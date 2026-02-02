@@ -1,0 +1,41 @@
+{
+  "name": "socratic-council",
+  "version": "1.0.0",
+  "description": "A real-time multi-agent group chat where five AI personas debate any topic",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@9.15.0",
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "scripts": {
+    "dev": "pnpm -r --parallel dev",
+    "dev:cli": "pnpm --filter @socratic-council/cli dev",
+    "dev:desktop": "pnpm --filter @socratic-council/desktop dev",
+    "build": "pnpm -r build",
+    "build:cli": "pnpm --filter @socratic-council/cli build",
+    "build:desktop": "pnpm --filter @socratic-council/desktop build",
+    "test": "pnpm -r test",
+    "lint": "pnpm -r lint",
+    "typecheck": "pnpm -r typecheck",
+    "clean": "pnpm -r clean && rm -rf node_modules"
+  },
+  "keywords": [
+    "ai",
+    "agents",
+    "socratic",
+    "debate",
+    "group-chat",
+    "openai",
+    "anthropic",
+    "gemini",
+    "deepseek",
+    "kimi"
+  ],
+  "author": "Socratic Council Team",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/richer-richard/socratic-council-of-five.git"
+  }
+}
