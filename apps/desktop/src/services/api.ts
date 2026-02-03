@@ -347,7 +347,11 @@ async function makeStreamingRequest(
 /**
  * Create headers for each provider
  */
-function createHeaders(provider: Provider, apiKey: string): Record<string, string> {
+function createHeaders(
+  provider: Provider,
+  apiKey: string,
+  options?: { anthropicVersion?: string }
+): Record<string, string> {
   const baseHeaders: Record<string, string> = {
     "Content-Type": "application/json",
   };
@@ -359,7 +363,7 @@ function createHeaders(provider: Provider, apiKey: string): Record<string, strin
       return {
         ...baseHeaders,
         "x-api-key": apiKey,
-        "anthropic-version": "2023-06-01"
+        "anthropic-version": options?.anthropicVersion || "2023-06-01"
       };
     case "google":
       return { ...baseHeaders, "x-goog-api-key": apiKey };
@@ -588,7 +592,12 @@ async function callAnthropic(
     let outputTokens = 0;
     let timedOut = false;
 
-    const headers = { ...createHeaders("anthropic", apiKey), Accept: "text/event-stream" };
+    const anthropicVersion = model.includes("4-5") ? "2024-02-29" : "2023-06-01";
+    const headers = {
+      ...createHeaders("anthropic", apiKey, { anthropicVersion }),
+      Accept: "text/event-stream",
+    };
+    apiLogger.log("info", "anthropic", "Using anthropic-version header", { anthropicVersion });
 
     await new Promise<void>((resolve, reject) => {
       let buffer = "";

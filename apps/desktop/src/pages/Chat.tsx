@@ -4,8 +4,17 @@ import type { Page } from "../App";
 import { useConfig, PROVIDER_INFO, type Provider } from "../stores/config";
 import { callProvider, apiLogger, type ChatMessage as APIChatMessage } from "../services/api";
 import { ProviderIcon, SystemIcon, UserIcon } from "../components/icons/ProviderIcons";
+import { ReactionIcon, type ReactionId } from "../components/icons/ReactionIcons";
 import { ConflictDetector, CostTrackerEngine } from "@socratic-council/core";
-import type { ConflictDetection, CostTracker, WhisperMessage, Message as SharedMessage, AgentId as CouncilAgentId } from "@socratic-council/shared";
+import type {
+  ConflictDetection,
+  CostTracker,
+  WhisperMessage,
+  Message as SharedMessage,
+  AgentId as CouncilAgentId,
+  ModelId,
+} from "@socratic-council/shared";
+import { callMcpTool, formatMcpResult } from "../services/mcp";
 
 interface ChatProps {
   topic: string;
@@ -16,6 +25,8 @@ interface ChatMessage extends SharedMessage {
   isStreaming?: boolean;
   latencyMs?: number;
   error?: string;
+  quotedMessageId?: string;
+  reactions?: Partial<Record<ReactionId, { count: number; by: string[] }>>;
 }
 
 interface BiddingRound {
@@ -58,6 +69,14 @@ const MODEL_DISPLAY_NAMES: Record<string, string> = {
   "moonshot-v1-128k": "Moonshot V1 128K",
 };
 
+const INTERACTION_COMMANDS = `
+Interaction commands (use only if helpful, put on separate lines at the end):
+- Quote a message: @quote(MSG_ID)
+- React to a message: @react(MSG_ID, thumbs_up|heart|laugh|sparkle)
+- Call an MCP tool: @mcp(tool_name, {"key":"value"})
+
+You can see message IDs in the context (format: msg_xxx). Do not invent IDs.`;
+
 const AGENT_CONFIG: Record<AgentId, {
   name: string;
   role: string;
@@ -84,7 +103,8 @@ Guidelines:
 - If someone hasn't spoken yet, don't reference them
 - If you're the first to speak, just share your initial thoughts on the topic
 - Keep responses conversational (2-3 paragraphs)
-- Address people by name when responding to their specific points`
+- Address people by name when responding to their specific points
+${INTERACTION_COMMANDS}`
   },
   cathy: {
     name: "Cathy",
@@ -103,7 +123,8 @@ Guidelines:
 - If someone hasn't spoken yet, don't reference them
 - If you're the first to speak, just share your initial thoughts on the topic
 - Keep responses conversational (2-3 paragraphs)
-- Address people by name when responding to their specific points`
+- Address people by name when responding to their specific points
+${INTERACTION_COMMANDS}`
   },
   grace: {
     name: "Grace",
@@ -122,7 +143,8 @@ Guidelines:
 - If someone hasn't spoken yet, don't reference them
 - If you're the first to speak, just share your initial thoughts on the topic
 - Keep responses conversational (2-3 paragraphs)
-- Address people by name when responding to their specific points`
+- Address people by name when responding to their specific points
+${INTERACTION_COMMANDS}`
   },
   douglas: {
     name: "Douglas",
@@ -141,7 +163,8 @@ Guidelines:
 - If someone hasn't spoken yet, don't reference them
 - If you're the first to speak, just share your initial thoughts on the topic
 - Keep responses conversational (2-3 paragraphs)
-- Address people by name when responding to their specific points`
+- Address people by name when responding to their specific points
+${INTERACTION_COMMANDS}`
   },
   kate: {
     name: "Kate",
@@ -160,7 +183,8 @@ Guidelines:
 - If someone hasn't spoken yet, don't reference them
 - If you're the first to speak, just share your initial thoughts on the topic
 - Keep responses conversational (2-3 paragraphs)
-- Address people by name when responding to their specific points`
+- Address people by name when responding to their specific points
+${INTERACTION_COMMANDS}`
   },
   system: {
     name: "System",
@@ -186,6 +210,80 @@ const AGENT_IDS: CouncilAgentId[] = ["george", "cathy", "grace", "douglas", "kat
 
 const isCouncilAgent = (id: ChatMessage["agentId"]): id is CouncilAgentId =>
   AGENT_IDS.includes(id as CouncilAgentId);
+
+const REACTION_IDS: ReactionId[] = ["thumbs_up", "heart", "laugh", "sparkle"];
+
+const ACTION_PATTERNS = {
+  quote: /@quote\(([^)]+)\)/g,
+  react: /@react\(([^,]+),\s*([^)]+)\)/g,
+  mcp: /@mcp\(([^,]+),\s*([\s\S]+?)\)/g,
+};
+
+function extractActions(raw: string) {
+  const reactions: Array<{ targetId: string; emoji: ReactionId }> = [];
+  const mcpCalls: Array<{ tool: string; args: Record<string, unknown> }> = [];
+  let quoteTarget: string | undefined;
+
+  let cleaned = raw;
+
+  cleaned = cleaned.replace(ACTION_PATTERNS.quote, (_, target) => {
+    if (!quoteTarget) quoteTarget = String(target).trim();
+    return "";
+  });
+
+  cleaned = cleaned.replace(ACTION_PATTERNS.react, (_, target, emoji) => {
+    const reaction = String(emoji).trim() as ReactionId;
+    if (REACTION_IDS.includes(reaction)) {
+      reactions.push({ targetId: String(target).trim(), emoji: reaction });
+    }
+    return "";
+  });
+
+  cleaned = cleaned.replace(ACTION_PATTERNS.mcp, (_, tool, args) => {
+    try {
+      const parsed = JSON.parse(String(args));
+      mcpCalls.push({ tool: String(tool).trim(), args: parsed });
+    } catch {
+      // Ignore malformed MCP blocks
+    }
+    return "";
+  });
+
+  return {
+    cleaned: cleaned.trim(),
+    quoteTarget,
+    reactions,
+    mcpCalls,
+  };
+}
+
+function applyReactions(
+  items: ChatMessage[],
+  reactions: Array<{ targetId: string; emoji: ReactionId }>,
+  actorId: CouncilAgentId
+) {
+  if (reactions.length === 0) return items;
+
+  return items.map((message) => {
+    const matches = reactions.filter((reaction) => reaction.targetId === message.id);
+    if (matches.length === 0) return message;
+
+    const nextReactions = { ...(message.reactions ?? {}) } as Partial<
+      Record<ReactionId, { count: number; by: string[] }>
+    >;
+
+    for (const reaction of matches) {
+      const existing = nextReactions[reaction.emoji] ?? { count: 0, by: [] };
+      if (!existing.by.includes(actorId)) {
+        existing.by = [...existing.by, actorId];
+        existing.count += 1;
+      }
+      nextReactions[reaction.emoji] = existing;
+    }
+
+    return { ...message, reactions: nextReactions };
+  });
+}
 
 export function Chat({ topic, onNavigate }: ChatProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -397,7 +495,7 @@ export function Chat({ topic, onNavigate }: ChatProps) {
       const speaker = AGENT_CONFIG[msg.agentId] ?? AGENT_CONFIG.system;
       history.push({
         role: "user",
-        content: `${speaker.name}: ${msg.content}`,
+        content: `${speaker.name} (id: ${msg.id}): ${msg.content}`,
       });
     }
 
@@ -411,8 +509,8 @@ export function Chat({ topic, onNavigate }: ChatProps) {
   }, [messages, topic]);
 
   // Get model display name
-  const getModelDisplayName = useCallback((provider: Provider): string => {
-    const modelId = config.models[provider];
+  const getModelDisplayName = useCallback((provider: Provider, overrideModel?: string): string => {
+    const modelId = overrideModel || config.models[provider];
     if (!modelId) return "Unknown Model";
     return MODEL_DISPLAY_NAMES[modelId] || modelId;
   }, [config.models]);
@@ -471,14 +569,43 @@ export function Chat({ topic, onNavigate }: ChatProps) {
     });
 
     try {
-      // Call the API
-      const result = await callProvider(
+    let modelUsed = model;
+
+    // Call the API
+    let result = await callProvider(
+      agentConfig.provider,
+      credential,
+      modelUsed,
+      conversationHistory,
+      () => {
+        // Check if aborted during streaming
+        if (abortRef.current) return;
+      },
+      config.proxy.type !== "none" ? config.proxy : undefined,
+      {
+        idleTimeoutMs,
+        requestTimeoutMs,
+        signal: controller.signal,
+      }
+    );
+
+    if (
+      !result.success &&
+      agentConfig.provider === "anthropic" &&
+      model.includes("4-5")
+    ) {
+      const fallbackModel = "claude-3-5-sonnet-20241022";
+      apiLogger.log("warn", "anthropic", "Primary model failed; retrying with fallback", {
+        primary: model,
+        fallback: fallbackModel,
+      });
+      modelUsed = fallbackModel;
+      result = await callProvider(
         agentConfig.provider,
         credential,
-        model,
+        modelUsed,
         conversationHistory,
         () => {
-          // Check if aborted during streaming
           if (abortRef.current) return;
         },
         config.proxy.type !== "none" ? config.proxy : undefined,
@@ -488,6 +615,7 @@ export function Chat({ topic, onNavigate }: ChatProps) {
           signal: controller.signal,
         }
       );
+    }
 
       // Check if aborted after request
       if (abortRef.current) {
@@ -496,19 +624,29 @@ export function Chat({ topic, onNavigate }: ChatProps) {
         return null;
       }
 
+      const { cleaned, quoteTarget, reactions, mcpCalls } = extractActions(result.content || "");
+      const displayContent =
+        cleaned || (result.content ? "No responses recorded" : "[No response received]");
+
       // Update message with final data
       const finalMessage: ChatMessage = {
         ...newMessage,
-        content: result.content || "[No response received]",
+        content: displayContent,
         isStreaming: false,
         tokens: result.tokens,
         latencyMs: result.latencyMs,
         error: result.error,
+        quotedMessageId: quoteTarget,
+        metadata: {
+          model: modelUsed as ModelId,
+          latencyMs: result.latencyMs,
+        },
       };
 
-      setMessages(prev =>
-        prev.map(m => m.id === newMessage.id ? finalMessage : m)
-      );
+      setMessages(prev => {
+        const updated = prev.map(m => m.id === newMessage.id ? finalMessage : m);
+        return applyReactions(updated, reactions, agentId);
+      });
 
       if (result.success) {
         setTotalTokens(prev => ({
@@ -522,6 +660,38 @@ export function Chat({ topic, onNavigate }: ChatProps) {
         }
       } else {
         setErrors(prev => [...prev, result.error || "Unknown error"]);
+      }
+
+      if (mcpCalls.length > 0) {
+        for (const call of mcpCalls) {
+          if (!config.mcp.enabled || !config.mcp.serverUrl) {
+            apiLogger.log("warn", "mcp", "MCP call ignored (not configured)", call);
+            continue;
+          }
+
+          try {
+            const result = await callMcpTool(
+              config.mcp.serverUrl,
+              call.tool,
+              call.args,
+              config.mcp.apiKey,
+              config.proxy.type !== "none" ? config.proxy : undefined
+            );
+
+            const mcpMessage: ChatMessage = {
+              id: `mcp_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+              agentId: "system",
+              content: formatMcpResult(call.tool, result),
+              timestamp: Date.now(),
+            };
+
+            setMessages(prev => [...prev, mcpMessage]);
+          } catch (error) {
+            const message = error instanceof Error ? error.message : "Unknown MCP error";
+            apiLogger.log("error", "mcp", message, error);
+            setErrors(prev => [...prev, message]);
+          }
+        }
       }
 
       return finalMessage;
@@ -779,13 +949,23 @@ export function Chat({ topic, onNavigate }: ChatProps) {
               const agent = AGENT_CONFIG[message.agentId] ?? AGENT_CONFIG.system;
               const isAgent = isCouncilAgent(message.agentId);
               const isSystem = message.agentId === "system";
-              const modelName = isAgent ? getModelDisplayName(agent.provider) : "";
+              const modelName = isAgent
+                ? getModelDisplayName(agent.provider, message.metadata?.model)
+                : "";
               const accent = isSystem
                 ? "var(--accent-ink)"
                 : message.agentId === "user"
                   ? "var(--accent-emerald)"
                   : `var(--color-${message.agentId})`;
               const accentStyle = { "--accent": accent } as CSSProperties;
+              const quotedMessage = message.quotedMessageId
+                ? messages.find((msg) => msg.id === message.quotedMessageId)
+                : null;
+              const reactionEntries = message.reactions
+                ? (Object.entries(message.reactions) as [ReactionId, { count: number; by: string[] }][]).filter(
+                    ([, reaction]) => reaction?.count
+                  )
+                : [];
 
               return (
                 <div
@@ -830,6 +1010,18 @@ export function Chat({ topic, onNavigate }: ChatProps) {
                       )}
                     </div>
 
+                    {quotedMessage && (
+                      <div className="message-quote">
+                        <div className="message-quote-header">
+                          {AGENT_CONFIG[quotedMessage.agentId].name} · {formatTime(quotedMessage.timestamp)}
+                        </div>
+                        <div className="message-quote-body">
+                          {quotedMessage.content.slice(0, 200)}
+                          {quotedMessage.content.length > 200 ? "…" : ""}
+                        </div>
+                      </div>
+                    )}
+
                     {/* Message body */}
                     <div className="discord-message-body">
                       {message.content}
@@ -850,6 +1042,17 @@ export function Chat({ topic, onNavigate }: ChatProps) {
                         React
                       </button>
                     </div>
+
+                    {reactionEntries.length > 0 && (
+                      <div className="reaction-bar">
+                        {reactionEntries.map(([reactionId, reaction]) => (
+                          <div key={reactionId} className="reaction-chip">
+                            <ReactionIcon type={reactionId} size={16} />
+                            <span>{reaction.count}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
 
                     {/* Error message */}
                     {message.error && (

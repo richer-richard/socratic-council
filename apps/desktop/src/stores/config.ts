@@ -30,11 +30,18 @@ export interface DiscussionPreferences {
   soundEffects: boolean;
 }
 
+export interface McpConfig {
+  enabled: boolean;
+  serverUrl: string;
+  apiKey?: string;
+}
+
 export interface AppConfig {
   credentials: Partial<Record<Provider, ProviderCredential>>;
   proxy: ProxyConfig;
   preferences: DiscussionPreferences;
   models: Partial<Record<Provider, string>>;
+  mcp: McpConfig;
 }
 
 const DEFAULT_CONFIG: AppConfig = {
@@ -57,6 +64,11 @@ const DEFAULT_CONFIG: AppConfig = {
     google: "gemini-3-pro-preview",
     deepseek: "deepseek-reasoner",
     kimi: "kimi-k2.5",
+  },
+  mcp: {
+    enabled: false,
+    serverUrl: "",
+    apiKey: "",
   },
 };
 
@@ -133,6 +145,13 @@ export function useConfig() {
     }));
   }, []);
 
+  const updateMcp = useCallback((mcp: Partial<McpConfig>) => {
+    setConfigState((prev) => ({
+      ...prev,
+      mcp: { ...prev.mcp, ...mcp },
+    }));
+  }, []);
+
   const getConfiguredProviders = useCallback((): Provider[] => {
     return (Object.keys(config.credentials) as Provider[]).filter(
       (p) => config.credentials[p]?.apiKey
@@ -158,6 +177,7 @@ export function useConfig() {
     updateProxy,
     updatePreferences,
     updateModel,
+    updateMcp,
     getConfiguredProviders,
     hasAnyApiKey,
     getMaxTurns,

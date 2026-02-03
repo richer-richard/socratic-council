@@ -16,9 +16,10 @@ interface ConfigModalProps {
   onUpdateProxy: (proxy: AppConfig["proxy"]) => void;
   onUpdatePreferences: (preferences: Partial<AppConfig["preferences"]>) => void;
   onUpdateModel: (provider: Provider, model: string) => void;
+  onUpdateMcp: (mcp: Partial<AppConfig["mcp"]>) => void;
 }
 
-type TabType = "api-keys" | "models" | "proxy" | "preferences";
+type TabType = "api-keys" | "models" | "proxy" | "preferences" | "mcp";
 
 const PROVIDERS = Object.keys(PROVIDER_INFO) as Provider[];
 
@@ -62,6 +63,7 @@ export function ConfigModal({
   onUpdateProxy,
   onUpdatePreferences,
   onUpdateModel,
+  onUpdateMcp,
 }: ConfigModalProps) {
   const [activeTab, setActiveTab] = useState<TabType>("api-keys");
   const [editingProvider, setEditingProvider] = useState<Provider | null>(null);
@@ -182,6 +184,7 @@ export function ConfigModal({
               { id: "models" as TabType, label: "Models", icon: "🤖" },
               { id: "proxy" as TabType, label: "Proxy", icon: "🌐" },
               { id: "preferences" as TabType, label: "Preferences", icon: "⚡" },
+              { id: "mcp" as TabType, label: "MCP", icon: "🧰" },
             ].map((tab) => (
               <button
                 key={tab.id}
@@ -680,6 +683,62 @@ export function ConfigModal({
                   >
                     Clear All Data
                   </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {activeTab === "mcp" && (
+            <div className="space-y-6 scale-in">
+              <div className="bg-gray-800/50 border border-gray-700 rounded-xl p-5">
+                <h3 className="font-medium text-white mb-4">Model Context Protocol</h3>
+
+                <div className="flex items-center justify-between mb-4">
+                  <div>
+                    <div className="text-sm text-white">Enable MCP Tools</div>
+                    <div className="text-xs text-gray-400">Allow agents to call MCP tools via commands</div>
+                  </div>
+                  <label className="toggle-switch">
+                    <input
+                      type="checkbox"
+                      checked={config.mcp.enabled}
+                      onChange={(e) => onUpdateMcp({ enabled: e.target.checked })}
+                    />
+                    <div className="toggle-slider" />
+                  </label>
+                </div>
+
+                <div className="space-y-3">
+                  <div>
+                    <label className="block text-sm text-gray-300 mb-2">Server URL</label>
+                    <input
+                      type="text"
+                      value={config.mcp.serverUrl}
+                      onChange={(e) => onUpdateMcp({ serverUrl: e.target.value })}
+                      placeholder="https://your-mcp-server.example.com"
+                      className="w-full bg-gray-900 border border-gray-600 rounded-lg px-4 py-2.5
+                        text-white focus:outline-none focus:border-primary transition-all"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm text-gray-300 mb-2">API Key (optional)</label>
+                    <input
+                      type="password"
+                      value={config.mcp.apiKey || ""}
+                      onChange={(e) => onUpdateMcp({ apiKey: e.target.value })}
+                      placeholder="Optional token"
+                      className="w-full bg-gray-900 border border-gray-600 rounded-lg px-4 py-2.5
+                        text-white focus:outline-none focus:border-primary transition-all"
+                    />
+                  </div>
+                </div>
+
+                <div className="mt-4 bg-gray-900/70 border border-gray-700 rounded-lg p-4 text-xs text-gray-300">
+                  <div className="font-semibold text-gray-200 mb-2">Agent Command Format</div>
+                  <div className="space-y-1">
+                    <div><code>@mcp(tool_name, {"{\"key\":\"value\"}" })</code></div>
+                    <div>Example: <code>@mcp(search, {"{\"query\":\"globalization\"}" })</code></div>
+                  </div>
                 </div>
               </div>
             </div>
