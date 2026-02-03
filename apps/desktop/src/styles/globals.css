@@ -32,7 +32,207 @@ body {
   @apply bg-gray-500;
 }
 
-/* Message animations */
+/* =========================================================================== */
+/* STARFIELD BACKGROUND                                                        */
+/* =========================================================================== */
+
+.starfield {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  overflow: hidden;
+  z-index: 0;
+}
+
+.star {
+  position: absolute;
+  background: white;
+  border-radius: 50%;
+  animation: twinkle var(--duration, 3s) ease-in-out infinite;
+  animation-delay: var(--delay, 0s);
+}
+
+.star-small {
+  width: 1px;
+  height: 1px;
+  opacity: 0.6;
+}
+
+.star-medium {
+  width: 2px;
+  height: 2px;
+  opacity: 0.8;
+}
+
+.star-large {
+  width: 3px;
+  height: 3px;
+  opacity: 1;
+  box-shadow: 0 0 6px 1px rgba(255, 255, 255, 0.5);
+}
+
+@keyframes twinkle {
+  0%, 100% {
+    opacity: var(--base-opacity, 0.6);
+    transform: scale(1);
+  }
+  50% {
+    opacity: var(--peak-opacity, 1);
+    transform: scale(1.2);
+  }
+}
+
+/* Shooting star effect */
+.shooting-star {
+  position: absolute;
+  width: 100px;
+  height: 2px;
+  background: linear-gradient(90deg, rgba(255,255,255,1) 0%, rgba(255,255,255,0) 100%);
+  opacity: 0;
+  animation: shoot 8s linear infinite;
+}
+
+@keyframes shoot {
+  0% {
+    transform: translateX(-100px) translateY(0) rotate(-45deg);
+    opacity: 0;
+  }
+  5% {
+    opacity: 1;
+  }
+  15% {
+    transform: translateX(100vw) translateY(50vh) rotate(-45deg);
+    opacity: 0;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+/* =========================================================================== */
+/* ELEGANT TITLE STYLES                                                        */
+/* =========================================================================== */
+
+.elegant-title {
+  font-size: 4rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  background: linear-gradient(135deg, 
+    #ffffff 0%, 
+    #a5b4fc 25%, 
+    #c4b5fd 50%, 
+    #93c5fd 75%,
+    #ffffff 100%);
+  background-size: 200% 200%;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  animation: shimmer 8s ease-in-out infinite;
+  text-shadow: 0 0 40px rgba(147, 197, 253, 0.3);
+}
+
+@keyframes shimmer {
+  0%, 100% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+}
+
+.elegant-subtitle {
+  font-size: 1.125rem;
+  font-weight: 500;
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+  color: rgba(148, 163, 184, 0.8);
+  margin-top: 0.5rem;
+}
+
+.temple-icon {
+  font-size: 5rem;
+  filter: drop-shadow(0 0 30px rgba(147, 197, 253, 0.4));
+  animation: float 6s ease-in-out infinite;
+}
+
+@keyframes float {
+  0%, 100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-10px);
+  }
+}
+
+/* =========================================================================== */
+/* START BUTTON                                                                */
+/* =========================================================================== */
+
+.start-button {
+  position: relative;
+  padding: 1.25rem 3rem;
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: white;
+  background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 50%, #a855f7 100%);
+  border: none;
+  border-radius: 16px;
+  cursor: pointer;
+  overflow: hidden;
+  transition: all 0.3s ease;
+  box-shadow: 
+    0 10px 40px rgba(139, 92, 246, 0.4),
+    0 0 0 1px rgba(255, 255, 255, 0.1) inset;
+}
+
+.start-button::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(255, 255, 255, 0.2),
+    transparent
+  );
+  transition: left 0.5s ease;
+}
+
+.start-button:hover::before {
+  left: 100%;
+}
+
+.start-button:hover {
+  transform: translateY(-2px);
+  box-shadow: 
+    0 15px 50px rgba(139, 92, 246, 0.5),
+    0 0 0 1px rgba(255, 255, 255, 0.2) inset;
+}
+
+.start-button:active {
+  transform: translateY(0);
+}
+
+.start-button:disabled {
+  background: linear-gradient(135deg, #374151 0%, #4b5563 100%);
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+.start-button:disabled::before {
+  display: none;
+}
+
+/* =========================================================================== */
+/* MESSAGE ANIMATIONS                                                          */
+/* =========================================================================== */
+
 @keyframes fadeIn {
   from {
     opacity: 0;
@@ -118,7 +318,10 @@ body {
   animation: scaleIn 0.2s ease-out;
 }
 
-/* Gradient text */
+/* =========================================================================== */
+/* GRADIENT TEXT                                                               */
+/* =========================================================================== */
+
 .gradient-text {
   background: linear-gradient(135deg, #6366F1 0%, #A855F7 50%, #06B6D4 100%);
   -webkit-background-clip: text;
@@ -126,7 +329,10 @@ body {
   background-clip: text;
 }
 
-/* Glow effects */
+/* =========================================================================== */
+/* GLOW EFFECTS                                                                */
+/* =========================================================================== */
+
 .glow-blue {
   box-shadow: 0 0 20px rgba(59, 130, 246, 0.3);
 }
@@ -147,7 +353,10 @@ body {
   box-shadow: 0 0 20px rgba(6, 182, 212, 0.3);
 }
 
-/* Card hover effects */
+/* =========================================================================== */
+/* CARD EFFECTS                                                                */
+/* =========================================================================== */
+
 .card-hover {
   @apply transition-all duration-200;
 }
@@ -157,21 +366,16 @@ body {
   box-shadow: 0 10px 25px rgba(0, 0, 0, 0.3);
 }
 
-/* Progress bar animation */
-@keyframes progressPulse {
-  0%, 100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0.6;
-  }
+.glass-card {
+  background: rgba(31, 41, 55, 0.5);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(75, 85, 99, 0.5);
 }
 
-.progress-bar {
-  animation: progressPulse 1.5s ease-in-out infinite;
-}
+/* =========================================================================== */
+/* BADGES                                                                      */
+/* =========================================================================== */
 
-/* Badge styles */
 .badge {
   @apply px-2 py-0.5 text-xs font-medium rounded-full;
 }
@@ -192,7 +396,10 @@ body {
   @apply bg-blue-500/20 text-blue-400;
 }
 
-/* Bidding bar animation */
+/* =========================================================================== */
+/* BIDDING BAR                                                                 */
+/* =========================================================================== */
+
 @keyframes fillBar {
   from {
     width: 0;
@@ -215,4 +422,118 @@ body {
 
 .winner-highlight {
   animation: winnerGlow 1s ease-in-out 3;
+}
+
+/* =========================================================================== */
+/* API WARNING BANNER                                                          */
+/* =========================================================================== */
+
+.api-warning-banner {
+  background: linear-gradient(135deg, rgba(239, 68, 68, 0.1) 0%, rgba(245, 158, 11, 0.1) 100%);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  backdrop-filter: blur(8px);
+}
+
+@keyframes warningPulse {
+  0%, 100% {
+    border-color: rgba(239, 68, 68, 0.3);
+  }
+  50% {
+    border-color: rgba(239, 68, 68, 0.6);
+  }
+}
+
+.api-warning-banner.pulsing {
+  animation: warningPulse 2s ease-in-out infinite;
+}
+
+/* =========================================================================== */
+/* MODAL OVERLAY                                                               */
+/* =========================================================================== */
+
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.7);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 50;
+  animation: fadeIn 0.2s ease-out;
+}
+
+.modal-content {
+  background: linear-gradient(180deg, rgba(31, 41, 55, 0.95) 0%, rgba(17, 24, 39, 0.98) 100%);
+  border: 1px solid rgba(75, 85, 99, 0.5);
+  border-radius: 24px;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+  max-height: 90vh;
+  overflow-y: auto;
+  animation: scaleIn 0.2s ease-out;
+}
+
+/* =========================================================================== */
+/* PROGRESS ANIMATIONS                                                         */
+/* =========================================================================== */
+
+@keyframes progressPulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.6;
+  }
+}
+
+.progress-bar {
+  animation: progressPulse 1.5s ease-in-out infinite;
+}
+
+/* =========================================================================== */
+/* INPUT STYLES                                                                */
+/* =========================================================================== */
+
+.elegant-input {
+  @apply w-full bg-gray-900/80 border border-gray-600 rounded-xl px-5 py-4 text-white text-lg;
+  @apply placeholder-gray-500 focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20;
+  @apply transition-all duration-200;
+}
+
+.elegant-input:focus {
+  box-shadow: 0 0 0 4px rgba(99, 102, 241, 0.1);
+}
+
+/* =========================================================================== */
+/* TOGGLE SWITCH                                                               */
+/* =========================================================================== */
+
+.toggle-switch {
+  @apply relative inline-flex items-center cursor-pointer;
+}
+
+.toggle-switch input {
+  @apply sr-only;
+}
+
+.toggle-slider {
+  @apply w-11 h-6 bg-gray-700 rounded-full;
+  @apply after:content-[''] after:absolute after:top-[2px] after:left-[2px];
+  @apply after:bg-white after:border-gray-300 after:border after:rounded-full;
+  @apply after:h-5 after:w-5 after:transition-all;
+}
+
+.toggle-switch input:checked + .toggle-slider {
+  @apply bg-primary;
+}
+
+.toggle-switch input:checked + .toggle-slider::after {
+  @apply translate-x-full border-white;
+}
+
+.toggle-switch input:focus + .toggle-slider {
+  @apply ring-4 ring-primary/20;
 }
