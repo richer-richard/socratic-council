@@ -1,184 +1,196 @@
 import { useState, useEffect, useRef, useCallback } from "react";
+import type { CSSProperties } from "react";
 import type { Page } from "../App";
 import { useConfig, PROVIDER_INFO, type Provider } from "../stores/config";
 import { callProvider, apiLogger, type ChatMessage as APIChatMessage } from "../services/api";
+import { ProviderIcon, SystemIcon, UserIcon } from "../components/icons/ProviderIcons";
+import { ConflictDetector, CostTrackerEngine } from "@socratic-council/core";
+import type { ConflictDetection, CostTracker, WhisperMessage, Message as SharedMessage, AgentId as CouncilAgentId } from "@socratic-council/shared";
 
 interface ChatProps {
   topic: string;
   onNavigate: (page: Page) => void;
 }
 
-interface Message {
-  id: string;
-  agentId: string;
-  content: string;
-  timestamp: number;
+interface ChatMessage extends SharedMessage {
   isStreaming?: boolean;
-  tokens?: { input: number; output: number };
   latencyMs?: number;
   error?: string;
 }
 
 interface BiddingRound {
-  scores: Record<string, number>;
-  winner: string;
+  scores: Record<CouncilAgentId, number>;
+  winner: CouncilAgentId;
 }
 
-type AgentId = "george" | "cathy" | "grace" | "douglas" | "kate" | "system" | "user";
+type AgentId = CouncilAgentId | "system" | "user";
 
-const AGENT_CONFIG: Record<AgentId, { 
-  name: string; 
-  role: string; 
-  color: string; 
-  bgColor: string; 
-  borderColor: string; 
-  avatar: string;
+interface DuoLogueState {
+  participants: [CouncilAgentId, CouncilAgentId];
+  remainingTurns: number;
+}
+
+// Model display names mapping
+const MODEL_DISPLAY_NAMES: Record<string, string> = {
+  // OpenAI
+  "gpt-5.2-pro": "GPT-5.2 Pro",
+  "gpt-5.2": "GPT-5.2",
+  "gpt-5-mini": "GPT-5 Mini",
+  "o3": "o3",
+  "o4-mini": "o4-mini",
+  "gpt-4o": "GPT-4o",
+  // Anthropic
+  "claude-opus-4-5": "Claude Opus 4.5",
+  "claude-sonnet-4-5": "Claude Sonnet 4.5",
+  "claude-haiku-4-5": "Claude Haiku 4.5",
+  "claude-3-5-sonnet-20241022": "Claude 3.5 Sonnet",
+  // Google
+  "gemini-3-pro-preview": "Gemini 3 Pro",
+  "gemini-3-flash-preview": "Gemini 3 Flash",
+  "gemini-2.5-pro": "Gemini 2.5 Pro",
+  "gemini-2.5-flash": "Gemini 2.5 Flash",
+  // DeepSeek
+  "deepseek-reasoner": "DeepSeek Reasoner",
+  "deepseek-chat": "DeepSeek Chat",
+  // Kimi
+  "kimi-k2.5": "Kimi K2.5",
+  "kimi-k2-thinking": "Kimi K2 Thinking",
+  "moonshot-v1-128k": "Moonshot V1 128K",
+};
+
+const AGENT_CONFIG: Record<AgentId, {
+  name: string;
+  role: string;
+  color: string;
+  bgColor: string;
+  borderColor: string;
   provider: Provider;
   systemPrompt: string;
 }> = {
-  george: { 
-    name: "George", 
-    role: "Logician", 
-    color: "text-george", 
-    bgColor: "bg-george/10", 
-    borderColor: "border-george", 
-    avatar: "🔷",
+  george: {
+    name: "George",
+    role: "Logician",
+    color: "text-george",
+    bgColor: "bg-george/10",
+    borderColor: "border-george",
     provider: "openai",
-    systemPrompt: `You are George, "The Logician" in the Socratic Council of Five. You are participating in a real-time multi-agent philosophical debate with four other AI council members: Cathy (The Ethicist), Grace (The Futurist), Douglas (The Skeptic), and Kate (The Historian).
+    systemPrompt: `You are George, participating in a group discussion with Cathy, Grace, Douglas, and Kate.
 
-ROLE: Analyze arguments with rigorous logical precision. You are the voice of reason and formal analysis.
+Your approach: You think carefully about the logical structure of arguments. When you spot flawed reasoning, you point it out clearly but without being condescending.
 
-PERSONALITY: Analytical, precise, methodical. You identify logical fallacies immediately, construct clear arguments, and demand coherent reasoning. You speak with authority but remain open to valid counterarguments.
-
-DEBATE APPROACH:
-- Use formal logic structures (premises → conclusion) when proving points
-- Identify and name logical fallacies (ad hominem, straw man, false dichotomy, etc.)
-- Ask probing questions that reveal hidden assumptions
-- Build on valid points from other council members
-- Challenge weak reasoning respectfully but firmly
-
-WHEN RESPONDING: Address other council members by name when engaging their arguments. Be direct and concise (2-3 paragraphs). Always show your reasoning chain.`
+Guidelines:
+- Speak naturally, like you're having a conversation with friends
+- Only respond to what others have actually said - never make up or assume their arguments
+- If someone hasn't spoken yet, don't reference them
+- If you're the first to speak, just share your initial thoughts on the topic
+- Keep responses conversational (2-3 paragraphs)
+- Address people by name when responding to their specific points`
   },
-  cathy: { 
-    name: "Cathy", 
-    role: "Ethicist", 
-    color: "text-cathy", 
-    bgColor: "bg-cathy/10", 
-    borderColor: "border-cathy", 
-    avatar: "💜",
+  cathy: {
+    name: "Cathy",
+    role: "Ethicist",
+    color: "text-cathy",
+    bgColor: "bg-cathy/10",
+    borderColor: "border-cathy",
     provider: "anthropic",
-    systemPrompt: `You are Cathy, "The Ethicist" in the Socratic Council of Five. You are participating in a real-time multi-agent philosophical debate with four other AI council members: George (The Logician), Grace (The Futurist), Douglas (The Skeptic), and Kate (The Historian).
+    systemPrompt: `You are Cathy, participating in a group discussion with George, Grace, Douglas, and Kate.
 
-ROLE: Evaluate all arguments through moral philosophy frameworks. You are the conscience of the council.
+Your approach: You care about the human impact of issues. You think about who benefits, who might be harmed, and what values are at stake.
 
-PERSONALITY: Empathetic, principled, nuanced. You consider all stakeholders, weigh competing values, and seek the most ethical path. You care deeply but reason carefully.
-
-DEBATE APPROACH:
-- Apply ethical frameworks explicitly: utilitarianism (greatest good), deontology (duty-based), virtue ethics (character), care ethics (relationships)
-- Consider who benefits and who suffers from each position
-- Identify moral dilemmas and trade-offs others might miss
-- Question the values underlying each argument
-- Seek common ground on shared moral principles
-
-WHEN RESPONDING: Address other council members by name when engaging their arguments. Be compassionate but intellectually rigorous (2-3 paragraphs). Don't shy away from difficult moral questions.`
+Guidelines:
+- Speak naturally, like you're having a conversation with friends
+- Only respond to what others have actually said - never make up or assume their arguments
+- If someone hasn't spoken yet, don't reference them
+- If you're the first to speak, just share your initial thoughts on the topic
+- Keep responses conversational (2-3 paragraphs)
+- Address people by name when responding to their specific points`
   },
-  grace: { 
-    name: "Grace", 
-    role: "Futurist", 
-    color: "text-grace", 
-    bgColor: "bg-grace/10", 
-    borderColor: "border-grace", 
-    avatar: "🌱",
+  grace: {
+    name: "Grace",
+    role: "Futurist",
+    color: "text-grace",
+    bgColor: "bg-grace/10",
+    borderColor: "border-grace",
     provider: "google",
-    systemPrompt: `You are Grace, "The Futurist" in the Socratic Council of Five. You are participating in a real-time multi-agent philosophical debate with four other AI council members: George (The Logician), Cathy (The Ethicist), Douglas (The Skeptic), and Kate (The Historian).
+    systemPrompt: `You are Grace, participating in a group discussion with George, Cathy, Douglas, and Kate.
 
-ROLE: Project current trends into future scenarios and consider long-term implications. You are the council's visionary.
+Your approach: You like to think about where things are heading. You consider long-term consequences and how today's decisions might play out over time.
 
-PERSONALITY: Forward-thinking, data-informed, optimistically realistic. You synthesize information across domains, think in systems, and imagine possibilities others can't see.
-
-DEBATE APPROACH:
-- Project current trends 10, 50, 100 years forward
-- Consider second and third-order effects (cascading consequences)
-- Use scenario planning: best case, worst case, most likely case
-- Reference technological, social, and environmental trends
-- Connect today's debates to tomorrow's realities
-
-WHEN RESPONDING: Address other council members by name when engaging their arguments. Be visionary but grounded (2-3 paragraphs). Acknowledge uncertainty while still making bold predictions.`
+Guidelines:
+- Speak naturally, like you're having a conversation with friends
+- Only respond to what others have actually said - never make up or assume their arguments
+- If someone hasn't spoken yet, don't reference them
+- If you're the first to speak, just share your initial thoughts on the topic
+- Keep responses conversational (2-3 paragraphs)
+- Address people by name when responding to their specific points`
   },
-  douglas: { 
-    name: "Douglas", 
-    role: "Skeptic", 
-    color: "text-douglas", 
-    bgColor: "bg-douglas/10", 
-    borderColor: "border-douglas", 
-    avatar: "🔶",
+  douglas: {
+    name: "Douglas",
+    role: "Skeptic",
+    color: "text-douglas",
+    bgColor: "bg-douglas/10",
+    borderColor: "border-douglas",
     provider: "deepseek",
-    systemPrompt: `You are Douglas, "The Skeptic" in the Socratic Council of Five. You are participating in a real-time multi-agent philosophical debate with four other AI council members: George (The Logician), Cathy (The Ethicist), Grace (The Futurist), and Kate (The Historian).
+    systemPrompt: `You are Douglas, participating in a group discussion with George, Cathy, Grace, and Kate.
 
-ROLE: Critically examine every claim and demand evidence. You are the council's devil's advocate.
+Your approach: You like to question assumptions and ask for evidence. You're not trying to be difficult - you just think it's important to examine claims carefully.
 
-PERSONALITY: Questioning, evidence-driven, intellectually honest. You challenge assumptions, spot weaknesses, and prevent groupthink. You doubt constructively.
-
-DEBATE APPROACH:
-- Ask "How do we know that?" and "What's the evidence?"
-- Challenge unsupported assertions and popular assumptions
-- Identify hidden premises and unstated assumptions
-- Demand specificity: numbers, sources, mechanisms
-- Steel-man opposing arguments before critiquing them
-
-WHEN RESPONDING: Address other council members by name when challenging their arguments. Be skeptical but fair (2-3 paragraphs). Acknowledge strong evidence when presented.`
+Guidelines:
+- Speak naturally, like you're having a conversation with friends
+- Only respond to what others have actually said - never make up or assume their arguments
+- If someone hasn't spoken yet, don't reference them
+- If you're the first to speak, just share your initial thoughts on the topic
+- Keep responses conversational (2-3 paragraphs)
+- Address people by name when responding to their specific points`
   },
-  kate: { 
-    name: "Kate", 
-    role: "Historian", 
-    color: "text-kate", 
-    bgColor: "bg-kate/10", 
-    borderColor: "border-kate", 
-    avatar: "📚",
+  kate: {
+    name: "Kate",
+    role: "Historian",
+    color: "text-kate",
+    bgColor: "bg-kate/10",
+    borderColor: "border-kate",
     provider: "kimi",
-    systemPrompt: `You are Kate, "The Historian" in the Socratic Council of Five. You are participating in a real-time multi-agent philosophical debate with four other AI council members: George (The Logician), Cathy (The Ethicist), Grace (The Futurist), and Douglas (The Skeptic).
+    systemPrompt: `You are Kate, participating in a group discussion with George, Cathy, Grace, and Douglas.
 
-ROLE: Provide historical context and identify patterns across time. You are the council's memory.
+Your approach: You like to bring historical perspective to discussions. You find it helpful to look at how similar situations played out in the past.
 
-PERSONALITY: Scholarly, contextual, pattern-seeking. You connect the present to the past, find precedents, and warn against repeating mistakes.
-
-DEBATE APPROACH:
-- Draw parallels to historical events and their outcomes
-- Cite specific historical examples with dates and details
-- Identify recurring patterns across civilizations and eras
-- Warn when we're repeating historical mistakes
-- Show how similar debates resolved in the past
-
-WHEN RESPONDING: Address other council members by name when adding historical context to their arguments. Be learned but accessible (2-3 paragraphs). Draw from diverse historical traditions worldwide.`
+Guidelines:
+- Speak naturally, like you're having a conversation with friends
+- Only respond to what others have actually said - never make up or assume their arguments
+- If someone hasn't spoken yet, don't reference them
+- If you're the first to speak, just share your initial thoughts on the topic
+- Keep responses conversational (2-3 paragraphs)
+- Address people by name when responding to their specific points`
   },
-  system: { 
-    name: "System", 
-    role: "", 
-    color: "text-gray-400", 
-    bgColor: "bg-gray-700/50", 
-    borderColor: "border-gray-600", 
-    avatar: "⚙️",
+  system: {
+    name: "System",
+    role: "",
+    color: "text-ink-500",
+    bgColor: "bg-white/60",
+    borderColor: "border-line-soft",
     provider: "openai",
     systemPrompt: ""
   },
-  user: { 
-    name: "You", 
-    role: "", 
-    color: "text-white", 
-    bgColor: "bg-primary/20", 
-    borderColor: "border-primary", 
-    avatar: "👤",
+  user: {
+    name: "You",
+    role: "",
+    color: "text-ink-900",
+    bgColor: "bg-white/80",
+    borderColor: "border-line-soft",
     provider: "openai",
     systemPrompt: ""
   },
 };
 
-const AGENT_IDS: AgentId[] = ["george", "cathy", "grace", "douglas", "kate"];
+const AGENT_IDS: CouncilAgentId[] = ["george", "cathy", "grace", "douglas", "kate"];
+
+const isCouncilAgent = (id: ChatMessage["agentId"]): id is CouncilAgentId =>
+  AGENT_IDS.includes(id as CouncilAgentId);
 
 export function Chat({ topic, onNavigate }: ChatProps) {
-  const [messages, setMessages] = useState<Message[]>([]);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isRunning, setIsRunning] = useState(false);
-  const [currentSpeaker, setCurrentSpeaker] = useState<string | null>(null);
+  const [typingAgents, setTypingAgents] = useState<CouncilAgentId[]>([]);
   const [currentTurn, setCurrentTurn] = useState(0);
   const [showBidding, setShowBidding] = useState(false);
   const [currentBidding, setCurrentBidding] = useState<BiddingRound | null>(null);
@@ -186,13 +198,55 @@ export function Chat({ topic, onNavigate }: ChatProps) {
   const [isPaused, setIsPaused] = useState(false);
   const [errors, setErrors] = useState<string[]>([]);
   const [showLogs, setShowLogs] = useState(false);
-  
+  const [costState, setCostState] = useState<CostTracker | null>(null);
+  const [conflictState, setConflictState] = useState<ConflictDetection | null>(null);
+  const [duoLogue, setDuoLogue] = useState<DuoLogueState | null>(null);
+  const [whisperLog, setWhisperLog] = useState<WhisperMessage[]>([]);
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef(false);
-  
+  const activeRequestsRef = useRef<Map<CouncilAgentId, AbortController>>(new Map());
+  const costTrackerRef = useRef<CostTrackerEngine | null>(null);
+  const conflictDetectorRef = useRef(new ConflictDetector());
+  const whisperBonusesRef = useRef<Record<CouncilAgentId, number>>({
+    george: 0,
+    cathy: 0,
+    grace: 0,
+    douglas: 0,
+    kate: 0,
+  });
+  const lastWhisperKeyRef = useRef<string | null>(null);
+  const duoLogueRef = useRef<DuoLogueState | null>(null);
+
   const { config, getMaxTurns, getConfiguredProviders } = useConfig();
   const maxTurns = getMaxTurns();
   const configuredProviders = getConfiguredProviders();
+
+  useEffect(() => {
+    duoLogueRef.current = duoLogue;
+  }, [duoLogue]);
+
+  const resetRuntimeState = useCallback(() => {
+    costTrackerRef.current = new CostTrackerEngine(AGENT_IDS);
+    setCostState(costTrackerRef.current.getState());
+    setTotalTokens({ input: 0, output: 0 });
+    setCurrentBidding(null);
+    setShowBidding(false);
+    setErrors([]);
+    setConflictState(null);
+    setDuoLogue(null);
+    setTypingAgents([]);
+    duoLogueRef.current = null;
+    setWhisperLog([]);
+    lastWhisperKeyRef.current = null;
+    whisperBonusesRef.current = {
+      george: 0,
+      cathy: 0,
+      grace: 0,
+      douglas: 0,
+      kate: 0,
+    };
+  }, []);
 
   // Scroll to bottom when new messages arrive
   useEffect(() => {
@@ -201,85 +255,173 @@ export function Chat({ topic, onNavigate }: ChatProps) {
     }
   }, [messages, config.preferences.autoScroll]);
 
+  useEffect(() => {
+    const agentMessages = messages.filter(
+      (m) => isCouncilAgent(m.agentId) && !m.isStreaming
+    );
+
+    if (agentMessages.length < 2) {
+      setConflictState(null);
+      return;
+    }
+
+    const conflict = conflictDetectorRef.current.evaluate(agentMessages, AGENT_IDS);
+    setConflictState(conflict);
+
+    if (conflict && !duoLogueRef.current) {
+      const newDuo: DuoLogueState = {
+        participants: conflict.agentPair,
+        remainingTurns: 3,
+      };
+      setDuoLogue(newDuo);
+      duoLogueRef.current = newDuo;
+    }
+  }, [messages]);
+
+  useEffect(() => {
+    if (!conflictState) return;
+
+    const key = conflictState.agentPair.join("-");
+    if (lastWhisperKeyRef.current === key) return;
+    lastWhisperKeyRef.current = key;
+
+    const [from, to] = conflictState.agentPair;
+    const whisper: WhisperMessage = {
+      id: `whisper_${Date.now()}`,
+      from,
+      to,
+      type: "strategy",
+      payload: {
+        proposedAction: "Press the counterpoint and tighten the argument.",
+        bidBonus: 8,
+      },
+      timestamp: Date.now(),
+    };
+
+    setWhisperLog((prev) => [...prev.slice(-9), whisper]);
+    whisperBonusesRef.current[to] = Math.min(
+      20,
+      (whisperBonusesRef.current[to] ?? 0) + (whisper.payload.bidBonus ?? 0)
+    );
+  }, [conflictState]);
+
   // Generate bidding scores based on conversation context
-  const generateBiddingScores = useCallback((excludeAgent?: string): BiddingRound => {
-    const scores: Record<string, number> = {};
-    let maxScore = 0;
-    let winner = "";
+  const generateBiddingScores = useCallback((
+    excludeAgent?: CouncilAgentId,
+    eligibleAgents: CouncilAgentId[] = AGENT_IDS
+  ): BiddingRound => {
+    const scores = {} as Record<CouncilAgentId, number>;
+    let maxScore = -Infinity;
+    let winner: CouncilAgentId = eligibleAgents[0] ?? AGENT_IDS[0];
+    let hasWinner = false;
 
     // Only include agents that have API keys configured
-    for (const agentId of AGENT_IDS) {
+    for (const agentId of eligibleAgents) {
       if (agentId === excludeAgent) continue;
-      
+
       const agentConfig = AGENT_CONFIG[agentId];
       const hasApiKey = configuredProviders.includes(agentConfig.provider);
-      
+
       if (!hasApiKey) {
         scores[agentId] = 0;
         continue;
       }
-      
+
       // Generate score based on various factors
       const baseScore = 50 + Math.random() * 30;
       const recencyBonus = agentId === excludeAgent ? -20 : 0;
-      const score = baseScore + recencyBonus;
-      
+      const whisperBonus = whisperBonusesRef.current[agentId] ?? 0;
+      const score = baseScore + recencyBonus + whisperBonus;
+
+      if (whisperBonus) {
+        whisperBonusesRef.current[agentId] = 0;
+      }
+
       scores[agentId] = score;
       if (score > maxScore) {
         maxScore = score;
         winner = agentId;
+        hasWinner = true;
       }
     }
 
     // If no winner found (no API keys), pick first available
-    if (!winner) {
-      const available = AGENT_IDS.filter(id => 
-        id !== excludeAgent && configuredProviders.includes(AGENT_CONFIG[id].provider)
+    if (!hasWinner) {
+      const available = eligibleAgents.filter(
+        (id) => id !== excludeAgent && configuredProviders.includes(AGENT_CONFIG[id].provider)
       );
-      winner = available[0] || AGENT_IDS[0];
+      winner = available[0] || eligibleAgents[0] || AGENT_IDS[0];
     }
 
     return { scores, winner };
   }, [configuredProviders]);
 
   // Build conversation history for API call
-  const buildConversationHistory = useCallback((agentId: AgentId): APIChatMessage[] => {
+  const buildConversationHistory = useCallback((agentId: CouncilAgentId): APIChatMessage[] => {
     const agentConfig = AGENT_CONFIG[agentId];
-    const history: APIChatMessage[] = [];
+    const history: APIChatMessage[] = [
+      {
+        role: "system",
+        content: agentConfig.systemPrompt,
+      },
+    ];
 
-    // Add system prompt
-    history.push({
-      role: "system",
-      content: agentConfig.systemPrompt,
-    });
+    // Filter to only include messages with actual content (not "[No response received]" or empty)
+    const validMessages = messages.filter(
+      (m) =>
+        m.agentId !== "system" &&
+        m.content &&
+        m.content.trim() !== "" &&
+        !m.content.includes("[No response received]") &&
+        !m.content.includes("No responses recorded") &&
+        !m.error &&
+        !m.isStreaming
+    );
 
-    // Add topic context
     history.push({
       role: "user",
-      content: `The current discussion topic is: "${topic}"\n\nPlease engage with the other council members' perspectives while staying true to your role. Keep your response focused and concise (2-3 paragraphs).`,
+      content: `Discussion topic: "${topic}"`,
     });
 
-    // Add conversation history (last 10 messages to stay within context limits)
-    const recentMessages = messages.slice(-10);
-    for (const msg of recentMessages) {
-      if (msg.agentId === "system") continue;
-      
-      if (msg.agentId === agentId) {
-        history.push({ role: "assistant", content: msg.content });
-      } else {
-        const speaker = AGENT_CONFIG[msg.agentId as AgentId];
-        history.push({
-          role: "user",
-          content: `[${speaker?.name || msg.agentId}]: ${msg.content}`,
-        });
-      }
+    if (validMessages.length === 0) {
+      history.push({
+        role: "user",
+        content:
+          "You're the first to speak. Share your initial thoughts on the topic, raise key questions, and set a direction for the discussion.",
+      });
+
+      return history;
     }
+
+    for (const msg of validMessages) {
+      const speaker = AGENT_CONFIG[msg.agentId] ?? AGENT_CONFIG.system;
+      history.push({
+        role: "user",
+        content: `${speaker.name}: ${msg.content}`,
+      });
+    }
+
+    history.push({
+      role: "user",
+      content:
+        "Now it's your turn. Respond to specific points above. Only reference arguments that were actually made.",
+    });
 
     return history;
   }, [messages, topic]);
 
+  // Get model display name
+  const getModelDisplayName = useCallback((provider: Provider): string => {
+    const modelId = config.models[provider];
+    if (!modelId) return "Unknown Model";
+    return MODEL_DISPLAY_NAMES[modelId] || modelId;
+  }, [config.models]);
+
   // Generate agent response using real API
-  const generateAgentResponse = useCallback(async (agentId: AgentId): Promise<Message | null> => {
+  const generateAgentResponse = useCallback(async (agentId: CouncilAgentId): Promise<ChatMessage | null> => {
+    // Check if aborted before starting
+    if (abortRef.current) return null;
+
     const agentConfig = AGENT_CONFIG[agentId];
     const credential = config.credentials[agentConfig.provider];
     const model = config.models[agentConfig.provider];
@@ -298,10 +440,10 @@ export function Chat({ topic, onNavigate }: ChatProps) {
       return null;
     }
 
-    setCurrentSpeaker(agentId);
+    setTypingAgents((prev) => (prev.includes(agentId) ? prev : [...prev, agentId]));
 
     // Create new message with streaming flag
-    const newMessage: Message = {
+    const newMessage: ChatMessage = {
       id: `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
       agentId,
       content: "",
@@ -314,59 +456,89 @@ export function Chat({ topic, onNavigate }: ChatProps) {
     // Build conversation history
     const conversationHistory = buildConversationHistory(agentId);
 
-    // Call the API
-    const result = await callProvider(
-      agentConfig.provider,
-      credential,
+    // Create abort controller for this request
+    const controller = new AbortController();
+    activeRequestsRef.current.set(agentId, controller);
+
+    const idleTimeoutMs = 120000;
+    const requestTimeoutMs = agentConfig.provider === "google" ? 240000 : 180000;
+
+    apiLogger.log("info", agentConfig.provider, "Dispatching request", {
       model,
-      conversationHistory,
-      (chunk) => {
-        if (!chunk.done && chunk.content) {
-          setMessages(prev =>
-            prev.map(m =>
-              m.id === newMessage.id
-                ? { ...m, content: m.content + chunk.content }
-                : m
-            )
-          );
+      proxy: config.proxy.type,
+      requestTimeoutMs,
+      idleTimeoutMs,
+    });
+
+    try {
+      // Call the API
+      const result = await callProvider(
+        agentConfig.provider,
+        credential,
+        model,
+        conversationHistory,
+        () => {
+          // Check if aborted during streaming
+          if (abortRef.current) return;
+        },
+        config.proxy.type !== "none" ? config.proxy : undefined,
+        {
+          idleTimeoutMs,
+          requestTimeoutMs,
+          signal: controller.signal,
         }
-      },
-      config.proxy.type !== "none" ? config.proxy : undefined
-    );
+      );
 
-    // Update message with final data
-    const finalMessage: Message = {
-      ...newMessage,
-      content: result.content || "[No response received]",
-      isStreaming: false,
-      tokens: result.tokens,
-      latencyMs: result.latencyMs,
-      error: result.error,
-    };
+      // Check if aborted after request
+      if (abortRef.current) {
+        // Remove the incomplete message
+        setMessages(prev => prev.filter(m => m.id !== newMessage.id));
+        return null;
+      }
 
-    setMessages(prev =>
-      prev.map(m => m.id === newMessage.id ? finalMessage : m)
-    );
+      // Update message with final data
+      const finalMessage: ChatMessage = {
+        ...newMessage,
+        content: result.content || "[No response received]",
+        isStreaming: false,
+        tokens: result.tokens,
+        latencyMs: result.latencyMs,
+        error: result.error,
+      };
 
-    if (result.success) {
-      setTotalTokens(prev => ({
-        input: prev.input + result.tokens.input,
-        output: prev.output + result.tokens.output,
-      }));
-    } else {
-      setErrors(prev => [...prev, result.error || "Unknown error"]);
+      setMessages(prev =>
+        prev.map(m => m.id === newMessage.id ? finalMessage : m)
+      );
+
+      if (result.success) {
+        setTotalTokens(prev => ({
+          input: prev.input + result.tokens.input,
+          output: prev.output + result.tokens.output,
+        }));
+
+        if (costTrackerRef.current) {
+          costTrackerRef.current.recordUsage(agentId, result.tokens, model);
+          setCostState(costTrackerRef.current.getState());
+        }
+      } else {
+        setErrors(prev => [...prev, result.error || "Unknown error"]);
+      }
+
+      return finalMessage;
+    } finally {
+      activeRequestsRef.current.delete(agentId);
+      setTypingAgents((prev) => prev.filter((id) => id !== agentId));
     }
-
-    return finalMessage;
   }, [config, buildConversationHistory]);
 
   // Main discussion loop
   const runDiscussion = useCallback(async () => {
     setIsRunning(true);
     abortRef.current = false;
+    resetRuntimeState();
 
     // Add topic as system message
-    const topicMessage: Message = {
+    const topicMessage: ChatMessage = {
       id: `msg_${Date.now()}`,
       agentId: "system",
       content: `Discussion Topic: "${topic}"`,
@@ -374,7 +546,7 @@ export function Chat({ topic, onNavigate }: ChatProps) {
     };
     setMessages([topicMessage]);
 
-    let previousSpeaker = "";
+    let previousSpeaker: CouncilAgentId | null = null;
     let turn = 0;
 
     while (!abortRef.current && (maxTurns === Infinity || turn < maxTurns)) {
@@ -388,8 +560,12 @@ export function Chat({ topic, onNavigate }: ChatProps) {
       setCurrentTurn(turn + 1);
 
       // Run bidding round
-      const bidding = generateBiddingScores(previousSpeaker);
-      
+      const eligibleAgents = duoLogueRef.current?.remainingTurns
+        ? duoLogueRef.current.participants
+        : AGENT_IDS;
+
+      const bidding = generateBiddingScores(previousSpeaker ?? undefined, eligibleAgents);
+
       if (config.preferences.showBiddingScores) {
         setCurrentBidding(bidding);
         setShowBidding(true);
@@ -397,32 +573,70 @@ export function Chat({ topic, onNavigate }: ChatProps) {
         setShowBidding(false);
       }
 
-      // Generate response from winning agent
-      const winner = bidding.winner as AgentId;
-      const response = await generateAgentResponse(winner);
+      if (abortRef.current) break;
 
-      if (!response) {
+      // Generate responses from top agents (group chat style)
+      const rankedAgents = (Object.entries(bidding.scores) as [CouncilAgentId, number][])
+        .filter(([agentId, score]) => score > 0 && configuredProviders.includes(AGENT_CONFIG[agentId].provider))
+        .sort((a, b) => b[1] - a[1])
+        .map(([agentId]) => agentId);
+
+      const maxConcurrentSpeakers = duoLogueRef.current?.remainingTurns ? 1 : 2;
+      const winners = rankedAgents.slice(0, Math.max(1, maxConcurrentSpeakers));
+
+      if (winners.length === 0) {
+        break;
+      }
+
+      const responses = await Promise.all(winners.map((winner) => generateAgentResponse(winner)));
+
+      if (abortRef.current) break;
+
+      if (responses.every((response) => !response || response.error)) {
         // If failed, try another agent
-        const alternates = AGENT_IDS.filter(id => 
-          id !== winner && configuredProviders.includes(AGENT_CONFIG[id].provider)
+        const alternates = eligibleAgents.filter(
+          (id) => !winners.includes(id) && configuredProviders.includes(AGENT_CONFIG[id].provider)
         );
-        
-        if (alternates.length > 0) {
+
+        if (alternates.length > 0 && !abortRef.current) {
           const alternate = alternates[Math.floor(Math.random() * alternates.length)];
           await generateAgentResponse(alternate);
         }
       }
 
-      previousSpeaker = winner;
+      if (abortRef.current) break;
+
+      previousSpeaker = winners[0] ?? previousSpeaker;
       turn++;
+
+      if (duoLogueRef.current) {
+        const remaining = duoLogueRef.current.remainingTurns - 1;
+        if (remaining <= 0) {
+          duoLogueRef.current = null;
+          setDuoLogue(null);
+          setConflictState(null);
+        } else {
+          const nextDuo = { ...duoLogueRef.current, remainingTurns: remaining };
+          duoLogueRef.current = nextDuo;
+          setDuoLogue(nextDuo);
+        }
+      }
 
       // Small delay between turns
       await new Promise(resolve => setTimeout(resolve, 500));
     }
 
-    setCurrentSpeaker(null);
     setIsRunning(false);
-  }, [topic, maxTurns, isPaused, config.preferences.showBiddingScores, generateBiddingScores, generateAgentResponse, configuredProviders]);
+  }, [
+    topic,
+    maxTurns,
+    isPaused,
+    config.preferences.showBiddingScores,
+    generateBiddingScores,
+    generateAgentResponse,
+    configuredProviders,
+    resetRuntimeState,
+  ]);
 
   // Start discussion when component mounts
   useEffect(() => {
@@ -432,7 +646,7 @@ export function Chat({ topic, onNavigate }: ChatProps) {
       setMessages([{
         id: `msg_${Date.now()}`,
         agentId: "system",
-        content: `⚠️ No API keys configured. Please go to Settings and configure at least one provider to start the discussion.`,
+        content: `No API keys configured. Please go to Settings and configure at least one provider to start the discussion.`,
         timestamp: Date.now(),
         error: "No API keys configured",
       }]);
@@ -440,93 +654,115 @@ export function Chat({ topic, onNavigate }: ChatProps) {
 
     return () => {
       abortRef.current = true;
+      for (const controller of activeRequestsRef.current.values()) {
+        controller.abort();
+      }
+      activeRequestsRef.current.clear();
     };
   }, []);
 
   const handleStop = () => {
     abortRef.current = true;
+    for (const controller of activeRequestsRef.current.values()) {
+      controller.abort();
+    }
+    activeRequestsRef.current.clear();
     setIsRunning(false);
-    setCurrentSpeaker(null);
+    setTypingAgents([]);
+    setIsPaused(false);
   };
 
   const handlePauseResume = () => {
     setIsPaused(!isPaused);
   };
 
-  const displayMaxTurns = maxTurns === Infinity ? "∞" : maxTurns;
+  const displayMaxTurns = maxTurns === Infinity ? "\u221E" : maxTurns;
+
+  // Format timestamp for Discord-style display
+  const formatTime = (timestamp: number) => {
+    return new Date(timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  };
 
   return (
-    <div className="flex-1 flex flex-col h-screen">
+    <div className="app-shell flex flex-col h-screen">
+      <div className="ambient-canvas" aria-hidden="true" />
       {/* Header */}
-      <div className="bg-gray-800/50 border-b border-gray-700 px-6 py-4">
-        <div className="flex items-center justify-between">
+      <div className="app-header px-6 py-4 relative z-10">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
           <div className="flex items-center gap-4">
             <button
               onClick={() => {
-                abortRef.current = true;
+                handleStop();
                 onNavigate("home");
               }}
-              className="text-gray-400 hover:text-white transition-colors"
+              className="button-ghost"
             >
-              ← Back
+              &larr; Back
             </button>
-            <div className="h-6 w-px bg-gray-700"></div>
+            <div className="divider-vertical"></div>
             <div>
-              <h1 className="text-lg font-semibold text-white flex items-center gap-2">
-                🏛️ Socratic Council
+              <h1 className="text-lg font-semibold text-ink-900 flex items-center gap-2">
+                Socratic Council
               </h1>
-              <p className="text-sm text-gray-400 truncate max-w-lg">
+              <p className="text-sm text-ink-500 truncate max-w-lg">
                 {topic}
               </p>
             </div>
           </div>
 
-          <div className="flex items-center gap-4">
-            {/* Progress indicator */}
+          <div className="flex flex-wrap items-center gap-3 justify-start lg:justify-end">
             <div className="flex items-center gap-2">
-              <div className="text-sm text-gray-400">
+              <div className="text-sm text-ink-500">
                 Turn {currentTurn}/{displayMaxTurns}
               </div>
               {maxTurns !== Infinity && (
-                <div className="w-32 h-2 bg-gray-700 rounded-full overflow-hidden">
+                <div className="progress-track">
                   <div
-                    className="h-full bg-gradient-to-r from-primary to-secondary transition-all duration-300"
+                    className="progress-fill"
                     style={{ width: `${Math.min((currentTurn / maxTurns) * 100, 100)}%` }}
                   />
                 </div>
               )}
             </div>
 
-            {/* Token counter */}
             <div className="badge badge-info">
               {totalTokens.input + totalTokens.output} tokens
             </div>
 
-            {/* Logs button */}
+            {costState && (
+              <div className="badge">
+                {Object.values(costState.agentCosts).some((agent) => agent.pricingAvailable)
+                  ? `$${costState.totalEstimatedUSD.toFixed(4)}`
+                  : "Cost N/A"}
+              </div>
+            )}
+
+            {duoLogue && (
+              <div className="badge badge-warning">
+                Duo-Logue · {duoLogue.remainingTurns} turns
+              </div>
+            )}
+
             <button
               onClick={() => setShowLogs(!showLogs)}
-              className={`text-sm px-3 py-1.5 rounded-lg transition-colors
-                ${showLogs ? "bg-yellow-500/20 text-yellow-400" : "bg-gray-700 text-gray-300 hover:bg-gray-600"}`}
+              className="button-secondary text-sm"
             >
-              📋 Logs {errors.length > 0 && `(${errors.length})`}
+              Logs {errors.length > 0 && `(${errors.length})`}
             </button>
 
-            {/* Control buttons */}
             {isRunning && (
               <>
                 <button
                   onClick={handlePauseResume}
-                  className="bg-yellow-600 hover:bg-yellow-500 text-white px-4 py-2 rounded-lg text-sm
-                    transition-colors flex items-center gap-2"
+                  className="button-secondary text-sm"
                 >
-                  {isPaused ? "▶ Resume" : "⏸ Pause"}
+                  {isPaused ? "Resume" : "Pause"}
                 </button>
                 <button
                   onClick={handleStop}
-                  className="bg-red-600 hover:bg-red-500 text-white px-4 py-2 rounded-lg text-sm
-                    transition-colors flex items-center gap-2"
+                  className="button-primary text-sm"
                 >
-                  ⏹ Stop
+                  Stop
                 </button>
               </>
             )}
@@ -535,64 +771,90 @@ export function Chat({ topic, onNavigate }: ChatProps) {
       </div>
 
       {/* Main content area */}
-      <div className="flex-1 flex overflow-hidden">
-        {/* Messages area */}
-        <div className="flex-1 overflow-y-auto p-6">
-          <div className="max-w-4xl mx-auto space-y-4">
+      <div className="flex-1 flex flex-col md:flex-row overflow-hidden relative z-10">
+        {/* Messages area - Discord style */}
+        <div className="flex-1 overflow-y-auto">
+          <div className="discord-messages">
             {messages.map((message) => {
-              const agent = AGENT_CONFIG[message.agentId as AgentId] ?? AGENT_CONFIG.system;
-              const isAgent = AGENT_IDS.includes(message.agentId as AgentId);
+              const agent = AGENT_CONFIG[message.agentId] ?? AGENT_CONFIG.system;
+              const isAgent = isCouncilAgent(message.agentId);
+              const isSystem = message.agentId === "system";
+              const modelName = isAgent ? getModelDisplayName(agent.provider) : "";
+              const accent = isSystem
+                ? "var(--accent-ink)"
+                : message.agentId === "user"
+                  ? "var(--accent-emerald)"
+                  : `var(--color-${message.agentId})`;
+              const accentStyle = { "--accent": accent } as CSSProperties;
 
               return (
                 <div
                   key={message.id}
-                  className={`message-enter ${message.agentId === "user" ? "flex-row-reverse" : ""}`}
+                  className={`discord-message message-enter ${message.error ? "has-error" : ""}`}
+                  style={accentStyle}
                 >
-                  <div
-                    className={`${agent.bgColor} ${agent.borderColor} border rounded-xl p-4
-                      ${message.agentId === currentSpeaker && message.isStreaming ? "ring-2 ring-primary/50" : ""}
-                      ${message.error ? "border-red-500/50" : ""}`}
-                  >
-                    {/* Message header */}
-                    <div className="flex items-center gap-3 mb-3">
-                      <div className={`w-10 h-10 rounded-full flex items-center justify-center text-xl
-                        ${agent.borderColor} border-2 ${currentSpeaker === message.agentId ? "pulse-ring" : ""}`}>
-                        {agent.avatar}
-                      </div>
-                      <div className="flex-1">
-                        <div className="flex items-center gap-2">
-                          <span className={`font-semibold ${agent.color}`}>{agent.name}</span>
-                          {isAgent && (
-                            <span className="text-xs text-gray-500">({agent.role})</span>
-                          )}
-                          {message.error && (
-                            <span className="badge badge-error">Error</span>
-                          )}
-                        </div>
-                        {message.tokens && (
-                          <div className="text-xs text-gray-500">
-                            {message.tokens.input}→{message.tokens.output} tokens • {message.latencyMs}ms
-                          </div>
-                        )}
-                      </div>
-                    </div>
+                  {/* Avatar */}
+                  <div className="discord-avatar">
+                    {isSystem ? (
+                      <SystemIcon size={40} />
+                    ) : message.agentId === "user" ? (
+                      <UserIcon size={40} />
+                    ) : (
+                      <ProviderIcon provider={agent.provider} size={40} />
+                    )}
+                    {isCouncilAgent(message.agentId) && typingAgents.includes(message.agentId) && message.isStreaming && (
+                      <div className="avatar-speaking-indicator" />
+                    )}
+                  </div>
 
-                    {/* Message content */}
-                    <div className="text-gray-200 leading-relaxed pl-13 whitespace-pre-wrap">
-                      {message.content}
-                      {message.isStreaming && (
-                        <span className="inline-flex ml-1">
-                          <span className="typing-dot w-1.5 h-1.5 bg-gray-400 rounded-full mx-0.5" />
-                          <span className="typing-dot w-1.5 h-1.5 bg-gray-400 rounded-full mx-0.5" />
-                          <span className="typing-dot w-1.5 h-1.5 bg-gray-400 rounded-full mx-0.5" />
+                  {/* Message content */}
+                  <div className="discord-message-content">
+                    {/* Header: Name (Model) + timestamp */}
+                    <div className="discord-message-header">
+                      <span className={`discord-username ${agent.color}`}>
+                        {agent.name}
+                      </span>
+                      {isAgent && modelName && (
+                        <span className="discord-model">({modelName})</span>
+                      )}
+                      {isAgent && (
+                        <span className="discord-role">{agent.role}</span>
+                      )}
+                      <span className="discord-timestamp">
+                        {formatTime(message.timestamp)}
+                      </span>
+                      {message.tokens && (
+                        <span className="discord-tokens">
+                          {message.tokens.input}+{message.tokens.output} tokens
                         </span>
                       )}
                     </div>
 
+                    {/* Message body */}
+                    <div className="discord-message-body">
+                      {message.content}
+                      {message.isStreaming && (
+                        <span className="typing-indicator">
+                          <span className="typing-dot" />
+                          <span className="typing-dot" />
+                          <span className="typing-dot" />
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="message-actions">
+                      <button type="button" className="message-action">
+                        Quote
+                      </button>
+                      <button type="button" className="message-action">
+                        React
+                      </button>
+                    </div>
+
                     {/* Error message */}
                     {message.error && (
-                      <div className="mt-2 text-sm text-red-400 bg-red-500/10 rounded-lg p-2">
-                        ⚠️ {message.error}
+                      <div className="discord-error">
+                        {message.error}
                       </div>
                     )}
                   </div>
@@ -604,17 +866,17 @@ export function Chat({ topic, onNavigate }: ChatProps) {
         </div>
 
         {/* Right sidebar - Agent status & Bidding */}
-        <div className="w-72 border-l border-gray-700 bg-gray-800/30 p-4 overflow-y-auto">
+        <div className="w-full md:w-80 md:border-l border-line-soft side-panel p-4 overflow-y-auto">
           {showLogs ? (
             // Logs panel
             <div className="scale-in">
               <div className="flex items-center justify-between mb-4">
-                <h3 className="text-sm font-semibold text-gray-400 uppercase tracking-wider">
+                <h3 className="text-xs font-semibold text-ink-500 uppercase tracking-[0.24em]">
                   API Logs
                 </h3>
                 <button
                   onClick={() => apiLogger.clearLogs()}
-                  className="text-xs text-gray-500 hover:text-white"
+                  className="button-ghost text-xs"
                 >
                   Clear
                 </button>
@@ -623,15 +885,11 @@ export function Chat({ topic, onNavigate }: ChatProps) {
                 {apiLogger.getLogs().slice(-20).reverse().map((log, i) => (
                   <div
                     key={i}
-                    className={`p-2 rounded-lg ${
-                      log.level === "error" ? "bg-red-500/10 text-red-400" :
-                      log.level === "warn" ? "bg-yellow-500/10 text-yellow-400" :
-                      "bg-gray-700/50 text-gray-300"
-                    }`}
+                    className={`log-card ${log.level === "error" ? "error" : log.level === "warn" ? "warn" : ""}`}
                   >
                     <div className="flex items-center gap-2 mb-1">
                       <span className="font-medium">[{log.provider}]</span>
-                      <span className="text-gray-500">
+                      <span className="text-ink-500">
                         {new Date(log.timestamp).toLocaleTimeString()}
                       </span>
                     </div>
@@ -639,60 +897,94 @@ export function Chat({ topic, onNavigate }: ChatProps) {
                   </div>
                 ))}
                 {apiLogger.getLogs().length === 0 && (
-                  <div className="text-gray-500 text-center py-4">No logs yet</div>
+                  <div className="text-ink-500 text-center py-4">No logs yet</div>
                 )}
               </div>
             </div>
           ) : (
             <>
-              <h3 className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-4">
-                Council Status
+              <h3 className="text-xs font-semibold text-ink-500 uppercase tracking-[0.24em] mb-4">
+                Council Members
               </h3>
 
-              {/* Agent list */}
+              {/* Agent list with provider icons */}
               <div className="space-y-2 mb-6">
                 {AGENT_IDS.map((agentId) => {
                   const agent = AGENT_CONFIG[agentId];
-                  const isSpeaking = currentSpeaker === agentId;
+                  const isSpeaking = typingAgents.includes(agentId);
                   const hasApiKey = configuredProviders.includes(agent.provider);
+                  const modelName = getModelDisplayName(agent.provider);
 
                   return (
                     <div
                       key={agentId}
-                      className={`flex items-center gap-3 p-2 rounded-lg transition-all
-                        ${isSpeaking ? `${agent.bgColor} ${agent.borderColor} border` : "hover:bg-gray-700/50"}
-                        ${!hasApiKey ? "opacity-50" : ""}`}
+                      className={`agent-row ${isSpeaking ? "speaking" : ""} ${!hasApiKey ? "opacity-50" : ""}`}
                     >
-                      <span className={`text-lg ${isSpeaking ? "pulse-ring" : ""}`}>{agent.avatar}</span>
+                      <div className={`relative ${isSpeaking ? "speaking-pulse" : ""}`}>
+                        <ProviderIcon provider={agent.provider} size={32} />
+                      </div>
                       <div className="flex-1 min-w-0">
                         <div className={`text-sm font-medium truncate ${agent.color}`}>
                           {agent.name}
                         </div>
-                        <div className="text-xs text-gray-500">{agent.role}</div>
+                        <div className="text-xs text-ink-500 truncate">
+                          {hasApiKey ? modelName : "No API key"}
+                        </div>
                       </div>
                       {isSpeaking && (
                         <span className="badge badge-success text-xs">Speaking</span>
-                      )}
-                      {!hasApiKey && (
-                        <span className="badge badge-warning text-xs">No key</span>
                       )}
                     </div>
                   );
                 })}
               </div>
 
+              <div className="panel-card p-4 mb-6">
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="text-xs font-semibold text-ink-500 uppercase tracking-[0.24em]">
+                    Conflict Meter
+                  </h3>
+                  {conflictState && (
+                    <span className="badge badge-warning text-xs">
+                      {conflictState.conflictScore}%
+                    </span>
+                  )}
+                </div>
+                {conflictState ? (
+                  <>
+                    <div className="text-sm text-ink-700 mb-2">
+                      {AGENT_CONFIG[conflictState.agentPair[0]].name} vs{" "}
+                      {AGENT_CONFIG[conflictState.agentPair[1]].name}
+                    </div>
+                    <div className="conflict-track">
+                      <div
+                        className="conflict-fill"
+                        style={{ width: `${Math.min(conflictState.conflictScore, 100)}%` }}
+                      />
+                    </div>
+                    {duoLogue && (
+                      <div className="text-xs text-ink-500 mt-2">
+                        Duo-Logue active · {duoLogue.remainingTurns} turns remaining
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <div className="text-sm text-ink-500">No active conflicts detected.</div>
+                )}
+              </div>
+
               {/* Bidding display */}
               {showBidding && currentBidding && (
                 <div className="scale-in">
-                  <h3 className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-3">
+                  <h3 className="text-xs font-semibold text-ink-500 uppercase tracking-[0.24em] mb-3">
                     Bidding Round
                   </h3>
-                  <div className="bg-gray-800/50 border border-gray-700 rounded-xl p-3 space-y-2">
-                    {Object.entries(currentBidding.scores)
+                  <div className="panel-card p-3 space-y-2">
+                    {(Object.entries(currentBidding.scores) as [CouncilAgentId, number][])
                       .filter(([_, score]) => score > 0)
                       .sort((a, b) => b[1] - a[1])
                       .map(([agentId, score]) => {
-                        const agent = AGENT_CONFIG[agentId as AgentId];
+                        const agent = AGENT_CONFIG[agentId];
                         const isWinner = agentId === currentBidding.winner;
                         const maxScore = Math.max(...Object.values(currentBidding.scores));
                         const barWidth = (score / maxScore) * 100;
@@ -700,18 +992,19 @@ export function Chat({ topic, onNavigate }: ChatProps) {
                         return (
                           <div key={agentId} className={`${isWinner ? "winner-highlight" : ""}`}>
                             <div className="flex items-center justify-between text-xs mb-1">
-                              <span className={agent.color}>
-                                {agent.avatar} {agent.name}
+                              <span className={`flex items-center gap-1 ${agent.color}`}>
+                                <ProviderIcon provider={agent.provider} size={14} />
+                                {agent.name}
                               </span>
-                              <span className="text-gray-400">
+                              <span className="text-ink-500">
                                 {score.toFixed(1)}
-                                {isWinner && " ★"}
+                                {isWinner && " \u2605"}
                               </span>
                             </div>
-                            <div className="h-1.5 bg-gray-700 rounded-full overflow-hidden">
+                            <div className="h-1.5 bg-white/70 rounded-full overflow-hidden">
                               <div
                                 className={`h-full bidding-bar rounded-full ${
-                                  isWinner ? "bg-gradient-to-r from-yellow-500 to-yellow-400" : "bg-gray-500"
+                                  isWinner ? "bg-gradient-to-r from-emerald-600 to-amber-400" : "bg-slate-400"
                                 }`}
                                 style={{ width: `${barWidth}%` }}
                               />
@@ -723,39 +1016,108 @@ export function Chat({ topic, onNavigate }: ChatProps) {
                 </div>
               )}
 
+              <div className="panel-card p-4 mb-6">
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="text-xs font-semibold text-ink-500 uppercase tracking-[0.24em]">
+                    Cost Ledger
+                  </h3>
+                  <span className="badge text-xs">
+                    {totalTokens.input + totalTokens.output} tokens
+                  </span>
+                </div>
+                {costState ? (
+                  <div className="space-y-2 text-xs">
+                    {AGENT_IDS.map((agentId) => {
+                      const agent = AGENT_CONFIG[agentId];
+                      const breakdown = costState.agentCosts[agentId];
+                      const costLabel = breakdown?.pricingAvailable
+                        ? `$${breakdown.estimatedUSD.toFixed(4)}`
+                        : "—";
+                      const tokenCount =
+                        (breakdown?.inputTokens ?? 0) + (breakdown?.outputTokens ?? 0);
+
+                      return (
+                        <div key={agentId} className="flex items-center justify-between">
+                          <span className={`text-ink-700 ${agent.color}`}>
+                            {agent.name}
+                          </span>
+                          <span className="text-ink-500">
+                            {tokenCount} · {costLabel}
+                          </span>
+                        </div>
+                      );
+                    })}
+                    <div className="pt-2 border-t border-line-soft flex items-center justify-between">
+                      <span className="text-ink-500">Estimated total</span>
+                      <span className="text-ink-900">
+                        {Object.values(costState.agentCosts).some((agent) => agent.pricingAvailable)
+                          ? `$${costState.totalEstimatedUSD.toFixed(4)}`
+                          : "Pricing not configured"}
+                      </span>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="text-sm text-ink-500">No usage recorded yet.</div>
+                )}
+              </div>
+
+              <div className="panel-card p-4 mb-6">
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="text-xs font-semibold text-ink-500 uppercase tracking-[0.24em]">
+                    Whisper Log
+                  </h3>
+                  <span className="badge text-xs">{whisperLog.length}</span>
+                </div>
+                {whisperLog.length === 0 ? (
+                  <div className="text-sm text-ink-500">No whispers yet.</div>
+                ) : (
+                  <div className="space-y-2 text-xs text-ink-700">
+                    {whisperLog.slice(-5).map((whisper) => (
+                        <div key={whisper.id} className="border-l border-line-soft pl-2">
+                          <div className="font-medium">
+                            {AGENT_CONFIG[whisper.from].name} → {AGENT_CONFIG[whisper.to].name}
+                          </div>
+                        <div className="text-ink-500">
+                          {whisper.payload.proposedAction ?? "No strategy details provided."}
+                        </div>
+                        </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
               {/* Discussion stats */}
               {!isRunning && currentTurn > 0 && (
                 <div className="mt-6 scale-in">
-                  <h3 className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-3">
+                  <h3 className="text-xs font-semibold text-ink-500 uppercase tracking-[0.24em] mb-3">
                     Summary
                   </h3>
-                  <div className="bg-gray-800/50 border border-gray-700 rounded-xl p-4 space-y-3">
+                  <div className="panel-card p-4 space-y-3">
                     <div className="flex justify-between text-sm">
-                      <span className="text-gray-400">Total turns</span>
-                      <span className="text-white">{currentTurn}</span>
+                      <span className="text-ink-500">Total turns</span>
+                      <span className="text-ink-900">{currentTurn}</span>
                     </div>
                     <div className="flex justify-between text-sm">
-                      <span className="text-gray-400">Messages</span>
-                      <span className="text-white">{messages.length}</span>
+                      <span className="text-ink-500">Messages</span>
+                      <span className="text-ink-900">{messages.length}</span>
                     </div>
                     <div className="flex justify-between text-sm">
-                      <span className="text-gray-400">Total tokens</span>
-                      <span className="text-white">{totalTokens.input + totalTokens.output}</span>
+                      <span className="text-ink-500">Total tokens</span>
+                      <span className="text-ink-900">{totalTokens.input + totalTokens.output}</span>
                     </div>
                     {errors.length > 0 && (
                       <div className="flex justify-between text-sm">
-                        <span className="text-red-400">Errors</span>
-                        <span className="text-red-400">{errors.length}</span>
+                        <span className="text-ink-500">Errors</span>
+                        <span className="text-ink-900">{errors.length}</span>
                       </div>
                     )}
-                    <div className="pt-2 border-t border-gray-700">
+                    <div className="pt-2 border-t border-line-soft">
                       <button
                         onClick={() => {
-                          abortRef.current = true;
+                          handleStop();
                           onNavigate("home");
                         }}
-                        className="w-full bg-primary hover:bg-primary/90 text-white py-2 rounded-lg
-                          text-sm font-medium transition-colors"
+                        className="w-full button-primary text-sm"
                       >
                         New Discussion
                       </button>
@@ -769,17 +1131,23 @@ export function Chat({ topic, onNavigate }: ChatProps) {
       </div>
 
       {/* Footer - Current speaker indicator */}
-      {currentSpeaker && (
-        <div className="bg-gray-800/80 border-t border-gray-700 px-6 py-3">
-          <div className="flex items-center justify-center gap-2 text-sm">
-            <span className={`${AGENT_CONFIG[currentSpeaker as AgentId]?.color ?? "text-white"}`}>
-              {AGENT_CONFIG[currentSpeaker as AgentId]?.avatar} {AGENT_CONFIG[currentSpeaker as AgentId]?.name}
-            </span>
-            <span className="text-gray-400">is speaking...</span>
-            <span className="inline-flex ml-2">
-              <span className="typing-dot w-1.5 h-1.5 bg-primary rounded-full mx-0.5" />
-              <span className="typing-dot w-1.5 h-1.5 bg-primary rounded-full mx-0.5" />
-              <span className="typing-dot w-1.5 h-1.5 bg-primary rounded-full mx-0.5" />
+      {typingAgents.length > 0 && (
+        <div className="app-footer px-6 py-3">
+          <div className="flex items-center justify-center gap-3 text-sm">
+            {typingAgents.slice(0, 3).map((agentId) => (
+              <span key={agentId} className="flex items-center gap-2">
+                <ProviderIcon provider={AGENT_CONFIG[agentId].provider} size={18} />
+                <span className={AGENT_CONFIG[agentId].color}>{AGENT_CONFIG[agentId].name}</span>
+              </span>
+            ))}
+            {typingAgents.length > 3 && (
+              <span className="text-ink-500">+{typingAgents.length - 3}</span>
+            )}
+            <span className="text-ink-500">typing...</span>
+            <span className="typing-indicator ml-2">
+              <span className="typing-dot" />
+              <span className="typing-dot" />
+              <span className="typing-dot" />
             </span>
           </div>
         </div>

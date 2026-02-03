@@ -5,14 +5,14 @@ export default {
     extend: {
       colors: {
         // Agent colors
-        george: "#3B82F6", // blue
-        cathy: "#A855F7", // purple
-        grace: "#22C55E", // green
-        douglas: "#F59E0B", // amber
-        kate: "#06B6D4", // cyan
+        george: "#60A5FA", // blue
+        cathy: "#FBBF24", // amber
+        grace: "#34D399", // emerald
+        douglas: "#F87171", // red
+        kate: "#2DD4BF", // teal
         // UI colors
-        primary: "#6366F1", // indigo
-        secondary: "#8B5CF6", // violet
+        primary: "#14B8A6", // emerald
+        secondary: "#F59E0B", // gold
       },
     },
   },

@@ -8,8 +8,13 @@ import type {
   AgentId,
   CouncilConfig,
   CouncilState,
+  CostTracker,
+  ConflictDetection,
+  DuoLogue,
   Message,
+  OracleResult,
   ProviderCredentials,
+  WhisperMessage,
 } from "@socratic-council/shared";
 import { DEFAULT_AGENTS, DEFAULT_COUNCIL_CONFIG } from "@socratic-council/shared";
 import {
@@ -19,6 +24,10 @@ import {
   formatConversationHistory,
 } from "@socratic-council/sdk";
 import { runBiddingRound } from "./bidding.js";
+import { CostTrackerEngine } from "./cost.js";
+import { ConflictDetector } from "./conflict.js";
+import { DuckDuckGoOracle } from "./oracle.js";
+import { WhisperManager } from "./whisper.js";
 
 /**
  * Generate a unique ID for messages and councils
@@ -36,6 +45,12 @@ export type CouncilEvent =
   | { type: "message_chunk"; agentId: AgentId; content: string }
   | { type: "message_complete"; message: Message }
   | { type: "bidding_complete"; winner: AgentId; scores: Record<AgentId, number> }
+  | { type: "whisper_sent"; message: WhisperMessage }
+  | { type: "conflict_detected"; conflict: ConflictDetection }
+  | { type: "duologue_started"; duoLogue: DuoLogue }
+  | { type: "duologue_ended"; duoLogue: DuoLogue }
+  | { type: "cost_updated"; costTracker: CostTracker }
+  | { type: "oracle_result"; result: OracleResult }
   | { type: "council_paused"; state: CouncilState }
   | { type: "council_completed"; state: CouncilState }
   | { type: "error"; error: Error; agentId?: AgentId };
@@ -51,6 +66,10 @@ export class Council {
   private eventCallback?: CouncilEventCallback;
   private isRunning = false;
   private abortController?: AbortController;
+  private whisperManager: WhisperManager;
+  private conflictDetector: ConflictDetector;
+  private costTracker: CostTrackerEngine;
+  private oracle: DuckDuckGoOracle;
 
   constructor(
     credentials: ProviderCredentials,
@@ -78,6 +97,15 @@ export class Council {
       totalCost: 0,
       status: "idle",
     };
+
+    const agentIds = this.state.agents.map((agent) => agent.id);
+    this.whisperManager = new WhisperManager(agentIds);
+    this.conflictDetector = new ConflictDetector();
+    this.costTracker = new CostTrackerEngine(agentIds);
+    this.oracle = new DuckDuckGoOracle();
+
+    this.state.costTracker = this.costTracker.getState();
+    this.state.whisperState = this.whisperManager.getState();
   }
 
   /**
@@ -114,8 +142,17 @@ export class Council {
     this.state.startedAt = Date.now();
     this.state.currentTurn = 0;
     this.state.messages = [];
+    this.state.totalCost = 0;
+    this.state.conflict = undefined;
+    this.state.duoLogue = undefined;
     this.isRunning = true;
     this.abortController = new AbortController();
+
+    const agentIds = this.state.agents.map((agent) => agent.id);
+    this.whisperManager = new WhisperManager(agentIds);
+    this.costTracker = new CostTrackerEngine(agentIds);
+    this.state.whisperState = this.whisperManager.getState();
+    this.state.costTracker = this.costTracker.getState();
 
     // Add the topic as a system message
     const topicMessage: Message = {
@@ -148,11 +185,19 @@ export class Council {
       try {
         // Run bidding to select next speaker
         const agentIds = this.state.agents.map((a) => a.id);
+        const whisperBonuses = this.whisperManager.consumeBonuses();
+        this.state.whisperState = this.whisperManager.getState();
+        const eligibleAgents =
+          this.state.duoLogue && this.state.duoLogue.remainingTurns > 0
+            ? this.state.duoLogue.participants
+            : agentIds;
+
         const biddingResult = runBiddingRound(
-          agentIds,
+          eligibleAgents,
           this.state.messages,
           this.state.config.topic,
-          lastSpeaker
+          lastSpeaker,
+          whisperBonuses
         );
 
         this.emit({
@@ -168,6 +213,16 @@ export class Council {
         await this.generateAgentResponse(agent);
         lastSpeaker = agent.id;
         this.state.currentTurn++;
+
+        if (this.state.duoLogue && this.state.duoLogue.remainingTurns > 0) {
+          this.state.duoLogue.remainingTurns -= 1;
+          if (this.state.duoLogue.remainingTurns <= 0) {
+            const completed = this.state.duoLogue;
+            this.state.duoLogue = undefined;
+            this.state.conflict = undefined;
+            this.emit({ type: "duologue_ended", duoLogue: completed });
+          }
+        }
 
         // Small delay between turns for readability
         await this.delay(500);
@@ -244,6 +299,8 @@ export class Council {
       };
 
       this.state.messages.push(message);
+      this.updateCost(agent.id, result.tokens, agent.model);
+      this.evaluateConflict();
       this.emit({ type: "message_complete", message });
 
       return message;
@@ -278,6 +335,56 @@ export class Council {
 
     this.state.messages.push(message);
     return message;
+  }
+
+  private updateCost(agentId: AgentId, tokens: CompletionResult["tokens"], modelId: string): void {
+    if (!tokens) return;
+    this.costTracker.recordUsage(agentId, tokens, modelId);
+    this.state.costTracker = this.costTracker.getState();
+    this.state.totalCost = this.state.costTracker.totalEstimatedUSD;
+    this.emit({ type: "cost_updated", costTracker: this.state.costTracker });
+  }
+
+  private evaluateConflict(): void {
+    if (this.state.duoLogue && this.state.duoLogue.remainingTurns > 0) return;
+
+    const agentIds = this.state.agents.map((agent) => agent.id);
+    const conflict = this.conflictDetector.evaluate(this.state.messages, agentIds);
+    this.state.conflict = conflict ?? undefined;
+
+    if (conflict) {
+      const duoLogue: DuoLogue = {
+        participants: conflict.agentPair,
+        remainingTurns: 3,
+        otherAgentsBidding: false,
+      };
+      this.state.duoLogue = duoLogue;
+      this.emit({ type: "conflict_detected", conflict });
+      this.emit({ type: "duologue_started", duoLogue });
+    }
+  }
+
+  /**
+   * Send a whisper between agents (adds optional bid bonus)
+   */
+  sendWhisper(
+    from: AgentId,
+    to: AgentId,
+    message: Omit<WhisperMessage, "id" | "from" | "to" | "timestamp">
+  ): WhisperMessage {
+    const whisper = this.whisperManager.sendWhisper(from, to, message);
+    this.state.whisperState = this.whisperManager.getState();
+    this.emit({ type: "whisper_sent", message: whisper });
+    return whisper;
+  }
+
+  /**
+   * Query the oracle tool for external verification
+   */
+  async queryOracle(query: string): Promise<OracleResult> {
+    const result = await this.oracle.query(query);
+    this.emit({ type: "oracle_result", result });
+    return result;
   }
 
   /**
@@ -379,5 +486,16 @@ export class Council {
   importState(stateJson: string): void {
     const imported = JSON.parse(stateJson) as CouncilState;
     this.state = imported;
+
+    const agentIds = this.state.agents.map((agent) => agent.id);
+    this.whisperManager = new WhisperManager(agentIds);
+    if (this.state.whisperState) {
+      this.whisperManager.loadState(this.state.whisperState);
+    }
+
+    this.costTracker = new CostTrackerEngine(agentIds);
+    if (this.state.costTracker) {
+      this.costTracker.loadState(this.state.costTracker);
+    }
   }
 }

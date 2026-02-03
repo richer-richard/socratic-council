@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- Allow outbound network connections (required for API calls) -->
+    <key>com.apple.security.network.client</key>
+    <true/>
+    <!-- Allow the app to connect to the network -->
+    <key>com.apple.security.network.server</key>
+    <false/>
+    <!-- Disable app sandbox to allow unrestricted network access including proxy -->
+    <key>com.apple.security.app-sandbox</key>
+    <false/>
+</dict>
+</plist>

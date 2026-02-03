@@ -23,7 +23,9 @@
     "build": "tsup",
     "dev": "tsup --watch",
     "typecheck": "tsc --noEmit",
-    "clean": "rm -rf dist"
+    "clean": "rm -rf dist",
+    "lint": "eslint \"src/**/*.{ts,tsx}\"",
+    "test": "vitest run --config ../../vitest.config.ts"
   },
   "devDependencies": {
     "tsup": "^8.3.5",

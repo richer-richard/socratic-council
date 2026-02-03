@@ -14,7 +14,10 @@
   "scripts": {
     "build": "tsup",
     "dev": "tsup --watch",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint \"src/**/*.{ts,tsx}\"",
+    "test": "vitest run --config ../../vitest.config.ts",
+    "clean": "rm -rf dist"
   },
   "dependencies": {
     "@socratic-council/shared": "workspace:*",

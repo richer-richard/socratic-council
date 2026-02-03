@@ -39,6 +39,12 @@ export const OpenAIConfigSchema = z.object({
   presence_penalty: z.number().min(-2).max(2).optional(),
   // For reasoning models (o1, o3, o4-mini)
   reasoning_effort: z.enum(["low", "medium", "high"]).optional(),
+  // New Responses API format
+  reasoning: z
+    .object({
+      effort: z.enum(["low", "medium", "high"]).optional(),
+    })
+    .optional(),
   stream: z.boolean().optional().default(true),
 });
 
@@ -52,6 +58,11 @@ export interface OpenAIRequest {
   temperature?: number;
   max_output_tokens?: number;
   top_p?: number;
+  // Preferred Responses API format
+  reasoning?: {
+    effort?: "low" | "medium" | "high";
+  };
+  // Deprecated (kept for compatibility)
   reasoning_effort?: "low" | "medium" | "high";
   stream?: boolean;
 }
@@ -255,6 +266,11 @@ export interface ModelInfo {
   supportsThinking: boolean;
   supportsVision: boolean;
   supportsStreaming: boolean;
+  pricing?: {
+    inputCostPer1M?: number;
+    outputCostPer1M?: number;
+    reasoningCostPer1M?: number;
+  };
 }
 
 // =============================================================================
@@ -337,6 +353,10 @@ export interface CouncilState {
   messages: Message[];
   currentTurn: number;
   totalCost: number;
+  costTracker?: CostTracker;
+  conflict?: ConflictDetection;
+  duoLogue?: DuoLogue;
+  whisperState?: WhisperState;
   status: "idle" | "running" | "paused" | "completed";
   startedAt?: number;
   completedAt?: number;
@@ -390,4 +410,135 @@ export interface AppConfig {
   credentials: ProviderCredentials;
   agents: Record<AgentId, AgentConfig>;
   council: CouncilConfig;
+}
+
+// =============================================================================
+// WHISPER PROTOCOL
+// =============================================================================
+
+export type WhisperType =
+  | "alliance_request"
+  | "alliance_accept"
+  | "alliance_reject"
+  | "strategy";
+
+export interface WhisperMessage {
+  id: string;
+  from: AgentId;
+  to: AgentId;
+  type: WhisperType;
+  payload: {
+    targetTopic?: string;
+    proposedAction?: string;
+    bidBonus?: number;
+  };
+  timestamp: number;
+}
+
+export interface WhisperState {
+  messages: WhisperMessage[];
+  pendingBonuses: Record<AgentId, number>;
+}
+
+// =============================================================================
+// CONFLICT DETECTION
+// =============================================================================
+
+export interface ConflictDetection {
+  agentPair: [AgentId, AgentId];
+  conflictScore: number;
+  threshold: number;
+  lastUpdated: number;
+}
+
+export interface DuoLogue {
+  participants: [AgentId, AgentId];
+  remainingTurns: number;
+  otherAgentsBidding: boolean;
+}
+
+// =============================================================================
+// COST TRACKING
+// =============================================================================
+
+export interface AgentCostBreakdown {
+  inputTokens: number;
+  outputTokens: number;
+  reasoningTokens?: number;
+  estimatedUSD: number;
+  pricingAvailable?: boolean;
+}
+
+export interface CostTracker {
+  totalInputTokens: number;
+  totalOutputTokens: number;
+  totalReasoningTokens: number;
+  agentCosts: Record<AgentId, AgentCostBreakdown>;
+  totalEstimatedUSD: number;
+}
+
+// =============================================================================
+// ORACLE TOOL
+// =============================================================================
+
+export interface SearchResult {
+  title: string;
+  url: string;
+  snippet: string;
+  source?: string;
+}
+
+export interface OracleResult {
+  query: string;
+  results: SearchResult[];
+}
+
+export interface VerificationResult {
+  claim: string;
+  verdict: "true" | "false" | "uncertain";
+  confidence: number;
+  evidence?: SearchResult[];
+}
+
+export interface Citation {
+  title: string;
+  url: string;
+  snippet: string;
+}
+
+export interface OracleTool {
+  search(query: string): Promise<SearchResult[]>;
+  verify(claim: string): Promise<VerificationResult>;
+  cite(topic: string): Promise<Citation[]>;
+}
+
+// =============================================================================
+// AGENT CONTEXT
+// =============================================================================
+
+export interface CouncilContext {
+  topic: string;
+  messages: Message[];
+  agents: AgentConfig[];
+  currentTurn: number;
+  maxTurns: number;
+  lastSpeaker?: AgentId;
+  costTracker?: CostTracker;
+  conflict?: ConflictDetection;
+  duoLogue?: DuoLogue;
+  whisperState?: WhisperState;
+}
+
+export interface AgentResponse {
+  agentId: AgentId;
+  content: string;
+  tokens?: {
+    input: number;
+    output: number;
+    reasoning?: number;
+  };
+  metadata?: {
+    model?: ModelId;
+    latencyMs?: number;
+  };
 }

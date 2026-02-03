@@ -6,17 +6,20 @@
   "private": true,
   "scripts": {
     "dev": "vite",
-    "build": "tsc && vite build",
+    "build": "pnpm -C ../../packages/shared build && pnpm -C ../../packages/sdk build && pnpm -C ../../packages/core build && tsc && vite build",
     "preview": "vite preview",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
-    "tauri:build": "tauri build"
+    "tauri:build": "tauri build",
+    "lint": "eslint \"src/**/*.{ts,tsx}\"",
+    "test": "vitest run --config ../../vitest.config.ts",
+    "clean": "rm -rf dist"
   },
   "dependencies": {
     "@socratic-council/core": "workspace:*",
     "@socratic-council/sdk": "workspace:*",
     "@socratic-council/shared": "workspace:*",
-    "@tauri-apps/api": "^2.10.0",
+    "@tauri-apps/api": "^2.10.1",
     "@tauri-apps/plugin-store": "^2.4.2",
     "react": "^18.3.0",
     "react-dom": "^18.3.0",

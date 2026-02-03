@@ -6,6 +6,7 @@ import {
   PROVIDER_INFO,
   DISCUSSION_LENGTHS,
 } from "../stores/config";
+import { ProviderIcon } from "./icons/ProviderIcons";
 
 interface ConfigModalProps {
   isOpen: boolean;
@@ -152,7 +153,7 @@ export function ConfigModal({
 
   return (
     <div className="modal-overlay" onClick={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="modal-content w-full max-w-4xl mx-4">
+      <div className="modal-content config-modal w-full max-w-4xl mx-4">
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-700">
           <div className="flex items-center gap-3">
@@ -223,10 +224,10 @@ export function ConfigModal({
                     <div className="flex items-start justify-between">
                       <div className="flex items-center gap-4">
                         <div
-                          className={`w-12 h-12 rounded-xl flex items-center justify-center text-2xl
+                          className={`w-12 h-12 rounded-xl flex items-center justify-center
                             ${isConfigured ? "bg-green-500/10" : "bg-gray-700/50"}`}
                         >
-                          {info.avatar}
+                          <ProviderIcon provider={provider} size={32} />
                         </div>
                         <div>
                           <div className="flex items-center gap-2 flex-wrap">
@@ -392,7 +393,7 @@ export function ConfigModal({
                     className="bg-gray-800/50 border border-gray-700 rounded-xl p-5"
                   >
                     <div className="flex items-center gap-4 mb-4">
-                      <span className="text-2xl">{info.avatar}</span>
+                      <ProviderIcon provider={provider} size={32} />
                       <div>
                         <div className={`font-semibold ${info.color}`}>{info.agent}</div>
                         <div className="text-sm text-gray-400">{info.name} models</div>
@@ -407,7 +408,7 @@ export function ConfigModal({
                     >
                       {models.map((model) => (
                         <option key={model.id} value={model.id}>
-                          {model.name}
+                          {model.name} ({model.id})
                         </option>
                       ))}
                     </select>

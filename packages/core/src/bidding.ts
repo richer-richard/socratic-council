@@ -82,7 +82,8 @@ export function runBiddingRound(
   agentIds: AgentId[],
   messages: Message[],
   topic: string,
-  excludeAgent?: AgentId
+  excludeAgent?: AgentId,
+  whisperBonuses: Partial<Record<AgentId, number>> = {}
 ): BiddingRound {
   const roundId = generateBiddingRoundId();
   const bids: Bid[] = [];
@@ -99,6 +100,7 @@ export function runBiddingRound(
     const bidParams = analyzeBidContext(agentId, messages, topic);
     const bid: Bid = {
       ...bidParams,
+      whisperBonus: Math.min(20, Math.max(0, whisperBonuses[agentId] ?? 0)),
       timestamp: Date.now(),
     };
     bids.push(bid);

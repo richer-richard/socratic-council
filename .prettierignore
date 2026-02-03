@@ -1,0 +1,9 @@
+node_modules
+pnpm-lock.yaml
+**/dist
+**/build
+**/coverage
+**/.turbo
+**/.vite
+**/.next
+apps/desktop/src-tauri/target

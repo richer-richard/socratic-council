@@ -6,7 +6,7 @@
  * - Uses 'input' instead of 'messages'
  * - Uses 'instructions' for system prompt
  * - Uses 'max_output_tokens' instead of 'max_tokens'
- * - Reasoning models (o1, o3, o4-mini) use 'reasoning_effort' parameter
+ * - Reasoning models (o1, o3, o4-mini) use 'reasoning.effort' parameter
  */
 
 import type { AgentConfig, OpenAIModel } from "@socratic-council/shared";
@@ -20,10 +20,10 @@ import {
   createHeaders,
 } from "./base.js";
 
-// Models that support reasoning_effort parameter
+// Models that support reasoning.effort parameter
 const REASONING_MODELS: OpenAIModel[] = ["o1", "o3", "o4-mini", "gpt-5.2-pro"];
 
-// Models that DON'T support temperature (reasoning models use reasoning_effort instead)
+// Models that DON'T support temperature (reasoning models use reasoning.effort instead)
 const NO_TEMPERATURE_MODELS: OpenAIModel[] = ["o1", "o3", "o4-mini"];
 
 interface OpenAIResponsesRequest {
@@ -33,7 +33,9 @@ interface OpenAIResponsesRequest {
   temperature?: number;
   max_output_tokens?: number;
   top_p?: number;
-  reasoning_effort?: "low" | "medium" | "high";
+  reasoning?: {
+    effort?: "low" | "medium" | "high";
+  };
   stream?: boolean;
 }
 
@@ -52,8 +54,57 @@ interface OpenAIResponsesResponse {
   usage: {
     input_tokens: number;
     output_tokens: number;
+    output_tokens_details?: {
+      reasoning_tokens?: number;
+    };
     reasoning_tokens?: number;
   };
+}
+
+interface OpenAIStreamEvent {
+  type: string;
+  delta?: string;
+  text?: string;
+  response?: {
+    usage?: {
+      input_tokens?: number;
+      output_tokens?: number;
+      output_tokens_details?: {
+        reasoning_tokens?: number;
+      };
+      reasoning_tokens?: number;
+    };
+  };
+  usage?: {
+    input_tokens?: number;
+    output_tokens?: number;
+    output_tokens_details?: {
+      reasoning_tokens?: number;
+    };
+    reasoning_tokens?: number;
+  };
+  output?: Array<{
+    content?: Array<{
+      type?: string;
+      text?: string;
+    }>;
+  }>;
+}
+
+function extractOutputText(data: OpenAIResponsesResponse): string {
+  const outputText =
+    data.output
+      ?.flatMap((item) => item.content ?? [])
+      .filter((content) => content.type === "output_text" || content.type === "text")
+      .map((content) => content.text)
+      .filter(Boolean)
+      .join("") ?? "";
+
+  if (outputText) return outputText;
+
+  // Fallback for SDK-style response helpers
+  const fallback = (data as { output_text?: string }).output_text;
+  return fallback ?? "";
 }
 
 export class OpenAIProvider implements BaseProvider {
@@ -95,15 +146,15 @@ export class OpenAIProvider implements BaseProvider {
     const latencyMs = Date.now() - startTime;
 
     // Extract content from the response
-    const content =
-      data.output?.[0]?.content?.[0]?.text ?? "";
+    const content = extractOutputText(data);
 
     return {
       content,
       tokens: {
         input: data.usage.input_tokens,
         output: data.usage.output_tokens,
-        reasoning: data.usage.reasoning_tokens,
+        reasoning:
+          data.usage.output_tokens_details?.reasoning_tokens ?? data.usage.reasoning_tokens,
       },
       finishReason: "stop",
       latencyMs,
@@ -145,32 +196,67 @@ export class OpenAIProvider implements BaseProvider {
     let inputTokens = 0;
     let outputTokens = 0;
     let reasoningTokens = 0;
+    let sawDelta = false;
+    let buffer = "";
 
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
 
-      const chunk = decoder.decode(value, { stream: true });
-      const lines = chunk.split("\n").filter((line) => line.startsWith("data: "));
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() ?? "";
 
       for (const line of lines) {
+        if (!line.startsWith("data: ")) continue;
         const data = line.slice(6); // Remove "data: " prefix
         if (data === "[DONE]") continue;
 
         try {
-          const parsed = JSON.parse(data);
-          const content = parsed.output?.[0]?.content?.[0]?.text ?? "";
-          
-          if (content) {
-            fullContent += content;
-            onChunk({ content, done: false });
+          const parsed = JSON.parse(data) as OpenAIStreamEvent;
+
+          if (parsed.type === "response.output_text.delta" && parsed.delta) {
+            sawDelta = true;
+            fullContent += parsed.delta;
+            onChunk({ content: parsed.delta, done: false });
+            continue;
           }
 
-          // Update token counts from final message
+          if (parsed.type === "response.output_text.done" && parsed.text && !sawDelta) {
+            fullContent += parsed.text;
+            onChunk({ content: parsed.text, done: false });
+            continue;
+          }
+
+          if (parsed.type === "response.completed" && parsed.response?.usage) {
+            inputTokens = parsed.response.usage.input_tokens ?? inputTokens;
+            outputTokens = parsed.response.usage.output_tokens ?? outputTokens;
+            reasoningTokens =
+              parsed.response.usage.output_tokens_details?.reasoning_tokens ??
+              parsed.response.usage.reasoning_tokens ??
+              reasoningTokens;
+            continue;
+          }
+
+          // Fallbacks for legacy formats
+          const legacyContent =
+            parsed.output?.[0]?.content?.[0]?.text ??
+            (parsed as { choices?: Array<{ delta?: { content?: string } }> }).choices?.[0]?.delta
+              ?.content ??
+            "";
+
+          if (legacyContent) {
+            fullContent += legacyContent;
+            onChunk({ content: legacyContent, done: false });
+          }
+
           if (parsed.usage) {
-            inputTokens = parsed.usage.input_tokens ?? 0;
-            outputTokens = parsed.usage.output_tokens ?? 0;
-            reasoningTokens = parsed.usage.reasoning_tokens ?? 0;
+            inputTokens = parsed.usage.input_tokens ?? inputTokens;
+            outputTokens = parsed.usage.output_tokens ?? outputTokens;
+            reasoningTokens =
+              parsed.usage.output_tokens_details?.reasoning_tokens ??
+              parsed.usage.reasoning_tokens ??
+              reasoningTokens;
           }
         } catch {
           // Ignore parse errors for incomplete chunks
@@ -252,7 +338,7 @@ export class OpenAIProvider implements BaseProvider {
 
     // Handle reasoning effort for reasoning models
     if (REASONING_MODELS.includes(model)) {
-      request.reasoning_effort = "medium"; // Default to medium
+      request.reasoning = { effort: "medium" };
     }
 
     return request;

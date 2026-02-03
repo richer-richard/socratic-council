@@ -87,7 +87,7 @@ export function createHeaders(
       return {
         ...baseHeaders,
         "x-api-key": apiKey,
-        "anthropic-version": "2026-01-01",
+        "anthropic-version": "2023-06-01",
       };
     case "google":
       return {

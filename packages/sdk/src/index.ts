@@ -4,3 +4,4 @@
  */
 
 export * from "./providers/index.js";
+export * from "./base-agent.js";
