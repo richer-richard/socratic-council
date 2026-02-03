@@ -100,7 +100,7 @@ export function loadConfig(): AppConfig {
         mcp: { ...DEFAULT_CONFIG.mcp, ...parsed.mcp },
       };
 
-      if (!merged.models.anthropic || merged.models.anthropic === "claude-sonnet-4-5") {
+      if (merged.models.anthropic !== "claude-opus-4-5") {
         merged.models = { ...merged.models, anthropic: "claude-opus-4-5" };
       }
 
@@ -169,7 +169,10 @@ export function useConfig() {
   const updateModel = useCallback((provider: Provider, model: string) => {
     setConfigState((prev) => ({
       ...prev,
-      models: { ...prev.models, [provider]: model },
+      models: {
+        ...prev.models,
+        [provider]: provider === "anthropic" ? "claude-opus-4-5" : model,
+      },
     }));
   }, []);
 
@@ -237,7 +240,7 @@ export const PROVIDER_INFO: Record<Provider, {
     agent: "Cathy",
     avatar: "💜",
     color: "text-cathy",
-    description: "Claude 4.5 Opus, Sonnet, Haiku",
+    description: "Claude Opus 4.5 (default), Sonnet, Haiku",
     keyPrefix: "sk-ant-",
     defaultBaseUrl: "https://api.anthropic.com",
   },

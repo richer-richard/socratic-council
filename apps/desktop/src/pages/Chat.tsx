@@ -624,27 +624,29 @@ export function Chat({ topic, onNavigate }: ChatProps) {
       agentConfig.provider === "anthropic" &&
       model.includes("4-5")
     ) {
-      const fallbackModel = "claude-3-5-sonnet-20241022";
-      apiLogger.log("warn", "anthropic", "Primary model failed; retrying with fallback", {
-        primary: model,
-        fallback: fallbackModel,
-      });
-      modelUsed = fallbackModel;
-      result = await callProvider(
-        agentConfig.provider,
-        credential,
-        modelUsed,
-        conversationHistory,
-        () => {
-          if (abortRef.current) return;
-        },
-        providerProxy,
-        {
-          idleTimeoutMs,
-          requestTimeoutMs,
-          signal: controller.signal,
-        }
-      );
+      const fallbackModel = "claude-opus-4-5";
+      if (modelUsed !== fallbackModel) {
+        apiLogger.log("warn", "anthropic", "Primary model failed; retrying with fallback", {
+          primary: model,
+          fallback: fallbackModel,
+        });
+        modelUsed = fallbackModel;
+        result = await callProvider(
+          agentConfig.provider,
+          credential,
+          modelUsed,
+          conversationHistory,
+          () => {
+            if (abortRef.current) return;
+          },
+          providerProxy,
+          {
+            idleTimeoutMs,
+            requestTimeoutMs,
+            signal: controller.signal,
+          }
+        );
+      }
     }
 
       // Check if aborted after request
