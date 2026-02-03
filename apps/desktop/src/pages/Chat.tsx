@@ -26,6 +26,7 @@ interface ChatMessage extends SharedMessage {
   latencyMs?: number;
   error?: string;
   quotedMessageId?: string;
+  plan?: string;
   reactions?: Partial<Record<ReactionId, { count: number; by: string[] }>>;
 }
 
@@ -70,10 +71,18 @@ const MODEL_DISPLAY_NAMES: Record<string, string> = {
 };
 
 const INTERACTION_COMMANDS = `
-Interaction commands (use only if helpful, put on separate lines at the end):
+Tool commands (put each command on its own line at the end):
 - Quote a message: @quote(MSG_ID)
 - React to a message: @react(MSG_ID, thumbs_up|heart|laugh|sparkle)
+- Plan for a pivotal response: @plan(step1; step2; step3)
 - Call an MCP tool: @mcp(tool_name, {"key":"value"})
+
+Rules:
+- Use at least one @quote and one @react in every substantive response.
+- If you are preparing a major/pivotal response, include @plan(...) before your main answer.
+- If you have nothing new, give a 1-sentence acknowledgement and still add @react or @plan.
+- Do not use meta disclaimers like "this is a massive topic"—start with substance.
+- Be interactive: build on or oppose specific points and connect ideas across speakers.
 
 You can see message IDs in the context (format: msg_xxx). Do not invent IDs.`;
 
@@ -216,6 +225,7 @@ const REACTION_IDS: ReactionId[] = ["thumbs_up", "heart", "laugh", "sparkle"];
 const ACTION_PATTERNS = {
   quote: /@quote\(([^)]+)\)/g,
   react: /@react\(([^,]+),\s*([^)]+)\)/g,
+  plan: /@plan\(([^)]+)\)/g,
   mcp: /@mcp\(([^,]+),\s*([\s\S]+?)\)/g,
 };
 
@@ -223,6 +233,7 @@ function extractActions(raw: string) {
   const reactions: Array<{ targetId: string; emoji: ReactionId }> = [];
   const mcpCalls: Array<{ tool: string; args: Record<string, unknown> }> = [];
   let quoteTarget: string | undefined;
+  let plan: string | undefined;
 
   let cleaned = raw;
 
@@ -236,6 +247,11 @@ function extractActions(raw: string) {
     if (REACTION_IDS.includes(reaction)) {
       reactions.push({ targetId: String(target).trim(), emoji: reaction });
     }
+    return "";
+  });
+
+  cleaned = cleaned.replace(ACTION_PATTERNS.plan, (_, planText) => {
+    if (!plan) plan = String(planText).trim();
     return "";
   });
 
@@ -253,6 +269,7 @@ function extractActions(raw: string) {
     cleaned: cleaned.trim(),
     quoteTarget,
     reactions,
+    plan,
     mcpCalls,
   };
 }
@@ -515,6 +532,17 @@ export function Chat({ topic, onNavigate }: ChatProps) {
     return MODEL_DISPLAY_NAMES[modelId] || modelId;
   }, [config.models]);
 
+  const getProxyForProvider = useCallback((provider: Provider) => {
+    const override = config.proxyOverrides?.[provider];
+    if (override && override.type !== "none") {
+      return { proxy: override, source: "override" as const };
+    }
+    if (config.proxy.type !== "none") {
+      return { proxy: config.proxy, source: "default" as const };
+    }
+    return { proxy: undefined, source: "none" as const };
+  }, [config.proxy, config.proxyOverrides]);
+
   // Generate agent response using real API
   const generateAgentResponse = useCallback(async (agentId: CouncilAgentId): Promise<ChatMessage | null> => {
     // Check if aborted before starting
@@ -560,10 +588,12 @@ export function Chat({ topic, onNavigate }: ChatProps) {
 
     const idleTimeoutMs = 120000;
     const requestTimeoutMs = agentConfig.provider === "google" ? 240000 : 180000;
+    const { proxy: providerProxy, source: proxySource } = getProxyForProvider(agentConfig.provider);
 
     apiLogger.log("info", agentConfig.provider, "Dispatching request", {
       model,
-      proxy: config.proxy.type,
+      proxy: providerProxy?.type ?? "none",
+      proxySource,
       requestTimeoutMs,
       idleTimeoutMs,
     });
@@ -572,22 +602,22 @@ export function Chat({ topic, onNavigate }: ChatProps) {
     let modelUsed = model;
 
     // Call the API
-    let result = await callProvider(
-      agentConfig.provider,
-      credential,
-      modelUsed,
-      conversationHistory,
-      () => {
-        // Check if aborted during streaming
-        if (abortRef.current) return;
-      },
-      config.proxy.type !== "none" ? config.proxy : undefined,
-      {
-        idleTimeoutMs,
-        requestTimeoutMs,
-        signal: controller.signal,
-      }
-    );
+      let result = await callProvider(
+        agentConfig.provider,
+        credential,
+        modelUsed,
+        conversationHistory,
+        () => {
+          // Check if aborted during streaming
+          if (abortRef.current) return;
+        },
+        providerProxy,
+        {
+          idleTimeoutMs,
+          requestTimeoutMs,
+          signal: controller.signal,
+        }
+      );
 
     if (
       !result.success &&
@@ -608,7 +638,7 @@ export function Chat({ topic, onNavigate }: ChatProps) {
         () => {
           if (abortRef.current) return;
         },
-        config.proxy.type !== "none" ? config.proxy : undefined,
+        providerProxy,
         {
           idleTimeoutMs,
           requestTimeoutMs,
@@ -624,7 +654,7 @@ export function Chat({ topic, onNavigate }: ChatProps) {
         return null;
       }
 
-      const { cleaned, quoteTarget, reactions, mcpCalls } = extractActions(result.content || "");
+      const { cleaned, quoteTarget, reactions, mcpCalls, plan } = extractActions(result.content || "");
       const displayContent =
         cleaned || (result.content ? "No responses recorded" : "[No response received]");
 
@@ -637,6 +667,7 @@ export function Chat({ topic, onNavigate }: ChatProps) {
         latencyMs: result.latencyMs,
         error: result.error,
         quotedMessageId: quoteTarget,
+        plan,
         metadata: {
           model: modelUsed as ModelId,
           latencyMs: result.latencyMs,
@@ -699,7 +730,7 @@ export function Chat({ topic, onNavigate }: ChatProps) {
       activeRequestsRef.current.delete(agentId);
       setTypingAgents((prev) => prev.filter((id) => id !== agentId));
     }
-  }, [config, buildConversationHistory]);
+  }, [config, buildConversationHistory, getProxyForProvider]);
 
   // Main discussion loop
   const runDiscussion = useCallback(async () => {
@@ -1019,6 +1050,13 @@ export function Chat({ topic, onNavigate }: ChatProps) {
                           {quotedMessage.content.slice(0, 200)}
                           {quotedMessage.content.length > 200 ? "…" : ""}
                         </div>
+                      </div>
+                    )}
+
+                    {message.plan && (
+                      <div className="message-plan">
+                        <div className="message-plan-header">Planning</div>
+                        <div className="message-plan-body">{message.plan}</div>
                       </div>
                     )}
 

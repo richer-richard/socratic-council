@@ -14,6 +14,7 @@ interface ConfigModalProps {
   config: AppConfig;
   onUpdateCredential: (provider: Provider, credential: { apiKey: string; baseUrl?: string; verified?: boolean; lastTested?: number } | null) => void;
   onUpdateProxy: (proxy: AppConfig["proxy"]) => void;
+  onUpdateProxyOverride: (provider: Provider, proxy: AppConfig["proxy"] | null) => void;
   onUpdatePreferences: (preferences: Partial<AppConfig["preferences"]>) => void;
   onUpdateModel: (provider: Provider, model: string) => void;
   onUpdateMcp: (mcp: Partial<AppConfig["mcp"]>) => void;
@@ -61,6 +62,7 @@ export function ConfigModal({
   config,
   onUpdateCredential,
   onUpdateProxy,
+  onUpdateProxyOverride,
   onUpdatePreferences,
   onUpdateModel,
   onUpdateMcp,
@@ -82,6 +84,8 @@ export function ConfigModal({
   if (!isOpen) return null;
 
   const configuredCount = PROVIDERS.filter((p) => config.credentials[p]?.apiKey).length;
+  const anthropicProxy = config.proxyOverrides.anthropic;
+  const isAnthropicProxyEnabled = !!anthropicProxy && anthropicProxy.type !== "none";
 
   const handleSaveCredential = async (provider: Provider) => {
     if (!apiKeyInput.trim()) return;
@@ -108,13 +112,18 @@ export function ConfigModal({
     setTestError(null);
 
     try {
+      const providerProxy =
+        config.proxyOverrides[provider]?.type && config.proxyOverrides[provider]?.type !== "none"
+          ? config.proxyOverrides[provider]
+          : config.proxy;
+
       // Build proxy URL if configured
       let proxyUrl = "";
-      if (config.proxy.type !== "none" && config.proxy.host && config.proxy.port) {
-        const auth = config.proxy.username 
-          ? `${config.proxy.username}:${config.proxy.password || ""}@` 
+      if (providerProxy.type !== "none" && providerProxy.host && providerProxy.port) {
+        const auth = providerProxy.username 
+          ? `${providerProxy.username}:${providerProxy.password || ""}@` 
           : "";
-        proxyUrl = `${config.proxy.type}://${auth}${config.proxy.host}:${config.proxy.port}`;
+        proxyUrl = `${providerProxy.type}://${auth}${providerProxy.host}:${providerProxy.port}`;
       }
 
       // In a real implementation, this would make actual API calls
@@ -505,6 +514,129 @@ export function ConfigModal({
                 )}
               </div>
 
+              <div className="bg-gray-800/50 border border-gray-700 rounded-xl p-5 space-y-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <div className="text-sm text-white">Claude Proxy Override</div>
+                    <div className="text-xs text-gray-400">Route Anthropic traffic through a separate proxy</div>
+                  </div>
+                  <label className="toggle-switch">
+                    <input
+                      type="checkbox"
+                      checked={isAnthropicProxyEnabled}
+                      onChange={(e) => {
+                        if (e.target.checked) {
+                          const baseProxy = config.proxy.type !== "none"
+                            ? config.proxy
+                            : { type: "http" as ProxyType, host: "", port: 0 };
+                          onUpdateProxyOverride("anthropic", { ...baseProxy });
+                        } else {
+                          onUpdateProxyOverride("anthropic", null);
+                        }
+                      }}
+                    />
+                    <div className="toggle-slider" />
+                  </label>
+                </div>
+
+                {isAnthropicProxyEnabled && (
+                  <>
+                    <div>
+                      <label className="block text-sm text-gray-300 mb-2">Proxy Type:</label>
+                      <select
+                        value={anthropicProxy?.type || "none"}
+                        onChange={(e) => {
+                          const nextType = e.target.value as ProxyType;
+                          if (nextType === "none") {
+                            onUpdateProxyOverride("anthropic", null);
+                            return;
+                          }
+                          onUpdateProxyOverride("anthropic", {
+                            ...(anthropicProxy ?? { host: "", port: 0, username: undefined, password: undefined }),
+                            type: nextType,
+                          });
+                        }}
+                        className="w-full bg-gray-900 border border-gray-600 rounded-lg px-4 py-2.5
+                          text-white focus:outline-none focus:border-primary transition-colors"
+                      >
+                        <option value="http">HTTP Proxy</option>
+                        <option value="https">HTTPS Proxy</option>
+                        <option value="socks5">SOCKS5 Proxy</option>
+                        <option value="socks5h">SOCKS5h Proxy (DNS through proxy)</option>
+                      </select>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-sm text-gray-300 mb-2">Host:</label>
+                        <input
+                          type="text"
+                          value={anthropicProxy?.host || ""}
+                          onChange={(e) => onUpdateProxyOverride("anthropic", {
+                            ...(anthropicProxy ?? { type: "http", port: 0 }),
+                            host: e.target.value,
+                          })}
+                          placeholder="127.0.0.1 or proxy.example.com"
+                          className="w-full bg-gray-900 border border-gray-600 rounded-lg px-4 py-2.5
+                            text-white placeholder-gray-500 focus:outline-none focus:border-primary transition-all"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm text-gray-300 mb-2">Port:</label>
+                        <input
+                          type="number"
+                          value={anthropicProxy?.port || ""}
+                          onChange={(e) => onUpdateProxyOverride("anthropic", {
+                            ...(anthropicProxy ?? { type: "http", host: "" }),
+                            port: parseInt(e.target.value) || 0,
+                          })}
+                          placeholder="7897"
+                          className="w-full bg-gray-900 border border-gray-600 rounded-lg px-4 py-2.5
+                            text-white placeholder-gray-500 focus:outline-none focus:border-primary transition-all"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-sm text-gray-300 mb-2">Username (optional):</label>
+                        <input
+                          type="text"
+                          value={anthropicProxy?.username || ""}
+                          onChange={(e) => onUpdateProxyOverride("anthropic", {
+                            ...(anthropicProxy ?? { type: "http", host: "", port: 0 }),
+                            username: e.target.value || undefined,
+                          })}
+                          placeholder="Optional"
+                          className="w-full bg-gray-900 border border-gray-600 rounded-lg px-4 py-2.5
+                            text-white placeholder-gray-500 focus:outline-none focus:border-primary transition-all"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm text-gray-300 mb-2">Password (optional):</label>
+                        <input
+                          type="password"
+                          value={anthropicProxy?.password || ""}
+                          onChange={(e) => onUpdateProxyOverride("anthropic", {
+                            ...(anthropicProxy ?? { type: "http", host: "", port: 0 }),
+                            password: e.target.value || undefined,
+                          })}
+                          placeholder="Optional"
+                          className="w-full bg-gray-900 border border-gray-600 rounded-lg px-4 py-2.5
+                            text-white placeholder-gray-500 focus:outline-none focus:border-primary transition-all"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="text-sm text-gray-500">
+                      Claude proxy URL: {anthropicProxy?.type || "http"}://
+                      {anthropicProxy?.username && `${anthropicProxy.username}:***@`}
+                      {anthropicProxy?.host || "host"}:{anthropicProxy?.port || "port"}
+                    </div>
+                  </>
+                )}
+              </div>
+
               <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-xl p-4">
                 <div className="flex items-start gap-3">
                   <span className="text-yellow-400">⚠️</span>
@@ -653,6 +785,11 @@ export function ConfigModal({
                               });
                             }
                             if (imported.proxy) onUpdateProxy(imported.proxy);
+                            if (imported.proxyOverrides) {
+                              Object.entries(imported.proxyOverrides).forEach(([p, proxy]) => {
+                                onUpdateProxyOverride(p as Provider, proxy as AppConfig["proxy"]);
+                              });
+                            }
                             if (imported.preferences) onUpdatePreferences(imported.preferences);
                             if (imported.models) {
                               Object.entries(imported.models).forEach(([p, m]) => {

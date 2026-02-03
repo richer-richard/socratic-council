@@ -39,6 +39,7 @@ export interface McpConfig {
 export interface AppConfig {
   credentials: Partial<Record<Provider, ProviderCredential>>;
   proxy: ProxyConfig;
+  proxyOverrides: Partial<Record<Provider, ProxyConfig>>;
   preferences: DiscussionPreferences;
   models: Partial<Record<Provider, string>>;
   mcp: McpConfig;
@@ -51,6 +52,7 @@ const DEFAULT_CONFIG: AppConfig = {
     host: "",
     port: 0,
   },
+  proxyOverrides: {},
   preferences: {
     defaultLength: "standard",
     customTurns: 100,
@@ -60,7 +62,7 @@ const DEFAULT_CONFIG: AppConfig = {
   },
   models: {
     openai: "gpt-5.2",
-    anthropic: "claude-sonnet-4-5",
+    anthropic: "claude-opus-4-5",
     google: "gemini-3-pro-preview",
     deepseek: "deepseek-reasoner",
     kimi: "kimi-k2.5",
@@ -88,7 +90,21 @@ export function loadConfig(): AppConfig {
     const stored = localStorage.getItem(STORAGE_KEY);
     if (stored) {
       const parsed = JSON.parse(stored);
-      return { ...DEFAULT_CONFIG, ...parsed };
+      const merged = {
+        ...DEFAULT_CONFIG,
+        ...parsed,
+        proxy: { ...DEFAULT_CONFIG.proxy, ...parsed.proxy },
+        proxyOverrides: { ...(parsed.proxyOverrides ?? {}) },
+        preferences: { ...DEFAULT_CONFIG.preferences, ...parsed.preferences },
+        models: { ...DEFAULT_CONFIG.models, ...parsed.models },
+        mcp: { ...DEFAULT_CONFIG.mcp, ...parsed.mcp },
+      };
+
+      if (!merged.models.anthropic || merged.models.anthropic === "claude-sonnet-4-5") {
+        merged.models = { ...merged.models, anthropic: "claude-opus-4-5" };
+      }
+
+      return merged;
     }
   } catch (error) {
     console.error("Failed to load config:", error);
@@ -129,6 +145,18 @@ export function useConfig() {
 
   const updateProxy = useCallback((proxy: ProxyConfig) => {
     setConfigState((prev) => ({ ...prev, proxy }));
+  }, []);
+
+  const updateProxyOverride = useCallback((provider: Provider, proxy: ProxyConfig | null) => {
+    setConfigState((prev) => {
+      const nextOverrides = { ...prev.proxyOverrides };
+      if (!proxy || proxy.type === "none") {
+        delete nextOverrides[provider];
+      } else {
+        nextOverrides[provider] = proxy;
+      }
+      return { ...prev, proxyOverrides: nextOverrides };
+    });
   }, []);
 
   const updatePreferences = useCallback((preferences: Partial<DiscussionPreferences>) => {
@@ -175,6 +203,7 @@ export function useConfig() {
     setConfig,
     updateCredential,
     updateProxy,
+    updateProxyOverride,
     updatePreferences,
     updateModel,
     updateMcp,
