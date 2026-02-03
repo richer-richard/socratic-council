@@ -1,8 +1,9 @@
 //! Socratic Council Tauri Application
-//! 
+//!
 //! This is the Rust backend for the Tauri desktop application.
 //! The main AI processing is handled by the Node.js sidecar.
 
+#[cfg(debug_assertions)]
 use tauri::Manager;
 
 /// Configure the Tauri application
@@ -10,10 +11,10 @@ use tauri::Manager;
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_store::Builder::new().build())
-        .setup(|app| {
+        .setup(|_app| {
             #[cfg(debug_assertions)]
             {
-                let window = app.get_webview_window("main").unwrap();
+                let window = _app.get_webview_window("main").unwrap();
                 window.open_devtools();
             }
             Ok(())

@@ -20,13 +20,6 @@ import {
   createHeaders,
 } from "./base.js";
 
-// Models that support extended thinking
-const THINKING_MODELS: AnthropicModel[] = [
-  "claude-opus-4-5",
-  "claude-sonnet-4-5",
-  "claude-haiku-4-5",
-];
-
 interface AnthropicMessage {
   role: "user" | "assistant";
   content: string | Array<{ type: "text"; text: string }>;

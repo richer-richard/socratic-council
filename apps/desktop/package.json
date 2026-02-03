@@ -13,17 +13,17 @@
     "tauri:build": "tauri build"
   },
   "dependencies": {
-    "@socratic-council/shared": "workspace:*",
-    "@socratic-council/sdk": "workspace:*",
     "@socratic-council/core": "workspace:*",
-    "@tauri-apps/api": "^2.0.0",
-    "@tauri-apps/plugin-store": "^2.0.0",
+    "@socratic-council/sdk": "workspace:*",
+    "@socratic-council/shared": "workspace:*",
+    "@tauri-apps/api": "^2.10.0",
+    "@tauri-apps/plugin-store": "^2.4.2",
     "react": "^18.3.0",
     "react-dom": "^18.3.0",
     "zustand": "^5.0.0"
   },
   "devDependencies": {
-    "@tauri-apps/cli": "^2.0.0",
+    "@tauri-apps/cli": "^2.10.0",
     "@types/react": "^18.3.0",
     "@types/react-dom": "^18.3.0",
     "@vitejs/plugin-react": "^4.3.0",

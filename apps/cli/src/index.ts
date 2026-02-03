@@ -7,8 +7,8 @@ import { input, select, confirm } from "@inquirer/prompts";
 import chalk from "chalk";
 import ora from "ora";
 import Conf from "conf";
-import type { AgentId, Provider, ProviderCredentials } from "@socratic-council/shared";
-import { DEFAULT_AGENTS, MODEL_REGISTRY, getModelsByProvider } from "@socratic-council/shared";
+import type { AgentId, ModelId, Provider, ProviderCredentials } from "@socratic-council/shared";
+import { DEFAULT_AGENTS, getModelsByProvider } from "@socratic-council/shared";
 import { Council, type CouncilEvent } from "@socratic-council/core";
 import { ProviderManager } from "@socratic-council/sdk";
 
@@ -41,6 +41,15 @@ const AGENT_COLORS: Record<AgentId | "system" | "user", (text: string) => string
   user: chalk.white.bold,
 };
 
+// Agent background colors for headers
+const AGENT_BG_COLORS: Record<AgentId, (text: string) => string> = {
+  george: chalk.bgBlue.white,
+  cathy: chalk.bgMagenta.white,
+  grace: chalk.bgGreen.black,
+  douglas: chalk.bgYellow.black,
+  kate: chalk.bgCyan.black,
+};
+
 // Agent emoji avatars
 const AGENT_AVATARS: Record<AgentId | "system" | "user", string> = {
   george: "🔷",
@@ -52,26 +61,75 @@ const AGENT_AVATARS: Record<AgentId | "system" | "user", string> = {
   user: "👤",
 };
 
+// Agent role descriptions
+const AGENT_ROLES: Record<AgentId, string> = {
+  george: "Logician",
+  cathy: "Ethicist",
+  grace: "Futurist",
+  douglas: "Skeptic",
+  kate: "Historian",
+};
+
 /**
  * Display the welcome banner
  */
 function showBanner(): void {
-  console.log(chalk.bold.cyan(`
-╔══════════════════════════════════════════════════════════════╗
-║                                                              ║
-║           🏛️  SOCRATIC COUNCIL OF FIVE  🏛️                   ║
-║                                                              ║
-║     Multi-Agent Group Chat for Deep Philosophical Debate     ║
-║                                                              ║
-╚══════════════════════════════════════════════════════════════╝
-`));
+  console.clear();
 
-  console.log(chalk.gray("  Council Members:"));
-  console.log(chalk.blue("  • George (The Logician) - OpenAI GPT-5.2"));
-  console.log(chalk.magenta("  • Cathy (The Ethicist) - Anthropic Claude 4.5"));
-  console.log(chalk.green("  • Grace (The Futurist) - Google Gemini 3"));
-  console.log(chalk.yellow("  • Douglas (The Skeptic) - DeepSeek V3.2"));
-  console.log(chalk.cyan("  • Kate (The Historian) - Kimi K2.5"));
+  // Gradient effect banner
+  const lines = [
+    "┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓",
+    "┃                                                                 ┃",
+    "┃           🏛️   S O C R A T I C   C O U N C I L   🏛️            ┃",
+    "┃                     O F   F I V E                               ┃",
+    "┃                                                                 ┃",
+    "┃       Multi-Agent Group Debate • Emergent Orchestration         ┃",
+    "┃                                                                 ┃",
+    "┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛",
+  ];
+
+  console.log();
+  lines.forEach((line, i) => {
+    // Gradient from cyan to blue
+    const ratio = i / lines.length;
+    if (ratio < 0.5) {
+      console.log(chalk.cyan(line));
+    } else {
+      console.log(chalk.blue(line));
+    }
+  });
+  console.log();
+
+  // Council members display with boxes
+  console.log(chalk.gray("  ╭─────────────────────────────────────────────────────────────╮"));
+  console.log(chalk.gray("  │") + chalk.white.bold("  Council Members                                            ") + chalk.gray("│"));
+  console.log(chalk.gray("  ├─────────────────────────────────────────────────────────────┤"));
+
+  const members = [
+    { id: "george" as AgentId, provider: "OpenAI GPT-5.2" },
+    { id: "cathy" as AgentId, provider: "Anthropic Claude 4.5" },
+    { id: "grace" as AgentId, provider: "Google Gemini 3" },
+    { id: "douglas" as AgentId, provider: "DeepSeek Reasoner" },
+    { id: "kate" as AgentId, provider: "Kimi K2.5" },
+  ];
+
+  members.forEach((m) => {
+    const avatar = AGENT_AVATARS[m.id];
+    const name = DEFAULT_AGENTS[m.id].name.padEnd(10);
+    const role = `(${AGENT_ROLES[m.id]})`.padEnd(12);
+    const provider = m.provider.padEnd(24);
+    const color = AGENT_COLORS[m.id];
+    console.log(
+      chalk.gray("  │  ") +
+      `${avatar} ` +
+      color(name) +
+      chalk.gray(role) +
+      chalk.dim(provider) +
+      chalk.gray("│")
+    );
+  });
+
+  console.log(chalk.gray("  ╰─────────────────────────────────────────────────────────────╯"));
   console.log();
 }
 
@@ -80,11 +138,11 @@ function showBanner(): void {
  */
 async function showHomeMenu(): Promise<"start" | "settings" | "exit"> {
   return await select({
-    message: "What would you like to do?",
+    message: chalk.bold("What would you like to do?"),
     choices: [
-      { name: "🚀 Start New Discussion", value: "start" as const },
-      { name: "⚙️  Settings (API Keys & Models)", value: "settings" as const },
-      { name: "🚪 Exit", value: "exit" as const },
+      { name: chalk.green("🚀 Start New Discussion"), value: "start" as const },
+      { name: chalk.blue("⚙️  Settings (API Keys & Models)"), value: "settings" as const },
+      { name: chalk.gray("🚪 Exit"), value: "exit" as const },
     ],
   });
 }
@@ -95,24 +153,32 @@ async function showHomeMenu(): Promise<"start" | "settings" | "exit"> {
 async function showSettings(): Promise<void> {
   const credentials = config.get("credentials") ?? {};
 
+  type SettingsAction = Provider | "models" | "back";
+
+  console.log();
+  console.log(chalk.bold.blue("  ⚙️  Settings"));
+  console.log(chalk.gray("  ─────────────────────────────────────────────"));
+  console.log();
+
   while (true) {
     const providers: Provider[] = ["openai", "anthropic", "google", "deepseek", "kimi"];
-    const choices = providers.map((p) => {
+    const choices: Array<{ name: string; value: SettingsAction }> = providers.map((p) => {
       const hasKey = !!(credentials as Record<string, { apiKey?: string }>)[p]?.apiKey;
-      const status = hasKey ? chalk.green("✓ configured") : chalk.red("✗ not set");
+      const status = hasKey ? chalk.green("✓") : chalk.red("✗");
+      const name = p.charAt(0).toUpperCase() + p.slice(1);
       return {
-        name: `${p.charAt(0).toUpperCase() + p.slice(1)} ${status}`,
+        name: `${status} ${name.padEnd(12)} ${hasKey ? chalk.dim("configured") : chalk.dim("not set")}`,
         value: p,
       };
     });
 
     choices.push(
-      { name: "📊 Configure Agent Models", value: "models" as Provider },
-      { name: "🔙 Back to Home", value: "back" as Provider }
+      { name: chalk.yellow("📊 Configure Agent Models"), value: "models" },
+      { name: chalk.gray("🔙 Back to Home"), value: "back" }
     );
 
-    const action = await select({
-      message: "Settings - Configure API Keys:",
+    const action = await select<SettingsAction>({
+      message: "Select provider to configure:",
       choices,
     });
 
@@ -124,8 +190,10 @@ async function showSettings(): Promise<void> {
     }
 
     // Configure API key for selected provider
+    const providerName = action.charAt(0).toUpperCase() + action.slice(1);
+    console.log();
     const apiKey = await input({
-      message: `Enter your ${action} API key:`,
+      message: `Enter your ${chalk.bold(providerName)} API key:`,
       validate: (value) => (value.length > 0 ? true : "API key cannot be empty"),
     });
 
@@ -137,18 +205,23 @@ async function showSettings(): Promise<void> {
     config.set("credentials", newCredentials);
 
     // Test the connection
-    const spinner = ora(`Testing ${action} connection...`).start();
+    const spinner = ora({
+      text: `Testing ${providerName} connection...`,
+      color: "cyan",
+    }).start();
+
     try {
       const manager = new ProviderManager({ [action]: { apiKey } });
       const results = await manager.testConnections();
       if (results[action as Provider]) {
-        spinner.succeed(chalk.green(`${action} API key is valid!`));
+        spinner.succeed(chalk.green(`${providerName} API key verified successfully!`));
       } else {
-        spinner.fail(chalk.red(`${action} API key test failed`));
+        spinner.fail(chalk.red(`${providerName} API key test failed - please check your key`));
       }
     } catch {
-      spinner.fail(chalk.red(`Failed to test ${action} connection`));
+      spinner.fail(chalk.red(`Failed to connect to ${providerName}`));
     }
+    console.log();
   }
 }
 
@@ -157,6 +230,11 @@ async function showSettings(): Promise<void> {
  */
 async function configureAgentModels(): Promise<void> {
   const agentModels = config.get("agentModels") ?? {};
+
+  console.log();
+  console.log(chalk.bold.yellow("  📊 Configure Agent Models"));
+  console.log(chalk.gray("  ─────────────────────────────────────────────"));
+  console.log();
 
   const agents: AgentId[] = ["george", "cathy", "grace", "douglas", "kate"];
   const agentProviders: Record<AgentId, Provider> = {
@@ -171,23 +249,140 @@ async function configureAgentModels(): Promise<void> {
     const provider = agentProviders[agentId];
     const models = getModelsByProvider(provider);
     const currentModel = agentModels[agentId] ?? DEFAULT_AGENTS[agentId].model;
+    const color = AGENT_COLORS[agentId];
 
     const modelChoices = models.map((m) => ({
-      name: `${m.name} - ${m.description}`,
+      name: `${m.name} ${chalk.dim(`- ${m.description}`)}`,
       value: m.id,
     }));
 
-    const selectedModel = await select({
-      message: `Select model for ${AGENT_AVATARS[agentId]} ${DEFAULT_AGENTS[agentId].name} (${provider}):`,
+    const selectedModel = await select<ModelId>({
+      message: `${AGENT_AVATARS[agentId]} ${color(DEFAULT_AGENTS[agentId].name)} ${chalk.dim(`(${AGENT_ROLES[agentId]})`)}:`,
       choices: modelChoices,
       default: currentModel,
     });
 
-    agentModels[agentId] = selectedModel;
+    agentModels[agentId] = selectedModel as string;
   }
 
   config.set("agentModels", agentModels);
-  console.log(chalk.green("✓ Agent models updated!"));
+  console.log();
+  console.log(chalk.green("  ✓ Agent models updated successfully!"));
+  console.log();
+}
+
+/**
+ * Display bidding scores visualization
+ */
+function displayBiddingScores(scores: Record<AgentId, number>, winner: AgentId): void {
+  const maxScore = Math.max(...Object.values(scores));
+  const barWidth = 20;
+
+  console.log();
+  console.log(chalk.gray("  ┌─────────────────────────────────────────────────────┐"));
+  console.log(chalk.gray("  │") + chalk.white.bold("  Bidding Round Results                              ") + chalk.gray("│"));
+  console.log(chalk.gray("  ├─────────────────────────────────────────────────────┤"));
+
+  const sortedAgents = (Object.entries(scores) as [AgentId, number][])
+    .sort((a, b) => b[1] - a[1]);
+
+  for (const [agentId, score] of sortedAgents) {
+    const barLength = Math.round((score / maxScore) * barWidth);
+    const bar = "█".repeat(barLength) + "░".repeat(barWidth - barLength);
+    const color = AGENT_COLORS[agentId];
+    const isWinner = agentId === winner;
+    const winnerMark = isWinner ? chalk.yellow(" ★") : "  ";
+    const name = DEFAULT_AGENTS[agentId].name.padEnd(8);
+    const scoreStr = score.toFixed(1).padStart(5);
+
+    console.log(
+      chalk.gray("  │  ") +
+      color(name) +
+      color(bar) + " " +
+      chalk.white(scoreStr) +
+      winnerMark +
+      chalk.gray("      │")
+    );
+  }
+
+  console.log(chalk.gray("  └─────────────────────────────────────────────────────┘"));
+  console.log();
+}
+
+/**
+ * Display turn header
+ */
+function displayTurnHeader(agentId: AgentId, turnNumber: number, maxTurns: number): void {
+  const bgColor = AGENT_BG_COLORS[agentId];
+  const agent = DEFAULT_AGENTS[agentId];
+  const progress = `${turnNumber}/${maxTurns}`;
+
+  console.log();
+  console.log(
+    chalk.gray("  ╭──") +
+    bgColor(` ${AGENT_AVATARS[agentId]} ${agent.name} `) +
+    chalk.gray("──") +
+    chalk.dim(` Turn ${progress} `) +
+    chalk.gray("─".repeat(35))
+  );
+  console.log(chalk.gray("  │"));
+}
+
+/**
+ * Display message footer with stats
+ */
+function displayMessageFooter(tokens: { input: number; output: number }, latencyMs: number): void {
+  console.log(chalk.gray("  │"));
+  console.log(
+    chalk.gray("  ╰──") +
+    chalk.dim(` ${tokens.input}→${tokens.output} tokens • ${latencyMs}ms `) +
+    chalk.gray("─".repeat(35))
+  );
+}
+
+/**
+ * Display completion summary
+ */
+function displayCompletionSummary(
+  totalTurns: number,
+  totalMessages: number,
+  totalTokens: { input: number; output: number },
+  agentStats: Record<AgentId, { messages: number; tokens: number }>
+): void {
+  console.log();
+  console.log(chalk.cyan("┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓"));
+  console.log(chalk.cyan("┃") + chalk.bold.white("  🏁 Discussion Complete                                        ") + chalk.cyan("┃"));
+  console.log(chalk.cyan("┣━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┫"));
+
+  // Overall stats
+  console.log(chalk.cyan("┃") + chalk.white("  📊 Summary                                                    ") + chalk.cyan("┃"));
+  console.log(chalk.cyan("┃") + chalk.gray(`     Total turns: ${String(totalTurns).padEnd(10)} Total messages: ${String(totalMessages).padEnd(10)}`) + chalk.cyan("     ┃"));
+  console.log(chalk.cyan("┃") + chalk.gray(`     Tokens used: ${String(totalTokens.input + totalTokens.output).padEnd(10)} (${totalTokens.input} in, ${totalTokens.output} out)`) + chalk.cyan("     ┃"));
+  console.log(chalk.cyan("┃") + "                                                                 " + chalk.cyan("┃"));
+
+  // Per-agent breakdown
+  console.log(chalk.cyan("┃") + chalk.white("  👥 Agent Participation                                        ") + chalk.cyan("┃"));
+
+  for (const agentId of Object.keys(agentStats) as AgentId[]) {
+    const stats = agentStats[agentId];
+    const color = AGENT_COLORS[agentId];
+    const name = DEFAULT_AGENTS[agentId].name.padEnd(10);
+    const msgCount = `${stats.messages} msgs`.padEnd(10);
+    const tokenCount = `${stats.tokens} tokens`;
+
+    console.log(
+      chalk.cyan("┃") +
+      "     " +
+      `${AGENT_AVATARS[agentId]} ` +
+      color(name) +
+      chalk.gray(msgCount) +
+      chalk.dim(tokenCount.padEnd(20)) +
+      chalk.cyan("       ┃")
+    );
+  }
+
+  console.log(chalk.cyan("┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛"));
+  console.log();
 }
 
 /**
@@ -202,8 +397,10 @@ async function startDiscussion(): Promise<void> {
   );
 
   if (configuredProviders.length === 0) {
-    console.log(chalk.red("\n⚠️  No API keys configured!"));
-    console.log(chalk.yellow("Please configure at least one provider in Settings first.\n"));
+    console.log();
+    console.log(chalk.red("  ⚠️  No API keys configured!"));
+    console.log(chalk.yellow("  Please configure at least one provider in Settings first."));
+    console.log();
 
     const goToSettings = await confirm({
       message: "Would you like to configure API keys now?",
@@ -217,33 +414,45 @@ async function startDiscussion(): Promise<void> {
   }
 
   // Get discussion topic
+  console.log();
   const topic = await input({
-    message: "Enter a topic for the council to discuss:",
+    message: chalk.bold("Enter a topic for the council to discuss:"),
     validate: (value) => (value.length > 0 ? true : "Topic cannot be empty"),
   });
 
   // Configure council options
   const maxTurns = await select({
-    message: "How many discussion turns?",
+    message: "Select discussion length:",
     choices: [
-      { name: "Quick (5 turns)", value: 5 },
-      { name: "Standard (10 turns)", value: 10 },
-      { name: "Extended (20 turns)", value: 20 },
-      { name: "Marathon (50 turns)", value: 50 },
+      { name: chalk.green("⚡ Quick") + chalk.dim(" (5 turns)"), value: 5 },
+      { name: chalk.blue("📝 Standard") + chalk.dim(" (10 turns)"), value: 10 },
+      { name: chalk.yellow("📚 Extended") + chalk.dim(" (20 turns)"), value: 20 },
+      { name: chalk.red("🏃 Marathon") + chalk.dim(" (50 turns)"), value: 50 },
     ],
     default: 10,
   });
 
-  console.log(chalk.cyan("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"));
-  console.log(chalk.bold.white(`  📜 Topic: ${topic}`));
-  console.log(chalk.cyan("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"));
+  // Display topic header
+  console.log();
+  console.log(chalk.cyan("┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓"));
+  console.log(chalk.cyan("┃") + chalk.bold.white("  📜 Discussion Topic                                           ") + chalk.cyan("┃"));
+  console.log(chalk.cyan("┃") + "                                                                 " + chalk.cyan("┃"));
+
+  // Wrap topic text
+  const wrappedTopic = topic.length > 60
+    ? topic.substring(0, 57) + "..."
+    : topic.padEnd(60);
+  console.log(chalk.cyan("┃") + chalk.white(`  "${wrappedTopic}"`) + chalk.cyan(" ┃"));
+  console.log(chalk.cyan("┃") + "                                                                 " + chalk.cyan("┃"));
+  console.log(chalk.cyan("┃") + chalk.dim(`  Turns: ${maxTurns} • Mode: Auto • Bidding: Enabled`.padEnd(62)) + chalk.cyan(" ┃"));
+  console.log(chalk.cyan("┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛"));
 
   // Build agent configs with selected models
   const agentModels = config.get("agentModels") ?? {};
   const agents = { ...DEFAULT_AGENTS };
   for (const [agentId, model] of Object.entries(agentModels)) {
     if (agents[agentId as AgentId]) {
-      agents[agentId as AgentId].model = model;
+      agents[agentId as AgentId].model = model as ModelId;
     }
   }
 
@@ -254,27 +463,31 @@ async function startDiscussion(): Promise<void> {
     agents
   );
 
-  // Track current streaming content
-  let currentAgentContent = "";
+  // Track statistics
   let currentAgentId: AgentId | null = null;
+  const totalTokens = { input: 0, output: 0 };
+  const agentStats: Record<AgentId, { messages: number; tokens: number }> = {
+    george: { messages: 0, tokens: 0 },
+    cathy: { messages: 0, tokens: 0 },
+    grace: { messages: 0, tokens: 0 },
+    douglas: { messages: 0, tokens: 0 },
+    kate: { messages: 0, tokens: 0 },
+  };
 
   // Set up event handling for group chat display
   council.onEvent((event: CouncilEvent) => {
     switch (event.type) {
       case "turn_started": {
         currentAgentId = event.agentId;
-        currentAgentContent = "";
-        const agent = DEFAULT_AGENTS[event.agentId];
-        const color = AGENT_COLORS[event.agentId];
-        const avatar = AGENT_AVATARS[event.agentId];
-        process.stdout.write(color(`\n${avatar} ${agent.name}: `));
+        displayTurnHeader(event.agentId, event.turnNumber, maxTurns);
+        process.stdout.write(chalk.gray("  │  "));
         break;
       }
 
       case "message_chunk": {
         if (event.agentId === currentAgentId) {
+          // Word wrap long lines
           process.stdout.write(event.content);
-          currentAgentContent += event.content;
         }
         break;
       }
@@ -283,39 +496,53 @@ async function startDiscussion(): Promise<void> {
         console.log(); // New line after message
         const tokens = event.message.tokens;
         if (tokens) {
-          console.log(
-            chalk.gray(`  [${tokens.input}→${tokens.output} tokens, ${event.message.metadata?.latencyMs}ms]`)
-          );
+          totalTokens.input += tokens.input;
+          totalTokens.output += tokens.output;
+
+          if (currentAgentId) {
+            agentStats[currentAgentId].messages += 1;
+            agentStats[currentAgentId].tokens += tokens.input + tokens.output;
+          }
+
+          displayMessageFooter(tokens, event.message.metadata?.latencyMs ?? 0);
         }
         break;
       }
 
       case "bidding_complete": {
-        // Could show bidding info in verbose mode
+        displayBiddingScores(event.scores, event.winner);
         break;
       }
 
       case "error": {
         const agentName = event.agentId ? DEFAULT_AGENTS[event.agentId].name : "System";
-        console.log(chalk.red(`\n⚠️  Error from ${agentName}: ${event.error.message}`));
+        console.log();
+        console.log(chalk.red(`  ⚠️  Error from ${agentName}: ${event.error.message}`));
+        console.log();
         break;
       }
 
       case "council_completed": {
-        console.log(chalk.cyan("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"));
-        console.log(chalk.bold.white("  🏁 Discussion Complete"));
-        console.log(chalk.gray(`  Total turns: ${event.state.currentTurn}`));
-        console.log(chalk.gray(`  Total messages: ${event.state.messages.length}`));
-        console.log(chalk.cyan("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"));
+        displayCompletionSummary(
+          event.state.currentTurn,
+          event.state.messages.length,
+          totalTokens,
+          agentStats
+        );
         break;
       }
     }
   });
 
   // Start the discussion
-  const spinner = ora("Starting council discussion...").start();
+  const spinner = ora({
+    text: "Initializing council discussion...",
+    color: "cyan",
+  }).start();
+
   try {
     spinner.stop();
+    console.log();
     await council.start(topic);
   } catch (error) {
     spinner.fail(chalk.red("Failed to start discussion"));
@@ -340,7 +567,10 @@ async function main(): Promise<void> {
         await showSettings();
         break;
       case "exit":
-        console.log(chalk.cyan("\n👋 Thank you for using Socratic Council!\n"));
+        console.log();
+        console.log(chalk.cyan("  👋 Thank you for using Socratic Council!"));
+        console.log(chalk.gray("  Visit https://github.com/socratic-council for more info."));
+        console.log();
         process.exit(0);
     }
   }

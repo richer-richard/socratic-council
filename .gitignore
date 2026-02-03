@@ -8,9 +8,11 @@ build/
 out/
 .next/
 .nuxt/
+*.tsbuildinfo
 
 # Tauri
-src-tauri/target/
+apps/desktop/src-tauri/target/
+apps/desktop/src-tauri/gen/
 
 # Environment
 .env
