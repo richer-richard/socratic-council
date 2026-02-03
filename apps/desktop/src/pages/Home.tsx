@@ -163,7 +163,7 @@ export function Home({ onNavigate }: HomeProps) {
         <div className="mt-12 text-center text-gray-500 text-sm">
           <p className="mb-2">Agents compete through bidding to determine speaking order</p>
           <div className="flex items-center justify-center gap-2 flex-wrap">
-            {(Object.keys(PROVIDER_INFO) as Provider[]).map((provider, i) => {
+            {(Object.keys(PROVIDER_INFO) as Provider[]).map((provider) => {
               const info = PROVIDER_INFO[provider];
               const isConfigured = configuredProviders.includes(provider);
               return (

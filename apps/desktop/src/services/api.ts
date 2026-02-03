@@ -6,8 +6,7 @@
 import type { 
   Provider, 
   ProxyConfig, 
-  ProviderCredential,
-  AppConfig 
+  ProviderCredential
 } from "../stores/config";
 
 export interface ChatMessage {
