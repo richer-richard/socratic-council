@@ -112,43 +112,14 @@ export const apiLogger = {
   },
 };
 
-// Cached Tauri detection result
-let tauriDetected: boolean | null = null;
-
-// Check if running in Tauri environment with multiple detection methods
+// Check if running in Tauri environment
+// NOTE: Do NOT cache this result - Tauri globals may be injected after module load
 function isTauri(): boolean {
-  if (tauriDetected !== null) return tauriDetected;
-
   if (typeof window === "undefined") {
-    tauriDetected = false;
     return false;
   }
-
-  // Primary detection: __TAURI__ global
-  if ("__TAURI__" in window) {
-    tauriDetected = true;
-    return true;
-  }
-
-  // Secondary detection: Tauri internals (v2 API)
-  // @ts-expect-error Tauri internals not in type definitions
-  if (window.__TAURI_INTERNALS__ || window.__TAURI_IPC__) {
-    tauriDetected = true;
-    return true;
-  }
-
-  tauriDetected = false;
-  return false;
-}
-
-// Log environment detection on load
-if (typeof window !== "undefined") {
-  console.log("[API] Environment detection:", {
-    hasTauri: "__TAURI__" in window,
-    hasInternals: "__TAURI_INTERNALS__" in window,
-    hasIPC: "__TAURI_IPC__" in window,
-    detected: isTauri(),
-  });
+  // Check for Tauri v2 globals
+  return "__TAURI__" in window || "__TAURI_INTERNALS__" in window;
 }
 
 // Tauri invoke wrapper
