@@ -15,7 +15,6 @@ import type {
   ModelId,
 } from "@socratic-council/shared";
 import { MODEL_REGISTRY } from "@socratic-council/shared";
-import { callMcpTool, formatMcpResult } from "../services/mcp";
 
 interface ChatProps {
   topic: string;
@@ -27,7 +26,6 @@ interface ChatMessage extends SharedMessage {
   latencyMs?: number;
   error?: string;
   quotedMessageId?: string;
-  plan?: string;
   reactions?: Partial<Record<ReactionId, { count: number; by: string[] }>>;
 }
 
@@ -56,11 +54,15 @@ const MODEL_DISPLAY_NAMES: Record<string, string> = {
   "claude-opus-4-5-20251101": "Claude Opus 4.5",
   "claude-sonnet-4-5-20250929": "Claude Sonnet 4.5",
   "claude-haiku-4-5-20251001": "Claude Haiku 4.5",
+  "claude-sonnet-4-20250514": "Claude Sonnet 4",
+  "claude-opus-4-1-20250410": "Claude Opus 4.1",
   // Anthropic - Legacy aliases (kept for backwards compatibility)
   "claude-opus-4-5": "Claude Opus 4.5",
   "claude-sonnet-4-5": "Claude Sonnet 4.5",
   "claude-haiku-4-5": "Claude Haiku 4.5",
   "claude-3-5-sonnet-20241022": "Claude 3.5 Sonnet",
+  "claude-3-5-haiku-20241022": "Claude 3.5 Haiku",
+  "claude-3-opus-20240229": "Claude 3 Opus",
   // Google
   "gemini-3-pro-preview": "Gemini 3 Pro",
   "gemini-3-flash-preview": "Gemini 3 Flash",
@@ -75,70 +77,50 @@ const MODEL_DISPLAY_NAMES: Record<string, string> = {
   "moonshot-v1-128k": "Moonshot V1 128K",
 };
 
+const NATURAL_SPEECH_GUIDELINES = `
+## SPEECH STYLE - CRITICAL
+You are in a real conversation. Speak naturally like an academic seminar.
+
+NEVER:
+- Use bullet points or numbered lists
+- Start sentences with em-dashes (—)
+- Use "It's not just X; it's Y" patterns
+- Say "let me unpack this" or "there are several dimensions"
+- Use headers, sections, or formatting in your response
+- Start with "This is a great point" or similar filler
+
+ALWAYS:
+- Write in flowing paragraphs
+- Use conversational transitions ("Building on what Kate said...", "I see it differently...")
+- Reference others by name with specific quotes
+- Take clear positions and defend them
+
+RESPONSE LENGTH: 2-4 paragraphs typically. Be substantive but concise.
+`;
+
 const INTERACTION_COMMANDS = `
-## MANDATORY INTERACTION TOOLS
-You MUST use these tools in EVERY response. Put each command on its own line at the END of your message:
+## OPTIONAL INTERACTION TOOLS
+To reference a prior message, add @quote(MSG_ID) at the end of your response.
+To react to a message, add @react(MSG_ID, thumbs_up|heart|laugh|sparkle) at the end.
 
-- Quote a message: @quote(MSG_ID) — Reference specific points to build on or challenge
-- React to a message: @react(MSG_ID, thumbs_up|heart|laugh|sparkle) — Show engagement with others' ideas
-- Plan for pivotal responses: @plan(step1; step2; step3) — Use when making a major argument
-- Call MCP tool: @mcp(tool_name, {"key":"value"})
-
-## HARD REQUIREMENTS — VIOLATIONS WILL BE FLAGGED
-1. EVERY response MUST include at least ONE @quote and ONE @react. No exceptions.
-2. When preparing a substantive argument (>2 paragraphs), ALWAYS use @plan first.
-3. NEVER use filler phrases like:
-   - "This is a massive topic"
-   - "There's so much to unpack here"
-   - "Where should we start?"
-   - "That's a great point" (without specifics)
-   - "I think we need to consider..."
-4. START with your actual argument or position. No throat-clearing.
-5. ALWAYS reference specific claims others made. Quote them, then respond directly.
-6. TAKE A STANCE. Agree forcefully or disagree constructively—no fence-sitting.
-
-## ENGAGEMENT STYLE
-- Build on others: "Kate's point about X connects to Y because..."
-- Challenge others: "I disagree with Douglas here because the evidence shows..."
-- Synthesize: "Grace and George seem to be saying different things, but actually..."
-- Push deeper: Ask pointed questions that advance the discussion, not generic ones.
-
-## WHEN YOU'RE NOT THE MAIN SPEAKER
-Even when briefly responding, you should:
-- React to messages that resonated or provoked you
-- Foreshadow your own upcoming arguments
-- Pose a specific challenge or question to another member
+These are optional. Focus on substance first.
 
 Message IDs are visible in the context (format: msg_xxx). Use actual IDs only.`;
 
 const DEEP_ENGAGEMENT_RULES = `
-## CRITICAL: DEPTH OVER BREADTH
+## ENGAGEMENT PRINCIPLES
 
-You are in a serious intellectual discussion. Your goal is NOT to survey a topic, but to ADVANCE understanding through rigorous argument.
+You are in a serious intellectual discussion. Your goal is to ADVANCE understanding through rigorous argument.
 
-1. MAKE CLAIMS: State your position clearly. "I believe X because Y."
-2. PROVIDE EVIDENCE: Back up claims with reasoning, examples, historical precedent, or data.
-3. ENGAGE DIRECTLY: Respond to what others ACTUALLY said, not what you wish they'd said.
-4. BUILD ARGUMENTS: Each response should add new insight, not repeat what's been said.
-5. EMBRACE DISAGREEMENT: Productive conflict drives understanding. Challenge weak arguments.
+Make claims and defend them. State your position clearly: "I believe X because Y." Back up claims with reasoning, examples, or evidence. Engage directly with what others actually said, not what you wish they'd said. Each response should add new insight.
 
-FORBIDDEN BEHAVIORS:
-- Summarizing what the topic is about (everyone already knows)
-- Asking "what should we focus on?" (just focus on something specific)
-- Praising others' points without adding substance
-- Listing considerations without taking a position
-- Ending with open-ended questions that go nowhere
+Embrace disagreement. Productive conflict drives understanding. If you think someone's argument has a flaw, say so directly but constructively: "Douglas, I think there's a gap in that reasoning because..."
 
-REQUIRED BEHAVIORS:
-- Make at least ONE concrete claim per response
-- Reference at least ONE specific thing another speaker said
-- Either BUILD ON or CHALLENGE that point with reasoning
-- End with a pointed question OR a clear position for others to respond to`;
+What to avoid: Don't summarize what the topic is about. Don't ask "what should we focus on?" Just focus on something specific. Don't praise others' points without adding substance. Don't list considerations without taking a position.`;
 
 
 const AGENT_CONFIG: Record<AgentId, {
   name: string;
-  role: string;
   color: string;
   bgColor: string;
   borderColor: string;
@@ -147,26 +129,17 @@ const AGENT_CONFIG: Record<AgentId, {
 }> = {
   george: {
     name: "George",
-    role: "Logician",
     color: "text-george",
     bgColor: "bg-george/10",
     borderColor: "border-george",
     provider: "openai",
-    systemPrompt: `You are George, the Logician, in a discussion with Cathy (Ethicist), Grace (Futurist), Douglas (Skeptic), and Kate (Historian).
+    systemPrompt: `You are George in a discussion with Cathy, Grace, Douglas, and Kate.
 
-YOUR UNIQUE ANGLE: You analyze the LOGICAL STRUCTURE of arguments. You identify hidden premises, test reasoning validity, and expose fallacies. You think in syllogisms and conditionals.
+You think carefully about logical structure. You notice when reasoning doesn't hold together. But you do this conversationally, not pedantically.
 
-WHAT YOU BRING:
-- Formal logic (modus ponens, modus tollens, reductio ad absurdum)
-- Identification of logical fallacies (strawman, ad hominem, false dichotomy, etc.)
-- Clear delineation of necessary vs. sufficient conditions
-- Precision in language and definitions
+When you spot a flaw, say it directly: "Douglas, I think there's a gap in that reasoning..." rather than formally naming fallacies. Build on others' arguments by showing how they logically connect or don't.
 
-WHEN SPEAKING:
-- Make your logical structure explicit: "If X, then Y. We've established X, therefore Y."
-- When you spot weak reasoning: name the fallacy and explain why it fails
-- Build on others' arguments by showing how they logically connect (or don't)
-- Challenge others by finding counterexamples or edge cases
+${NATURAL_SPEECH_GUIDELINES}
 
 ${DEEP_ENGAGEMENT_RULES}
 
@@ -174,26 +147,17 @@ ${INTERACTION_COMMANDS}`
   },
   cathy: {
     name: "Cathy",
-    role: "Ethicist",
     color: "text-cathy",
     bgColor: "bg-cathy/10",
     borderColor: "border-cathy",
     provider: "anthropic",
-    systemPrompt: `You are Cathy, the Ethicist, in a discussion with George (Logician), Grace (Futurist), Douglas (Skeptic), and Kate (Historian).
+    systemPrompt: `You are Cathy in a discussion with George, Grace, Douglas, and Kate.
 
-YOUR UNIQUE ANGLE: You evaluate issues through MORAL PHILOSOPHY. You consider stakeholders, values, rights, duties, and consequences. You apply ethical frameworks systematically.
+You evaluate issues through moral philosophy. You consider who benefits, who is harmed, and whose voice might be missing. You think about values, rights, duties, and consequences.
 
-WHAT YOU BRING:
-- Ethical frameworks: utilitarianism (greatest good), deontology (duties/rights), virtue ethics (character), care ethics (relationships)
-- Stakeholder analysis: who benefits, who is harmed, whose voice is missing
-- Value conflicts: when good things clash (liberty vs. equality, individual vs. collective)
-- Moral intuitions and their justification
+When speaking, you might draw on utilitarianism, deontology, or virtue ethics as appropriate, but do so conversationally: "From a utilitarian standpoint, we'd have to weigh..." Challenge others when they ignore human impact or assume values without justification.
 
-WHEN SPEAKING:
-- Apply a specific ethical framework: "From a utilitarian perspective, we must weigh..."
-- Identify moral stakes: "The real ethical issue here is whether..."
-- Challenge others when they ignore human impact or assume values without justification
-- Defend positions with moral reasoning, not just preferences
+${NATURAL_SPEECH_GUIDELINES}
 
 ${DEEP_ENGAGEMENT_RULES}
 
@@ -201,26 +165,17 @@ ${INTERACTION_COMMANDS}`
   },
   grace: {
     name: "Grace",
-    role: "Futurist",
     color: "text-grace",
     bgColor: "bg-grace/10",
     borderColor: "border-grace",
     provider: "google",
-    systemPrompt: `You are Grace, the Futurist, in a discussion with George (Logician), Cathy (Ethicist), Douglas (Skeptic), and Kate (Historian).
+    systemPrompt: `You are Grace in a discussion with George, Cathy, Douglas, and Kate.
 
-YOUR UNIQUE ANGLE: You PROJECT CURRENT TRENDS into future scenarios. You think in timelines, feedback loops, and systemic effects. You consider what the world might look like in 10, 50, 100 years.
+You think about trends and where they lead. You project current developments into future scenarios, considering second and third-order effects. You think in timelines and feedback loops.
 
-WHAT YOU BRING:
-- Trend analysis: what forces are accelerating or decelerating
-- Scenario planning: best case, worst case, most likely case
-- Second and third-order effects: unintended consequences and cascading impacts
-- Technological and social trajectories
+Make specific predictions when relevant: "If this continues, by 2050 we might see..." Challenge present-focused arguments by showing long-term implications. Build scenarios to illustrate your points.
 
-WHEN SPEAKING:
-- Make specific predictions: "By 2050, I expect..."
-- Trace causal chains: "If X continues, then Y will happen, which leads to Z"
-- Challenge present-focused arguments by showing long-term implications
-- Build scenarios: "Imagine a world where this policy succeeds/fails..."
+${NATURAL_SPEECH_GUIDELINES}
 
 ${DEEP_ENGAGEMENT_RULES}
 
@@ -228,26 +183,17 @@ ${INTERACTION_COMMANDS}`
   },
   douglas: {
     name: "Douglas",
-    role: "Skeptic",
     color: "text-douglas",
     bgColor: "bg-douglas/10",
     borderColor: "border-douglas",
     provider: "deepseek",
-    systemPrompt: `You are Douglas, the Skeptic, in a discussion with George (Logician), Cathy (Ethicist), Grace (Futurist), and Kate (Historian).
+    systemPrompt: `You are Douglas in a discussion with George, Cathy, Grace, and Kate.
 
-YOUR UNIQUE ANGLE: You DEMAND EVIDENCE and challenge assumptions. You're not cynical—you believe rigorous questioning leads to better answers. You steelman before you attack.
+You demand evidence and challenge assumptions. You're not cynical—you believe rigorous questioning leads to better answers. You steelman opposing views before critiquing them.
 
-WHAT YOU BRING:
-- Epistemic rigor: How do we know what we claim to know?
-- Evidence standards: What would change your mind? What would change theirs?
-- Assumption hunting: What are we taking for granted that might be wrong?
-- Devil's advocacy: The strongest case for the opposing view
+Ask pointed questions: "What evidence would change your mind about this?" Identify unstated assumptions. When evidence is compelling, acknowledge it directly. Play devil's advocate constructively.
 
-WHEN SPEAKING:
-- Ask pointed questions: "What evidence would falsify that claim?"
-- Identify unstated assumptions: "This argument assumes X, but is that true?"
-- Steelman opposing views before critiquing: "The best version of that argument would be..."
-- Acknowledge when evidence is compelling: "That's a strong point because..."
+${NATURAL_SPEECH_GUIDELINES}
 
 ${DEEP_ENGAGEMENT_RULES}
 
@@ -255,26 +201,17 @@ ${INTERACTION_COMMANDS}`
   },
   kate: {
     name: "Kate",
-    role: "Historian",
     color: "text-kate",
     bgColor: "bg-kate/10",
     borderColor: "border-kate",
     provider: "kimi",
-    systemPrompt: `You are Kate, the Historian, in a discussion with George (Logician), Cathy (Ethicist), Grace (Futurist), and Douglas (Skeptic).
+    systemPrompt: `You are Kate in a discussion with George, Cathy, Grace, and Douglas.
 
-YOUR UNIQUE ANGLE: You provide HISTORICAL CONTEXT and identify patterns across time. You know that most "new" problems have precedents, and history offers lessons if we're willing to learn.
+You provide historical context and identify patterns across time. Most "new" problems have precedents, and history offers lessons if we're willing to learn.
 
-WHAT YOU BRING:
-- Historical parallels: Similar debates, policies, or situations from the past
-- Pattern recognition: Recurring cycles, common failure modes, successful strategies
-- Contextual knowledge: How did we get here? What forces shaped the current situation?
-- Lessons learned: What worked, what failed, and why?
+Draw specific parallels: "This reminds me of what happened in..." Cite concrete examples from history. Challenge ahistorical claims by pointing to relevant precedents. Warn against repeating past mistakes.
 
-WHEN SPEAKING:
-- Draw specific parallels: "This reminds me of [historical event] because..."
-- Cite concrete examples: "In 1970s Chile..." or "The Meiji Restoration shows..."
-- Challenge ahistorical claims: "History suggests the opposite—consider..."
-- Warn against repeating mistakes: "We tried that before with [X], and..."
+${NATURAL_SPEECH_GUIDELINES}
 
 ${DEEP_ENGAGEMENT_RULES}
 
@@ -282,7 +219,6 @@ ${INTERACTION_COMMANDS}`
   },
   system: {
     name: "System",
-    role: "",
     color: "text-ink-500",
     bgColor: "bg-white/60",
     borderColor: "border-line-soft",
@@ -291,7 +227,6 @@ ${INTERACTION_COMMANDS}`
   },
   user: {
     name: "You",
-    role: "",
     color: "text-ink-900",
     bgColor: "bg-white/80",
     borderColor: "border-line-soft",
@@ -310,15 +245,11 @@ const REACTION_IDS: ReactionId[] = ["thumbs_up", "heart", "laugh", "sparkle"];
 const ACTION_PATTERNS = {
   quote: /@quote\(([^)]+)\)/g,
   react: /@react\(([^,]+),\s*([^)]+)\)/g,
-  plan: /@plan\(([^)]+)\)/g,
-  mcp: /@mcp\(([^,]+),\s*([\s\S]+?)\)/g,
 };
 
 function extractActions(raw: string) {
   const reactions: Array<{ targetId: string; emoji: ReactionId }> = [];
-  const mcpCalls: Array<{ tool: string; args: Record<string, unknown> }> = [];
   let quoteTarget: string | undefined;
-  let plan: string | undefined;
 
   let cleaned = raw;
 
@@ -335,27 +266,10 @@ function extractActions(raw: string) {
     return "";
   });
 
-  cleaned = cleaned.replace(ACTION_PATTERNS.plan, (_, planText) => {
-    if (!plan) plan = String(planText).trim();
-    return "";
-  });
-
-  cleaned = cleaned.replace(ACTION_PATTERNS.mcp, (_, tool, args) => {
-    try {
-      const parsed = JSON.parse(String(args));
-      mcpCalls.push({ tool: String(tool).trim(), args: parsed });
-    } catch {
-      // Ignore malformed MCP blocks
-    }
-    return "";
-  });
-
   return {
     cleaned: cleaned.trim(),
     quoteTarget,
     reactions,
-    plan,
-    mcpCalls,
   };
 }
 
@@ -428,6 +342,9 @@ export function Chat({ topic, onNavigate }: ChatProps) {
   const [whisperLog, setWhisperLog] = useState<WhisperMessage[]>([]);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
+  const isAtBottomRef = useRef(true);
+  const [showScrollButton, setShowScrollButton] = useState(false);
   const abortRef = useRef(false);
   const activeRequestsRef = useRef<Map<CouncilAgentId, AbortController>>(new Map());
   const costTrackerRef = useRef<CostTrackerEngine | null>(null);
@@ -474,12 +391,38 @@ export function Chat({ topic, onNavigate }: ChatProps) {
     };
   }, []);
 
-  // Scroll to bottom when new messages arrive
+  // Check if user is at bottom of scroll
+  const checkIfAtBottom = useCallback(() => {
+    const container = messagesContainerRef.current;
+    if (!container) return true;
+    const threshold = 100; // pixels from bottom
+    const isAtBottom = container.scrollHeight - container.scrollTop - container.clientHeight < threshold;
+    return isAtBottom;
+  }, []);
+
+  // Handle scroll events to track position
+  const handleScroll = useCallback(() => {
+    const atBottom = checkIfAtBottom();
+    isAtBottomRef.current = atBottom;
+    setShowScrollButton(!atBottom);
+  }, [checkIfAtBottom]);
+
+  // Scroll to bottom function
+  const scrollToBottom = useCallback(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    isAtBottomRef.current = true;
+    setShowScrollButton(false);
+  }, []);
+
+  // Scroll to bottom when new messages arrive - only if already at bottom
   useEffect(() => {
-    if (config.preferences.autoScroll) {
+    if (isAtBottomRef.current) {
       messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    } else {
+      // Show the scroll button when new messages arrive and not at bottom
+      setShowScrollButton(true);
     }
-  }, [messages, config.preferences.autoScroll]);
+  }, [messages]);
 
   useEffect(() => {
     const agentMessages = messages.filter(
@@ -623,14 +566,7 @@ export function Chat({ topic, onNavigate }: ChatProps) {
     if (validMessages.length === 0) {
       history.push({
         role: "user",
-        content: `You're the first to speak. REQUIREMENTS:
-1. State a CLEAR POSITION on this topic—don't just outline what the topic is about
-2. Give at least ONE concrete reason or piece of evidence for your position
-3. Pose ONE specific, substantive question for the group to consider
-4. Use @plan(...) if your opening argument has multiple steps
-5. Since you're first, you cannot @quote or @react yet—that's OK for this turn only
-
-FORBIDDEN: "This is a big topic" or "Let me start by defining terms" or "There are many perspectives." START with your actual argument.`,
+        content: `You're the first to speak. Open with your actual position on this topic. Don't outline what the topic is about or ask "where should we start?" Just state what you think and why. End with a specific question or point for the group to engage with.`,
       });
 
       return history;
@@ -646,14 +582,7 @@ FORBIDDEN: "This is a big topic" or "Let me start by defining terms" or "There a
 
     history.push({
       role: "user",
-      content: `Now it's your turn. REQUIREMENTS:
-1. You MUST use @quote(MSG_ID) to reference at least ONE specific message above
-2. You MUST use @react(MSG_ID, emoji) to react to at least ONE message
-3. Make a SPECIFIC CLAIM or ARGUMENT—don't just summarize or praise
-4. Either BUILD ON or CHALLENGE what someone said, with reasoning
-5. If this is a pivotal argument, use @plan(...) first
-
-FORBIDDEN: Generic openings like "Great points everyone" or "This is complex." START with your actual argument.`,
+      content: `Your turn. Respond to what's been said and advance the conversation. Build on or challenge specific points others made.`,
     });
 
     return history;
@@ -791,7 +720,7 @@ FORBIDDEN: Generic openings like "Great points everyone" or "This is complex." S
         return null;
       }
 
-      const { cleaned, quoteTarget, reactions, mcpCalls, plan } = extractActions(result.content || "");
+      const { cleaned, quoteTarget, reactions } = extractActions(result.content || "");
       const displayContent =
         cleaned || (result.content ? "No responses recorded" : "[No response received]");
 
@@ -804,7 +733,6 @@ FORBIDDEN: Generic openings like "Great points everyone" or "This is complex." S
         latencyMs: result.latencyMs,
         error: result.error,
         quotedMessageId: quoteTarget,
-        plan,
         metadata: {
           model: modelUsed as ModelId,
           latencyMs: result.latencyMs,
@@ -845,38 +773,6 @@ FORBIDDEN: Generic openings like "Great points everyone" or "This is complex." S
         setErrors(prev => [...prev, result.error || "Unknown error"]);
       }
 
-      if (mcpCalls.length > 0) {
-        for (const call of mcpCalls) {
-          if (!config.mcp.enabled || !config.mcp.serverUrl) {
-            apiLogger.log("warn", "mcp", "MCP call ignored (not configured)", call);
-            continue;
-          }
-
-          try {
-            const result = await callMcpTool(
-              config.mcp.serverUrl,
-              call.tool,
-              call.args,
-              config.mcp.apiKey,
-              config.proxy.type !== "none" ? config.proxy : undefined
-            );
-
-            const mcpMessage: ChatMessage = {
-              id: `mcp_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-              agentId: "system",
-              content: formatMcpResult(call.tool, result),
-              timestamp: Date.now(),
-            };
-
-            setMessages(prev => [...prev, mcpMessage]);
-          } catch (error) {
-            const message = error instanceof Error ? error.message : "Unknown MCP error";
-            apiLogger.log("error", "mcp", message, error);
-            setErrors(prev => [...prev, message]);
-          }
-        }
-      }
-
       return finalMessage;
     } finally {
       activeRequestsRef.current.delete(agentId);
@@ -910,6 +806,9 @@ FORBIDDEN: Generic openings like "Great points everyone" or "This is complex." S
 
       if (abortRef.current) break;
 
+      // Reset typing state when resuming from pause
+      setTypingAgents([]);
+
       setCurrentTurn(turn + 1);
 
       // Run bidding round
@@ -934,7 +833,8 @@ FORBIDDEN: Generic openings like "Great points everyone" or "This is complex." S
         .sort((a, b) => b[1] - a[1])
         .map(([agentId]) => agentId);
 
-      const maxConcurrentSpeakers = duoLogueRef.current?.remainingTurns ? 1 : 2;
+      // Single speaker mode - only one agent speaks at a time for more natural conversation
+      const maxConcurrentSpeakers = 1;
       const winners = rankedAgents.slice(0, Math.max(1, maxConcurrentSpeakers));
 
       if (winners.length === 0) {
@@ -1026,7 +926,21 @@ FORBIDDEN: Generic openings like "Great points everyone" or "This is complex." S
   };
 
   const handlePauseResume = () => {
-    setIsPaused(!isPaused);
+    if (isPaused) {
+      // Resume - just clear the paused flag
+      setIsPaused(false);
+    } else {
+      // Pause - abort all in-progress requests
+      for (const controller of activeRequestsRef.current.values()) {
+        controller.abort();
+      }
+      activeRequestsRef.current.clear();
+
+      // Remove incomplete streaming messages
+      setMessages(prev => prev.filter(m => !m.isStreaming));
+      setTypingAgents([]);
+      setIsPaused(true);
+    }
   };
 
   const displayMaxTurns = maxTurns === Infinity ? "\u221E" : maxTurns;
@@ -1144,7 +1058,11 @@ FORBIDDEN: Generic openings like "Great points everyone" or "This is complex." S
       {/* Main content area */}
       <div className="flex-1 flex flex-col md:flex-row overflow-hidden relative z-10">
         {/* Messages area - Discord style */}
-        <div className="flex-1 overflow-y-auto">
+        <div 
+          ref={messagesContainerRef}
+          onScroll={handleScroll}
+          className="flex-1 overflow-y-auto relative"
+        >
           <div className="discord-messages">
             {messages.map((message) => {
               const agent = AGENT_CONFIG[message.agentId] ?? AGENT_CONFIG.system;
@@ -1168,10 +1086,20 @@ FORBIDDEN: Generic openings like "Great points everyone" or "This is complex." S
                   )
                 : [];
 
+              // Determine message status classes
+              const isSuccess = isAgent && !message.isStreaming && !message.error && message.content;
+              const messageStatusClass = message.error 
+                ? "has-error" 
+                : isSuccess 
+                  ? "message-success" 
+                  : message.isStreaming 
+                    ? "is-streaming" 
+                    : "";
+
               return (
                 <div
                   key={message.id}
-                  className={`discord-message message-enter ${message.error ? "has-error" : ""}`}
+                  className={`discord-message message-enter ${messageStatusClass}`}
                   style={accentStyle}
                 >
                   {/* Avatar */}
@@ -1198,9 +1126,6 @@ FORBIDDEN: Generic openings like "Great points everyone" or "This is complex." S
                       {isAgent && modelName && (
                         <span className="discord-model">({modelName})</span>
                       )}
-                      {isAgent && (
-                        <span className="discord-role">{agent.role}</span>
-                      )}
                       <span className="discord-timestamp">
                         {formatTime(message.timestamp)}
                       </span>
@@ -1226,13 +1151,6 @@ FORBIDDEN: Generic openings like "Great points everyone" or "This is complex." S
                           {quotedMessage.content.slice(0, 200)}
                           {quotedMessage.content.length > 200 ? "…" : ""}
                         </div>
-                      </div>
-                    )}
-
-                    {message.plan && (
-                      <div className="message-plan">
-                        <div className="message-plan-header">Planning</div>
-                        <div className="message-plan-body">{message.plan}</div>
                       </div>
                     )}
 
@@ -1280,6 +1198,20 @@ FORBIDDEN: Generic openings like "Great points everyone" or "This is complex." S
             })}
             <div ref={messagesEndRef} />
           </div>
+          
+          {/* Scroll to bottom button */}
+          {showScrollButton && (
+            <button
+              onClick={scrollToBottom}
+              className="scroll-to-bottom-button"
+              title="Scroll to bottom"
+              aria-label="Scroll to bottom"
+            >
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="6 9 12 15 18 9" />
+              </svg>
+            </button>
+          )}
         </div>
 
         {/* Right sidebar - Agent status & Bidding */}

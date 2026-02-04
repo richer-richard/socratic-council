@@ -46,12 +46,26 @@ const API_ENDPOINTS: Record<Provider, string> = {
 
 const OPENAI_REASONING_MODELS = new Set(["o1", "o3", "o4-mini", "gpt-5.2-pro"]);
 
-// Logger for API calls
-export const apiLogger = {
-  logs: [] as { timestamp: number; level: string; provider: string; message: string; details?: unknown }[],
+// Enhanced log entry interface
+interface LogEntry {
+  timestamp: number;
+  level: "debug" | "info" | "warn" | "error";
+  provider: string;
+  message: string;
+  details?: unknown;
+}
 
-  log(level: "info" | "warn" | "error", provider: string, message: string, details?: unknown) {
-    const entry = {
+// Logger for API calls with enhanced tracking
+export const apiLogger = {
+  logs: [] as LogEntry[],
+
+  log(
+    level: "debug" | "info" | "warn" | "error",
+    provider: string,
+    message: string,
+    details?: unknown
+  ) {
+    const entry: LogEntry = {
       timestamp: Date.now(),
       level,
       provider,
@@ -60,13 +74,18 @@ export const apiLogger = {
     };
     this.logs.push(entry);
 
-    // Keep only last 100 logs
-    if (this.logs.length > 100) {
-      this.logs = this.logs.slice(-100);
+    // Keep only last 200 logs for more history
+    if (this.logs.length > 200) {
+      this.logs = this.logs.slice(-200);
     }
 
-    // Also log to console
-    const consoleMethod = level === "error" ? console.error : level === "warn" ? console.warn : console.log;
+    // Also log to console with appropriate method
+    const consoleMethod = {
+      debug: console.debug,
+      info: console.log,
+      warn: console.warn,
+      error: console.error,
+    }[level];
     consoleMethod(`[${level.toUpperCase()}] [${provider}] ${message}`, details || "");
   },
 
@@ -77,11 +96,59 @@ export const apiLogger = {
   clearLogs() {
     this.logs = [];
   },
+
+  // Get logs filtered by level or provider
+  getFilteredLogs(filter?: { level?: LogEntry["level"]; provider?: string }) {
+    return this.logs.filter((log) => {
+      if (filter?.level && log.level !== filter.level) return false;
+      if (filter?.provider && log.provider !== filter.provider) return false;
+      return true;
+    });
+  },
+
+  // Get recent errors
+  getRecentErrors(count = 10) {
+    return this.logs.filter((log) => log.level === "error").slice(-count);
+  },
 };
 
-// Check if running in Tauri environment
+// Cached Tauri detection result
+let tauriDetected: boolean | null = null;
+
+// Check if running in Tauri environment with multiple detection methods
 function isTauri(): boolean {
-  return typeof window !== "undefined" && "__TAURI__" in window;
+  if (tauriDetected !== null) return tauriDetected;
+
+  if (typeof window === "undefined") {
+    tauriDetected = false;
+    return false;
+  }
+
+  // Primary detection: __TAURI__ global
+  if ("__TAURI__" in window) {
+    tauriDetected = true;
+    return true;
+  }
+
+  // Secondary detection: Tauri internals (v2 API)
+  // @ts-expect-error Tauri internals not in type definitions
+  if (window.__TAURI_INTERNALS__ || window.__TAURI_IPC__) {
+    tauriDetected = true;
+    return true;
+  }
+
+  tauriDetected = false;
+  return false;
+}
+
+// Log environment detection on load
+if (typeof window !== "undefined") {
+  console.log("[API] Environment detection:", {
+    hasTauri: "__TAURI__" in window,
+    hasInternals: "__TAURI_INTERNALS__" in window,
+    hasIPC: "__TAURI_IPC__" in window,
+    detected: isTauri(),
+  });
 }
 
 // Tauri invoke wrapper
@@ -154,7 +221,10 @@ export async function makeHttpRequest(
   } else {
     // Fall back to browser fetch (no proxy support)
     if (proxy && proxy.type !== "none") {
-      apiLogger.log("warn", "proxy", "Browser fetch does not support proxy. Use desktop app for proxy support.");
+      apiLogger.log("warn", "proxy",
+        `Proxy configured but isTauri()=${isTauri()}. Using browser fetch (no proxy support).`,
+        { tauriDetected: isTauri() }
+      );
     }
 
     const response = await fetch(url, {
@@ -289,7 +359,10 @@ async function makeStreamingRequest(
   } else {
     // Fall back to browser fetch streaming
     if (proxy && proxy.type !== "none") {
-      apiLogger.log("warn", "proxy", "Browser fetch does not support proxy. Use desktop app for proxy support.");
+      apiLogger.log("warn", "proxy",
+        `Proxy configured but isTauri()=${isTauri()}. Using browser fetch (no proxy support).`,
+        { tauriDetected: isTauri() }
+      );
     }
 
     try {

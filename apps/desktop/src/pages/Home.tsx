@@ -18,7 +18,6 @@ export function Home({ onNavigate }: HomeProps) {
     updateProxyOverride,
     updatePreferences,
     updateModel,
-    updateMcp,
     hasAnyApiKey,
     getConfiguredProviders,
   } = useConfig();
@@ -185,7 +184,6 @@ export function Home({ onNavigate }: HomeProps) {
         onUpdateProxyOverride={updateProxyOverride}
         onUpdatePreferences={updatePreferences}
         onUpdateModel={updateModel}
-        onUpdateMcp={updateMcp}
       />
     </div>
   );
