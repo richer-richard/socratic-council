@@ -45,6 +45,9 @@ export interface AppConfig {
   mcp: McpConfig;
 }
 
+// The correct Claude Opus 4.5 model ID from Anthropic's API
+const CLAUDE_OPUS_4_5_MODEL_ID = "claude-opus-4-5-20251101";
+
 const DEFAULT_CONFIG: AppConfig = {
   credentials: {},
   proxy: {
@@ -62,7 +65,7 @@ const DEFAULT_CONFIG: AppConfig = {
   },
   models: {
     openai: "gpt-5.2",
-    anthropic: "claude-opus-4-5",
+    anthropic: CLAUDE_OPUS_4_5_MODEL_ID,
     google: "gemini-3-pro-preview",
     deepseek: "deepseek-reasoner",
     kimi: "kimi-k2.5",
@@ -100,8 +103,17 @@ export function loadConfig(): AppConfig {
         mcp: { ...DEFAULT_CONFIG.mcp, ...parsed.mcp },
       };
 
-      if (merged.models.anthropic !== "claude-opus-4-5") {
-        merged.models = { ...merged.models, anthropic: "claude-opus-4-5" };
+      // Migrate old model IDs to new full dated ID for Claude Opus 4.5
+      const currentAnthropicModel = merged.models.anthropic;
+      const needsMigration = 
+        !currentAnthropicModel ||
+        currentAnthropicModel === "claude-opus-4-5" ||
+        currentAnthropicModel === "claude-sonnet-4-5" ||
+        currentAnthropicModel === "claude-3-5-sonnet-20241022" ||
+        currentAnthropicModel.includes("3-5-sonnet");
+      
+      if (needsMigration) {
+        merged.models = { ...merged.models, anthropic: CLAUDE_OPUS_4_5_MODEL_ID };
       }
 
       return merged;
@@ -171,7 +183,10 @@ export function useConfig() {
       ...prev,
       models: {
         ...prev.models,
-        [provider]: provider === "anthropic" ? "claude-opus-4-5" : model,
+        // For anthropic, always use Claude Opus 4.5 as default unless explicitly changing to another 4.5 model
+        [provider]: provider === "anthropic" && !model.includes("4-5-20") 
+          ? CLAUDE_OPUS_4_5_MODEL_ID 
+          : model,
       },
     }));
   }, []);

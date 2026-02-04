@@ -5,7 +5,7 @@ import { useConfig, PROVIDER_INFO, type Provider } from "../stores/config";
 import { callProvider, apiLogger, type ChatMessage as APIChatMessage } from "../services/api";
 import { ProviderIcon, SystemIcon, UserIcon } from "../components/icons/ProviderIcons";
 import { ReactionIcon, type ReactionId } from "../components/icons/ReactionIcons";
-import { ConflictDetector, CostTrackerEngine } from "@socratic-council/core";
+import { ConflictDetector, CostTrackerEngine, ConversationMemoryManager, createMemoryManager } from "@socratic-council/core";
 import type {
   ConflictDetection,
   CostTracker,
@@ -14,6 +14,7 @@ import type {
   AgentId as CouncilAgentId,
   ModelId,
 } from "@socratic-council/shared";
+import { MODEL_REGISTRY } from "@socratic-council/shared";
 import { callMcpTool, formatMcpResult } from "../services/mcp";
 
 interface ChatProps {
@@ -42,7 +43,7 @@ interface DuoLogueState {
   remainingTurns: number;
 }
 
-// Model display names mapping
+// Model display names mapping - includes both full dated IDs and aliases
 const MODEL_DISPLAY_NAMES: Record<string, string> = {
   // OpenAI
   "gpt-5.2-pro": "GPT-5.2 Pro",
@@ -51,7 +52,11 @@ const MODEL_DISPLAY_NAMES: Record<string, string> = {
   "o3": "o3",
   "o4-mini": "o4-mini",
   "gpt-4o": "GPT-4o",
-  // Anthropic
+  // Anthropic - Full dated IDs (recommended for production)
+  "claude-opus-4-5-20251101": "Claude Opus 4.5",
+  "claude-sonnet-4-5-20250929": "Claude Sonnet 4.5",
+  "claude-haiku-4-5-20251001": "Claude Haiku 4.5",
+  // Anthropic - Legacy aliases (kept for backwards compatibility)
   "claude-opus-4-5": "Claude Opus 4.5",
   "claude-sonnet-4-5": "Claude Sonnet 4.5",
   "claude-haiku-4-5": "Claude Haiku 4.5",
@@ -71,20 +76,65 @@ const MODEL_DISPLAY_NAMES: Record<string, string> = {
 };
 
 const INTERACTION_COMMANDS = `
-Tool commands (put each command on its own line at the end):
-- Quote a message: @quote(MSG_ID)
-- React to a message: @react(MSG_ID, thumbs_up|heart|laugh|sparkle)
-- Plan for a pivotal response: @plan(step1; step2; step3)
-- Call an MCP tool: @mcp(tool_name, {"key":"value"})
+## MANDATORY INTERACTION TOOLS
+You MUST use these tools in EVERY response. Put each command on its own line at the END of your message:
 
-Rules:
-- Use at least one @quote and one @react in every substantive response.
-- If you are preparing a major/pivotal response, include @plan(...) before your main answer.
-- If you have nothing new, give a 1-sentence acknowledgement and still add @react or @plan.
-- Do not use meta disclaimers like "this is a massive topic"—start with substance.
-- Be interactive: build on or oppose specific points and connect ideas across speakers.
+- Quote a message: @quote(MSG_ID) — Reference specific points to build on or challenge
+- React to a message: @react(MSG_ID, thumbs_up|heart|laugh|sparkle) — Show engagement with others' ideas
+- Plan for pivotal responses: @plan(step1; step2; step3) — Use when making a major argument
+- Call MCP tool: @mcp(tool_name, {"key":"value"})
 
-You can see message IDs in the context (format: msg_xxx). Do not invent IDs.`;
+## HARD REQUIREMENTS — VIOLATIONS WILL BE FLAGGED
+1. EVERY response MUST include at least ONE @quote and ONE @react. No exceptions.
+2. When preparing a substantive argument (>2 paragraphs), ALWAYS use @plan first.
+3. NEVER use filler phrases like:
+   - "This is a massive topic"
+   - "There's so much to unpack here"
+   - "Where should we start?"
+   - "That's a great point" (without specifics)
+   - "I think we need to consider..."
+4. START with your actual argument or position. No throat-clearing.
+5. ALWAYS reference specific claims others made. Quote them, then respond directly.
+6. TAKE A STANCE. Agree forcefully or disagree constructively—no fence-sitting.
+
+## ENGAGEMENT STYLE
+- Build on others: "Kate's point about X connects to Y because..."
+- Challenge others: "I disagree with Douglas here because the evidence shows..."
+- Synthesize: "Grace and George seem to be saying different things, but actually..."
+- Push deeper: Ask pointed questions that advance the discussion, not generic ones.
+
+## WHEN YOU'RE NOT THE MAIN SPEAKER
+Even when briefly responding, you should:
+- React to messages that resonated or provoked you
+- Foreshadow your own upcoming arguments
+- Pose a specific challenge or question to another member
+
+Message IDs are visible in the context (format: msg_xxx). Use actual IDs only.`;
+
+const DEEP_ENGAGEMENT_RULES = `
+## CRITICAL: DEPTH OVER BREADTH
+
+You are in a serious intellectual discussion. Your goal is NOT to survey a topic, but to ADVANCE understanding through rigorous argument.
+
+1. MAKE CLAIMS: State your position clearly. "I believe X because Y."
+2. PROVIDE EVIDENCE: Back up claims with reasoning, examples, historical precedent, or data.
+3. ENGAGE DIRECTLY: Respond to what others ACTUALLY said, not what you wish they'd said.
+4. BUILD ARGUMENTS: Each response should add new insight, not repeat what's been said.
+5. EMBRACE DISAGREEMENT: Productive conflict drives understanding. Challenge weak arguments.
+
+FORBIDDEN BEHAVIORS:
+- Summarizing what the topic is about (everyone already knows)
+- Asking "what should we focus on?" (just focus on something specific)
+- Praising others' points without adding substance
+- Listing considerations without taking a position
+- Ending with open-ended questions that go nowhere
+
+REQUIRED BEHAVIORS:
+- Make at least ONE concrete claim per response
+- Reference at least ONE specific thing another speaker said
+- Either BUILD ON or CHALLENGE that point with reasoning
+- End with a pointed question OR a clear position for others to respond to`;
+
 
 const AGENT_CONFIG: Record<AgentId, {
   name: string;
@@ -102,17 +152,24 @@ const AGENT_CONFIG: Record<AgentId, {
     bgColor: "bg-george/10",
     borderColor: "border-george",
     provider: "openai",
-    systemPrompt: `You are George, participating in a group discussion with Cathy, Grace, Douglas, and Kate.
+    systemPrompt: `You are George, the Logician, in a discussion with Cathy (Ethicist), Grace (Futurist), Douglas (Skeptic), and Kate (Historian).
 
-Your approach: You think carefully about the logical structure of arguments. When you spot flawed reasoning, you point it out clearly but without being condescending.
+YOUR UNIQUE ANGLE: You analyze the LOGICAL STRUCTURE of arguments. You identify hidden premises, test reasoning validity, and expose fallacies. You think in syllogisms and conditionals.
 
-Guidelines:
-- Speak naturally, like you're having a conversation with friends
-- Only respond to what others have actually said - never make up or assume their arguments
-- If someone hasn't spoken yet, don't reference them
-- If you're the first to speak, just share your initial thoughts on the topic
-- Keep responses conversational (2-3 paragraphs)
-- Address people by name when responding to their specific points
+WHAT YOU BRING:
+- Formal logic (modus ponens, modus tollens, reductio ad absurdum)
+- Identification of logical fallacies (strawman, ad hominem, false dichotomy, etc.)
+- Clear delineation of necessary vs. sufficient conditions
+- Precision in language and definitions
+
+WHEN SPEAKING:
+- Make your logical structure explicit: "If X, then Y. We've established X, therefore Y."
+- When you spot weak reasoning: name the fallacy and explain why it fails
+- Build on others' arguments by showing how they logically connect (or don't)
+- Challenge others by finding counterexamples or edge cases
+
+${DEEP_ENGAGEMENT_RULES}
+
 ${INTERACTION_COMMANDS}`
   },
   cathy: {
@@ -122,17 +179,24 @@ ${INTERACTION_COMMANDS}`
     bgColor: "bg-cathy/10",
     borderColor: "border-cathy",
     provider: "anthropic",
-    systemPrompt: `You are Cathy, participating in a group discussion with George, Grace, Douglas, and Kate.
+    systemPrompt: `You are Cathy, the Ethicist, in a discussion with George (Logician), Grace (Futurist), Douglas (Skeptic), and Kate (Historian).
 
-Your approach: You care about the human impact of issues. You think about who benefits, who might be harmed, and what values are at stake.
+YOUR UNIQUE ANGLE: You evaluate issues through MORAL PHILOSOPHY. You consider stakeholders, values, rights, duties, and consequences. You apply ethical frameworks systematically.
 
-Guidelines:
-- Speak naturally, like you're having a conversation with friends
-- Only respond to what others have actually said - never make up or assume their arguments
-- If someone hasn't spoken yet, don't reference them
-- If you're the first to speak, just share your initial thoughts on the topic
-- Keep responses conversational (2-3 paragraphs)
-- Address people by name when responding to their specific points
+WHAT YOU BRING:
+- Ethical frameworks: utilitarianism (greatest good), deontology (duties/rights), virtue ethics (character), care ethics (relationships)
+- Stakeholder analysis: who benefits, who is harmed, whose voice is missing
+- Value conflicts: when good things clash (liberty vs. equality, individual vs. collective)
+- Moral intuitions and their justification
+
+WHEN SPEAKING:
+- Apply a specific ethical framework: "From a utilitarian perspective, we must weigh..."
+- Identify moral stakes: "The real ethical issue here is whether..."
+- Challenge others when they ignore human impact or assume values without justification
+- Defend positions with moral reasoning, not just preferences
+
+${DEEP_ENGAGEMENT_RULES}
+
 ${INTERACTION_COMMANDS}`
   },
   grace: {
@@ -142,17 +206,24 @@ ${INTERACTION_COMMANDS}`
     bgColor: "bg-grace/10",
     borderColor: "border-grace",
     provider: "google",
-    systemPrompt: `You are Grace, participating in a group discussion with George, Cathy, Douglas, and Kate.
+    systemPrompt: `You are Grace, the Futurist, in a discussion with George (Logician), Cathy (Ethicist), Douglas (Skeptic), and Kate (Historian).
 
-Your approach: You like to think about where things are heading. You consider long-term consequences and how today's decisions might play out over time.
+YOUR UNIQUE ANGLE: You PROJECT CURRENT TRENDS into future scenarios. You think in timelines, feedback loops, and systemic effects. You consider what the world might look like in 10, 50, 100 years.
 
-Guidelines:
-- Speak naturally, like you're having a conversation with friends
-- Only respond to what others have actually said - never make up or assume their arguments
-- If someone hasn't spoken yet, don't reference them
-- If you're the first to speak, just share your initial thoughts on the topic
-- Keep responses conversational (2-3 paragraphs)
-- Address people by name when responding to their specific points
+WHAT YOU BRING:
+- Trend analysis: what forces are accelerating or decelerating
+- Scenario planning: best case, worst case, most likely case
+- Second and third-order effects: unintended consequences and cascading impacts
+- Technological and social trajectories
+
+WHEN SPEAKING:
+- Make specific predictions: "By 2050, I expect..."
+- Trace causal chains: "If X continues, then Y will happen, which leads to Z"
+- Challenge present-focused arguments by showing long-term implications
+- Build scenarios: "Imagine a world where this policy succeeds/fails..."
+
+${DEEP_ENGAGEMENT_RULES}
+
 ${INTERACTION_COMMANDS}`
   },
   douglas: {
@@ -162,17 +233,24 @@ ${INTERACTION_COMMANDS}`
     bgColor: "bg-douglas/10",
     borderColor: "border-douglas",
     provider: "deepseek",
-    systemPrompt: `You are Douglas, participating in a group discussion with George, Cathy, Grace, and Kate.
+    systemPrompt: `You are Douglas, the Skeptic, in a discussion with George (Logician), Cathy (Ethicist), Grace (Futurist), and Kate (Historian).
 
-Your approach: You like to question assumptions and ask for evidence. You're not trying to be difficult - you just think it's important to examine claims carefully.
+YOUR UNIQUE ANGLE: You DEMAND EVIDENCE and challenge assumptions. You're not cynical—you believe rigorous questioning leads to better answers. You steelman before you attack.
 
-Guidelines:
-- Speak naturally, like you're having a conversation with friends
-- Only respond to what others have actually said - never make up or assume their arguments
-- If someone hasn't spoken yet, don't reference them
-- If you're the first to speak, just share your initial thoughts on the topic
-- Keep responses conversational (2-3 paragraphs)
-- Address people by name when responding to their specific points
+WHAT YOU BRING:
+- Epistemic rigor: How do we know what we claim to know?
+- Evidence standards: What would change your mind? What would change theirs?
+- Assumption hunting: What are we taking for granted that might be wrong?
+- Devil's advocacy: The strongest case for the opposing view
+
+WHEN SPEAKING:
+- Ask pointed questions: "What evidence would falsify that claim?"
+- Identify unstated assumptions: "This argument assumes X, but is that true?"
+- Steelman opposing views before critiquing: "The best version of that argument would be..."
+- Acknowledge when evidence is compelling: "That's a strong point because..."
+
+${DEEP_ENGAGEMENT_RULES}
+
 ${INTERACTION_COMMANDS}`
   },
   kate: {
@@ -182,17 +260,24 @@ ${INTERACTION_COMMANDS}`
     bgColor: "bg-kate/10",
     borderColor: "border-kate",
     provider: "kimi",
-    systemPrompt: `You are Kate, participating in a group discussion with George, Cathy, Grace, and Douglas.
+    systemPrompt: `You are Kate, the Historian, in a discussion with George (Logician), Cathy (Ethicist), Grace (Futurist), and Douglas (Skeptic).
 
-Your approach: You like to bring historical perspective to discussions. You find it helpful to look at how similar situations played out in the past.
+YOUR UNIQUE ANGLE: You provide HISTORICAL CONTEXT and identify patterns across time. You know that most "new" problems have precedents, and history offers lessons if we're willing to learn.
 
-Guidelines:
-- Speak naturally, like you're having a conversation with friends
-- Only respond to what others have actually said - never make up or assume their arguments
-- If someone hasn't spoken yet, don't reference them
-- If you're the first to speak, just share your initial thoughts on the topic
-- Keep responses conversational (2-3 paragraphs)
-- Address people by name when responding to their specific points
+WHAT YOU BRING:
+- Historical parallels: Similar debates, policies, or situations from the past
+- Pattern recognition: Recurring cycles, common failure modes, successful strategies
+- Contextual knowledge: How did we get here? What forces shaped the current situation?
+- Lessons learned: What worked, what failed, and why?
+
+WHEN SPEAKING:
+- Draw specific parallels: "This reminds me of [historical event] because..."
+- Cite concrete examples: "In 1970s Chile..." or "The Meiji Restoration shows..."
+- Challenge ahistorical claims: "History suggests the opposite—consider..."
+- Warn against repeating mistakes: "We tried that before with [X], and..."
+
+${DEEP_ENGAGEMENT_RULES}
+
 ${INTERACTION_COMMANDS}`
   },
   system: {
@@ -274,6 +359,30 @@ function extractActions(raw: string) {
   };
 }
 
+/**
+ * Calculate per-message cost based on token usage and model pricing
+ * Returns cost in USD (4 decimal places) or null if pricing unavailable
+ */
+function calculateMessageCost(
+  modelId: string | undefined,
+  tokens: { input: number; output: number; reasoning?: number } | undefined
+): number | null {
+  if (!modelId || !tokens) return null;
+  
+  const modelInfo = MODEL_REGISTRY.find((m) => m.id === modelId);
+  const pricing = modelInfo?.pricing;
+  
+  if (!pricing || (!pricing.inputCostPer1M && !pricing.outputCostPer1M)) {
+    return null;
+  }
+  
+  const inputCost = ((tokens.input || 0) / 1_000_000) * (pricing.inputCostPer1M ?? 0);
+  const outputCost = ((tokens.output || 0) / 1_000_000) * (pricing.outputCostPer1M ?? 0);
+  const reasoningCost = ((tokens.reasoning || 0) / 1_000_000) * (pricing.reasoningCostPer1M ?? 0);
+  
+  return inputCost + outputCost + reasoningCost;
+}
+
 function applyReactions(
   items: ChatMessage[],
   reactions: Array<{ targetId: string; emoji: ReactionId }>,
@@ -323,6 +432,7 @@ export function Chat({ topic, onNavigate }: ChatProps) {
   const activeRequestsRef = useRef<Map<CouncilAgentId, AbortController>>(new Map());
   const costTrackerRef = useRef<CostTrackerEngine | null>(null);
   const conflictDetectorRef = useRef(new ConflictDetector());
+  const memoryManagerRef = useRef<ConversationMemoryManager | null>(null);
   const whisperBonusesRef = useRef<Record<CouncilAgentId, number>>({
     george: 0,
     cathy: 0,
@@ -344,6 +454,7 @@ export function Chat({ topic, onNavigate }: ChatProps) {
   const resetRuntimeState = useCallback(() => {
     costTrackerRef.current = new CostTrackerEngine(AGENT_IDS);
     setCostState(costTrackerRef.current.getState());
+    memoryManagerRef.current = createMemoryManager({ windowSize: 20 });
     setTotalTokens({ input: 0, output: 0 });
     setCurrentBidding(null);
     setShowBidding(false);
@@ -446,7 +557,18 @@ export function Chat({ topic, onNavigate }: ChatProps) {
       const baseScore = 50 + Math.random() * 30;
       const recencyBonus = agentId === excludeAgent ? -20 : 0;
       const whisperBonus = whisperBonusesRef.current[agentId] ?? 0;
-      const score = baseScore + recencyBonus + whisperBonus;
+      
+      // Add engagement debt bonus (agents with pending debts get priority)
+      let engagementDebtBonus = 0;
+      if (memoryManagerRef.current) {
+        const debts = memoryManagerRef.current.getEngagementDebts(agentId);
+        // High-priority debts (direct questions, challenges) give bigger bonus
+        for (const debt of debts.slice(0, 3)) {
+          engagementDebtBonus += Math.min(debt.priority * 0.2, 15);
+        }
+      }
+      
+      const score = baseScore + recencyBonus + whisperBonus + engagementDebtBonus;
 
       if (whisperBonus) {
         whisperBonusesRef.current[agentId] = 0;
@@ -501,8 +623,14 @@ export function Chat({ topic, onNavigate }: ChatProps) {
     if (validMessages.length === 0) {
       history.push({
         role: "user",
-        content:
-          "You're the first to speak. Share your initial thoughts on the topic, raise key questions, and set a direction for the discussion.",
+        content: `You're the first to speak. REQUIREMENTS:
+1. State a CLEAR POSITION on this topic—don't just outline what the topic is about
+2. Give at least ONE concrete reason or piece of evidence for your position
+3. Pose ONE specific, substantive question for the group to consider
+4. Use @plan(...) if your opening argument has multiple steps
+5. Since you're first, you cannot @quote or @react yet—that's OK for this turn only
+
+FORBIDDEN: "This is a big topic" or "Let me start by defining terms" or "There are many perspectives." START with your actual argument.`,
       });
 
       return history;
@@ -518,8 +646,14 @@ export function Chat({ topic, onNavigate }: ChatProps) {
 
     history.push({
       role: "user",
-      content:
-        "Now it's your turn. Respond to specific points above. Only reference arguments that were actually made.",
+      content: `Now it's your turn. REQUIREMENTS:
+1. You MUST use @quote(MSG_ID) to reference at least ONE specific message above
+2. You MUST use @react(MSG_ID, emoji) to react to at least ONE message
+3. Make a SPECIFIC CLAIM or ARGUMENT—don't just summarize or praise
+4. Either BUILD ON or CHALLENGE what someone said, with reasoning
+5. If this is a pivotal argument, use @plan(...) first
+
+FORBIDDEN: Generic openings like "Great points everyone" or "This is complex." START with your actual argument.`,
     });
 
     return history;
@@ -622,9 +756,10 @@ export function Chat({ topic, onNavigate }: ChatProps) {
     if (
       !result.success &&
       agentConfig.provider === "anthropic" &&
-      model.includes("4-5")
+      model.includes("opus")
     ) {
-      const fallbackModel = "claude-opus-4-5";
+      // If the full dated model ID fails, try the alias as fallback
+      const fallbackModel = "claude-opus-4-5-20251101";
       if (modelUsed !== fallbackModel) {
         apiLogger.log("warn", "anthropic", "Primary model failed; retrying with fallback", {
           primary: model,
@@ -680,6 +815,21 @@ export function Chat({ topic, onNavigate }: ChatProps) {
         const updated = prev.map(m => m.id === newMessage.id ? finalMessage : m);
         return applyReactions(updated, reactions, agentId);
       });
+
+      // Track message in memory manager for engagement tracking
+      if (memoryManagerRef.current && result.success) {
+        memoryManagerRef.current.addMessage(finalMessage);
+        
+        // Record quote if present
+        if (quoteTarget) {
+          memoryManagerRef.current.recordQuote(quoteTarget, agentId);
+        }
+        
+        // Record reactions
+        for (const reaction of reactions) {
+          memoryManagerRef.current.recordReaction(reaction.targetId, agentId, reaction.emoji);
+        }
+      }
 
       if (result.success) {
         setTotalTokens(prev => ({
@@ -957,15 +1107,33 @@ export function Chat({ topic, onNavigate }: ChatProps) {
               <>
                 <button
                   onClick={handlePauseResume}
-                  className="button-secondary text-sm"
+                  className="button-secondary p-2"
+                  title={isPaused ? "Resume" : "Pause"}
                 >
-                  {isPaused ? "Resume" : "Pause"}
+                  {isPaused ? (
+                    // Play icon inside circle
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <circle cx="12" cy="12" r="10" />
+                      <polygon points="10 8 16 12 10 16 10 8" fill="currentColor" stroke="none" />
+                    </svg>
+                  ) : (
+                    // Pause icon inside circle
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <circle cx="12" cy="12" r="10" />
+                      <line x1="10" y1="9" x2="10" y2="15" strokeWidth="2.5" />
+                      <line x1="14" y1="9" x2="14" y2="15" strokeWidth="2.5" />
+                    </svg>
+                  )}
                 </button>
                 <button
                   onClick={handleStop}
-                  className="button-primary text-sm"
+                  className="button-primary p-2"
+                  title="Stop"
                 >
-                  Stop
+                  {/* Stop icon (square) */}
+                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <rect x="6" y="6" width="12" height="12" rx="2" fill="currentColor" stroke="none" />
+                  </svg>
                 </button>
               </>
             )}
@@ -1041,6 +1209,12 @@ export function Chat({ topic, onNavigate }: ChatProps) {
                           {message.tokens.input}+{message.tokens.output} tokens
                         </span>
                       )}
+                      {(() => {
+                        const msgCost = calculateMessageCost(message.metadata?.model, message.tokens);
+                        return msgCost !== null ? (
+                          <span className="discord-cost">${msgCost.toFixed(4)}</span>
+                        ) : null;
+                      })()}
                     </div>
 
                     {quotedMessage && (

@@ -25,6 +25,11 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     supportsThinking: true,
     supportsVision: true,
     supportsStreaming: true,
+    pricing: {
+      inputCostPer1M: 2.50,
+      outputCostPer1M: 10.00,
+      reasoningCostPer1M: 15.00,
+    },
   },
   {
     id: "gpt-5.2",
@@ -36,6 +41,10 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     supportsThinking: false,
     supportsVision: true,
     supportsStreaming: true,
+    pricing: {
+      inputCostPer1M: 5.00,
+      outputCostPer1M: 15.00,
+    },
   },
   {
     id: "gpt-5-mini",
@@ -47,6 +56,10 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     supportsThinking: false,
     supportsVision: true,
     supportsStreaming: true,
+    pricing: {
+      inputCostPer1M: 0.40,
+      outputCostPer1M: 1.60,
+    },
   },
   {
     id: "gpt-5-nano",
@@ -58,6 +71,10 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     supportsThinking: false,
     supportsVision: false,
     supportsStreaming: true,
+    pricing: {
+      inputCostPer1M: 0.10,
+      outputCostPer1M: 0.40,
+    },
   },
   {
     id: "o4-mini",
@@ -69,6 +86,11 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     supportsThinking: true,
     supportsVision: true,
     supportsStreaming: true,
+    pricing: {
+      inputCostPer1M: 1.10,
+      outputCostPer1M: 4.40,
+      reasoningCostPer1M: 4.40,
+    },
   },
   {
     id: "o3",
@@ -80,6 +102,11 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     supportsThinking: true,
     supportsVision: true,
     supportsStreaming: true,
+    pricing: {
+      inputCostPer1M: 10.00,
+      outputCostPer1M: 40.00,
+      reasoningCostPer1M: 40.00,
+    },
   },
   {
     id: "o1",
@@ -91,6 +118,11 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     supportsThinking: true,
     supportsVision: true,
     supportsStreaming: true,
+    pricing: {
+      inputCostPer1M: 15.00,
+      outputCostPer1M: 60.00,
+      reasoningCostPer1M: 60.00,
+    },
   },
   {
     id: "gpt-4o",
@@ -102,6 +134,10 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     supportsThinking: false,
     supportsVision: true,
     supportsStreaming: true,
+    pricing: {
+      inputCostPer1M: 2.50,
+      outputCostPer1M: 10.00,
+    },
   },
   {
     id: "gpt-4o-mini",
@@ -113,6 +149,10 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     supportsThinking: false,
     supportsVision: true,
     supportsStreaming: true,
+    pricing: {
+      inputCostPer1M: 0.15,
+      outputCostPer1M: 0.60,
+    },
   },
   {
     id: "gpt-4-turbo",
@@ -124,11 +164,16 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     supportsThinking: false,
     supportsVision: true,
     supportsStreaming: true,
+    pricing: {
+      inputCostPer1M: 10.00,
+      outputCostPer1M: 30.00,
+    },
   },
 
-  // Anthropic Models (latest first)
+  // Anthropic Models (latest first) - Using full model IDs for reliability
+  // Pricing from https://docs.anthropic.com/en/docs/about-claude/models (Feb 2026)
   {
-    id: "claude-opus-4-5",
+    id: "claude-opus-4-5-20251101",
     provider: "anthropic",
     name: "Claude Opus 4.5",
     description: "Premium model, maximum intelligence",
@@ -137,9 +182,13 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     supportsThinking: true,
     supportsVision: true,
     supportsStreaming: true,
+    pricing: {
+      inputCostPer1M: 5.00,
+      outputCostPer1M: 25.00,
+    },
   },
   {
-    id: "claude-sonnet-4-5",
+    id: "claude-sonnet-4-5-20250929",
     provider: "anthropic",
     name: "Claude Sonnet 4.5",
     description: "Best balance of speed and intelligence",
@@ -148,9 +197,13 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     supportsThinking: true,
     supportsVision: true,
     supportsStreaming: true,
+    pricing: {
+      inputCostPer1M: 3.00,
+      outputCostPer1M: 15.00,
+    },
   },
   {
-    id: "claude-haiku-4-5",
+    id: "claude-haiku-4-5-20251001",
     provider: "anthropic",
     name: "Claude Haiku 4.5",
     description: "Fastest with near-frontier intelligence",
@@ -159,6 +212,10 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     supportsThinking: true,
     supportsVision: true,
     supportsStreaming: true,
+    pricing: {
+      inputCostPer1M: 1.00,
+      outputCostPer1M: 5.00,
+    },
   },
   {
     id: "claude-3-5-sonnet-20241022",
@@ -170,6 +227,10 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     supportsThinking: false,
     supportsVision: true,
     supportsStreaming: true,
+    pricing: {
+      inputCostPer1M: 3.00,
+      outputCostPer1M: 15.00,
+    },
   },
   {
     id: "claude-3-5-haiku-20241022",
@@ -181,6 +242,10 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     supportsThinking: false,
     supportsVision: true,
     supportsStreaming: true,
+    pricing: {
+      inputCostPer1M: 0.80,
+      outputCostPer1M: 4.00,
+    },
   },
   {
     id: "claude-3-opus-20240229",
@@ -192,6 +257,10 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     supportsThinking: false,
     supportsVision: true,
     supportsStreaming: true,
+    pricing: {
+      inputCostPer1M: 15.00,
+      outputCostPer1M: 75.00,
+    },
   },
 
   // Google Gemini Models (latest first)
@@ -205,6 +274,10 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     supportsThinking: true,
     supportsVision: true,
     supportsStreaming: true,
+    pricing: {
+      inputCostPer1M: 1.25,
+      outputCostPer1M: 5.00,
+    },
   },
   {
     id: "gemini-3-pro-image-preview",
@@ -216,6 +289,10 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     supportsThinking: false,
     supportsVision: true,
     supportsStreaming: true,
+    pricing: {
+      inputCostPer1M: 1.25,
+      outputCostPer1M: 5.00,
+    },
   },
   {
     id: "gemini-3-flash-preview",
@@ -227,6 +304,10 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     supportsThinking: false,
     supportsVision: true,
     supportsStreaming: true,
+    pricing: {
+      inputCostPer1M: 0.10,
+      outputCostPer1M: 0.40,
+    },
   },
   {
     id: "gemini-2.5-pro",
@@ -238,6 +319,10 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     supportsThinking: true,
     supportsVision: true,
     supportsStreaming: true,
+    pricing: {
+      inputCostPer1M: 1.25,
+      outputCostPer1M: 5.00,
+    },
   },
   {
     id: "gemini-2.5-flash",
@@ -249,6 +334,10 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     supportsThinking: true,
     supportsVision: true,
     supportsStreaming: true,
+    pricing: {
+      inputCostPer1M: 0.075,
+      outputCostPer1M: 0.30,
+    },
   },
   {
     id: "gemini-2.5-flash-lite",
@@ -260,6 +349,10 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     supportsThinking: false,
     supportsVision: true,
     supportsStreaming: true,
+    pricing: {
+      inputCostPer1M: 0.02,
+      outputCostPer1M: 0.08,
+    },
   },
   {
     id: "gemini-2.5-flash-image",
@@ -271,6 +364,10 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     supportsThinking: false,
     supportsVision: true,
     supportsStreaming: true,
+    pricing: {
+      inputCostPer1M: 0.075,
+      outputCostPer1M: 0.30,
+    },
   },
   {
     id: "gemini-2.0-flash",
@@ -282,6 +379,10 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     supportsThinking: false,
     supportsVision: true,
     supportsStreaming: true,
+    pricing: {
+      inputCostPer1M: 0.10,
+      outputCostPer1M: 0.40,
+    },
   },
   {
     id: "gemini-2.0-flash-lite",
@@ -293,6 +394,10 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     supportsThinking: false,
     supportsVision: true,
     supportsStreaming: true,
+    pricing: {
+      inputCostPer1M: 0.02,
+      outputCostPer1M: 0.08,
+    },
   },
 
   // DeepSeek Models (latest first)
@@ -306,6 +411,11 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     supportsThinking: true,
     supportsVision: false,
     supportsStreaming: true,
+    pricing: {
+      inputCostPer1M: 0.55,
+      outputCostPer1M: 2.19,
+      reasoningCostPer1M: 2.19,
+    },
   },
   {
     id: "deepseek-chat",
@@ -317,6 +427,10 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     supportsThinking: false,
     supportsVision: false,
     supportsStreaming: true,
+    pricing: {
+      inputCostPer1M: 0.27,
+      outputCostPer1M: 1.10,
+    },
   },
 
   // Kimi/Moonshot Models (latest first)
@@ -330,6 +444,10 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     supportsThinking: false,
     supportsVision: true,
     supportsStreaming: true,
+    pricing: {
+      inputCostPer1M: 0.90,
+      outputCostPer1M: 3.60,
+    },
   },
   {
     id: "kimi-k2-thinking",
@@ -341,6 +459,10 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     supportsThinking: true,
     supportsVision: false,
     supportsStreaming: true,
+    pricing: {
+      inputCostPer1M: 0.60,
+      outputCostPer1M: 2.40,
+    },
   },
   {
     id: "kimi-k2-thinking-turbo",
@@ -352,6 +474,10 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     supportsThinking: true,
     supportsVision: false,
     supportsStreaming: true,
+    pricing: {
+      inputCostPer1M: 0.60,
+      outputCostPer1M: 2.40,
+    },
   },
   {
     id: "kimi-k2-turbo-preview",
@@ -363,6 +489,10 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     supportsThinking: false,
     supportsVision: false,
     supportsStreaming: true,
+    pricing: {
+      inputCostPer1M: 0.60,
+      outputCostPer1M: 2.40,
+    },
   },
   {
     id: "kimi-k2-0905-preview",
@@ -374,6 +504,10 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     supportsThinking: false,
     supportsVision: false,
     supportsStreaming: true,
+    pricing: {
+      inputCostPer1M: 0.60,
+      outputCostPer1M: 2.40,
+    },
   },
   {
     id: "kimi-k2-0711-preview",
@@ -385,6 +519,10 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     supportsThinking: false,
     supportsVision: false,
     supportsStreaming: true,
+    pricing: {
+      inputCostPer1M: 0.55,
+      outputCostPer1M: 2.20,
+    },
   },
   {
     id: "moonshot-v1-128k",
@@ -396,6 +534,10 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     supportsThinking: false,
     supportsVision: false,
     supportsStreaming: true,
+    pricing: {
+      inputCostPer1M: 0.80,
+      outputCostPer1M: 0.80,
+    },
   },
   {
     id: "moonshot-v1-128k-vision-preview",
@@ -407,6 +549,10 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     supportsThinking: false,
     supportsVision: true,
     supportsStreaming: true,
+    pricing: {
+      inputCostPer1M: 0.80,
+      outputCostPer1M: 0.80,
+    },
   },
   {
     id: "moonshot-v1-32k",
@@ -418,6 +564,10 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     supportsThinking: false,
     supportsVision: false,
     supportsStreaming: true,
+    pricing: {
+      inputCostPer1M: 0.35,
+      outputCostPer1M: 0.35,
+    },
   },
   {
     id: "moonshot-v1-32k-vision-preview",
@@ -429,6 +579,10 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     supportsThinking: false,
     supportsVision: true,
     supportsStreaming: true,
+    pricing: {
+      inputCostPer1M: 0.35,
+      outputCostPer1M: 0.35,
+    },
   },
   {
     id: "moonshot-v1-8k",
@@ -440,6 +594,10 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     supportsThinking: false,
     supportsVision: false,
     supportsStreaming: true,
+    pricing: {
+      inputCostPer1M: 0.17,
+      outputCostPer1M: 0.17,
+    },
   },
   {
     id: "moonshot-v1-8k-vision-preview",
@@ -451,6 +609,10 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     supportsThinking: false,
     supportsVision: true,
     supportsStreaming: true,
+    pricing: {
+      inputCostPer1M: 0.17,
+      outputCostPer1M: 0.17,
+    },
   },
 ];
 
@@ -588,7 +750,7 @@ export const DEFAULT_AGENTS: Record<AgentId, AgentConfig> = {
     name: "Cathy",
     persona: "ethicist",
     provider: "anthropic",
-    model: "claude-sonnet-4-5",
+    model: "claude-opus-4-5-20251101",
     systemPrompt: DEFAULT_SYSTEM_PROMPTS.cathy,
     temperature: 0.8,
     maxTokens: 2048,
@@ -663,4 +825,29 @@ export function getModelInfo(modelId: string): ModelInfo | undefined {
 export function getDefaultModelForProvider(provider: Provider): string {
   const models = getModelsByProvider(provider);
   return models[0]?.id ?? "";
+}
+
+/**
+ * Calculate the cost of a single message based on token usage and model pricing
+ * Returns cost in USD with pricing availability flag
+ */
+export function calculateMessageCost(
+  modelId: string,
+  tokens: { input: number; output: number; reasoning?: number }
+): { cost: number; pricingAvailable: boolean } {
+  const modelInfo = getModelInfo(modelId);
+  const pricing = modelInfo?.pricing;
+
+  if (!pricing || (!pricing.inputCostPer1M && !pricing.outputCostPer1M)) {
+    return { cost: 0, pricingAvailable: false };
+  }
+
+  const inputCost = ((tokens.input || 0) / 1_000_000) * (pricing.inputCostPer1M ?? 0);
+  const outputCost = ((tokens.output || 0) / 1_000_000) * (pricing.outputCostPer1M ?? 0);
+  const reasoningCost = ((tokens.reasoning || 0) / 1_000_000) * (pricing.reasoningCostPer1M ?? 0);
+
+  return {
+    cost: inputCost + outputCost + reasoningCost,
+    pricingAvailable: true,
+  };
 }

@@ -592,12 +592,14 @@ async function callAnthropic(
     let outputTokens = 0;
     let timedOut = false;
 
-    const anthropicVersion = model.includes("4-5") ? "2024-02-29" : "2023-06-01";
+    // Claude 4.5 models require the latest API version
+    // Use 2023-06-01 as base, which is stable and supports all current features
+    const anthropicVersion = "2023-06-01";
     const headers = {
       ...createHeaders("anthropic", apiKey, { anthropicVersion }),
       Accept: "text/event-stream",
     };
-    apiLogger.log("info", "anthropic", "Using anthropic-version header", { anthropicVersion });
+    apiLogger.log("info", "anthropic", "Using anthropic-version header", { anthropicVersion, model });
 
     await new Promise<void>((resolve, reject) => {
       let buffer = "";
