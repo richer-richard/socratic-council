@@ -52,6 +52,7 @@ const MODEL_DISPLAY_NAMES: Record<string, string> = {
   "o4-mini": "o4-mini",
   "gpt-4o": "GPT-4o",
   // Anthropic - Full dated IDs (recommended for production)
+  "claude-opus-4-6": "Claude Opus 4.6",
   "claude-opus-4-5-20251101": "Claude Opus 4.5",
   "claude-sonnet-4-5-20250929": "Claude Sonnet 4.5",
   "claude-haiku-4-5-20251001": "Claude Haiku 4.5",
@@ -770,7 +771,7 @@ export function Chat({ topic, onNavigate }: ChatProps) {
 
       if (!result.success && agentConfig.provider === "anthropic" && model.includes("opus")) {
         // If the full dated model ID fails, try the alias as fallback
-        const fallbackModel = "claude-opus-4-5-20251101";
+        const fallbackModel = "claude-opus-4-6";
         if (modelUsed !== fallbackModel) {
           apiLogger.log("warn", "anthropic", "Primary model failed; retrying with fallback", {
             primary: model,

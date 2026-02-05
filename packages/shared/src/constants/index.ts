@@ -173,6 +173,21 @@ export const MODEL_REGISTRY: ModelInfo[] = [
   // Anthropic Models (latest first) - Using full model IDs for reliability
   // Pricing from https://docs.anthropic.com/en/docs/about-claude/models (Feb 2026)
   {
+    id: "claude-opus-4-6",
+    provider: "anthropic",
+    name: "Claude Opus 4.6",
+    description: "Latest premium model, adaptive thinking, 128K output",
+    contextWindow: 200000,
+    maxOutputTokens: 128000,
+    supportsThinking: true,
+    supportsVision: true,
+    supportsStreaming: true,
+    pricing: {
+      inputCostPer1M: 5.00,
+      outputCostPer1M: 25.00,
+    },
+  },
+  {
     id: "claude-opus-4-5-20251101",
     provider: "anthropic",
     name: "Claude Opus 4.5",
@@ -780,7 +795,7 @@ export const DEFAULT_AGENTS: Record<AgentId, AgentConfig> = {
     name: "Cathy",
     persona: "ethicist",
     provider: "anthropic",
-    model: "claude-opus-4-5-20251101",
+    model: "claude-opus-4-6",
     systemPrompt: DEFAULT_SYSTEM_PROMPTS.cathy,
     temperature: 0.8,
     maxTokens: 2048,

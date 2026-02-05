@@ -49,8 +49,8 @@ export interface AppConfig {
   mcp: McpConfig;
 }
 
-// The correct Claude Opus 4.5 model ID from Anthropic's API
-const CLAUDE_OPUS_4_5_MODEL_ID = "claude-opus-4-5-20251101";
+// Claude Opus 4.6 - default for Cathy
+const CLAUDE_OPUS_4_6_MODEL_ID = "claude-opus-4-6";
 
 const DEFAULT_CONFIG: AppConfig = {
   credentials: {},
@@ -68,7 +68,7 @@ const DEFAULT_CONFIG: AppConfig = {
   },
   models: {
     openai: "gpt-5.2",
-    anthropic: CLAUDE_OPUS_4_5_MODEL_ID,
+    anthropic: CLAUDE_OPUS_4_6_MODEL_ID,
     google: "gemini-3-pro-preview",
     deepseek: "deepseek-reasoner",
     kimi: "kimi-k2.5",
@@ -130,17 +130,18 @@ export function loadConfig(): AppConfig {
         mcp: { ...DEFAULT_CONFIG.mcp, ...parsed.mcp },
       };
 
-      // Migrate old model IDs to new full dated ID for Claude Opus 4.5
+      // Migrate old model IDs to Claude Opus 4.6
       const currentAnthropicModel = merged.models.anthropic;
       const needsMigration = 
         !currentAnthropicModel ||
         currentAnthropicModel === "claude-opus-4-5" ||
+        currentAnthropicModel === "claude-opus-4-5-20251101" ||
         currentAnthropicModel === "claude-sonnet-4-5" ||
         currentAnthropicModel === "claude-3-5-sonnet-20241022" ||
         currentAnthropicModel.includes("3-5-sonnet");
       
       if (needsMigration) {
-        merged.models = { ...merged.models, anthropic: CLAUDE_OPUS_4_5_MODEL_ID };
+        merged.models = { ...merged.models, anthropic: CLAUDE_OPUS_4_6_MODEL_ID };
       }
 
       // Clean up deprecated proxyOverrides if it exists
@@ -285,7 +286,7 @@ export const PROVIDER_INFO: Record<Provider, {
     agent: "Cathy",
     avatar: "💜",
     color: "text-cathy",
-    description: "Claude Opus 4.5 (default), Sonnet, Haiku",
+    description: "Claude Opus 4.6 (default), Sonnet, Haiku",
     keyPrefix: "sk-ant-",
     defaultBaseUrl: "https://api.anthropic.com",
   },

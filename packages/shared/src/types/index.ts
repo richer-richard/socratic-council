@@ -72,6 +72,8 @@ export interface OpenAIRequest {
 // =============================================================================
 
 export const AnthropicModels = [
+  // Claude 4.6 model
+  "claude-opus-4-6",
   // Claude 4.5 models with full dated IDs (recommended for production)
   "claude-opus-4-5-20251101",
   "claude-sonnet-4-5-20250929",
@@ -89,12 +91,12 @@ export type AnthropicModel = (typeof AnthropicModels)[number];
 
 export const AnthropicConfigSchema = z.object({
   model: z.enum(AnthropicModels),
-  max_tokens: z.number().min(1).max(64000).default(4096),
+  max_tokens: z.number().min(1).max(128000).default(4096),
   temperature: z.number().min(0).max(1).optional().default(1),
   top_p: z.number().min(0).max(1).optional(),
   top_k: z.number().min(0).optional(),
-  // Extended thinking for Claude 4.5 models
-  thinking: z.boolean().optional(),
+  // Extended thinking - boolean for legacy, or "adaptive" for Claude 4.6+
+  thinking: z.union([z.boolean(), z.literal("adaptive")]).optional(),
   stream: z.boolean().optional().default(true),
 });
 
