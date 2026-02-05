@@ -236,6 +236,11 @@ export const KimiConfigSchema = z.object({
   top_p: z.number().min(0).max(1).optional(),
   // Kimi-specific: enable search for fact-checking
   use_search: z.boolean().optional(),
+  stream_options: z
+    .object({
+      include_usage: z.boolean().optional(),
+    })
+    .optional(),
   stream: z.boolean().optional().default(true),
 });
 
@@ -252,6 +257,9 @@ export interface KimiRequest {
   max_tokens?: number;
   top_p?: number;
   use_search?: boolean;
+  stream_options?: {
+    include_usage?: boolean;
+  };
   stream?: boolean;
 }
 
@@ -316,7 +324,7 @@ export const AgentConfigSchema = z.object({
 
 export interface Message {
   id: string;
-  agentId: AgentId | "user" | "system";
+  agentId: AgentId | "user" | "system" | "tool";
   content: string;
   timestamp: number;
   tokens?: {

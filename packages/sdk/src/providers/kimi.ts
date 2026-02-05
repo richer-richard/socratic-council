@@ -71,6 +71,10 @@ export class KimiProvider implements BaseProvider {
       request.use_search = options.useSearch;
     }
 
+    if (stream) {
+      request.stream_options = { include_usage: true };
+    }
+
     return request;
   }
 

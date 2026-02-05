@@ -992,6 +992,13 @@ body {
   line-height: 1.4;
 }
 
+.message-quote-reactions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  margin-top: 0.4rem;
+}
+
 .message-plan {
   border-left: 3px solid var(--accent-blue);
   background: rgba(59, 130, 246, 0.12);

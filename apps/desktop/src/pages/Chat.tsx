@@ -3,6 +3,7 @@ import type { CSSProperties } from "react";
 import type { Page } from "../App";
 import { useConfig, PROVIDER_INFO, type Provider } from "../stores/config";
 import { callProvider, apiLogger, type ChatMessage as APIChatMessage } from "../services/api";
+import { getToolPrompt, runToolCall, type ToolCall } from "../services/tools";
 import { ProviderIcon, SystemIcon, UserIcon } from "../components/icons/ProviderIcons";
 import { ReactionIcon, type ReactionId } from "../components/icons/ReactionIcons";
 import { ConflictDetector, CostTrackerEngine, ConversationMemoryManager, createMemoryManager } from "@socratic-council/core";
@@ -34,7 +35,7 @@ interface BiddingRound {
   winner: CouncilAgentId;
 }
 
-type AgentId = CouncilAgentId | "system" | "user";
+type AgentId = CouncilAgentId | "system" | "user" | "tool";
 
 interface DuoLogueState {
   participants: [CouncilAgentId, CouncilAgentId];
@@ -77,46 +78,28 @@ const MODEL_DISPLAY_NAMES: Record<string, string> = {
   "moonshot-v1-128k": "Moonshot V1 128K",
 };
 
-const NATURAL_SPEECH_GUIDELINES = `
-## SPEECH STYLE - CRITICAL
-You are in a real conversation. Speak naturally like an academic seminar.
+const GROUP_CHAT_GUIDELINES = `
+You are in a real-time group chat. Keep responses short and engaging.
 
-NEVER:
-- Use bullet points or numbered lists
-- Start sentences with em-dashes (—)
-- Use "It's not just X; it's Y" patterns
-- Say "let me unpack this" or "there are several dimensions"
-- Use headers, sections, or formatting in your response
-- Start with "This is a great point" or similar filler
+Rules:
+- 1–2 short paragraphs (max ~140 words).
+- No headings or bullet lists.
+- Directly address a specific point from someone else by name.
+- Add exactly one new claim, example, or counterpoint; don’t restate your thesis.
+- End with one concrete question to the group.
 
-ALWAYS:
-- Write in flowing paragraphs
-- Use conversational transitions ("Building on what Kate said...", "I see it differently...")
-- Reference others by name with specific quotes
-- Take clear positions and defend them
+Quoting/Reactions:
+- You MUST include @quote(MSG_ID) for a specific prior message.
+- If it fits, include @react(MSG_ID, thumbs_up|heart|laugh|sparkle).
 
-RESPONSE LENGTH: 2-4 paragraphs typically. Be substantive but concise.
+${getToolPrompt()}
 `;
 
-const INTERACTION_COMMANDS = `
-## OPTIONAL INTERACTION TOOLS
-To reference a prior message, add @quote(MSG_ID) at the end of your response.
-To react to a message, add @react(MSG_ID, thumbs_up|heart|laugh|sparkle) at the end.
+const BASE_SYSTEM_PROMPT = (name: string) => `You are ${name} in a group chat with George, Cathy, Grace, Douglas, and Kate.
 
-These are optional. Focus on substance first.
+Do NOT adopt a persona or specialty. Speak as yourself, and keep the tone natural.
 
-Message IDs are visible in the context (format: msg_xxx). Use actual IDs only.`;
-
-const DEEP_ENGAGEMENT_RULES = `
-## ENGAGEMENT PRINCIPLES
-
-You are in a serious intellectual discussion. Your goal is to ADVANCE understanding through rigorous argument.
-
-Make claims and defend them. State your position clearly: "I believe X because Y." Back up claims with reasoning, examples, or evidence. Engage directly with what others actually said, not what you wish they'd said. Each response should add new insight.
-
-Embrace disagreement. Productive conflict drives understanding. If you think someone's argument has a flaw, say so directly but constructively: "Douglas, I think there's a gap in that reasoning because..."
-
-What to avoid: Don't summarize what the topic is about. Don't ask "what should we focus on?" Just focus on something specific. Don't praise others' points without adding substance. Don't list considerations without taking a position.`;
+${GROUP_CHAT_GUIDELINES}`;
 
 
 const AGENT_CONFIG: Record<AgentId, {
@@ -133,17 +116,7 @@ const AGENT_CONFIG: Record<AgentId, {
     bgColor: "bg-george/10",
     borderColor: "border-george",
     provider: "openai",
-    systemPrompt: `You are George in a discussion with Cathy, Grace, Douglas, and Kate.
-
-You think carefully about logical structure. You notice when reasoning doesn't hold together. But you do this conversationally, not pedantically.
-
-When you spot a flaw, say it directly: "Douglas, I think there's a gap in that reasoning..." rather than formally naming fallacies. Build on others' arguments by showing how they logically connect or don't.
-
-${NATURAL_SPEECH_GUIDELINES}
-
-${DEEP_ENGAGEMENT_RULES}
-
-${INTERACTION_COMMANDS}`
+    systemPrompt: BASE_SYSTEM_PROMPT("George"),
   },
   cathy: {
     name: "Cathy",
@@ -151,17 +124,7 @@ ${INTERACTION_COMMANDS}`
     bgColor: "bg-cathy/10",
     borderColor: "border-cathy",
     provider: "anthropic",
-    systemPrompt: `You are Cathy in a discussion with George, Grace, Douglas, and Kate.
-
-You evaluate issues through moral philosophy. You consider who benefits, who is harmed, and whose voice might be missing. You think about values, rights, duties, and consequences.
-
-When speaking, you might draw on utilitarianism, deontology, or virtue ethics as appropriate, but do so conversationally: "From a utilitarian standpoint, we'd have to weigh..." Challenge others when they ignore human impact or assume values without justification.
-
-${NATURAL_SPEECH_GUIDELINES}
-
-${DEEP_ENGAGEMENT_RULES}
-
-${INTERACTION_COMMANDS}`
+    systemPrompt: BASE_SYSTEM_PROMPT("Cathy"),
   },
   grace: {
     name: "Grace",
@@ -169,17 +132,7 @@ ${INTERACTION_COMMANDS}`
     bgColor: "bg-grace/10",
     borderColor: "border-grace",
     provider: "google",
-    systemPrompt: `You are Grace in a discussion with George, Cathy, Douglas, and Kate.
-
-You think about trends and where they lead. You project current developments into future scenarios, considering second and third-order effects. You think in timelines and feedback loops.
-
-Make specific predictions when relevant: "If this continues, by 2050 we might see..." Challenge present-focused arguments by showing long-term implications. Build scenarios to illustrate your points.
-
-${NATURAL_SPEECH_GUIDELINES}
-
-${DEEP_ENGAGEMENT_RULES}
-
-${INTERACTION_COMMANDS}`
+    systemPrompt: BASE_SYSTEM_PROMPT("Grace"),
   },
   douglas: {
     name: "Douglas",
@@ -187,17 +140,7 @@ ${INTERACTION_COMMANDS}`
     bgColor: "bg-douglas/10",
     borderColor: "border-douglas",
     provider: "deepseek",
-    systemPrompt: `You are Douglas in a discussion with George, Cathy, Grace, and Kate.
-
-You demand evidence and challenge assumptions. You're not cynical—you believe rigorous questioning leads to better answers. You steelman opposing views before critiquing them.
-
-Ask pointed questions: "What evidence would change your mind about this?" Identify unstated assumptions. When evidence is compelling, acknowledge it directly. Play devil's advocate constructively.
-
-${NATURAL_SPEECH_GUIDELINES}
-
-${DEEP_ENGAGEMENT_RULES}
-
-${INTERACTION_COMMANDS}`
+    systemPrompt: BASE_SYSTEM_PROMPT("Douglas"),
   },
   kate: {
     name: "Kate",
@@ -205,20 +148,18 @@ ${INTERACTION_COMMANDS}`
     bgColor: "bg-kate/10",
     borderColor: "border-kate",
     provider: "kimi",
-    systemPrompt: `You are Kate in a discussion with George, Cathy, Grace, and Douglas.
-
-You provide historical context and identify patterns across time. Most "new" problems have precedents, and history offers lessons if we're willing to learn.
-
-Draw specific parallels: "This reminds me of what happened in..." Cite concrete examples from history. Challenge ahistorical claims by pointing to relevant precedents. Warn against repeating past mistakes.
-
-${NATURAL_SPEECH_GUIDELINES}
-
-${DEEP_ENGAGEMENT_RULES}
-
-${INTERACTION_COMMANDS}`
+    systemPrompt: BASE_SYSTEM_PROMPT("Kate"),
   },
   system: {
     name: "System",
+    color: "text-ink-500",
+    bgColor: "bg-white/60",
+    borderColor: "border-line-soft",
+    provider: "openai",
+    systemPrompt: ""
+  },
+  tool: {
+    name: "Tool",
     color: "text-ink-500",
     bgColor: "bg-white/60",
     borderColor: "border-line-soft",
@@ -241,17 +182,41 @@ const isCouncilAgent = (id: ChatMessage["agentId"]): id is CouncilAgentId =>
   AGENT_IDS.includes(id as CouncilAgentId);
 
 const REACTION_IDS: ReactionId[] = ["thumbs_up", "heart", "laugh", "sparkle"];
+const MAX_CONTEXT_MESSAGES = 16;
+const MAX_TOOL_ITERATIONS = 2;
 
 const ACTION_PATTERNS = {
   quote: /@quote\(([^)]+)\)/g,
   react: /@react\(([^,]+),\s*([^)]+)\)/g,
+  tool: /@tool\(([^,]+),\s*([\s\S]*?)\)/g,
 };
 
 function extractActions(raw: string) {
   const reactions: Array<{ targetId: string; emoji: ReactionId }> = [];
   let quoteTarget: string | undefined;
+  const toolCalls: ToolCall[] = [];
 
   let cleaned = raw;
+
+  cleaned = cleaned.replace(ACTION_PATTERNS.tool, (_, name, argsText) => {
+    const toolName = String(name).trim();
+    try {
+      const parsed = JSON.parse(String(argsText));
+      if (toolName === "oracle.search" || toolName === "oracle.verify" || toolName === "oracle.cite") {
+        toolCalls.push({
+          name: toolName as ToolCall["name"],
+          args: typeof parsed === "object" && parsed ? parsed : {},
+        });
+      }
+    } catch (error) {
+      apiLogger.log("warn", "tools", "Failed to parse tool call", {
+        toolName,
+        argsText,
+        error,
+      });
+    }
+    return "";
+  });
 
   cleaned = cleaned.replace(ACTION_PATTERNS.quote, (_, target) => {
     if (!quoteTarget) quoteTarget = String(target).trim();
@@ -270,6 +235,7 @@ function extractActions(raw: string) {
     cleaned: cleaned.trim(),
     quoteTarget,
     reactions,
+    toolCalls,
   };
 }
 
@@ -350,6 +316,7 @@ export function Chat({ topic, onNavigate }: ChatProps) {
   const costTrackerRef = useRef<CostTrackerEngine | null>(null);
   const conflictDetectorRef = useRef(new ConflictDetector());
   const memoryManagerRef = useRef<ConversationMemoryManager | null>(null);
+  const hasStartedRef = useRef(false);
   const whisperBonusesRef = useRef<Record<CouncilAgentId, number>>({
     george: 0,
     cathy: 0,
@@ -371,7 +338,8 @@ export function Chat({ topic, onNavigate }: ChatProps) {
   const resetRuntimeState = useCallback(() => {
     costTrackerRef.current = new CostTrackerEngine(AGENT_IDS);
     setCostState(costTrackerRef.current.getState());
-    memoryManagerRef.current = createMemoryManager({ windowSize: 20 });
+    memoryManagerRef.current = createMemoryManager({ windowSize: MAX_CONTEXT_MESSAGES });
+    memoryManagerRef.current.setTopic(topic);
     setTotalTokens({ input: 0, output: 0 });
     setCurrentBidding(null);
     setShowBidding(false);
@@ -389,7 +357,7 @@ export function Chat({ topic, onNavigate }: ChatProps) {
       douglas: 0,
       kate: 0,
     };
-  }, []);
+  }, [topic]);
 
   // Check if user is at bottom of scroll
   const checkIfAtBottom = useCallback(() => {
@@ -536,57 +504,129 @@ export function Chat({ topic, onNavigate }: ChatProps) {
     return { scores, winner };
   }, [configuredProviders]);
 
-  // Build conversation history for API call
-  const buildConversationHistory = useCallback((agentId: CouncilAgentId): APIChatMessage[] => {
-    const agentConfig = AGENT_CONFIG[agentId];
-    const history: APIChatMessage[] = [
-      {
-        role: "system",
-        content: agentConfig.systemPrompt,
-      },
-    ];
+  const getContextMessages = useCallback((agentId: CouncilAgentId) => {
+    if (memoryManagerRef.current) {
+      const context = memoryManagerRef.current.buildContext(agentId);
+      const recent = context.recentMessages
+        .filter((m) => isCouncilAgent(m.agentId))
+        .slice(-MAX_CONTEXT_MESSAGES);
+      return { messages: recent, engagementDebts: context.engagementDebt };
+    }
 
-    // Filter to only include messages with actual content (not "[No response received]" or empty)
-    const validMessages = messages.filter(
-      (m) =>
-        m.agentId !== "system" &&
-        m.content &&
-        m.content.trim() !== "" &&
-        !m.content.includes("[No response received]") &&
-        !m.content.includes("No responses recorded") &&
-        !m.error &&
-        !m.isStreaming
-    );
+    const fallback = messages
+      .filter(
+        (m) =>
+          isCouncilAgent(m.agentId) &&
+          m.content &&
+          m.content.trim() !== "" &&
+          !m.content.includes("[No response received]") &&
+          !m.content.includes("No responses recorded") &&
+          !m.error &&
+          !m.isStreaming
+      )
+      .slice(-MAX_CONTEXT_MESSAGES);
 
-    history.push({
-      role: "user",
-      content: `Discussion topic: "${topic}"`,
+    return { messages: fallback, engagementDebts: [] };
+  }, [messages]);
+
+  const buildEngagementPrompt = useCallback((debts: Array<{ messageId: string; creditor: CouncilAgentId; reason: string }>) => {
+    if (debts.length === 0) return "";
+    const top = debts.slice(0, 2);
+    const lines = top.map((debt) => {
+      const name = AGENT_CONFIG[debt.creditor]?.name ?? debt.creditor;
+      return `Respond to ${name} (id: ${debt.messageId}) because they ${debt.reason.replace(/_/g, " ")}.`;
     });
+    return `Required replies: ${lines.join(" ")}`;
+  }, []);
 
-    if (validMessages.length === 0) {
+  // Build conversation history for API call
+  const buildConversationHistory = useCallback(
+    (agentId: CouncilAgentId, extraContext: APIChatMessage[] = []): APIChatMessage[] => {
+      const agentConfig = AGENT_CONFIG[agentId];
+      const history: APIChatMessage[] = [
+        {
+          role: "system",
+          content: agentConfig.systemPrompt,
+        },
+      ];
+
       history.push({
         role: "user",
-        content: `You're the first to speak. Open with your actual position on this topic. Don't outline what the topic is about or ask "where should we start?" Just state what you think and why. End with a specific question or point for the group to engage with.`,
+        content: `Discussion topic: "${topic}"`,
+      });
+
+      const { messages: contextMessages, engagementDebts } = getContextMessages(agentId);
+
+      if (contextMessages.length === 0) {
+        history.push({
+          role: "user",
+          content:
+            "You're the first to speak. State your position directly, then ask one concrete question. Include @quote(MSG_ID) only after there are messages to quote.",
+        });
+        return history;
+      }
+
+      for (const msg of contextMessages) {
+        if (!isCouncilAgent(msg.agentId)) continue;
+        if (msg.agentId === agentId) {
+          history.push({ role: "assistant", content: msg.content });
+        } else {
+          const speaker = AGENT_CONFIG[msg.agentId] ?? AGENT_CONFIG.system;
+          history.push({
+            role: "user",
+            content: `${speaker.name} (id: ${msg.id}): ${msg.content}`,
+          });
+        }
+      }
+
+      const engagementPrompt = buildEngagementPrompt(engagementDebts);
+      if (engagementPrompt) {
+        history.push({ role: "user", content: engagementPrompt });
+      }
+
+      if (extraContext.length > 0) {
+        history.push(...extraContext);
+      }
+
+      history.push({
+        role: "user",
+        content:
+          "Your turn. Respond directly to one specific message above and add one new point.",
       });
 
       return history;
-    }
+    },
+    [buildEngagementPrompt, getContextMessages, topic]
+  );
 
-    for (const msg of validMessages) {
-      const speaker = AGENT_CONFIG[msg.agentId] ?? AGENT_CONFIG.system;
-      history.push({
+  const resolveQuoteTarget = useCallback(
+    (agentId: CouncilAgentId, explicit?: string) => {
+      if (explicit) return explicit;
+      const debts = memoryManagerRef.current?.getEngagementDebts(agentId) ?? [];
+      if (debts.length > 0) {
+        return debts[0]?.messageId;
+      }
+      const recent = [...messages]
+        .reverse()
+        .find((m) => isCouncilAgent(m.agentId) && m.agentId !== agentId && !m.isStreaming);
+      return recent?.id;
+    },
+    [messages]
+  );
+
+  const buildToolContextMessages = useCallback((results: Array<{ name: string; output: string; error?: string }>) => {
+    const messages = results.map((result) => ({
+      role: "user" as const,
+      content: `Tool result (${result.name}): ${result.error ? `Error: ${result.error}` : result.output}`,
+    }));
+    if (messages.length > 0) {
+      messages.push({
         role: "user",
-        content: `${speaker.name} (id: ${msg.id}): ${msg.content}`,
+        content: "Use the tool results above. Only call another tool if strictly necessary.",
       });
     }
-
-    history.push({
-      role: "user",
-      content: `Your turn. Respond to what's been said and advance the conversation. Build on or challenge specific points others made.`,
-    });
-
-    return history;
-  }, [messages, topic]);
+    return messages;
+  }, []);
 
   // Get model display name
   const getModelDisplayName = useCallback((provider: Provider, overrideModel?: string): string => {
@@ -642,9 +682,6 @@ export function Chat({ topic, onNavigate }: ChatProps) {
 
     setMessages(prev => [...prev, newMessage]);
 
-    // Build conversation history
-    const conversationHistory = buildConversationHistory(agentId);
-
     // Create abort controller for this request
     const controller = new AbortController();
     activeRequestsRef.current.set(agentId, controller);
@@ -687,56 +724,22 @@ export function Chat({ topic, onNavigate }: ChatProps) {
     };
 
     try {
-    let modelUsed = model;
+      let modelUsed = model;
+      let toolIteration = 0;
 
-    // Call the API
-      let result = await callProvider(
-        agentConfig.provider,
-        credential,
-        modelUsed,
-        conversationHistory,
-        (chunk) => {
-          if (abortRef.current) return;
-          if (chunk.content) {
-            streamingContent += chunk.content;
-          }
-          if (chunk.done) {
-            clearStreamFlushTimer();
-            flushStreamingContent(true);
-            return;
-          }
-          if (Date.now() - lastStreamFlushAt >= 50) {
-            flushStreamingContent(true);
-          } else {
-            scheduleStreamFlush();
-          }
-        },
-        proxy,
-        {
-          idleTimeoutMs,
-          requestTimeoutMs,
-          signal: controller.signal,
-        }
-      );
+      const runCompletion = async (history: APIChatMessage[], currentModel: string) => {
+        streamingContent = "";
+        lastStreamFlushAt = 0;
+        clearStreamFlushTimer();
+        setMessages((prev) =>
+          prev.map((m) => (m.id === newMessage.id ? { ...m, content: "" } : m))
+        );
 
-    if (
-      !result.success &&
-      agentConfig.provider === "anthropic" &&
-      model.includes("opus")
-    ) {
-      // If the full dated model ID fails, try the alias as fallback
-      const fallbackModel = "claude-opus-4-5-20251101";
-      if (modelUsed !== fallbackModel) {
-        apiLogger.log("warn", "anthropic", "Primary model failed; retrying with fallback", {
-          primary: model,
-          fallback: fallbackModel,
-        });
-        modelUsed = fallbackModel;
-        result = await callProvider(
+        return callProvider(
           agentConfig.provider,
           credential,
-          modelUsed,
-          conversationHistory,
+          currentModel,
+          history,
           (chunk) => {
             if (abortRef.current) return;
             if (chunk.content) {
@@ -760,8 +763,52 @@ export function Chat({ topic, onNavigate }: ChatProps) {
             signal: controller.signal,
           }
         );
+      };
+
+      let history = buildConversationHistory(agentId);
+      let result = await runCompletion(history, modelUsed);
+
+      if (!result.success && agentConfig.provider === "anthropic" && model.includes("opus")) {
+        // If the full dated model ID fails, try the alias as fallback
+        const fallbackModel = "claude-opus-4-5-20251101";
+        if (modelUsed !== fallbackModel) {
+          apiLogger.log("warn", "anthropic", "Primary model failed; retrying with fallback", {
+            primary: model,
+            fallback: fallbackModel,
+          });
+          modelUsed = fallbackModel;
+          result = await runCompletion(history, modelUsed);
+        }
       }
-    }
+
+      while (result.success && toolIteration < MAX_TOOL_ITERATIONS) {
+        const { cleaned, toolCalls } = extractActions(result.content || "");
+        if (toolCalls.length === 0) break;
+
+        const interim = cleaned || "Checking sources…";
+        setMessages((prev) =>
+          prev.map((m) => (m.id === newMessage.id ? { ...m, content: interim } : m))
+        );
+
+        const calls = toolCalls.slice(0, 3);
+        const results = await Promise.all(calls.map((call) => runToolCall(call)));
+
+        const toolMessages: ChatMessage[] = results.map((toolResult) => ({
+          id: `tool_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+          agentId: "tool",
+          content: `Tool result (${toolResult.name}): ${
+            toolResult.error ? `Error: ${toolResult.error}` : toolResult.output
+          }`,
+          timestamp: Date.now(),
+        }));
+
+        setMessages((prev) => [...prev, ...toolMessages]);
+
+        const extraContext = buildToolContextMessages(results);
+        history = buildConversationHistory(agentId, extraContext);
+        result = await runCompletion(history, modelUsed);
+        toolIteration += 1;
+      }
 
       // Check if aborted after request
       if (abortRef.current) {
@@ -771,6 +818,11 @@ export function Chat({ topic, onNavigate }: ChatProps) {
       }
 
       const { cleaned, quoteTarget, reactions } = extractActions(result.content || "");
+      const resolvedQuote = resolveQuoteTarget(agentId, quoteTarget);
+      const resolvedReactions =
+        reactions.length === 0 && resolvedQuote
+          ? [{ targetId: resolvedQuote, emoji: "thumbs_up" as ReactionId }]
+          : reactions;
       const displayContent =
         cleaned || (result.content ? "No responses recorded" : "[No response received]");
 
@@ -782,7 +834,7 @@ export function Chat({ topic, onNavigate }: ChatProps) {
         tokens: result.tokens,
         latencyMs: result.latencyMs,
         error: result.error,
-        quotedMessageId: quoteTarget,
+        quotedMessageId: resolvedQuote,
         metadata: {
           model: modelUsed as ModelId,
           latencyMs: result.latencyMs,
@@ -791,7 +843,7 @@ export function Chat({ topic, onNavigate }: ChatProps) {
 
       setMessages(prev => {
         const updated = prev.map(m => m.id === newMessage.id ? finalMessage : m);
-        return applyReactions(updated, reactions, agentId);
+        return applyReactions(updated, resolvedReactions, agentId);
       });
 
       // Track message in memory manager for engagement tracking
@@ -799,12 +851,12 @@ export function Chat({ topic, onNavigate }: ChatProps) {
         memoryManagerRef.current.addMessage(finalMessage);
         
         // Record quote if present
-        if (quoteTarget) {
-          memoryManagerRef.current.recordQuote(quoteTarget, agentId);
+        if (resolvedQuote) {
+          memoryManagerRef.current.recordQuote(resolvedQuote, agentId);
         }
         
         // Record reactions
-        for (const reaction of reactions) {
+        for (const reaction of resolvedReactions) {
           memoryManagerRef.current.recordReaction(reaction.targetId, agentId, reaction.emoji);
         }
       }
@@ -816,7 +868,7 @@ export function Chat({ topic, onNavigate }: ChatProps) {
         }));
 
         if (costTrackerRef.current) {
-          costTrackerRef.current.recordUsage(agentId, result.tokens, model);
+          costTrackerRef.current.recordUsage(agentId, result.tokens, modelUsed);
           setCostState(costTrackerRef.current.getState());
         }
       } else {
@@ -829,7 +881,7 @@ export function Chat({ topic, onNavigate }: ChatProps) {
       activeRequestsRef.current.delete(agentId);
       setTypingAgents((prev) => prev.filter((id) => id !== agentId));
     }
-  }, [config, buildConversationHistory, getProxy]);
+  }, [config, buildConversationHistory, buildToolContextMessages, getProxy, resolveQuoteTarget]);
 
   // Main discussion loop
   const runDiscussion = useCallback(async () => {
@@ -942,11 +994,13 @@ export function Chat({ topic, onNavigate }: ChatProps) {
     resetRuntimeState,
   ]);
 
-  // Start discussion when component mounts
+  // Start discussion when providers become available
   useEffect(() => {
+    if (hasStartedRef.current) return;
     if (configuredProviders.length > 0) {
+      hasStartedRef.current = true;
       runDiscussion();
-    } else {
+    } else if (messages.length === 0) {
       setMessages([{
         id: `msg_${Date.now()}`,
         agentId: "system",
@@ -955,7 +1009,10 @@ export function Chat({ topic, onNavigate }: ChatProps) {
         error: "No API keys configured",
       }]);
     }
+  }, [configuredProviders.length, messages.length, runDiscussion]);
 
+  // Cleanup on unmount
+  useEffect(() => {
     return () => {
       abortRef.current = true;
       for (const controller of activeRequestsRef.current.values()) {
@@ -1119,18 +1176,25 @@ export function Chat({ topic, onNavigate }: ChatProps) {
               const agent = AGENT_CONFIG[message.agentId] ?? AGENT_CONFIG.system;
               const isAgent = isCouncilAgent(message.agentId);
               const isSystem = message.agentId === "system";
+              const isTool = message.agentId === "tool";
               const modelName = isAgent
                 ? getModelDisplayName(agent.provider, message.metadata?.model)
                 : "";
               const accent = isSystem
                 ? "var(--accent-ink)"
-                : message.agentId === "user"
+                : isTool
+                  ? "var(--accent-ink)"
+                  : message.agentId === "user"
                   ? "var(--accent-emerald)"
                   : `var(--color-${message.agentId})`;
               const accentStyle = { "--accent": accent } as CSSProperties;
               const quotedMessage = message.quotedMessageId
                 ? messages.find((msg) => msg.id === message.quotedMessageId)
                 : null;
+              const quotedReactions = quotedMessage?.reactions
+                ? (Object.entries(quotedMessage.reactions) as [ReactionId, { count: number; by: string[] }][])
+                    .filter(([, reaction]) => reaction?.count)
+                : [];
               const reactionEntries = message.reactions
                 ? (Object.entries(message.reactions) as [ReactionId, { count: number; by: string[] }][]).filter(
                     ([, reaction]) => reaction?.count
@@ -1155,7 +1219,7 @@ export function Chat({ topic, onNavigate }: ChatProps) {
                 >
                   {/* Avatar */}
                   <div className="discord-avatar">
-                    {isSystem ? (
+                    {isSystem || isTool ? (
                       <SystemIcon size={40} />
                     ) : message.agentId === "user" ? (
                       <UserIcon size={40} />
@@ -1202,6 +1266,16 @@ export function Chat({ topic, onNavigate }: ChatProps) {
                           {quotedMessage.content.slice(0, 200)}
                           {quotedMessage.content.length > 200 ? "…" : ""}
                         </div>
+                        {quotedReactions.length > 0 && (
+                          <div className="message-quote-reactions">
+                            {quotedReactions.map(([reactionId, reaction]) => (
+                              <div key={reactionId} className="reaction-chip">
+                                <ReactionIcon type={reactionId} size={14} />
+                                <span>{reaction.count}</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
                       </div>
                     )}
 
@@ -1218,10 +1292,10 @@ export function Chat({ topic, onNavigate }: ChatProps) {
                     </div>
 
                     <div className="message-actions">
-                      <button type="button" className="message-action">
+                      <button type="button" className="message-action" disabled title="Auto-managed">
                         Quote
                       </button>
-                      <button type="button" className="message-action">
+                      <button type="button" className="message-action" disabled title="Auto-managed">
                         React
                       </button>
                     </div>

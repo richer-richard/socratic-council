@@ -182,7 +182,7 @@ export class ConversationMemoryManager {
     this.messages.push(enhancedMessage);
 
     // Track agent mentions
-    if (message.agentId !== "system" && message.agentId !== "user") {
+    if (message.agentId !== "system" && message.agentId !== "user" && message.agentId !== "tool") {
       this.agentMentions[message.agentId as AgentId]++;
     }
 
@@ -227,7 +227,7 @@ export class ConversationMemoryManager {
    */
   private updateEngagementDebts(message: MessageWithContext): void {
     const speakerId = message.agentId;
-    if (speakerId === "system" || speakerId === "user") return;
+    if (speakerId === "system" || speakerId === "user" || speakerId === "tool") return;
 
     const agentIds: AgentId[] = ["george", "cathy", "grace", "douglas", "kate"];
 
@@ -342,7 +342,7 @@ export class ConversationMemoryManager {
         m => m.agentId === currentAgent && 
              m.quotedBy.includes(msg.agentId as AgentId)
       );
-      if (!hasResponseFromAgent && msg.agentId !== "system" && msg.agentId !== "user") {
+      if (!hasResponseFromAgent && msg.agentId !== "system" && msg.agentId !== "user" && msg.agentId !== "tool") {
         score += 30;
       }
 
