@@ -10,7 +10,7 @@ import Conf from "conf";
 import type { AgentId, ModelId, Provider, ProviderCredentials } from "@socratic-council/shared";
 import { DEFAULT_AGENTS, getModelsByProvider } from "@socratic-council/shared";
 import { Council, type CouncilEvent } from "@socratic-council/core";
-import { ProviderManager } from "@socratic-council/sdk";
+import { ProviderManager, createFetchTransport, type ProxyConfig } from "@socratic-council/sdk";
 
 // Config store for API keys (stored securely in user's config directory)
 const config = new Conf<{
@@ -69,6 +69,40 @@ const AGENT_ROLES: Record<AgentId, string> = {
   douglas: "Skeptic",
   kate: "Historian",
 };
+
+function parseProxyUrl(raw?: string): ProxyConfig | undefined {
+  if (!raw) return undefined;
+
+  try {
+    const url = new URL(raw);
+    const type = url.protocol.replace(":", "");
+    if (!["http", "https", "socks5", "socks5h"].includes(type)) {
+      return undefined;
+    }
+    const port = url.port ? parseInt(url.port, 10) : 0;
+    if (!url.hostname || !port) return undefined;
+    const username = url.username ? decodeURIComponent(url.username) : undefined;
+    const password = url.password ? decodeURIComponent(url.password) : undefined;
+
+    return {
+      type: type as ProxyConfig["type"],
+      host: url.hostname,
+      port,
+      username: username || undefined,
+      password: password || undefined,
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+const proxy =
+  parseProxyUrl(process.env.SOCRATIC_PROXY) ||
+  parseProxyUrl(process.env.ALL_PROXY) ||
+  parseProxyUrl(process.env.HTTPS_PROXY) ||
+  parseProxyUrl(process.env.HTTP_PROXY);
+
+const transport = createFetchTransport({ proxy });
 
 /**
  * Display the welcome banner
@@ -211,7 +245,7 @@ async function showSettings(): Promise<void> {
     }).start();
 
     try {
-      const manager = new ProviderManager({ [action]: { apiKey } });
+      const manager = new ProviderManager({ [action]: { apiKey } }, { transport });
       const results = await manager.testConnections();
       if (results[action as Provider]) {
         spinner.succeed(chalk.green(`${providerName} API key verified successfully!`));
@@ -460,7 +494,8 @@ async function startDiscussion(): Promise<void> {
   const council = new Council(
     credentials as ProviderCredentials,
     { topic, maxTurns, autoMode: true },
-    agents
+    agents,
+    { transport }
   );
 
   // Track statistics

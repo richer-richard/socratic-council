@@ -10,6 +10,7 @@ import { AnthropicProvider } from "./anthropic.js";
 import { GoogleProvider } from "./google.js";
 import { DeepSeekProvider } from "./deepseek.js";
 import { KimiProvider } from "./kimi.js";
+import type { Transport } from "../transport.js";
 
 // Re-export all providers
 export { OpenAIProvider } from "./openai.js";
@@ -22,18 +23,22 @@ export * from "./base.js";
 /**
  * Create a provider instance from a provider type and API key
  */
-export function createProvider(provider: Provider, apiKey: string): BaseProvider {
+export function createProvider(
+  provider: Provider,
+  apiKey: string,
+  options?: { baseUrl?: string; transport?: Transport }
+): BaseProvider {
   switch (provider) {
     case "openai":
-      return new OpenAIProvider(apiKey);
+      return new OpenAIProvider(apiKey, options);
     case "anthropic":
-      return new AnthropicProvider(apiKey);
+      return new AnthropicProvider(apiKey, options);
     case "google":
-      return new GoogleProvider(apiKey);
+      return new GoogleProvider(apiKey, options);
     case "deepseek":
-      return new DeepSeekProvider(apiKey);
+      return new DeepSeekProvider(apiKey, options);
     case "kimi":
-      return new KimiProvider(apiKey);
+      return new KimiProvider(apiKey, options);
     default:
       throw new Error(`Unknown provider: ${provider}`);
   }
@@ -44,25 +49,57 @@ export function createProvider(provider: Provider, apiKey: string): BaseProvider
  */
 export class ProviderManager {
   private providers: Map<Provider, BaseProvider> = new Map();
+  private transport?: Transport;
 
   /**
    * Initialize providers from credentials
    */
-  constructor(credentials: ProviderCredentials) {
+  constructor(credentials: ProviderCredentials, options?: { transport?: Transport }) {
+    this.transport = options?.transport;
     if (credentials.openai?.apiKey) {
-      this.providers.set("openai", new OpenAIProvider(credentials.openai.apiKey));
+      this.providers.set(
+        "openai",
+        new OpenAIProvider(credentials.openai.apiKey, {
+          baseUrl: credentials.openai.baseUrl,
+          transport: this.transport,
+        })
+      );
     }
     if (credentials.anthropic?.apiKey) {
-      this.providers.set("anthropic", new AnthropicProvider(credentials.anthropic.apiKey));
+      this.providers.set(
+        "anthropic",
+        new AnthropicProvider(credentials.anthropic.apiKey, {
+          baseUrl: credentials.anthropic.baseUrl,
+          transport: this.transport,
+        })
+      );
     }
     if (credentials.google?.apiKey) {
-      this.providers.set("google", new GoogleProvider(credentials.google.apiKey));
+      this.providers.set(
+        "google",
+        new GoogleProvider(credentials.google.apiKey, {
+          baseUrl: credentials.google.baseUrl,
+          transport: this.transport,
+        })
+      );
     }
     if (credentials.deepseek?.apiKey) {
-      this.providers.set("deepseek", new DeepSeekProvider(credentials.deepseek.apiKey));
+      this.providers.set(
+        "deepseek",
+        new DeepSeekProvider(credentials.deepseek.apiKey, {
+          baseUrl: credentials.deepseek.baseUrl,
+          transport: this.transport,
+        })
+      );
     }
     if (credentials.kimi?.apiKey) {
-      this.providers.set("kimi", new KimiProvider(credentials.kimi.apiKey));
+      this.providers.set(
+        "kimi",
+        new KimiProvider(credentials.kimi.apiKey, {
+          baseUrl: credentials.kimi.baseUrl,
+          transport: this.transport,
+        })
+      );
     }
   }
 
@@ -107,8 +144,14 @@ export class ProviderManager {
   /**
    * Add or update a provider
    */
-  setProvider(provider: Provider, apiKey: string): void {
-    this.providers.set(provider, createProvider(provider, apiKey));
+  setProvider(provider: Provider, apiKey: string, baseUrl?: string, transport?: Transport): void {
+    this.providers.set(
+      provider,
+      createProvider(provider, apiKey, {
+        baseUrl,
+        transport: transport ?? this.transport,
+      })
+    );
   }
 
   /**

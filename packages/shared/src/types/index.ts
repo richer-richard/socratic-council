@@ -392,19 +392,19 @@ export interface BiddingRound {
 // =============================================================================
 
 export interface ProviderCredentials {
-  openai?: { apiKey: string };
-  anthropic?: { apiKey: string };
-  google?: { apiKey: string };
-  deepseek?: { apiKey: string };
-  kimi?: { apiKey: string };
+  openai?: { apiKey: string; baseUrl?: string };
+  anthropic?: { apiKey: string; baseUrl?: string };
+  google?: { apiKey: string; baseUrl?: string };
+  deepseek?: { apiKey: string; baseUrl?: string };
+  kimi?: { apiKey: string; baseUrl?: string };
 }
 
 export const ProviderCredentialsSchema = z.object({
-  openai: z.object({ apiKey: z.string().min(1) }).optional(),
-  anthropic: z.object({ apiKey: z.string().min(1) }).optional(),
-  google: z.object({ apiKey: z.string().min(1) }).optional(),
-  deepseek: z.object({ apiKey: z.string().min(1) }).optional(),
-  kimi: z.object({ apiKey: z.string().min(1) }).optional(),
+  openai: z.object({ apiKey: z.string().min(1), baseUrl: z.string().optional() }).optional(),
+  anthropic: z.object({ apiKey: z.string().min(1), baseUrl: z.string().optional() }).optional(),
+  google: z.object({ apiKey: z.string().min(1), baseUrl: z.string().optional() }).optional(),
+  deepseek: z.object({ apiKey: z.string().min(1), baseUrl: z.string().optional() }).optional(),
+  kimi: z.object({ apiKey: z.string().min(1), baseUrl: z.string().optional() }).optional(),
 });
 
 // =============================================================================

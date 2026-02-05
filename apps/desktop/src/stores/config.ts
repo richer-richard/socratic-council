@@ -1,5 +1,10 @@
 /**
  * Configuration store for managing API keys, proxy settings, and preferences
+ * 
+ * Proxy Logic:
+ * - Single global proxy configuration applies to ALL providers
+ * - No per-provider proxy overrides (removed for simplicity)
+ * - Proxy is optional - if not configured, direct connection is used
  */
 
 import { useState, useEffect, useCallback } from "react";
@@ -39,7 +44,6 @@ export interface McpConfig {
 export interface AppConfig {
   credentials: Partial<Record<Provider, ProviderCredential>>;
   proxy: ProxyConfig;
-  proxyOverrides: Partial<Record<Provider, ProxyConfig>>;
   preferences: DiscussionPreferences;
   models: Partial<Record<Provider, string>>;
   mcp: McpConfig;
@@ -55,7 +59,6 @@ const DEFAULT_CONFIG: AppConfig = {
     host: "",
     port: 0,
   },
-  proxyOverrides: {},
   preferences: {
     defaultLength: "standard",
     customTurns: 100,
@@ -77,6 +80,30 @@ const DEFAULT_CONFIG: AppConfig = {
   },
 };
 
+const VALID_PROXY_TYPES: ProxyType[] = ["none", "http", "https", "socks5", "socks5h"];
+
+function normalizeProxyConfig(input?: Partial<ProxyConfig>): ProxyConfig {
+  const type = VALID_PROXY_TYPES.includes(input?.type as ProxyType)
+    ? (input?.type as ProxyType)
+    : "none";
+  const host = typeof input?.host === "string" ? input.host : "";
+  const rawPort = input?.port;
+  const parsedPort =
+    typeof rawPort === "number" ? rawPort : typeof rawPort === "string" ? parseInt(rawPort, 10) : 0;
+  const port =
+    Number.isFinite(parsedPort) && parsedPort > 0 && parsedPort <= 65535 ? parsedPort : 0;
+  const username = typeof input?.username === "string" && input.username !== "" ? input.username : undefined;
+  const password = typeof input?.password === "string" && input.password !== "" ? input.password : undefined;
+
+  return {
+    type,
+    host,
+    port,
+    ...(username ? { username } : {}),
+    ...(password ? { password } : {}),
+  };
+}
+
 const STORAGE_KEY = "socratic-council-config";
 
 // Discussion length presets (in turns)
@@ -93,11 +120,11 @@ export function loadConfig(): AppConfig {
     const stored = localStorage.getItem(STORAGE_KEY);
     if (stored) {
       const parsed = JSON.parse(stored);
-      const merged = {
-        ...DEFAULT_CONFIG,
-        ...parsed,
-        proxy: { ...DEFAULT_CONFIG.proxy, ...parsed.proxy },
-        proxyOverrides: { ...(parsed.proxyOverrides ?? {}) },
+      
+      // Merge with defaults, removing deprecated fields
+      const merged: AppConfig = {
+        credentials: parsed.credentials ?? {},
+        proxy: normalizeProxyConfig({ ...DEFAULT_CONFIG.proxy, ...parsed.proxy }),
         preferences: { ...DEFAULT_CONFIG.preferences, ...parsed.preferences },
         models: { ...DEFAULT_CONFIG.models, ...parsed.models },
         mcp: { ...DEFAULT_CONFIG.mcp, ...parsed.mcp },
@@ -114,6 +141,12 @@ export function loadConfig(): AppConfig {
       
       if (needsMigration) {
         merged.models = { ...merged.models, anthropic: CLAUDE_OPUS_4_5_MODEL_ID };
+      }
+
+      // Clean up deprecated proxyOverrides if it exists
+      if ("proxyOverrides" in parsed) {
+        console.log("[config] Removing deprecated proxyOverrides field");
+        // It's not in our type anymore, so it will be dropped on save
       }
 
       return merged;
@@ -156,19 +189,7 @@ export function useConfig() {
   }, []);
 
   const updateProxy = useCallback((proxy: ProxyConfig) => {
-    setConfigState((prev) => ({ ...prev, proxy }));
-  }, []);
-
-  const updateProxyOverride = useCallback((provider: Provider, proxy: ProxyConfig | null) => {
-    setConfigState((prev) => {
-      const nextOverrides = { ...prev.proxyOverrides };
-      if (!proxy || proxy.type === "none") {
-        delete nextOverrides[provider];
-      } else {
-        nextOverrides[provider] = proxy;
-      }
-      return { ...prev, proxyOverrides: nextOverrides };
-    });
+    setConfigState((prev) => ({ ...prev, proxy: normalizeProxyConfig(proxy) }));
   }, []);
 
   const updatePreferences = useCallback((preferences: Partial<DiscussionPreferences>) => {
@@ -183,10 +204,7 @@ export function useConfig() {
       ...prev,
       models: {
         ...prev.models,
-        // For anthropic, always use Claude Opus 4.5 as default unless explicitly changing to another 4.5 model
-        [provider]: provider === "anthropic" && !model.includes("4-5-20") 
-          ? CLAUDE_OPUS_4_5_MODEL_ID 
-          : model,
+        [provider]: model,
       },
     }));
   }, []);
@@ -216,18 +234,30 @@ export function useConfig() {
     return DISCUSSION_LENGTHS[defaultLength];
   }, [config.preferences]);
 
+  /**
+   * Get the proxy configuration
+   * Returns the global proxy config, or undefined if proxy is disabled
+   */
+  const getProxy = useCallback((): ProxyConfig | undefined => {
+    const normalized = normalizeProxyConfig(config.proxy);
+    if (normalized.type === "none" || !normalized.host || normalized.port <= 0) {
+      return undefined;
+    }
+    return normalized;
+  }, [config.proxy]);
+
   return {
     config,
     setConfig,
     updateCredential,
     updateProxy,
-    updateProxyOverride,
     updatePreferences,
     updateModel,
     updateMcp,
     getConfiguredProviders,
     hasAnyApiKey,
     getMaxTurns,
+    getProxy,
   };
 }
 

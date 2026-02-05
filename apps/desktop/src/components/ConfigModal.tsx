@@ -6,7 +6,9 @@ import {
   PROVIDER_INFO,
   DISCUSSION_LENGTHS,
 } from "../stores/config";
+import { getModelsByProvider } from "@socratic-council/shared";
 import { ProviderIcon } from "./icons/ProviderIcons";
+import { testProviderConnection } from "../services/api";
 
 interface ConfigModalProps {
   isOpen: boolean;
@@ -14,7 +16,6 @@ interface ConfigModalProps {
   config: AppConfig;
   onUpdateCredential: (provider: Provider, credential: { apiKey: string; baseUrl?: string; verified?: boolean; lastTested?: number } | null) => void;
   onUpdateProxy: (proxy: AppConfig["proxy"]) => void;
-  onUpdateProxyOverride: (provider: Provider, proxy: AppConfig["proxy"] | null) => void;
   onUpdatePreferences: (preferences: Partial<AppConfig["preferences"]>) => void;
   onUpdateModel: (provider: Provider, model: string) => void;
 }
@@ -23,40 +24,32 @@ type TabType = "api-keys" | "models" | "proxy" | "preferences";
 
 const PROVIDERS = Object.keys(PROVIDER_INFO) as Provider[];
 
-const MODEL_OPTIONS: Record<Provider, { id: string; name: string }[]> = {
-  openai: [
-    { id: "gpt-5.2-pro", name: "GPT-5.2 Pro (Reasoning)" },
-    { id: "gpt-5.2", name: "GPT-5.2" },
-    { id: "gpt-5-mini", name: "GPT-5 Mini" },
-    { id: "o3", name: "o3 (Reasoning)" },
-    { id: "o4-mini", name: "o4-mini" },
-    { id: "gpt-4o", name: "GPT-4o (Legacy)" },
-  ],
-  anthropic: [
-    { id: "claude-opus-4-5-20251101", name: "Claude Opus 4.5" },
-    { id: "claude-sonnet-4-5-20250929", name: "Claude Sonnet 4.5" },
-    { id: "claude-haiku-4-5-20251001", name: "Claude Haiku 4.5" },
-    { id: "claude-sonnet-4-20250514", name: "Claude Sonnet 4" },
-    { id: "claude-opus-4-1-20250410", name: "Claude Opus 4.1" },
-    { id: "claude-3-5-sonnet-20241022", name: "Claude 3.5 Sonnet (Legacy)" },
-    { id: "claude-3-5-haiku-20241022", name: "Claude 3.5 Haiku (Legacy)" },
-    { id: "claude-3-opus-20240229", name: "Claude 3 Opus (Legacy)" },
-  ],
-  google: [
-    { id: "gemini-3-pro-preview", name: "Gemini 3 Pro" },
-    { id: "gemini-3-flash-preview", name: "Gemini 3 Flash" },
-    { id: "gemini-2.5-pro", name: "Gemini 2.5 Pro" },
-    { id: "gemini-2.5-flash", name: "Gemini 2.5 Flash" },
-  ],
-  deepseek: [
-    { id: "deepseek-reasoner", name: "DeepSeek Reasoner" },
-    { id: "deepseek-chat", name: "DeepSeek Chat" },
-  ],
-  kimi: [
-    { id: "kimi-k2.5", name: "Kimi K2.5" },
-    { id: "kimi-k2-thinking", name: "Kimi K2 Thinking" },
-    { id: "moonshot-v1-128k", name: "Moonshot V1 128K" },
-  ],
+const MODEL_OPTIONS: Record<Provider, { id: string; name: string; description?: string }[]> = {
+  openai: getModelsByProvider("openai").map((model) => ({
+    id: model.id,
+    name: model.name,
+    description: model.description,
+  })),
+  anthropic: getModelsByProvider("anthropic").map((model) => ({
+    id: model.id,
+    name: model.name,
+    description: model.description,
+  })),
+  google: getModelsByProvider("google").map((model) => ({
+    id: model.id,
+    name: model.name,
+    description: model.description,
+  })),
+  deepseek: getModelsByProvider("deepseek").map((model) => ({
+    id: model.id,
+    name: model.name,
+    description: model.description,
+  })),
+  kimi: getModelsByProvider("kimi").map((model) => ({
+    id: model.id,
+    name: model.name,
+    description: model.description,
+  })),
 };
 
 export function ConfigModal({
@@ -65,7 +58,6 @@ export function ConfigModal({
   config,
   onUpdateCredential,
   onUpdateProxy,
-  onUpdateProxyOverride,
   onUpdatePreferences,
   onUpdateModel,
 }: ConfigModalProps) {
@@ -86,8 +78,6 @@ export function ConfigModal({
   if (!isOpen) return null;
 
   const configuredCount = PROVIDERS.filter((p) => config.credentials[p]?.apiKey).length;
-  const anthropicProxy = config.proxyOverrides.anthropic;
-  const isAnthropicProxyEnabled = !!anthropicProxy && anthropicProxy.type !== "none";
 
   const handleSaveCredential = async (provider: Provider) => {
     if (!apiKeyInput.trim()) return;
@@ -114,31 +104,13 @@ export function ConfigModal({
     setTestError(null);
 
     try {
-      const providerProxy =
-        config.proxyOverrides[provider]?.type && config.proxyOverrides[provider]?.type !== "none"
-          ? config.proxyOverrides[provider]
-          : config.proxy;
+      const success = await testProviderConnection(
+        provider,
+        { apiKey: key, baseUrl },
+        config.proxy
+      );
 
-      // Build proxy URL if configured
-      let proxyUrl = "";
-      if (providerProxy.type !== "none" && providerProxy.host && providerProxy.port) {
-        const auth = providerProxy.username 
-          ? `${providerProxy.username}:${providerProxy.password || ""}@` 
-          : "";
-        proxyUrl = `${providerProxy.type}://${auth}${providerProxy.host}:${providerProxy.port}`;
-      }
-
-      // In a real implementation, this would make actual API calls
-      // For now, we'll simulate the test with a delay
-      console.log(`Testing ${provider} connection...`, { apiKey: key.slice(0, 10) + "...", baseUrl, proxyUrl });
-      
-      await new Promise((resolve) => setTimeout(resolve, 1500));
-
-      // For demonstration, we'll check if the API key format looks valid
-      const info = PROVIDER_INFO[provider];
-      const isValidFormat = key.startsWith(info.keyPrefix) || key.length > 20;
-
-      if (isValidFormat) {
+      if (success) {
         setTestResults((prev) => ({ ...prev, [provider]: "success" }));
         onUpdateCredential(provider, {
           apiKey: key,
@@ -148,7 +120,7 @@ export function ConfigModal({
         });
       } else {
         setTestResults((prev) => ({ ...prev, [provider]: "failed" }));
-        setTestError(`Invalid API key format for ${info.name}`);
+        setTestError(`Connection test failed for ${PROVIDER_INFO[provider].name}`);
       }
     } catch (error) {
       console.error(`Error testing ${provider}:`, error);
@@ -421,7 +393,8 @@ export function ConfigModal({
                     >
                       {models.map((model) => (
                         <option key={model.id} value={model.id}>
-                          {model.name} ({model.id})
+                          {model.name}
+                          {model.description ? ` — ${model.description}` : ""} ({model.id})
                         </option>
                       ))}
                     </select>
@@ -434,7 +407,8 @@ export function ConfigModal({
           {activeTab === "proxy" && (
             <div className="space-y-6 scale-in">
               <p className="text-gray-400 text-sm mb-4">
-                Configure a proxy server for API requests. This can help if you're behind a firewall or need to route traffic through a specific server.
+                Configure a proxy server for API requests. This applies to <strong>all providers</strong> uniformly.
+                Use this if you're behind a firewall or need to route traffic through a specific server.
               </p>
 
               <div className="bg-gray-800/50 border border-gray-700 rounded-xl p-5 space-y-4">
@@ -515,129 +489,6 @@ export function ConfigModal({
                 )}
               </div>
 
-              <div className="bg-gray-800/50 border border-gray-700 rounded-xl p-5 space-y-4">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <div className="text-sm text-white">Claude Proxy Override</div>
-                    <div className="text-xs text-gray-400">Route Anthropic traffic through a separate proxy</div>
-                  </div>
-                  <label className="toggle-switch">
-                    <input
-                      type="checkbox"
-                      checked={isAnthropicProxyEnabled}
-                      onChange={(e) => {
-                        if (e.target.checked) {
-                          const baseProxy = config.proxy.type !== "none"
-                            ? config.proxy
-                            : { type: "http" as ProxyType, host: "", port: 0 };
-                          onUpdateProxyOverride("anthropic", { ...baseProxy });
-                        } else {
-                          onUpdateProxyOverride("anthropic", null);
-                        }
-                      }}
-                    />
-                    <div className="toggle-slider" />
-                  </label>
-                </div>
-
-                {isAnthropicProxyEnabled && (
-                  <>
-                    <div>
-                      <label className="block text-sm text-gray-300 mb-2">Proxy Type:</label>
-                      <select
-                        value={anthropicProxy?.type || "none"}
-                        onChange={(e) => {
-                          const nextType = e.target.value as ProxyType;
-                          if (nextType === "none") {
-                            onUpdateProxyOverride("anthropic", null);
-                            return;
-                          }
-                          onUpdateProxyOverride("anthropic", {
-                            ...(anthropicProxy ?? { host: "", port: 0, username: undefined, password: undefined }),
-                            type: nextType,
-                          });
-                        }}
-                        className="w-full bg-gray-900 border border-gray-600 rounded-lg px-4 py-2.5
-                          text-white focus:outline-none focus:border-primary transition-colors"
-                      >
-                        <option value="http">HTTP Proxy</option>
-                        <option value="https">HTTPS Proxy</option>
-                        <option value="socks5">SOCKS5 Proxy</option>
-                        <option value="socks5h">SOCKS5h Proxy (DNS through proxy)</option>
-                      </select>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-4">
-                      <div>
-                        <label className="block text-sm text-gray-300 mb-2">Host:</label>
-                        <input
-                          type="text"
-                          value={anthropicProxy?.host || ""}
-                          onChange={(e) => onUpdateProxyOverride("anthropic", {
-                            ...(anthropicProxy ?? { type: "http", port: 0 }),
-                            host: e.target.value,
-                          })}
-                          placeholder="127.0.0.1 or proxy.example.com"
-                          className="w-full bg-gray-900 border border-gray-600 rounded-lg px-4 py-2.5
-                            text-white placeholder-gray-500 focus:outline-none focus:border-primary transition-all"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-sm text-gray-300 mb-2">Port:</label>
-                        <input
-                          type="number"
-                          value={anthropicProxy?.port || ""}
-                          onChange={(e) => onUpdateProxyOverride("anthropic", {
-                            ...(anthropicProxy ?? { type: "http", host: "" }),
-                            port: parseInt(e.target.value) || 0,
-                          })}
-                          placeholder="7897"
-                          className="w-full bg-gray-900 border border-gray-600 rounded-lg px-4 py-2.5
-                            text-white placeholder-gray-500 focus:outline-none focus:border-primary transition-all"
-                        />
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-4">
-                      <div>
-                        <label className="block text-sm text-gray-300 mb-2">Username (optional):</label>
-                        <input
-                          type="text"
-                          value={anthropicProxy?.username || ""}
-                          onChange={(e) => onUpdateProxyOverride("anthropic", {
-                            ...(anthropicProxy ?? { type: "http", host: "", port: 0 }),
-                            username: e.target.value || undefined,
-                          })}
-                          placeholder="Optional"
-                          className="w-full bg-gray-900 border border-gray-600 rounded-lg px-4 py-2.5
-                            text-white placeholder-gray-500 focus:outline-none focus:border-primary transition-all"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-sm text-gray-300 mb-2">Password (optional):</label>
-                        <input
-                          type="password"
-                          value={anthropicProxy?.password || ""}
-                          onChange={(e) => onUpdateProxyOverride("anthropic", {
-                            ...(anthropicProxy ?? { type: "http", host: "", port: 0 }),
-                            password: e.target.value || undefined,
-                          })}
-                          placeholder="Optional"
-                          className="w-full bg-gray-900 border border-gray-600 rounded-lg px-4 py-2.5
-                            text-white placeholder-gray-500 focus:outline-none focus:border-primary transition-all"
-                        />
-                      </div>
-                    </div>
-
-                    <div className="text-sm text-gray-500">
-                      Claude proxy URL: {anthropicProxy?.type || "http"}://
-                      {anthropicProxy?.username && `${anthropicProxy.username}:***@`}
-                      {anthropicProxy?.host || "host"}:{anthropicProxy?.port || "port"}
-                    </div>
-                  </>
-                )}
-              </div>
-
               <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-xl p-4">
                 <div className="flex items-start gap-3">
                   <span className="text-yellow-400">⚠️</span>
@@ -646,6 +497,7 @@ export function ConfigModal({
                     <p className="text-yellow-300/80 text-sm mt-1">
                       Proxy support requires the Tauri backend to handle HTTP requests. 
                       If you're experiencing connection issues, ensure your proxy is properly configured and accessible.
+                      The proxy setting applies to all API providers uniformly.
                     </p>
                   </div>
                 </div>
@@ -786,11 +638,6 @@ export function ConfigModal({
                               });
                             }
                             if (imported.proxy) onUpdateProxy(imported.proxy);
-                            if (imported.proxyOverrides) {
-                              Object.entries(imported.proxyOverrides).forEach(([p, proxy]) => {
-                                onUpdateProxyOverride(p as Provider, proxy as AppConfig["proxy"]);
-                              });
-                            }
                             if (imported.preferences) onUpdatePreferences(imported.preferences);
                             if (imported.models) {
                               Object.entries(imported.models).forEach(([p, m]) => {

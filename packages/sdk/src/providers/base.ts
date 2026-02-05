@@ -14,6 +14,9 @@ export interface CompletionOptions {
   temperature?: number;
   maxTokens?: number;
   stream?: boolean;
+  timeoutMs?: number;
+  idleTimeoutMs?: number;
+  signal?: AbortSignal;
 }
 
 export interface CompletionResult {
@@ -153,4 +156,24 @@ export function formatConversationHistory(
   }
 
   return messages;
+}
+
+export function joinBaseUrl(baseUrl: string, path: string): string {
+  const trimmed = baseUrl.replace(/\/+$/, "");
+  const normalized = path.startsWith("/") ? path : `/${path}`;
+  return `${trimmed}${normalized}`;
+}
+
+export function resolveEndpoint(
+  baseUrl: string | undefined,
+  path: string,
+  fallback: string
+): string {
+  if (!baseUrl) return fallback;
+  const trimmed = baseUrl.replace(/\/+$/, "");
+  const normalizedPath = path.startsWith("/") ? path : `/${path}`;
+  if (trimmed.endsWith(normalizedPath)) {
+    return trimmed;
+  }
+  return joinBaseUrl(trimmed, normalizedPath);
 }

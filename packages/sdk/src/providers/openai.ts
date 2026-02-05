@@ -18,7 +18,9 @@ import {
   type CompletionResult,
   type StreamCallback,
   createHeaders,
+  resolveEndpoint,
 } from "./base.js";
+import { type Transport, createFetchTransport } from "../transport.js";
 
 // Models that support reasoning.effort parameter
 const REASONING_MODELS: OpenAIModel[] = ["o1", "o3", "o4-mini", "gpt-5.2-pro"];
@@ -111,10 +113,12 @@ export class OpenAIProvider implements BaseProvider {
   readonly provider = "openai" as const;
   readonly apiKey: string;
   private readonly endpoint: string;
+  private readonly transport: Transport;
 
-  constructor(apiKey: string) {
+  constructor(apiKey: string, options?: { baseUrl?: string; transport?: Transport }) {
     this.apiKey = apiKey;
-    this.endpoint = API_ENDPOINTS.openai;
+    this.endpoint = resolveEndpoint(options?.baseUrl, "/v1/responses", API_ENDPOINTS.openai);
+    this.transport = options?.transport ?? createFetchTransport();
   }
 
   async complete(
@@ -131,18 +135,20 @@ export class OpenAIProvider implements BaseProvider {
       stream: false,
     });
 
-    const response = await fetch(this.endpoint, {
+    const { status, body } = await this.transport.request({
+      url: this.endpoint,
       method: "POST",
       headers: createHeaders("openai", this.apiKey),
       body: JSON.stringify(requestBody),
+      timeoutMs: options?.timeoutMs,
+      signal: options?.signal,
     });
 
-    if (!response.ok) {
-      const error = await response.text();
-      throw new Error(`OpenAI API error: ${response.status} - ${error}`);
+    if (status < 200 || status >= 300) {
+      throw new Error(`OpenAI API error: ${status} - ${body}`);
     }
 
-    const data = (await response.json()) as OpenAIResponsesResponse;
+    const data = JSON.parse(body) as OpenAIResponsesResponse;
     const latencyMs = Date.now() - startTime;
 
     // Extract content from the response
@@ -175,23 +181,6 @@ export class OpenAIProvider implements BaseProvider {
       stream: true,
     });
 
-    const response = await fetch(this.endpoint, {
-      method: "POST",
-      headers: createHeaders("openai", this.apiKey),
-      body: JSON.stringify(requestBody),
-    });
-
-    if (!response.ok) {
-      const error = await response.text();
-      throw new Error(`OpenAI API error: ${response.status} - ${error}`);
-    }
-
-    const reader = response.body?.getReader();
-    if (!reader) {
-      throw new Error("No response body");
-    }
-
-    const decoder = new TextDecoder();
     let fullContent = "";
     let inputTokens = 0;
     let outputTokens = 0;
@@ -199,70 +188,83 @@ export class OpenAIProvider implements BaseProvider {
     let sawDelta = false;
     let buffer = "";
 
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
+    await new Promise<void>((resolve, reject) => {
+      this.transport.stream(
+        {
+          url: this.endpoint,
+          method: "POST",
+          headers: createHeaders("openai", this.apiKey),
+          body: JSON.stringify(requestBody),
+          timeoutMs: options?.timeoutMs,
+          idleTimeoutMs: options?.idleTimeoutMs,
+          signal: options?.signal,
+        },
+        {
+          onChunk: (text) => {
+            buffer += text;
+            const lines = buffer.split("\n");
+            buffer = lines.pop() ?? "";
 
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split("\n");
-      buffer = lines.pop() ?? "";
+            for (const line of lines) {
+              if (!line.startsWith("data: ")) continue;
+              const data = line.slice(6);
+              if (data === "[DONE]") continue;
 
-      for (const line of lines) {
-        if (!line.startsWith("data: ")) continue;
-        const data = line.slice(6); // Remove "data: " prefix
-        if (data === "[DONE]") continue;
+              try {
+                const parsed = JSON.parse(data) as OpenAIStreamEvent;
 
-        try {
-          const parsed = JSON.parse(data) as OpenAIStreamEvent;
+                if (parsed.type === "response.output_text.delta" && parsed.delta) {
+                  sawDelta = true;
+                  fullContent += parsed.delta;
+                  onChunk({ content: parsed.delta, done: false });
+                  continue;
+                }
 
-          if (parsed.type === "response.output_text.delta" && parsed.delta) {
-            sawDelta = true;
-            fullContent += parsed.delta;
-            onChunk({ content: parsed.delta, done: false });
-            continue;
-          }
+                if (parsed.type === "response.output_text.done" && parsed.text && !sawDelta) {
+                  fullContent += parsed.text;
+                  onChunk({ content: parsed.text, done: false });
+                  continue;
+                }
 
-          if (parsed.type === "response.output_text.done" && parsed.text && !sawDelta) {
-            fullContent += parsed.text;
-            onChunk({ content: parsed.text, done: false });
-            continue;
-          }
+                if (parsed.type === "response.completed" && parsed.response?.usage) {
+                  inputTokens = parsed.response.usage.input_tokens ?? inputTokens;
+                  outputTokens = parsed.response.usage.output_tokens ?? outputTokens;
+                  reasoningTokens =
+                    parsed.response.usage.output_tokens_details?.reasoning_tokens ??
+                    parsed.response.usage.reasoning_tokens ??
+                    reasoningTokens;
+                  continue;
+                }
 
-          if (parsed.type === "response.completed" && parsed.response?.usage) {
-            inputTokens = parsed.response.usage.input_tokens ?? inputTokens;
-            outputTokens = parsed.response.usage.output_tokens ?? outputTokens;
-            reasoningTokens =
-              parsed.response.usage.output_tokens_details?.reasoning_tokens ??
-              parsed.response.usage.reasoning_tokens ??
-              reasoningTokens;
-            continue;
-          }
+                const legacyContent =
+                  parsed.output?.[0]?.content?.[0]?.text ??
+                  (parsed as { choices?: Array<{ delta?: { content?: string } }> }).choices?.[0]
+                    ?.delta?.content ??
+                  "";
 
-          // Fallbacks for legacy formats
-          const legacyContent =
-            parsed.output?.[0]?.content?.[0]?.text ??
-            (parsed as { choices?: Array<{ delta?: { content?: string } }> }).choices?.[0]?.delta
-              ?.content ??
-            "";
+                if (legacyContent) {
+                  fullContent += legacyContent;
+                  onChunk({ content: legacyContent, done: false });
+                }
 
-          if (legacyContent) {
-            fullContent += legacyContent;
-            onChunk({ content: legacyContent, done: false });
-          }
-
-          if (parsed.usage) {
-            inputTokens = parsed.usage.input_tokens ?? inputTokens;
-            outputTokens = parsed.usage.output_tokens ?? outputTokens;
-            reasoningTokens =
-              parsed.usage.output_tokens_details?.reasoning_tokens ??
-              parsed.usage.reasoning_tokens ??
-              reasoningTokens;
-          }
-        } catch {
-          // Ignore parse errors for incomplete chunks
+                if (parsed.usage) {
+                  inputTokens = parsed.usage.input_tokens ?? inputTokens;
+                  outputTokens = parsed.usage.output_tokens ?? outputTokens;
+                  reasoningTokens =
+                    parsed.usage.output_tokens_details?.reasoning_tokens ??
+                    parsed.usage.reasoning_tokens ??
+                    reasoningTokens;
+                }
+              } catch {
+                // Ignore parse errors for incomplete chunks
+              }
+            }
+          },
+          onDone: () => resolve(),
+          onError: (error) => reject(new Error(`${error.code}: ${error.message}`)),
         }
-      }
-    }
+      );
+    });
 
     onChunk({ content: "", done: true });
     const latencyMs = Date.now() - startTime;
@@ -282,7 +284,8 @@ export class OpenAIProvider implements BaseProvider {
   async testConnection(): Promise<boolean> {
     try {
       // Use a simple test with gpt-5-nano (cheapest model)
-      const response = await fetch(this.endpoint, {
+      const { status } = await this.transport.request({
+        url: this.endpoint,
         method: "POST",
         headers: createHeaders("openai", this.apiKey),
         body: JSON.stringify({
@@ -290,8 +293,9 @@ export class OpenAIProvider implements BaseProvider {
           input: "Say 'ok'",
           max_output_tokens: 10,
         }),
+        timeoutMs: 15000,
       });
-      return response.ok;
+      return status >= 200 && status < 300;
     } catch {
       return false;
     }

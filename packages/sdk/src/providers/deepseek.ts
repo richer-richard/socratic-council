@@ -12,14 +12,23 @@ import type {
   CompletionResult,
   StreamCallback,
 } from "./base.js";
-import { createHeaders } from "./base.js";
+import { createHeaders, resolveEndpoint } from "./base.js";
+import { type Transport, createFetchTransport } from "../transport.js";
 
 export class DeepSeekProvider implements BaseProvider {
   readonly provider = "deepseek" as const;
   readonly apiKey: string;
+  private readonly endpoint: string;
+  private readonly transport: Transport;
 
-  constructor(apiKey: string) {
+  constructor(apiKey: string, options?: { baseUrl?: string; transport?: Transport }) {
     this.apiKey = apiKey;
+    this.endpoint = resolveEndpoint(
+      options?.baseUrl,
+      "/v1/chat/completions",
+      API_ENDPOINTS.deepseek
+    );
+    this.transport = options?.transport ?? createFetchTransport();
   }
 
   /**
@@ -65,18 +74,20 @@ export class DeepSeekProvider implements BaseProvider {
     const startTime = Date.now();
     const body = this.buildRequestBody(agent, messages, options, false);
 
-    const response = await fetch(API_ENDPOINTS.deepseek, {
+    const { status, body: responseBody } = await this.transport.request({
+      url: this.endpoint,
       method: "POST",
       headers: createHeaders("deepseek", this.apiKey),
       body: JSON.stringify(body),
+      timeoutMs: options.timeoutMs,
+      signal: options.signal,
     });
 
-    if (!response.ok) {
-      const error = await response.text();
-      throw new Error(`DeepSeek API error: ${response.status} - ${error}`);
+    if (status < 200 || status >= 300) {
+      throw new Error(`DeepSeek API error: ${status} - ${responseBody}`);
     }
 
-    const data = await response.json();
+    const data = JSON.parse(responseBody);
     const latencyMs = Date.now() - startTime;
 
     const choice = data.choices?.[0];
@@ -109,84 +120,68 @@ export class DeepSeekProvider implements BaseProvider {
     const startTime = Date.now();
     const body = this.buildRequestBody(agent, messages, options, true);
 
-    const response = await fetch(API_ENDPOINTS.deepseek, {
-      method: "POST",
-      headers: createHeaders("deepseek", this.apiKey),
-      body: JSON.stringify(body),
-    });
-
-    if (!response.ok) {
-      const error = await response.text();
-      throw new Error(`DeepSeek API error: ${response.status} - ${error}`);
-    }
-
-    if (!response.body) {
-      throw new Error("No response body for streaming");
-    }
-
     let fullContent = "";
     let inputTokens = 0;
     let outputTokens = 0;
     let reasoningTokens: number | undefined;
     let finishReason: "stop" | "length" | "error" = "stop";
-
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
     let buffer = "";
 
-    try {
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
+    await new Promise<void>((resolve, reject) => {
+      this.transport.stream(
+        {
+          url: this.endpoint,
+          method: "POST",
+          headers: createHeaders("deepseek", this.apiKey),
+          body: JSON.stringify(body),
+          timeoutMs: options.timeoutMs,
+          idleTimeoutMs: options.idleTimeoutMs,
+          signal: options.signal,
+        },
+        {
+          onChunk: (text) => {
+            buffer += text;
+            const lines = buffer.split("\n");
+            buffer = lines.pop() ?? "";
 
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop() ?? "";
+            for (const line of lines) {
+              const trimmedLine = line.trim();
+              if (!trimmedLine || !trimmedLine.startsWith("data: ")) continue;
 
-        for (const line of lines) {
-          const trimmedLine = line.trim();
-          if (!trimmedLine || !trimmedLine.startsWith("data: ")) continue;
+              const jsonStr = trimmedLine.slice(6);
+              if (jsonStr === "[DONE]") continue;
 
-          const jsonStr = trimmedLine.slice(6);
-          if (jsonStr === "[DONE]") continue;
+              try {
+                const data = JSON.parse(jsonStr);
+                const choice = data.choices?.[0];
+                const delta = choice?.delta;
 
-          try {
-            const data = JSON.parse(jsonStr);
-            const choice = data.choices?.[0];
-            const delta = choice?.delta;
+                if (delta?.content) {
+                  fullContent += delta.content;
+                  onChunk({ content: delta.content, done: false });
+                }
 
-            if (delta?.content) {
-              fullContent += delta.content;
-              onChunk({ content: delta.content, done: false });
-            }
+                if (data.usage) {
+                  inputTokens = data.usage.prompt_tokens ?? inputTokens;
+                  outputTokens = data.usage.completion_tokens ?? outputTokens;
+                  if (data.usage.completion_tokens_details?.reasoning_tokens) {
+                    reasoningTokens = data.usage.completion_tokens_details.reasoning_tokens;
+                  }
+                }
 
-            // DeepSeek may stream reasoning_content separately
-            if (delta?.reasoning_content) {
-              // We can optionally handle reasoning content
-              // For now, we track it but don't output it to the main stream
-            }
-
-            // Update token counts if available (usually only in final chunk)
-            if (data.usage) {
-              inputTokens = data.usage.prompt_tokens ?? inputTokens;
-              outputTokens = data.usage.completion_tokens ?? outputTokens;
-              if (data.usage.completion_tokens_details?.reasoning_tokens) {
-                reasoningTokens = data.usage.completion_tokens_details.reasoning_tokens;
+                if (choice?.finish_reason) {
+                  finishReason = this.mapFinishReason(choice.finish_reason);
+                }
+              } catch {
+                // Skip malformed JSON lines
               }
             }
-
-            // Check finish reason
-            if (choice?.finish_reason) {
-              finishReason = this.mapFinishReason(choice.finish_reason);
-            }
-          } catch {
-            // Skip malformed JSON lines
-          }
+          },
+          onDone: () => resolve(),
+          onError: (error) => reject(new Error(`${error.code}: ${error.message}`)),
         }
-      }
-    } finally {
-      reader.releaseLock();
-    }
+      );
+    });
 
     onChunk({ content: "", done: true });
 
@@ -221,7 +216,8 @@ export class DeepSeekProvider implements BaseProvider {
    */
   async testConnection(): Promise<boolean> {
     try {
-      const response = await fetch(API_ENDPOINTS.deepseek, {
+      const { status } = await this.transport.request({
+        url: this.endpoint,
         method: "POST",
         headers: createHeaders("deepseek", this.apiKey),
         body: JSON.stringify({
@@ -229,9 +225,10 @@ export class DeepSeekProvider implements BaseProvider {
           messages: [{ role: "user", content: "Hello" }],
           max_tokens: 10,
         }),
+        timeoutMs: 15000,
       });
 
-      return response.ok;
+      return status >= 200 && status < 300;
     } catch {
       return false;
     }

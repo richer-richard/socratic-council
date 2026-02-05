@@ -18,7 +18,9 @@ import {
   type CompletionResult,
   type StreamCallback,
   createHeaders,
+  resolveEndpoint,
 } from "./base.js";
+import { type Transport, createFetchTransport } from "../transport.js";
 
 interface AnthropicMessage {
   role: "user" | "assistant";
@@ -71,10 +73,12 @@ export class AnthropicProvider implements BaseProvider {
   readonly provider = "anthropic" as const;
   readonly apiKey: string;
   private readonly endpoint: string;
+  private readonly transport: Transport;
 
-  constructor(apiKey: string) {
+  constructor(apiKey: string, options?: { baseUrl?: string; transport?: Transport }) {
     this.apiKey = apiKey;
-    this.endpoint = API_ENDPOINTS.anthropic;
+    this.endpoint = resolveEndpoint(options?.baseUrl, "/v1/messages", API_ENDPOINTS.anthropic);
+    this.transport = options?.transport ?? createFetchTransport();
   }
 
   async complete(
@@ -90,18 +94,20 @@ export class AnthropicProvider implements BaseProvider {
       stream: false,
     });
 
-    const response = await fetch(this.endpoint, {
+    const { status, body } = await this.transport.request({
+      url: this.endpoint,
       method: "POST",
       headers: createHeaders("anthropic", this.apiKey),
       body: JSON.stringify(requestBody),
+      timeoutMs: options?.timeoutMs,
+      signal: options?.signal,
     });
 
-    if (!response.ok) {
-      const error = await response.text();
-      throw new Error(`Anthropic API error: ${response.status} - ${error}`);
+    if (status < 200 || status >= 300) {
+      throw new Error(`Anthropic API error: ${status} - ${body}`);
     }
 
-    const data = (await response.json()) as AnthropicResponse;
+    const data = JSON.parse(body) as AnthropicResponse;
     const latencyMs = Date.now() - startTime;
 
     // Extract content from the response
@@ -135,62 +141,58 @@ export class AnthropicProvider implements BaseProvider {
       stream: true,
     });
 
-    const response = await fetch(this.endpoint, {
-      method: "POST",
-      headers: createHeaders("anthropic", this.apiKey),
-      body: JSON.stringify(requestBody),
-    });
-
-    if (!response.ok) {
-      const error = await response.text();
-      throw new Error(`Anthropic API error: ${response.status} - ${error}`);
-    }
-
-    const reader = response.body?.getReader();
-    if (!reader) {
-      throw new Error("No response body");
-    }
-
-    const decoder = new TextDecoder();
     let fullContent = "";
     let inputTokens = 0;
     let outputTokens = 0;
     let buffer = "";
 
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
+    await new Promise<void>((resolve, reject) => {
+      this.transport.stream(
+        {
+          url: this.endpoint,
+          method: "POST",
+          headers: createHeaders("anthropic", this.apiKey),
+          body: JSON.stringify(requestBody),
+          timeoutMs: options?.timeoutMs,
+          idleTimeoutMs: options?.idleTimeoutMs,
+          signal: options?.signal,
+        },
+        {
+          onChunk: (text) => {
+            buffer += text;
+            const lines = buffer.split("\n");
+            buffer = lines.pop() ?? "";
 
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split("\n");
-      buffer = lines.pop() ?? ""; // Keep incomplete line in buffer
+            for (const line of lines) {
+              if (!line.startsWith("data: ")) continue;
+              const data = line.slice(6);
+              if (data === "[DONE]") continue;
 
-      for (const line of lines) {
-        if (!line.startsWith("data: ")) continue;
-        
-        const data = line.slice(6);
-        if (data === "[DONE]") continue;
+              try {
+                const event = JSON.parse(data) as AnthropicStreamEvent;
 
-        try {
-          const event = JSON.parse(data) as AnthropicStreamEvent;
+                if (event.type === "content_block_delta" && event.delta?.text) {
+                  fullContent += event.delta.text;
+                  onChunk({ content: event.delta.text, done: false });
+                }
 
-          if (event.type === "content_block_delta" && event.delta?.text) {
-            fullContent += event.delta.text;
-            onChunk({ content: event.delta.text, done: false });
-          }
+                if (event.type === "message_delta" && event.usage) {
+                  outputTokens = event.usage.output_tokens;
+                }
 
-          if (event.type === "message_delta" && event.usage) {
-            outputTokens = event.usage.output_tokens;
-          }
-
-          if (event.type === "message_start" && event.usage) {
-            inputTokens = event.usage.input_tokens;
-          }
-        } catch {
-          // Ignore parse errors for incomplete chunks
+                if (event.type === "message_start" && event.usage) {
+                  inputTokens = event.usage.input_tokens;
+                }
+              } catch {
+                // Ignore parse errors for incomplete chunks
+              }
+            }
+          },
+          onDone: () => resolve(),
+          onError: (error) => reject(new Error(`${error.code}: ${error.message}`)),
         }
-      }
-    }
+      );
+    });
 
     onChunk({ content: "", done: true });
     const latencyMs = Date.now() - startTime;
@@ -208,16 +210,18 @@ export class AnthropicProvider implements BaseProvider {
 
   async testConnection(): Promise<boolean> {
     try {
-      const response = await fetch(this.endpoint, {
+      const { status } = await this.transport.request({
+        url: this.endpoint,
         method: "POST",
         headers: createHeaders("anthropic", this.apiKey),
         body: JSON.stringify({
-          model: "claude-haiku-4-5",
+          model: "claude-haiku-4-5-20251001",
           messages: [{ role: "user", content: "Say 'ok'" }],
           max_tokens: 10,
         }),
+        timeoutMs: 15000,
       });
-      return response.ok;
+      return status >= 200 && status < 300;
     } catch {
       return false;
     }

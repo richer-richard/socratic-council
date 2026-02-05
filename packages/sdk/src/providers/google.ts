@@ -12,23 +12,31 @@ import type {
   CompletionResult,
   StreamCallback,
 } from "./base.js";
-import { createHeaders } from "./base.js";
+import { createHeaders, resolveEndpoint } from "./base.js";
+import { type Transport, createFetchTransport } from "../transport.js";
 
 export class GoogleProvider implements BaseProvider {
   readonly provider = "google" as const;
   readonly apiKey: string;
+  private readonly baseUrl: string;
+  private readonly transport: Transport;
 
-  constructor(apiKey: string) {
+  constructor(apiKey: string, options?: { baseUrl?: string; transport?: Transport }) {
     this.apiKey = apiKey;
+    this.baseUrl = resolveEndpoint(
+      options?.baseUrl,
+      "/v1beta/models",
+      API_ENDPOINTS.google
+    );
+    this.transport = options?.transport ?? createFetchTransport();
   }
 
   /**
    * Build the full API URL for a model
    */
   private getApiUrl(model: GeminiModel, stream: boolean): string {
-    const baseUrl = API_ENDPOINTS.google;
     const action = stream ? "streamGenerateContent" : "generateContent";
-    return `${baseUrl}/${model}:${action}`;
+    return `${this.baseUrl}/${model}:${action}`;
   }
 
   /**
@@ -118,18 +126,20 @@ export class GoogleProvider implements BaseProvider {
     const url = this.getApiUrl(agent.model as GeminiModel, false);
     const body = this.buildRequestBody(agent, messages, options);
 
-    const response = await fetch(url, {
+    const { status, body: responseBody } = await this.transport.request({
+      url,
       method: "POST",
       headers: createHeaders("google", this.apiKey),
       body: JSON.stringify(body),
+      timeoutMs: options.timeoutMs,
+      signal: options.signal,
     });
 
-    if (!response.ok) {
-      const error = await response.text();
-      throw new Error(`Google API error: ${response.status} - ${error}`);
+    if (status < 200 || status >= 300) {
+      throw new Error(`Google API error: ${status} - ${responseBody}`);
     }
 
-    const data = await response.json();
+    const data = JSON.parse(responseBody);
     const latencyMs = Date.now() - startTime;
 
     // Extract content from Gemini response
@@ -164,79 +174,66 @@ export class GoogleProvider implements BaseProvider {
     const url = `${this.getApiUrl(agent.model as GeminiModel, true)}?alt=sse`;
     const body = this.buildRequestBody(agent, messages, options);
 
-    const response = await fetch(url, {
-      method: "POST",
-      headers: createHeaders("google", this.apiKey),
-      body: JSON.stringify(body),
-    });
-
-    if (!response.ok) {
-      const error = await response.text();
-      throw new Error(`Google API error: ${response.status} - ${error}`);
-    }
-
-    if (!response.body) {
-      throw new Error("No response body for streaming");
-    }
-
     let fullContent = "";
     let inputTokens = 0;
     let outputTokens = 0;
     let reasoningTokens: number | undefined;
     let finishReason: "stop" | "length" | "error" = "stop";
-
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
     let buffer = "";
 
-    try {
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
+    await new Promise<void>((resolve, reject) => {
+      this.transport.stream(
+        {
+          url,
+          method: "POST",
+          headers: createHeaders("google", this.apiKey),
+          body: JSON.stringify(body),
+          timeoutMs: options.timeoutMs,
+          idleTimeoutMs: options.idleTimeoutMs,
+          signal: options.signal,
+        },
+        {
+          onChunk: (text) => {
+            buffer += text;
+            const lines = buffer.split("\n");
+            buffer = lines.pop() ?? "";
 
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop() ?? "";
+            for (const line of lines) {
+              if (!line.startsWith("data: ")) continue;
+              const jsonStr = line.slice(6).trim();
+              if (!jsonStr || jsonStr === "[DONE]") continue;
 
-        for (const line of lines) {
-          if (line.startsWith("data: ")) {
-            const jsonStr = line.slice(6).trim();
-            if (!jsonStr || jsonStr === "[DONE]") continue;
+              try {
+                const data = JSON.parse(jsonStr);
+                const candidate = data.candidates?.[0];
+                const parts = candidate?.content?.parts ?? [];
 
-            try {
-              const data = JSON.parse(jsonStr);
-              
-              // Extract content from streaming response
-              const candidate = data.candidates?.[0];
-              const parts = candidate?.content?.parts ?? [];
-              
-              for (const part of parts) {
-                if (part.text) {
-                  fullContent += part.text;
-                  onChunk({ content: part.text, done: false });
+                for (const part of parts) {
+                  if (part.text) {
+                    fullContent += part.text;
+                    onChunk({ content: part.text, done: false });
+                  }
                 }
-              }
 
-              // Update token counts if available
-              if (data.usageMetadata) {
-                inputTokens = data.usageMetadata.promptTokenCount ?? inputTokens;
-                outputTokens = data.usageMetadata.candidatesTokenCount ?? outputTokens;
-                reasoningTokens = data.usageMetadata.thoughtsTokenCount ?? reasoningTokens;
-              }
+                if (data.usageMetadata) {
+                  inputTokens = data.usageMetadata.promptTokenCount ?? inputTokens;
+                  outputTokens = data.usageMetadata.candidatesTokenCount ?? outputTokens;
+                  reasoningTokens = data.usageMetadata.thoughtsTokenCount ?? reasoningTokens;
+                }
 
-              // Check finish reason
-              if (candidate?.finishReason) {
-                finishReason = this.mapFinishReason(candidate.finishReason);
+                if (candidate?.finishReason) {
+                  finishReason = this.mapFinishReason(candidate.finishReason);
+                }
+              } catch {
+                // Skip malformed JSON lines
               }
-            } catch {
-              // Skip malformed JSON lines
             }
-          }
+          },
+          onDone: () => resolve(),
+          onError: (error) => reject(new Error(`${error.code}: ${error.message}`)),
         }
-      }
-    } finally {
-      reader.releaseLock();
-    }
+      );
+    });
 
     onChunk({ content: "", done: true });
 
@@ -276,17 +273,19 @@ export class GoogleProvider implements BaseProvider {
   async testConnection(): Promise<boolean> {
     try {
       // Use a simple request to test the API key
-      const url = `${API_ENDPOINTS.google}/gemini-2.0-flash-lite:generateContent`;
-      const response = await fetch(url, {
+      const url = `${this.baseUrl}/gemini-2.0-flash-lite:generateContent`;
+      const { status } = await this.transport.request({
+        url,
         method: "POST",
         headers: createHeaders("google", this.apiKey),
         body: JSON.stringify({
           contents: [{ role: "user", parts: [{ text: "Hello" }] }],
           generationConfig: { maxOutputTokens: 10 },
         }),
+        timeoutMs: 15000,
       });
 
-      return response.ok;
+      return status >= 200 && status < 300;
     } catch {
       return false;
     }

@@ -595,16 +595,16 @@ export function Chat({ topic, onNavigate }: ChatProps) {
     return MODEL_DISPLAY_NAMES[modelId] || modelId;
   }, [config.models]);
 
-  const getProxyForProvider = useCallback((provider: Provider) => {
-    const override = config.proxyOverrides?.[provider];
-    if (override && override.type !== "none") {
-      return { proxy: override, source: "override" as const };
+  /**
+   * Get proxy configuration - unified for all providers
+   * Returns the global proxy if configured, otherwise undefined (direct connection)
+   */
+  const getProxy = useCallback(() => {
+    if (config.proxy.type !== "none" && config.proxy.host && config.proxy.port > 0) {
+      return config.proxy;
     }
-    if (config.proxy.type !== "none") {
-      return { proxy: config.proxy, source: "default" as const };
-    }
-    return { proxy: undefined, source: "none" as const };
-  }, [config.proxy, config.proxyOverrides]);
+    return undefined;
+  }, [config.proxy]);
 
   // Generate agent response using real API
   const generateAgentResponse = useCallback(async (agentId: CouncilAgentId): Promise<ChatMessage | null> => {
@@ -651,15 +651,40 @@ export function Chat({ topic, onNavigate }: ChatProps) {
 
     const idleTimeoutMs = 120000;
     const requestTimeoutMs = agentConfig.provider === "google" ? 240000 : 180000;
-    const { proxy: providerProxy, source: proxySource } = getProxyForProvider(agentConfig.provider);
+    const proxy = getProxy();
 
     apiLogger.log("info", agentConfig.provider, "Dispatching request", {
       model,
-      proxy: providerProxy?.type ?? "none",
-      proxySource,
+      proxy: proxy?.type ?? "none (direct)",
       requestTimeoutMs,
       idleTimeoutMs,
     });
+
+    let streamingContent = "";
+    let lastStreamFlushAt = 0;
+    let streamFlushTimer: ReturnType<typeof setTimeout> | null = null;
+    const clearStreamFlushTimer = () => {
+      if (streamFlushTimer) {
+        clearTimeout(streamFlushTimer);
+        streamFlushTimer = null;
+      }
+    };
+    const flushStreamingContent = (force = false) => {
+      if (abortRef.current) return;
+      const now = Date.now();
+      if (!force && now - lastStreamFlushAt < 50) return;
+      lastStreamFlushAt = now;
+      setMessages((prev) =>
+        prev.map((m) => (m.id === newMessage.id ? { ...m, content: streamingContent } : m))
+      );
+    };
+    const scheduleStreamFlush = () => {
+      if (streamFlushTimer) return;
+      streamFlushTimer = setTimeout(() => {
+        streamFlushTimer = null;
+        flushStreamingContent(true);
+      }, 60);
+    };
 
     try {
     let modelUsed = model;
@@ -670,11 +695,23 @@ export function Chat({ topic, onNavigate }: ChatProps) {
         credential,
         modelUsed,
         conversationHistory,
-        () => {
-          // Check if aborted during streaming
+        (chunk) => {
           if (abortRef.current) return;
+          if (chunk.content) {
+            streamingContent += chunk.content;
+          }
+          if (chunk.done) {
+            clearStreamFlushTimer();
+            flushStreamingContent(true);
+            return;
+          }
+          if (Date.now() - lastStreamFlushAt >= 50) {
+            flushStreamingContent(true);
+          } else {
+            scheduleStreamFlush();
+          }
         },
-        providerProxy,
+        proxy,
         {
           idleTimeoutMs,
           requestTimeoutMs,
@@ -700,10 +737,23 @@ export function Chat({ topic, onNavigate }: ChatProps) {
           credential,
           modelUsed,
           conversationHistory,
-          () => {
+          (chunk) => {
             if (abortRef.current) return;
+            if (chunk.content) {
+              streamingContent += chunk.content;
+            }
+            if (chunk.done) {
+              clearStreamFlushTimer();
+              flushStreamingContent(true);
+              return;
+            }
+            if (Date.now() - lastStreamFlushAt >= 50) {
+              flushStreamingContent(true);
+            } else {
+              scheduleStreamFlush();
+            }
           },
-          providerProxy,
+          proxy,
           {
             idleTimeoutMs,
             requestTimeoutMs,
@@ -775,10 +825,11 @@ export function Chat({ topic, onNavigate }: ChatProps) {
 
       return finalMessage;
     } finally {
+      clearStreamFlushTimer();
       activeRequestsRef.current.delete(agentId);
       setTypingAgents((prev) => prev.filter((id) => id !== agentId));
     }
-  }, [config, buildConversationHistory, getProxyForProvider]);
+  }, [config, buildConversationHistory, getProxy]);
 
   // Main discussion loop
   const runDiscussion = useCallback(async () => {

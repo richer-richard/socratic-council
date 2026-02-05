@@ -15,7 +15,6 @@ export function Home({ onNavigate }: HomeProps) {
     config,
     updateCredential,
     updateProxy,
-    updateProxyOverride,
     updatePreferences,
     updateModel,
     hasAnyApiKey,
@@ -181,7 +180,6 @@ export function Home({ onNavigate }: HomeProps) {
         config={config}
         onUpdateCredential={updateCredential}
         onUpdateProxy={updateProxy}
-        onUpdateProxyOverride={updateProxyOverride}
         onUpdatePreferences={updatePreferences}
         onUpdateModel={updateModel}
       />

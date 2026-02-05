@@ -23,6 +23,7 @@ import {
   type StreamCallback,
   formatConversationHistory,
 } from "@socratic-council/sdk";
+import type { Transport } from "@socratic-council/sdk";
 import { runBiddingRound } from "./bidding.js";
 import { CostTrackerEngine } from "./cost.js";
 import { ConflictDetector } from "./conflict.js";
@@ -74,9 +75,10 @@ export class Council {
   constructor(
     credentials: ProviderCredentials,
     config?: Partial<CouncilConfig>,
-    agents?: Record<AgentId, AgentConfig>
+    agents?: Record<AgentId, AgentConfig>,
+    options?: { transport?: Transport }
   ) {
-    this.providerManager = new ProviderManager(credentials);
+    this.providerManager = new ProviderManager(credentials, { transport: options?.transport });
 
     const mergedConfig: CouncilConfig = {
       topic: config?.topic ?? "",
@@ -449,7 +451,11 @@ export class Council {
   updateCredentials(credentials: Partial<ProviderCredentials>): void {
     for (const [provider, cred] of Object.entries(credentials)) {
       if (cred?.apiKey) {
-        this.providerManager.setProvider(provider as AgentConfig["provider"], cred.apiKey);
+        this.providerManager.setProvider(
+          provider as AgentConfig["provider"],
+          cred.apiKey,
+          cred.baseUrl
+        );
       }
     }
   }
