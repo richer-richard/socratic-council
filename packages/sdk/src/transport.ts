@@ -277,15 +277,20 @@ export function createFetchTransport(options: FetchTransportOptions = {}): Trans
         return;
       }
 
+      const decoder = new TextDecoder();
+
       while (!finished) {
         const { done, value } = await reader.read();
         if (done) break;
         if (value) {
           lastChunkAt = Date.now();
-          const text = new TextDecoder().decode(value, { stream: true });
+          const text = decoder.decode(value, { stream: true });
           if (text) handlers.onChunk(text);
         }
       }
+
+      const tail = decoder.decode();
+      if (tail) handlers.onChunk(tail);
 
       if (!finished) {
         finishDone();
