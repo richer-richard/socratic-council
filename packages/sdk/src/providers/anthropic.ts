@@ -20,6 +20,7 @@ import {
   createHeaders,
   resolveEndpoint,
 } from "./base.js";
+import { createSseParser } from "./sse.js";
 import { type Transport, createFetchTransport } from "../transport.js";
 
 interface AnthropicMessage {
@@ -150,13 +151,9 @@ export class AnthropicProvider implements BaseProvider {
     let fullContent = "";
     let inputTokens = 0;
     let outputTokens = 0;
-    let buffer = "";
-
-    const processLine = (line: string) => {
-      if (!line.startsWith("data: ")) return;
-      const data = line.slice(6);
+    const parser = createSseParser((dataLine) => {
+      const data = dataLine.trim();
       if (!data || data === "[DONE]") return;
-
       try {
         const event = JSON.parse(data) as AnthropicStreamEvent;
 
@@ -182,7 +179,7 @@ export class AnthropicProvider implements BaseProvider {
       } catch {
         // Ignore parse errors for incomplete chunks
       }
-    };
+    });
 
     await new Promise<void>((resolve, reject) => {
       this.transport.stream(
@@ -197,21 +194,10 @@ export class AnthropicProvider implements BaseProvider {
         },
         {
           onChunk: (text) => {
-            buffer += text;
-            const lines = buffer.split("\n");
-            buffer = lines.pop() ?? "";
-
-            for (const line of lines) {
-              processLine(line);
-            }
+            parser.push(text);
           },
           onDone: () => {
-            // Flush any buffered line that didn't end with a newline.
-            const trailing = buffer.trim();
-            if (trailing) {
-              processLine(trailing);
-            }
-            buffer = "";
+            parser.flush();
             resolve();
           },
           onError: (error) => reject(new Error(`${error.code}: ${error.message}`)),

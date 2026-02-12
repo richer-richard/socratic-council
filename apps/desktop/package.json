@@ -21,8 +21,16 @@
     "@socratic-council/shared": "workspace:*",
     "@tauri-apps/api": "^2.10.1",
     "@tauri-apps/plugin-store": "^2.4.2",
+    "highlight.js": "^11.11.1",
+    "katex": "^0.16.28",
     "react": "^18.3.0",
     "react-dom": "^18.3.0",
+    "react-markdown": "^10.1.0",
+    "rehype-highlight": "^7.0.2",
+    "rehype-katex": "^7.0.1",
+    "remark-breaks": "^4.0.0",
+    "remark-gfm": "^4.0.1",
+    "remark-math": "^6.0.0",
     "zustand": "^5.0.0"
   },
   "devDependencies": {

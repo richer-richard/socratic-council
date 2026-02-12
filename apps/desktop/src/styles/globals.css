@@ -1025,8 +1025,108 @@ body {
   color: var(--ink-700);
   font-size: 1rem;
   line-height: 1.65;
-  white-space: pre-wrap;
   word-wrap: break-word;
+}
+
+.markdown-content {
+  color: inherit;
+  font: inherit;
+}
+
+.markdown-content > :first-child {
+  margin-top: 0;
+}
+
+.markdown-content > :last-child {
+  margin-bottom: 0;
+}
+
+.markdown-content p {
+  margin: 0.25rem 0 0.75rem;
+}
+
+.markdown-content a {
+  color: var(--accent-sky, #38bdf8);
+  text-decoration: none;
+}
+
+.markdown-content a:hover {
+  text-decoration: underline;
+}
+
+.markdown-content hr {
+  border: 0;
+  border-top: 1px solid var(--line-soft);
+  margin: 0.9rem 0;
+}
+
+.markdown-content blockquote {
+  margin: 0.75rem 0;
+  padding: 0.55rem 0.75rem;
+  border-left: 3px solid rgba(148, 163, 184, 0.45);
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 10px;
+  color: var(--ink-600);
+}
+
+.markdown-content code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New",
+    monospace;
+  font-size: 0.92em;
+  background: rgba(15, 23, 42, 0.55);
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  padding: 0.12rem 0.35rem;
+  border-radius: 8px;
+}
+
+.markdown-content pre {
+  margin: 0.75rem 0;
+  padding: 0.85rem 1rem;
+  background: rgba(15, 23, 42, 0.72);
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  border-radius: 14px;
+  overflow: auto;
+}
+
+.markdown-content pre code {
+  background: transparent;
+  border: 0;
+  padding: 0;
+  border-radius: 0;
+  font-size: 0.9em;
+}
+
+.markdown-content table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0.85rem 0;
+  overflow: hidden;
+  border-radius: 12px;
+}
+
+.markdown-content th,
+.markdown-content td {
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  padding: 0.4rem 0.55rem;
+}
+
+.markdown-content th {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--ink-500);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 0.72rem;
+}
+
+.markdown-content ul,
+.markdown-content ol {
+  margin: 0.35rem 0 0.85rem;
+  padding-left: 1.35rem;
+}
+
+.markdown-content li {
+  margin: 0.2rem 0;
 }
 
 .message-quote {

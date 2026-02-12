@@ -13,6 +13,7 @@ import type {
   StreamCallback,
 } from "./base.js";
 import { createHeaders, resolveEndpoint } from "./base.js";
+import { createSseParser } from "./sse.js";
 import { type Transport, createFetchTransport } from "../transport.js";
 
 export interface KimiCompletionOptions extends CompletionOptions {
@@ -135,15 +136,9 @@ export class KimiProvider implements BaseProvider {
     let inputTokens = 0;
     let outputTokens = 0;
     let finishReason: "stop" | "length" | "error" = "stop";
-    let buffer = "";
-
-    const processLine = (line: string) => {
-      const trimmedLine = line.trim();
-      if (!trimmedLine || !trimmedLine.startsWith("data: ")) return;
-
-      const jsonStr = trimmedLine.slice(6);
+    const parser = createSseParser((dataLine) => {
+      const jsonStr = dataLine.trim();
       if (!jsonStr || jsonStr === "[DONE]") return;
-
       try {
         const data = JSON.parse(jsonStr);
         const choice = data.choices?.[0];
@@ -165,7 +160,7 @@ export class KimiProvider implements BaseProvider {
       } catch {
         // Skip malformed JSON lines
       }
-    };
+    });
 
     await new Promise<void>((resolve, reject) => {
       this.transport.stream(
@@ -180,19 +175,10 @@ export class KimiProvider implements BaseProvider {
         },
         {
           onChunk: (text) => {
-            buffer += text;
-            const lines = buffer.split("\n");
-            buffer = lines.pop() ?? "";
-
-            for (const line of lines) {
-              processLine(line);
-            }
+            parser.push(text);
           },
           onDone: () => {
-            if (buffer.trim()) {
-              processLine(buffer);
-            }
-            buffer = "";
+            parser.flush();
             resolve();
           },
           onError: (error) => reject(new Error(`${error.code}: ${error.message}`)),

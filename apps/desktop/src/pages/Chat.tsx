@@ -11,6 +11,7 @@ import {
   REACTION_CATALOG,
   type ReactionId,
 } from "../components/icons/ReactionIcons";
+import { Markdown } from "../components/Markdown";
 import { ConflictGraph } from "../components/ConflictGraph";
 import { ConflictDetector, CostTrackerEngine, ConversationMemoryManager, createMemoryManager, FairnessManager } from "@socratic-council/core";
 import type {
@@ -91,10 +92,15 @@ You are in a real-time group chat. Keep responses short and engaging.
 
 Rules:
 - 1–2 short paragraphs (max ~140 words).
-- No headings or bullet lists.
+- Avoid headings and long bullet lists (keep it chatty). Use them only if plain text is clearly insufficient.
 - Directly address a specific point from someone else by name.
 - Add exactly one new claim, example, or counterpoint; don’t restate your thesis.
 - End with one concrete question to the group.
+
+Markdown:
+- Markdown is supported (GFM tables, links, **bold**, \`code\`, fenced code blocks, and LaTeX math via $...$ / $$...$$).
+- Prefer plain text for normal conversations. Use Markdown only when it materially improves clarity (math, CS, structured data).
+- If you use math/code, write the *real* formula/code (not placeholders).
 
 Quoting/Reactions:
 - You MUST include @quote(MSG_ID) for a specific prior message. You can quote MULTIPLE messages from different speakers or even the same speaker: @quote(MSG_A) @quote(MSG_B).
@@ -633,6 +639,50 @@ export function Chat({ topic, onNavigate }: ChatProps) {
     [buildEngagementPrompt, getContextMessages, topic]
   );
 
+  const buildClosingConversationHistory = useCallback(
+    (agentId: CouncilAgentId, turnsCompleted: number): APIChatMessage[] => {
+      const agentConfig = AGENT_CONFIG[agentId];
+      const history: APIChatMessage[] = [
+        {
+          role: "system",
+          content: agentConfig.systemPrompt,
+        },
+      ];
+
+      history.push({
+        role: "user",
+        content: `Discussion topic: "${topic}"`,
+      });
+
+      const { messages: contextMessages } = getContextMessages(agentId);
+      for (const msg of contextMessages) {
+        if (!isCouncilAgent(msg.agentId)) continue;
+        if (msg.agentId === agentId) {
+          history.push({ role: "assistant", content: msg.content });
+        } else {
+          const speaker = AGENT_CONFIG[msg.agentId] ?? AGENT_CONFIG.system;
+          history.push({
+            role: "user",
+            content: `${speaker.name}: ${msg.content}`,
+          });
+        }
+      }
+
+      history.push({
+        role: "user",
+        content: `The discussion has ended after ${turnsCompleted} turns. Write a short closing note:
+- 2–3 sentences total.
+- Give one concrete piece of feedback to at least one other agent by name (appreciation or critique).
+- Then say goodbye.
+- Do NOT ask any questions.
+- Do NOT include @quote(...), @react(...), or @tool(...).`,
+      });
+
+      return history;
+    },
+    [getContextMessages, topic]
+  );
+
   const resolveQuoteTargets = useCallback(
     (agentId: CouncilAgentId, explicit: string[]): string[] => {
       if (explicit.length > 0) return explicit;
@@ -961,6 +1011,101 @@ export function Chat({ topic, onNavigate }: ChatProps) {
     }
   }, [config, buildConversationHistory, buildToolContextMessages, getProxy, resolveQuoteTargets]);
 
+  const generateClosingResponse = useCallback(
+    async (agentId: CouncilAgentId, turnsCompleted: number): Promise<ChatMessage | null> => {
+      if (abortRef.current) return null;
+
+      const agentConfig = AGENT_CONFIG[agentId];
+      const credential = config.credentials[agentConfig.provider];
+      const model = config.models[agentConfig.provider];
+
+      if (!credential?.apiKey || !model) return null;
+
+      const proxy = getProxy();
+      const controller = new AbortController();
+      activeRequestsRef.current.set(agentId, controller);
+      setTypingAgents((prev) => (prev.includes(agentId) ? prev : [...prev, agentId]));
+
+      const newMessage: ChatMessage = {
+        id: `msg_${Date.now()}_${agentId}_closing`,
+        agentId,
+        content: "",
+        timestamp: Date.now(),
+        isStreaming: true,
+      };
+
+      setMessages((prev) => [...prev, newMessage]);
+
+      let streamingContent = "";
+      try {
+        const history = buildClosingConversationHistory(agentId, turnsCompleted);
+        const result = await callProvider(
+          agentConfig.provider,
+          credential,
+          model,
+          history,
+          (chunk) => {
+            if (abortRef.current) return;
+            if (chunk.content) {
+              streamingContent += chunk.content;
+              setMessages((prev) =>
+                prev.map((m) => (m.id === newMessage.id ? { ...m, content: streamingContent } : m))
+              );
+            }
+          },
+          proxy,
+          {
+            signal: controller.signal,
+            // Closing notes should be quick; keep timeouts tight.
+            idleTimeoutMs: 60000,
+            requestTimeoutMs: 90000,
+          }
+        );
+
+        if (abortRef.current) {
+          setMessages((prev) => prev.filter((m) => m.id !== newMessage.id));
+          return null;
+        }
+
+        const { cleaned } = extractActions(result.content || "");
+        const displayContent = cleaned || normalizeMessageText(result.content || streamingContent || "");
+
+        const finalMessage: ChatMessage = {
+          ...newMessage,
+          content: displayContent || "[No response received]",
+          isStreaming: false,
+          tokens: result.tokens,
+          latencyMs: result.latencyMs,
+          error: result.error,
+          metadata: {
+            model: model as ModelId,
+            latencyMs: result.latencyMs,
+          },
+        };
+
+        setMessages((prev) => prev.map((m) => (m.id === newMessage.id ? finalMessage : m)));
+
+        if (result.success) {
+          setTotalTokens((prev) => ({
+            input: prev.input + result.tokens.input,
+            output: prev.output + result.tokens.output,
+          }));
+
+          if (costTrackerRef.current) {
+            costTrackerRef.current.recordUsage(agentId, result.tokens, model);
+            setCostState(costTrackerRef.current.getState());
+          }
+        }
+
+        return finalMessage;
+      } finally {
+        activeRequestsRef.current.delete(agentId);
+        setTypingAgents((prev) => prev.filter((id) => id !== agentId));
+      }
+    },
+    [buildClosingConversationHistory, config, getProxy]
+  );
+
   // Main discussion loop
   const runDiscussion = useCallback(async () => {
     setIsRunning(true);
@@ -1061,6 +1206,26 @@ export function Chat({ topic, onNavigate }: ChatProps) {
       await new Promise(resolve => setTimeout(resolve, 500));
     }
 
+    if (!abortRef.current && turn > 0) {
+      const closingNotice: ChatMessage = {
+        id: `msg_${Date.now()}_closing_notice`,
+        agentId: "system",
+        content:
+          `Discussion ended after ${turn} turns. Closing round: quick goodbyes + feedback.`,
+        timestamp: Date.now(),
+      };
+      setMessages((prev) => [...prev, closingNotice]);
+
+      const closingAgents = AGENT_IDS.filter((id) =>
+        configuredProviders.includes(AGENT_CONFIG[id].provider)
+      );
+
+      for (const agentId of closingAgents) {
+        if (abortRef.current) break;
+        await generateClosingResponse(agentId, turn);
+      }
+    }
+
     setIsRunning(false);
   }, [
     topic,
@@ -1069,6 +1234,7 @@ export function Chat({ topic, onNavigate }: ChatProps) {
     config.preferences.showBiddingScores,
     generateBiddingScores,
     generateAgentResponse,
+    generateClosingResponse,
     configuredProviders,
     resetRuntimeState,
   ]);
@@ -1362,7 +1528,7 @@ export function Chat({ topic, onNavigate }: ChatProps) {
 
                     {/* Message body */}
                     <div className="discord-message-body">
-                      {message.content}
+                      <Markdown content={message.content} className="markdown-content" />
                       {message.isStreaming && (
                         <span className="typing-indicator">
                           <span className="typing-dot" />

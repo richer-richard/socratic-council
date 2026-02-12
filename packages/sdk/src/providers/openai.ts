@@ -20,6 +20,7 @@ import {
   createHeaders,
   resolveEndpoint,
 } from "./base.js";
+import { createSseParser } from "./sse.js";
 import { type Transport, createFetchTransport } from "../transport.js";
 
 // Models that support reasoning.effort parameter
@@ -186,13 +187,9 @@ export class OpenAIProvider implements BaseProvider {
     let outputTokens = 0;
     let reasoningTokens = 0;
     let sawDelta = false;
-    let buffer = "";
 
-    const processLine = (line: string) => {
-      if (!line.startsWith("data: ")) return;
-      const data = line.slice(6);
+    const parser = createSseParser((data) => {
       if (!data || data === "[DONE]") return;
-
       try {
         const parsed = JSON.parse(data) as OpenAIStreamEvent;
 
@@ -241,7 +238,7 @@ export class OpenAIProvider implements BaseProvider {
       } catch {
         // Ignore parse errors for incomplete chunks
       }
-    };
+    });
 
     await new Promise<void>((resolve, reject) => {
       this.transport.stream(
@@ -256,20 +253,10 @@ export class OpenAIProvider implements BaseProvider {
         },
         {
           onChunk: (text) => {
-            buffer += text;
-            const lines = buffer.split("\n");
-            buffer = lines.pop() ?? "";
-
-            for (const line of lines) {
-              processLine(line);
-            }
+            parser.push(text);
           },
           onDone: () => {
-            const trailing = buffer.trim();
-            if (trailing) {
-              processLine(trailing);
-            }
-            buffer = "";
+            parser.flush();
             resolve();
           },
           onError: (error) => reject(new Error(`${error.code}: ${error.message}`)),
