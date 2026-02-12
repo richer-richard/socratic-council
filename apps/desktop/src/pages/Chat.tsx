@@ -220,6 +220,18 @@ const REACTION_IDS = REACTION_CATALOG;
 const MAX_CONTEXT_MESSAGES = 16;
 const MAX_TOOL_ITERATIONS = 2;
 
+const DiscordVirtuosoList = forwardRef<HTMLDivElement, HTMLAttributes<HTMLDivElement>>(
+  function DiscordVirtuosoList({ className, ...props }, ref) {
+    return (
+      <div
+        {...props}
+        ref={ref}
+        className={`discord-messages ${className ?? ""}`}
+      />
+    );
+  }
+);
+
 const ACTION_PATTERNS = {
   quote: /@quote\(([^)]+)\)/g,
   react: /@react\(([^,]+),\s*([^)]+)\)/g,
@@ -360,6 +372,7 @@ export function Chat({ topic, onNavigate }: ChatProps) {
   const { config, getMaxTurns, getConfiguredProviders } = useConfig();
   const maxTurns = getMaxTurns();
   const configuredProviders = getConfiguredProviders();
+  const virtuosoComponents = useMemo(() => ({ List: DiscordVirtuosoList }), []);
 
   const messageIndexById = useMemo(() => {
     const map = new Map<string, number>();
@@ -1680,15 +1693,7 @@ export function Chat({ topic, onNavigate }: ChatProps) {
               isAtBottomRef.current = atBottom;
               setShowScrollButton(!atBottom);
             }}
-            components={{
-              List: forwardRef<HTMLDivElement, HTMLAttributes<HTMLDivElement>>((props, ref) => (
-                <div
-                  {...props}
-                  ref={ref}
-                  className={`discord-messages ${props.className ?? ""}`}
-                />
-              )),
-            }}
+            components={virtuosoComponents}
             itemContent={(_, message) => {
               const agent = AGENT_CONFIG[message.agentId] ?? AGENT_CONFIG.system;
               const isAgent = isCouncilAgent(message.agentId);
@@ -1815,7 +1820,13 @@ export function Chat({ topic, onNavigate }: ChatProps) {
 
                     {/* Message body */}
                     <div className="discord-message-body">
-                      <Markdown content={message.content} className="markdown-content" />
+                      {message.isStreaming ? (
+                        <div className="markdown-content" style={{ whiteSpace: "pre-wrap" }}>
+                          {message.content}
+                        </div>
+                      ) : (
+                        <Markdown content={message.content} className="markdown-content" />
+                      )}
                       {message.isStreaming && (
                         <span className="typing-indicator">
                           <span className="typing-dot" />

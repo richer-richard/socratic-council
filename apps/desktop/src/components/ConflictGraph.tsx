@@ -145,9 +145,9 @@ export function ConflictGraph({ conflicts, agents }: ConflictGraphProps) {
                 {sortedPairs.map((pair) => {
                   const key = `${pair.agents[0]}-${pair.agents[1]}`;
                   return (
-                    <div key={key} className="grid grid-cols-[1fr,auto] items-center gap-3 text-[11px]">
+                    <div key={key} className="grid grid-cols-[1fr,3.25rem] items-center gap-3 text-[11px]">
                       <div className="truncate">{renderPairLabel(pair)}</div>
-                      <div className="text-ink-400 tabular-nums">
+                      <div className="text-ink-400 tabular-nums text-right">
                         {Math.round(pair.score * 100)}%
                       </div>
                     </div>
@@ -157,18 +157,18 @@ export function ConflictGraph({ conflicts, agents }: ConflictGraphProps) {
             </>
           ) : (
             <>
-              <div className="grid grid-cols-[auto,1fr,auto] items-center gap-3 text-[11px] text-ink-500">
-                <span>Top tension</span>
+              <div className="grid grid-cols-[6.5rem,1fr,3.25rem] items-center gap-3 text-[11px] text-ink-500">
+                <span className="whitespace-nowrap">Top tension</span>
                 <span className="truncate">{renderPairLabel(strongestPair)}</span>
-                <span className="text-ink-400 tabular-nums">
+                <span className="text-ink-400 tabular-nums text-right">
                   {Math.round(strongestPair.score * 100)}%
                 </span>
               </div>
               {sortedPairs[1] && (
-                <div className="grid grid-cols-[auto,1fr,auto] items-center gap-3 text-[11px] text-ink-500 mt-1">
+                <div className="grid grid-cols-[6.5rem,1fr,3.25rem] items-center gap-3 text-[11px] text-ink-500 mt-1">
                   <span aria-hidden="true" />
                   <span className="truncate">{renderPairLabel(sortedPairs[1])}</span>
-                  <span className="text-ink-400 tabular-nums">
+                  <span className="text-ink-400 tabular-nums text-right">
                     {Math.round(sortedPairs[1].score * 100)}%
                   </span>
                 </div>
