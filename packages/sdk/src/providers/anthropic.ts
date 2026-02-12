@@ -67,6 +67,12 @@ interface AnthropicStreamEvent {
     input_tokens: number;
     output_tokens: number;
   };
+  message?: {
+    usage?: {
+      input_tokens: number;
+      output_tokens: number;
+    };
+  };
 }
 
 export class AnthropicProvider implements BaseProvider {
@@ -146,6 +152,38 @@ export class AnthropicProvider implements BaseProvider {
     let outputTokens = 0;
     let buffer = "";
 
+    const processLine = (line: string) => {
+      if (!line.startsWith("data: ")) return;
+      const data = line.slice(6);
+      if (!data || data === "[DONE]") return;
+
+      try {
+        const event = JSON.parse(data) as AnthropicStreamEvent;
+
+        if (event.type === "content_block_delta" && event.delta?.text) {
+          fullContent += event.delta.text;
+          onChunk({ content: event.delta.text, done: false });
+        }
+
+        if (event.type === "message_delta" && event.usage) {
+          outputTokens = event.usage.output_tokens;
+        }
+
+        if (event.type === "message_start") {
+          // Anthropic streams input token usage in the message_start payload.
+          // Depending on API version, it can appear either at the top-level `usage`
+          // or nested under `message.usage`.
+          const usage = event.usage ?? event.message?.usage;
+          if (usage) {
+            inputTokens = usage.input_tokens;
+            outputTokens = usage.output_tokens ?? outputTokens;
+          }
+        }
+      } catch {
+        // Ignore parse errors for incomplete chunks
+      }
+    };
+
     await new Promise<void>((resolve, reject) => {
       this.transport.stream(
         {
@@ -164,31 +202,18 @@ export class AnthropicProvider implements BaseProvider {
             buffer = lines.pop() ?? "";
 
             for (const line of lines) {
-              if (!line.startsWith("data: ")) continue;
-              const data = line.slice(6);
-              if (data === "[DONE]") continue;
-
-              try {
-                const event = JSON.parse(data) as AnthropicStreamEvent;
-
-                if (event.type === "content_block_delta" && event.delta?.text) {
-                  fullContent += event.delta.text;
-                  onChunk({ content: event.delta.text, done: false });
-                }
-
-                if (event.type === "message_delta" && event.usage) {
-                  outputTokens = event.usage.output_tokens;
-                }
-
-                if (event.type === "message_start" && event.usage) {
-                  inputTokens = event.usage.input_tokens;
-                }
-              } catch {
-                // Ignore parse errors for incomplete chunks
-              }
+              processLine(line);
             }
           },
-          onDone: () => resolve(),
+          onDone: () => {
+            // Flush any buffered line that didn't end with a newline.
+            const trailing = buffer.trim();
+            if (trailing) {
+              processLine(trailing);
+            }
+            buffer = "";
+            resolve();
+          },
           onError: (error) => reject(new Error(`${error.code}: ${error.message}`)),
         }
       );

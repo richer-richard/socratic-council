@@ -1,144 +1,78 @@
 /**
  * Provider Icons - SVG icons for each AI provider
- * Discord-style circular avatars with official brand colors
+ * Discord-style circular avatars using provider logo marks (SVG assets)
  */
 
 import type { Provider } from "../../stores/config";
+import openaiLogo from "../../assets/providers/openai.svg";
+import anthropicLogo from "../../assets/providers/anthropic.svg";
+import googleLogo from "../../assets/providers/google.svg";
+import deepseekLogo from "../../assets/providers/deepseek.svg";
+import kimiLogo from "../../assets/providers/kimi.svg";
 
 interface IconProps {
   className?: string;
   size?: number;
 }
 
-/** OpenAI - Black hexagon with white logo mark */
-export function OpenAIIcon({ className = "", size = 24 }: IconProps) {
+function ProviderLogo({
+  src,
+  alt,
+  className = "",
+  size = 24,
+}: { src: string; alt: string } & IconProps) {
   return (
-    <svg
-      viewBox="0 0 24 24"
-      width={size}
-      height={size}
+    <div
       className={className}
-      fill="none"
-      xmlns="http://www.w3.org/2000/svg"
+      style={{
+        width: size,
+        height: size,
+        borderRadius: "50%",
+        background: "rgba(255,255,255,0.12)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        overflow: "hidden",
+        flexShrink: 0,
+      }}
     >
-      <circle cx="12" cy="12" r="12" fill="#000000" />
-      <path
-        d="M18.5 10.5c.3-2.1-1.4-4-3.5-4.3-.4-1.6-1.8-2.7-3.5-2.7-1.4 0-2.6.8-3.2 2-.2 0-.5-.1-.7-.1-1.7 0-3.1 1.4-3.1 3.1 0 .4.1.8.2 1.2C3.6 10.4 3 11.5 3 12.8c0 2.1 1.7 3.8 3.8 3.8.4 0 .8-.1 1.2-.2.6 1 1.7 1.6 2.9 1.6 1.4 0 2.6-.8 3.2-2 .2 0 .5.1.7.1 1.7 0 3.1-1.4 3.1-3.1 0-.4-.1-.8-.2-1.2.6-.7.9-1.5.8-2.3z"
-        fill="none"
-        stroke="#FFFFFF"
-        strokeWidth="1.2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
+      <img
+        src={src}
+        alt={alt}
+        width={Math.round(size * 0.7)}
+        height={Math.round(size * 0.7)}
+        style={{ display: "block", objectFit: "contain" }}
+        draggable={false}
       />
-      <path
-        d="M12 8v8M9 11l3-3 3 3"
-        stroke="#FFFFFF"
-        strokeWidth="1.2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
+    </div>
   );
 }
 
-/** Anthropic - Coral/orange with stylized A mark */
+/** OpenAI */
+export function OpenAIIcon({ className = "", size = 24 }: IconProps) {
+  return <ProviderLogo src={openaiLogo} alt="OpenAI" className={className} size={size} />;
+}
+
+/** Anthropic */
 export function AnthropicIcon({ className = "", size = 24 }: IconProps) {
   return (
-    <svg
-      viewBox="0 0 24 24"
-      width={size}
-      height={size}
-      className={className}
-      fill="none"
-      xmlns="http://www.w3.org/2000/svg"
-    >
-      <circle cx="12" cy="12" r="12" fill="#D97757" />
-      <path
-        d="M12 5L6 17h2.5l1-2.5h5l1 2.5H18L12 5zm0 4.5l1.75 4.5h-3.5L12 9.5z"
-        fill="#FFFFFF"
-      />
-    </svg>
+    <ProviderLogo src={anthropicLogo} alt="Anthropic" className={className} size={size} />
   );
 }
 
-/** Google Gemini - Blue gradient with G/star mark */
+/** Google Gemini */
 export function GoogleIcon({ className = "", size = 24 }: IconProps) {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      width={size}
-      height={size}
-      className={className}
-      fill="none"
-      xmlns="http://www.w3.org/2000/svg"
-    >
-      <defs>
-        <linearGradient id="geminiGradient" x1="0%" y1="0%" x2="100%" y2="100%">
-          <stop offset="0%" stopColor="#4285F4" />
-          <stop offset="25%" stopColor="#EA4335" />
-          <stop offset="50%" stopColor="#FBBC05" />
-          <stop offset="75%" stopColor="#34A853" />
-          <stop offset="100%" stopColor="#4285F4" />
-        </linearGradient>
-      </defs>
-      <circle cx="12" cy="12" r="12" fill="url(#geminiGradient)" />
-      <path
-        d="M12 6l1.5 3.5L17 11l-3.5 1.5L12 16l-1.5-3.5L7 11l3.5-1.5L12 6z"
-        fill="#FFFFFF"
-      />
-      <circle cx="12" cy="11" r="1.5" fill="#FFFFFF" />
-    </svg>
-  );
+  return <ProviderLogo src={googleLogo} alt="Google Gemini" className={className} size={size} />;
 }
 
-/** DeepSeek - Blue with diamond/spark mark */
+/** DeepSeek */
 export function DeepSeekIcon({ className = "", size = 24 }: IconProps) {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      width={size}
-      height={size}
-      className={className}
-      fill="none"
-      xmlns="http://www.w3.org/2000/svg"
-    >
-      <circle cx="12" cy="12" r="12" fill="#0066FF" />
-      <path
-        d="M12 5l2 4.5 4.5 2-4.5 2-2 4.5-2-4.5L5.5 11.5l4.5-2L12 5z"
-        fill="#FFFFFF"
-      />
-      <path
-        d="M12 8.5l1 2 2 1-2 1-1 2-1-2-2-1 2-1 1-2z"
-        fill="#0066FF"
-      />
-    </svg>
-  );
+  return <ProviderLogo src={deepseekLogo} alt="DeepSeek" className={className} size={size} />;
 }
 
-/** Kimi/Moonshot - Orange gradient with crescent moon */
+/** Kimi / Moonshot */
 export function KimiIcon({ className = "", size = 24 }: IconProps) {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      width={size}
-      height={size}
-      className={className}
-      fill="none"
-      xmlns="http://www.w3.org/2000/svg"
-    >
-      <defs>
-        <linearGradient id="kimiGradient" x1="0%" y1="0%" x2="100%" y2="100%">
-          <stop offset="0%" stopColor="#FF6B35" />
-          <stop offset="100%" stopColor="#F7931E" />
-        </linearGradient>
-      </defs>
-      <circle cx="12" cy="12" r="12" fill="url(#kimiGradient)" />
-      <path
-        d="M15 7c-3.3 0-6 2.7-6 6s2.7 6 6 6c.8 0 1.5-.2 2.2-.4-1.2 1-2.8 1.4-4.4 1.4-4.1 0-7.8-3.4-7.8-7.5S8.7 5 12.8 5c1.6 0 3.1.5 4.2 1.4-.7-.3-1.3-.4-2-.4z"
-        fill="#FFFFFF"
-      />
-    </svg>
-  );
+  return <ProviderLogo src={kimiLogo} alt="Kimi" className={className} size={size} />;
 }
 
 /** System icon for system messages */

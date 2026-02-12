@@ -6,7 +6,7 @@ const agentIds = ["george", "cathy"] as const;
 describe("CostTrackerEngine", () => {
   it("tracks token totals without pricing", () => {
     const tracker = new CostTrackerEngine([...agentIds]);
-    tracker.recordUsage("george", { input: 120, output: 80 }, "gpt-5.2");
+    tracker.recordUsage("george", { input: 120, output: 80 });
 
     const state = tracker.getState();
     expect(state.totalInputTokens).toBe(120);

@@ -181,6 +181,37 @@ export class GoogleProvider implements BaseProvider {
     let finishReason: "stop" | "length" | "error" = "stop";
     let buffer = "";
 
+    const processLine = (line: string) => {
+      if (!line.startsWith("data: ")) return;
+      const jsonStr = line.slice(6).trim();
+      if (!jsonStr || jsonStr === "[DONE]") return;
+
+      try {
+        const data = JSON.parse(jsonStr);
+        const candidate = data.candidates?.[0];
+        const parts = candidate?.content?.parts ?? [];
+
+        for (const part of parts) {
+          if (part.text) {
+            fullContent += part.text;
+            onChunk({ content: part.text, done: false });
+          }
+        }
+
+        if (data.usageMetadata) {
+          inputTokens = data.usageMetadata.promptTokenCount ?? inputTokens;
+          outputTokens = data.usageMetadata.candidatesTokenCount ?? outputTokens;
+          reasoningTokens = data.usageMetadata.thoughtsTokenCount ?? reasoningTokens;
+        }
+
+        if (candidate?.finishReason) {
+          finishReason = this.mapFinishReason(candidate.finishReason);
+        }
+      } catch {
+        // Skip malformed JSON lines
+      }
+    };
+
     await new Promise<void>((resolve, reject) => {
       this.transport.stream(
         {
@@ -199,37 +230,17 @@ export class GoogleProvider implements BaseProvider {
             buffer = lines.pop() ?? "";
 
             for (const line of lines) {
-              if (!line.startsWith("data: ")) continue;
-              const jsonStr = line.slice(6).trim();
-              if (!jsonStr || jsonStr === "[DONE]") continue;
-
-              try {
-                const data = JSON.parse(jsonStr);
-                const candidate = data.candidates?.[0];
-                const parts = candidate?.content?.parts ?? [];
-
-                for (const part of parts) {
-                  if (part.text) {
-                    fullContent += part.text;
-                    onChunk({ content: part.text, done: false });
-                  }
-                }
-
-                if (data.usageMetadata) {
-                  inputTokens = data.usageMetadata.promptTokenCount ?? inputTokens;
-                  outputTokens = data.usageMetadata.candidatesTokenCount ?? outputTokens;
-                  reasoningTokens = data.usageMetadata.thoughtsTokenCount ?? reasoningTokens;
-                }
-
-                if (candidate?.finishReason) {
-                  finishReason = this.mapFinishReason(candidate.finishReason);
-                }
-              } catch {
-                // Skip malformed JSON lines
-              }
+              processLine(line);
             }
           },
-          onDone: () => resolve(),
+          onDone: () => {
+            const trailing = buffer.trim();
+            if (trailing) {
+              processLine(trailing);
+            }
+            buffer = "";
+            resolve();
+          },
           onError: (error) => reject(new Error(`${error.code}: ${error.message}`)),
         }
       );

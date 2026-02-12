@@ -5,11 +5,18 @@ import { useConfig, PROVIDER_INFO, type Provider } from "../stores/config";
 import { callProvider, apiLogger, type ChatMessage as APIChatMessage } from "../services/api";
 import { getToolPrompt, runToolCall, type ToolCall } from "../services/tools";
 import { ProviderIcon, SystemIcon, UserIcon } from "../components/icons/ProviderIcons";
-import { ReactionIcon, type ReactionId } from "../components/icons/ReactionIcons";
-import { ConflictDetector, CostTrackerEngine, ConversationMemoryManager, createMemoryManager } from "@socratic-council/core";
+import {
+  ReactionIcon,
+  DEFAULT_REACTION,
+  REACTION_CATALOG,
+  type ReactionId,
+} from "../components/icons/ReactionIcons";
+import { ConflictGraph } from "../components/ConflictGraph";
+import { ConflictDetector, CostTrackerEngine, ConversationMemoryManager, createMemoryManager, FairnessManager } from "@socratic-council/core";
 import type {
   ConflictDetection,
   CostTracker,
+  PairwiseConflict,
   WhisperMessage,
   Message as SharedMessage,
   AgentId as CouncilAgentId,
@@ -26,7 +33,7 @@ interface ChatMessage extends SharedMessage {
   isStreaming?: boolean;
   latencyMs?: number;
   error?: string;
-  quotedMessageId?: string;
+  quotedMessageIds?: string[];
   reactions?: Partial<Record<ReactionId, { count: number; by: string[] }>>;
 }
 
@@ -90,8 +97,8 @@ Rules:
 - End with one concrete question to the group.
 
 Quoting/Reactions:
-- You MUST include @quote(MSG_ID) for a specific prior message.
-- If it fits, include @react(MSG_ID, thumbs_up|heart|laugh|sparkle).
+- You MUST include @quote(MSG_ID) for a specific prior message. You can quote MULTIPLE messages from different speakers or even the same speaker: @quote(MSG_A) @quote(MSG_B).
+- If it fits, include @react(MSG_ID, 👍|👎|❤️|😂|😮|😢|😡|✨|🎉).
 
 ${getToolPrompt()}
 `;
@@ -182,7 +189,7 @@ const AGENT_IDS: CouncilAgentId[] = ["george", "cathy", "grace", "douglas", "kat
 const isCouncilAgent = (id: ChatMessage["agentId"]): id is CouncilAgentId =>
   AGENT_IDS.includes(id as CouncilAgentId);
 
-const REACTION_IDS: ReactionId[] = ["thumbs_up", "heart", "laugh", "sparkle"];
+const REACTION_IDS = REACTION_CATALOG;
 const MAX_CONTEXT_MESSAGES = 16;
 const MAX_TOOL_ITERATIONS = 2;
 
@@ -192,9 +199,17 @@ const ACTION_PATTERNS = {
   tool: /@tool\(([^,]+),\s*([\s\S]*?)\)/g,
 };
 
+function normalizeMessageText(raw: string) {
+  return raw
+    .replace(/\r\n/g, "\n")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
 function extractActions(raw: string) {
   const reactions: Array<{ targetId: string; emoji: ReactionId }> = [];
-  let quoteTarget: string | undefined;
+  const quoteTargets: string[] = [];
   const toolCalls: ToolCall[] = [];
 
   let cleaned = raw;
@@ -220,7 +235,10 @@ function extractActions(raw: string) {
   });
 
   cleaned = cleaned.replace(ACTION_PATTERNS.quote, (_, target) => {
-    if (!quoteTarget) quoteTarget = String(target).trim();
+    const targetId = String(target).trim();
+    if (!quoteTargets.includes(targetId)) {
+      quoteTargets.push(targetId);
+    }
     return "";
   });
 
@@ -233,8 +251,8 @@ function extractActions(raw: string) {
   });
 
   return {
-    cleaned: cleaned.trim(),
-    quoteTarget,
+    cleaned: normalizeMessageText(cleaned),
+    quoteTargets,
     reactions,
     toolCalls,
   };
@@ -305,8 +323,10 @@ export function Chat({ topic, onNavigate }: ChatProps) {
   const [showLogs, setShowLogs] = useState(false);
   const [costState, setCostState] = useState<CostTracker | null>(null);
   const [conflictState, setConflictState] = useState<ConflictDetection | null>(null);
+  const [allConflicts, setAllConflicts] = useState<PairwiseConflict[]>([]);
   const [duoLogue, setDuoLogue] = useState<DuoLogueState | null>(null);
-  const [whisperLog, setWhisperLog] = useState<WhisperMessage[]>([]);
+  const [reactionPickerTarget, setReactionPickerTarget] = useState<string | null>(null);
+  const [recentlyCopiedQuote, setRecentlyCopiedQuote] = useState<string | null>(null);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
@@ -315,9 +335,10 @@ export function Chat({ topic, onNavigate }: ChatProps) {
   const abortRef = useRef(false);
   const activeRequestsRef = useRef<Map<CouncilAgentId, AbortController>>(new Map());
   const costTrackerRef = useRef<CostTrackerEngine | null>(null);
-  const conflictDetectorRef = useRef(new ConflictDetector());
+  const conflictDetectorRef = useRef(new ConflictDetector(60, 12));
   const memoryManagerRef = useRef<ConversationMemoryManager | null>(null);
   const hasStartedRef = useRef(false);
+  const fairnessManagerRef = useRef(new FairnessManager());
   const whisperBonusesRef = useRef<Record<CouncilAgentId, number>>({
     george: 0,
     cathy: 0,
@@ -346,11 +367,12 @@ export function Chat({ topic, onNavigate }: ChatProps) {
     setShowBidding(false);
     setErrors([]);
     setConflictState(null);
+    setAllConflicts([]);
     setDuoLogue(null);
     setTypingAgents([]);
     duoLogueRef.current = null;
-    setWhisperLog([]);
     lastWhisperKeyRef.current = null;
+    fairnessManagerRef.current = new FairnessManager();
     whisperBonusesRef.current = {
       george: 0,
       cathy: 0,
@@ -400,10 +422,12 @@ export function Chat({ topic, onNavigate }: ChatProps) {
 
     if (agentMessages.length < 2) {
       setConflictState(null);
+      setAllConflicts([]);
       return;
     }
 
-    const conflict = conflictDetectorRef.current.evaluate(agentMessages, AGENT_IDS);
+    const { pairs, strongestPair: conflict } = conflictDetectorRef.current.evaluateAll(agentMessages, AGENT_IDS);
+    setAllConflicts(pairs);
     setConflictState(conflict);
 
     if (conflict && !duoLogueRef.current) {
@@ -436,7 +460,6 @@ export function Chat({ topic, onNavigate }: ChatProps) {
       timestamp: Date.now(),
     };
 
-    setWhisperLog((prev) => [...prev.slice(-9), whisper]);
     whisperBonusesRef.current[to] = Math.min(
       20,
       (whisperBonusesRef.current[to] ?? 0) + (whisper.payload.bidBonus ?? 0)
@@ -446,12 +469,16 @@ export function Chat({ topic, onNavigate }: ChatProps) {
   // Generate bidding scores based on conversation context
   const generateBiddingScores = useCallback((
     excludeAgent?: CouncilAgentId,
-    eligibleAgents: CouncilAgentId[] = AGENT_IDS
+    eligibleAgents: CouncilAgentId[] = AGENT_IDS,
+    focusAgents?: CouncilAgentId[]
   ): BiddingRound => {
     const scores = {} as Record<CouncilAgentId, number>;
     let maxScore = -Infinity;
     let winner: CouncilAgentId = eligibleAgents[0] ?? AGENT_IDS[0];
     let hasWinner = false;
+
+    const fairnessAdjustments = fairnessManagerRef.current.calculateAdjustments(eligibleAgents);
+    const fairnessById = new Map(fairnessAdjustments.map((a) => [a.agentId, a]));
 
     // Only include agents that have API keys configured
     for (const agentId of eligibleAgents) {
@@ -467,20 +494,26 @@ export function Chat({ topic, onNavigate }: ChatProps) {
 
       // Generate score based on various factors
       const baseScore = 50 + Math.random() * 30;
-      const recencyBonus = agentId === excludeAgent ? -20 : 0;
       const whisperBonus = whisperBonusesRef.current[agentId] ?? 0;
-      
+
       // Add engagement debt bonus (agents with pending debts get priority)
+      // Capped at 20 to prevent feedback loops
       let engagementDebtBonus = 0;
       if (memoryManagerRef.current) {
         const debts = memoryManagerRef.current.getEngagementDebts(agentId);
-        // High-priority debts (direct questions, challenges) give bigger bonus
         for (const debt of debts.slice(0, 3)) {
           engagementDebtBonus += Math.min(debt.priority * 0.2, 15);
         }
+        engagementDebtBonus = Math.min(engagementDebtBonus, 20);
       }
-      
-      const score = baseScore + recencyBonus + whisperBonus + engagementDebtBonus;
+
+      // Fairness adjustment to ensure balanced turn-taking
+      const fairnessBonus = fairnessById.get(agentId)?.adjustment ?? 0;
+
+      // Conflict focus bonus nudges disagreeing pair to respond without locking out others
+      const conflictFocusBonus = focusAgents?.includes(agentId) ? 8 : 0;
+
+      const score = baseScore + whisperBonus + engagementDebtBonus + fairnessBonus + conflictFocusBonus;
 
       if (whisperBonus) {
         whisperBonusesRef.current[agentId] = 0;
@@ -600,17 +633,19 @@ export function Chat({ topic, onNavigate }: ChatProps) {
     [buildEngagementPrompt, getContextMessages, topic]
   );
 
-  const resolveQuoteTarget = useCallback(
-    (agentId: CouncilAgentId, explicit?: string) => {
-      if (explicit) return explicit;
+  const resolveQuoteTargets = useCallback(
+    (agentId: CouncilAgentId, explicit: string[]): string[] => {
+      if (explicit.length > 0) return explicit;
+      // Fallback: pick the most relevant from engagement debts or most recent message
       const debts = memoryManagerRef.current?.getEngagementDebts(agentId) ?? [];
       if (debts.length > 0) {
-        return debts[0]?.messageId;
+        const id = debts[0]?.messageId;
+        return id ? [id] : [];
       }
       const recent = [...messages]
         .reverse()
         .find((m) => isCouncilAgent(m.agentId) && m.agentId !== agentId && !m.isStreaming);
-      return recent?.id;
+      return recent?.id ? [recent.id] : [];
     },
     [messages]
   );
@@ -646,6 +681,48 @@ export function Chat({ topic, onNavigate }: ChatProps) {
     }
     return undefined;
   }, [config.proxy]);
+
+  const toggleUserReaction = useCallback((targetId: string, emoji: ReactionId) => {
+    setMessages((prev) =>
+      prev.map((message) => {
+        if (message.id !== targetId) return message;
+
+        const existingBar = (message.reactions ?? {}) as Partial<
+          Record<ReactionId, { count: number; by: string[] }>
+        >;
+        const nextBar = { ...existingBar };
+
+        const existing = nextBar[emoji] ?? { count: 0, by: [] };
+        const alreadyReacted = existing.by.includes("user");
+
+        if (alreadyReacted) {
+          const nextBy = existing.by.filter((id) => id !== "user");
+          const nextCount = Math.max(0, existing.count - 1);
+          if (nextCount === 0) {
+            delete nextBar[emoji];
+          } else {
+            nextBar[emoji] = { count: nextCount, by: nextBy };
+          }
+        } else {
+          nextBar[emoji] = { count: existing.count + 1, by: [...existing.by, "user"] };
+        }
+
+        return { ...message, reactions: nextBar };
+      })
+    );
+  }, []);
+
+  const copyQuoteToken = useCallback(async (messageId: string) => {
+    const token = `@quote(${messageId})`;
+
+    try {
+      await navigator.clipboard.writeText(token);
+      setRecentlyCopiedQuote(messageId);
+      window.setTimeout(() => setRecentlyCopiedQuote((prev) => (prev === messageId ? null : prev)), 900);
+    } catch (error) {
+      apiLogger.log("warn", "ui", "Clipboard copy failed", { error });
+    }
+  }, []);
 
   // Generate agent response using real API
   const generateAgentResponse = useCallback(async (agentId: CouncilAgentId): Promise<ChatMessage | null> => {
@@ -818,11 +895,11 @@ export function Chat({ topic, onNavigate }: ChatProps) {
         return null;
       }
 
-      const { cleaned, quoteTarget, reactions } = extractActions(result.content || "");
-      const resolvedQuote = resolveQuoteTarget(agentId, quoteTarget);
+      const { cleaned, quoteTargets, reactions } = extractActions(result.content || "");
+      const resolvedQuotes = resolveQuoteTargets(agentId, quoteTargets);
       const resolvedReactions =
-        reactions.length === 0 && resolvedQuote
-          ? [{ targetId: resolvedQuote, emoji: "thumbs_up" as ReactionId }]
+        reactions.length === 0 && resolvedQuotes.length > 0
+          ? [{ targetId: resolvedQuotes[0]!, emoji: DEFAULT_REACTION }]
           : reactions;
       const displayContent =
         cleaned || (result.content ? "No responses recorded" : "[No response received]");
@@ -835,7 +912,7 @@ export function Chat({ topic, onNavigate }: ChatProps) {
         tokens: result.tokens,
         latencyMs: result.latencyMs,
         error: result.error,
-        quotedMessageId: resolvedQuote,
+        quotedMessageIds: resolvedQuotes.length > 0 ? resolvedQuotes : undefined,
         metadata: {
           model: modelUsed as ModelId,
           latencyMs: result.latencyMs,
@@ -850,12 +927,12 @@ export function Chat({ topic, onNavigate }: ChatProps) {
       // Track message in memory manager for engagement tracking
       if (memoryManagerRef.current && result.success) {
         memoryManagerRef.current.addMessage(finalMessage);
-        
-        // Record quote if present
-        if (resolvedQuote) {
-          memoryManagerRef.current.recordQuote(resolvedQuote, agentId);
+
+        // Record quotes if present
+        for (const quoteId of resolvedQuotes) {
+          memoryManagerRef.current.recordQuote(quoteId, agentId);
         }
-        
+
         // Record reactions
         for (const reaction of resolvedReactions) {
           memoryManagerRef.current.recordReaction(reaction.targetId, agentId, reaction.emoji);
@@ -882,7 +959,7 @@ export function Chat({ topic, onNavigate }: ChatProps) {
       activeRequestsRef.current.delete(agentId);
       setTypingAgents((prev) => prev.filter((id) => id !== agentId));
     }
-  }, [config, buildConversationHistory, buildToolContextMessages, getProxy, resolveQuoteTarget]);
+  }, [config, buildConversationHistory, buildToolContextMessages, getProxy, resolveQuoteTargets]);
 
   // Main discussion loop
   const runDiscussion = useCallback(async () => {
@@ -916,11 +993,8 @@ export function Chat({ topic, onNavigate }: ChatProps) {
       setCurrentTurn(turn + 1);
 
       // Run bidding round
-      const eligibleAgents = duoLogueRef.current?.remainingTurns
-        ? duoLogueRef.current.participants
-        : AGENT_IDS;
-
-      const bidding = generateBiddingScores(previousSpeaker ?? undefined, eligibleAgents);
+      const focusAgents = duoLogueRef.current?.remainingTurns ? duoLogueRef.current.participants : undefined;
+      const bidding = generateBiddingScores(previousSpeaker ?? undefined, AGENT_IDS, focusAgents);
 
       if (config.preferences.showBiddingScores) {
         setCurrentBidding(bidding);
@@ -951,7 +1025,7 @@ export function Chat({ topic, onNavigate }: ChatProps) {
 
       if (responses.every((response) => !response || response.error)) {
         // If failed, try another agent
-        const alternates = eligibleAgents.filter(
+        const alternates = AGENT_IDS.filter(
           (id) => !winners.includes(id) && configuredProviders.includes(AGENT_CONFIG[id].provider)
         );
 
@@ -964,6 +1038,10 @@ export function Chat({ topic, onNavigate }: ChatProps) {
       if (abortRef.current) break;
 
       previousSpeaker = winners[0] ?? previousSpeaker;
+      // Record speaker for fairness tracking
+      if (previousSpeaker) {
+        fairnessManagerRef.current.recordSpeaker(previousSpeaker);
+      }
       turn++;
 
       if (duoLogueRef.current) {
@@ -1115,7 +1193,7 @@ export function Chat({ topic, onNavigate }: ChatProps) {
 
             {duoLogue && (
               <div className="badge badge-warning">
-                Duo-Logue · {duoLogue.remainingTurns} turns
+                Conflict Focus · {duoLogue.remainingTurns} turns
               </div>
             )}
 
@@ -1189,13 +1267,9 @@ export function Chat({ topic, onNavigate }: ChatProps) {
                   ? "var(--accent-emerald)"
                   : `var(--color-${message.agentId})`;
               const accentStyle = { "--accent": accent } as CSSProperties;
-              const quotedMessage = message.quotedMessageId
-                ? messages.find((msg) => msg.id === message.quotedMessageId)
-                : null;
-              const quotedReactions = quotedMessage?.reactions
-                ? (Object.entries(quotedMessage.reactions) as [ReactionId, { count: number; by: string[] }][])
-                    .filter(([, reaction]) => reaction?.count)
-                : [];
+              const quotedMessages = (message.quotedMessageIds ?? [])
+                .map((qid) => messages.find((msg) => msg.id === qid))
+                .filter((m): m is ChatMessage => m != null);
               const reactionEntries = message.reactions
                 ? (Object.entries(message.reactions) as [ReactionId, { count: number; by: string[] }][]).filter(
                     ([, reaction]) => reaction?.count
@@ -1258,27 +1332,33 @@ export function Chat({ topic, onNavigate }: ChatProps) {
                       })()}
                     </div>
 
-                    {quotedMessage && (
-                      <div className="message-quote">
-                        <div className="message-quote-header">
-                          {AGENT_CONFIG[quotedMessage.agentId].name} · {formatTime(quotedMessage.timestamp)}
-                        </div>
-                        <div className="message-quote-body">
-                          {quotedMessage.content.slice(0, 200)}
-                          {quotedMessage.content.length > 200 ? "…" : ""}
-                        </div>
-                        {quotedReactions.length > 0 && (
-                          <div className="message-quote-reactions">
-                            {quotedReactions.map(([reactionId, reaction]) => (
-                              <div key={reactionId} className="reaction-chip">
-                                <ReactionIcon type={reactionId} size={14} />
-                                <span>{reaction.count}</span>
-                              </div>
-                            ))}
+                    {quotedMessages.map((qm) => {
+                      const qReactions = qm.reactions
+                        ? (Object.entries(qm.reactions) as [ReactionId, { count: number; by: string[] }][])
+                            .filter(([, r]) => r?.count)
+                        : [];
+                      return (
+                        <div key={qm.id} className="message-quote">
+                          <div className="message-quote-header">
+                            {AGENT_CONFIG[qm.agentId].name} · {formatTime(qm.timestamp)}
                           </div>
-                        )}
-                      </div>
-                    )}
+                          <div className="message-quote-body">
+                            {qm.content.slice(0, 200)}
+                            {qm.content.length > 200 ? "…" : ""}
+                          </div>
+                          {qReactions.length > 0 && (
+                            <div className="message-quote-reactions">
+                              {qReactions.map(([reactionId, reaction]) => (
+                                <div key={reactionId} className="reaction-chip">
+                                  <ReactionIcon type={reactionId} size={14} />
+                                  <span>{reaction.count}</span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
 
                     {/* Message body */}
                     <div className="discord-message-body">
@@ -1292,14 +1372,46 @@ export function Chat({ topic, onNavigate }: ChatProps) {
                       )}
                     </div>
 
-                    <div className="message-actions">
-                      <button type="button" className="message-action" disabled title="Auto-managed">
-                        Quote
+                  <div className="message-actions">
+                      <button
+                        type="button"
+                        className="message-action"
+                        onClick={() => copyQuoteToken(message.id)}
+                        title="Copy @quote() token to clipboard"
+                      >
+                        {recentlyCopiedQuote === message.id ? "Copied" : "Quote"}
                       </button>
-                      <button type="button" className="message-action" disabled title="Auto-managed">
+                      <button
+                        type="button"
+                        className="message-action"
+                        onClick={() =>
+                          setReactionPickerTarget((prev) => (prev === message.id ? null : message.id))
+                        }
+                        title="Add a reaction"
+                      >
                         React
                       </button>
                     </div>
+
+                    {reactionPickerTarget === message.id && (
+                      <div className="reaction-picker" role="dialog" aria-label="Reaction picker">
+                        {REACTION_CATALOG.map((emoji) => (
+                          <button
+                            key={emoji}
+                            type="button"
+                            className="reaction-picker-item"
+                            onClick={() => {
+                              toggleUserReaction(message.id, emoji);
+                              setReactionPickerTarget(null);
+                            }}
+                            title={emoji}
+                            aria-label={`React ${emoji}`}
+                          >
+                            <ReactionIcon type={emoji} size={18} />
+                          </button>
+                        ))}
+                      </div>
+                    )}
 
                     {reactionEntries.length > 0 && (
                       <div className="reaction-bar">
@@ -1350,10 +1462,10 @@ export function Chat({ topic, onNavigate }: ChatProps) {
                   API Logs
                 </h3>
                 <button
-                  onClick={() => apiLogger.clearLogs()}
+                  onClick={() => setShowLogs(false)}
                   className="button-ghost text-xs"
                 >
-                  Clear
+                  Close
                 </button>
               </div>
               <div className="space-y-2 text-xs">
@@ -1414,39 +1526,14 @@ export function Chat({ topic, onNavigate }: ChatProps) {
                 })}
               </div>
 
-              <div className="panel-card p-4 mb-6">
-                <div className="flex items-center justify-between mb-3">
-                  <h3 className="text-xs font-semibold text-ink-500 uppercase tracking-[0.24em]">
-                    Conflict Meter
-                  </h3>
-                  {conflictState && (
-                    <span className="badge badge-warning text-xs">
-                      {conflictState.conflictScore}%
-                    </span>
-                  )}
-                </div>
-                {conflictState ? (
-                  <>
-                    <div className="text-sm text-ink-700 mb-2">
-                      {AGENT_CONFIG[conflictState.agentPair[0]].name} vs{" "}
-                      {AGENT_CONFIG[conflictState.agentPair[1]].name}
-                    </div>
-                    <div className="conflict-track">
-                      <div
-                        className="conflict-fill"
-                        style={{ width: `${Math.min(conflictState.conflictScore, 100)}%` }}
-                      />
-                    </div>
-                    {duoLogue && (
-                      <div className="text-xs text-ink-500 mt-2">
-                        Duo-Logue active · {duoLogue.remainingTurns} turns remaining
-                      </div>
-                    )}
-                  </>
-                ) : (
-                  <div className="text-sm text-ink-500">No active conflicts detected.</div>
-                )}
-              </div>
+              <ConflictGraph
+                conflicts={allConflicts}
+                agents={AGENT_IDS.map((id) => ({
+                  id,
+                  name: AGENT_CONFIG[id].name,
+                  color: AGENT_CONFIG[id].color,
+                }))}
+              />
 
               {/* Bidding display */}
               {showBidding && currentBidding && (
@@ -1508,8 +1595,8 @@ export function Chat({ topic, onNavigate }: ChatProps) {
                       const costLabel = breakdown?.pricingAvailable
                         ? `$${breakdown.estimatedUSD.toFixed(4)}`
                         : "—";
-                      const tokenCount =
-                        (breakdown?.inputTokens ?? 0) + (breakdown?.outputTokens ?? 0);
+                      const inputTokens = breakdown?.inputTokens ?? 0;
+                      const outputTokens = breakdown?.outputTokens ?? 0;
 
                       return (
                         <div key={agentId} className="flex items-center justify-between">
@@ -1517,7 +1604,7 @@ export function Chat({ topic, onNavigate }: ChatProps) {
                             {agent.name}
                           </span>
                           <span className="text-ink-500">
-                            {tokenCount} · {costLabel}
+                            {inputTokens}/{outputTokens} · {costLabel}
                           </span>
                         </div>
                       );
@@ -1536,30 +1623,6 @@ export function Chat({ topic, onNavigate }: ChatProps) {
                 )}
               </div>
 
-              <div className="panel-card p-4 mb-6">
-                <div className="flex items-center justify-between mb-3">
-                  <h3 className="text-xs font-semibold text-ink-500 uppercase tracking-[0.24em]">
-                    Whisper Log
-                  </h3>
-                  <span className="badge text-xs">{whisperLog.length}</span>
-                </div>
-                {whisperLog.length === 0 ? (
-                  <div className="text-sm text-ink-500">No whispers yet.</div>
-                ) : (
-                  <div className="space-y-2 text-xs text-ink-700">
-                    {whisperLog.slice(-5).map((whisper) => (
-                        <div key={whisper.id} className="border-l border-line-soft pl-2">
-                          <div className="font-medium">
-                            {AGENT_CONFIG[whisper.from].name} → {AGENT_CONFIG[whisper.to].name}
-                          </div>
-                        <div className="text-ink-500">
-                          {whisper.payload.proposedAction ?? "No strategy details provided."}
-                        </div>
-                        </div>
-                    ))}
-                  </div>
-                )}
-              </div>
 
               {/* Discussion stats */}
               {!isRunning && currentTurn > 0 && (

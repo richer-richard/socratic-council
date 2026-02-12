@@ -137,6 +137,36 @@ export class KimiProvider implements BaseProvider {
     let finishReason: "stop" | "length" | "error" = "stop";
     let buffer = "";
 
+    const processLine = (line: string) => {
+      const trimmedLine = line.trim();
+      if (!trimmedLine || !trimmedLine.startsWith("data: ")) return;
+
+      const jsonStr = trimmedLine.slice(6);
+      if (!jsonStr || jsonStr === "[DONE]") return;
+
+      try {
+        const data = JSON.parse(jsonStr);
+        const choice = data.choices?.[0];
+        const delta = choice?.delta;
+
+        if (delta?.content) {
+          fullContent += delta.content;
+          onChunk({ content: delta.content, done: false });
+        }
+
+        if (data.usage) {
+          inputTokens = data.usage.prompt_tokens ?? inputTokens;
+          outputTokens = data.usage.completion_tokens ?? outputTokens;
+        }
+
+        if (choice?.finish_reason) {
+          finishReason = this.mapFinishReason(choice.finish_reason);
+        }
+      } catch {
+        // Skip malformed JSON lines
+      }
+    };
+
     await new Promise<void>((resolve, reject) => {
       this.transport.stream(
         {
@@ -155,36 +185,16 @@ export class KimiProvider implements BaseProvider {
             buffer = lines.pop() ?? "";
 
             for (const line of lines) {
-              const trimmedLine = line.trim();
-              if (!trimmedLine || !trimmedLine.startsWith("data: ")) continue;
-
-              const jsonStr = trimmedLine.slice(6);
-              if (jsonStr === "[DONE]") continue;
-
-              try {
-                const data = JSON.parse(jsonStr);
-                const choice = data.choices?.[0];
-                const delta = choice?.delta;
-
-                if (delta?.content) {
-                  fullContent += delta.content;
-                  onChunk({ content: delta.content, done: false });
-                }
-
-                if (data.usage) {
-                  inputTokens = data.usage.prompt_tokens ?? inputTokens;
-                  outputTokens = data.usage.completion_tokens ?? outputTokens;
-                }
-
-                if (choice?.finish_reason) {
-                  finishReason = this.mapFinishReason(choice.finish_reason);
-                }
-              } catch {
-                // Skip malformed JSON lines
-              }
+              processLine(line);
             }
           },
-          onDone: () => resolve(),
+          onDone: () => {
+            if (buffer.trim()) {
+              processLine(buffer);
+            }
+            buffer = "";
+            resolve();
+          },
           onError: (error) => reject(new Error(`${error.code}: ${error.message}`)),
         }
       );

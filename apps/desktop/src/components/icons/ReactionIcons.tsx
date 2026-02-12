@@ -1,23 +1,177 @@
-import thumbsUp from "../../assets/emoji/thumbs-up.svg";
-import heart from "../../assets/emoji/heart.svg";
-import laugh from "../../assets/emoji/laugh.svg";
-import sparkle from "../../assets/emoji/sparkle.svg";
+export type ReactionId = string;
 
-export type ReactionId = "thumbs_up" | "heart" | "laugh" | "sparkle";
+export const REACTION_CATALOG: ReactionId[] = [
+  // Core quick reactions
+  "👍",
+  "👎",
+  "❤️",
+  "😂",
+  "😮",
+  "😢",
+  "😡",
+  "✨",
+  "🎉",
+  "🙏",
+  "🤔",
+  "💯",
+  "🔥",
+  "👏",
+  "🙌",
+  "🤝",
+  "✅",
+  "❌",
+  "⚠️",
+  "🧠",
+  "👀",
+  "💡",
+  // Faces (positive / neutral)
+  "😀",
+  "😃",
+  "😄",
+  "😁",
+  "😆",
+  "😅",
+  "🤣",
+  "😊",
+  "😇",
+  "🙂",
+  "🙃",
+  "😉",
+  "😌",
+  "😍",
+  "🥰",
+  "😘",
+  "😗",
+  "😙",
+  "😚",
+  "😋",
+  "😛",
+  "😝",
+  "😜",
+  "🤪",
+  "🤨",
+  "🧐",
+  "🤓",
+  "😎",
+  "🥸",
+  "🤩",
+  "🥳",
+  // Faces (skeptical / negative)
+  "😏",
+  "😒",
+  "😞",
+  "😔",
+  "😟",
+  "😕",
+  "🙁",
+  "☹️",
+  "😣",
+  "😖",
+  "😫",
+  "😩",
+  "🥺",
+  "😭",
+  "😤",
+  "😠",
+  "🤬",
+  "😳",
+  "🥵",
+  "🥶",
+  "😱",
+  "😨",
+  "😰",
+  "😥",
+  "😓",
+  // Faces (misc)
+  "🤗",
+  "🫢",
+  "🤭",
+  "🤫",
+  "🤥",
+  "😶",
+  "😐",
+  "😑",
+  "😬",
+  "🙄",
+  "😯",
+  "😦",
+  "😧",
+  "😲",
+  "🥱",
+  "😴",
+  "🤤",
+  "😪",
+  "😵",
+  "🤐",
+  "🫠",
+  "🥴",
+  "🤢",
+  "🤮",
+  "🤧",
+  "😷",
+  "🤒",
+  "🤕",
+  // Hearts
+  "🫶",
+  "💚",
+  "💙",
+  "💜",
+  "🖤",
+  "🤍",
+  "🧡",
+  "💛",
+  "🤎",
+  "💔",
+  "💖",
+  "💘",
+  "💝",
+  "💞",
+  "💓",
+  "💗",
+  "💕",
+  "💟",
+  // Gestures / people
+  "👌",
+  "✌️",
+  "🤟",
+  "🤘",
+  "🤙",
+  "✊",
+  "🤛",
+  "🤜",
+  "💪",
+  "🫡",
+  // Objects / symbols
+  "⭐",
+  "🌟",
+  "💫",
+  "🏆",
+  "🥇",
+  "🥈",
+  "🥉",
+  "📌",
+  "📎",
+  "🔗",
+  "📣",
+  "🔔",
+  "📚",
+  "📝",
+  "🧪",
+  "🔬",
+  "🧩",
+  "🎯",
+  "🗳️",
+  "📊",
+  "📈",
+  "📉",
+  "🧵",
+  "🕒",
+  "⏳",
+  "🧭",
+  "🛑",
+];
 
-const REACTION_ICON: Record<ReactionId, string> = {
-  thumbs_up: thumbsUp,
-  heart,
-  laugh,
-  sparkle,
-};
-
-const REACTION_LABEL: Record<ReactionId, string> = {
-  thumbs_up: "thumbs up",
-  heart: "heart",
-  laugh: "laugh",
-  sparkle: "sparkle",
-};
+export const DEFAULT_REACTION: ReactionId = "👍";
 
 interface ReactionIconProps {
   type: ReactionId;
@@ -26,14 +180,18 @@ interface ReactionIconProps {
 
 export function ReactionIcon({ type, size = 18 }: ReactionIconProps) {
   return (
-    <img
-      src={REACTION_ICON[type]}
-      width={size}
-      height={size}
-      alt={REACTION_LABEL[type]}
-      style={{ display: "block" }}
-      loading="lazy"
-      decoding="async"
-    />
+    <span
+      aria-label={`reaction ${type}`}
+      title={type}
+      style={{
+        display: "inline-block",
+        fontSize: size,
+        lineHeight: 1,
+        transform: "translateY(0.5px)",
+      }}
+    >
+      {type}
+    </span>
   );
 }
+

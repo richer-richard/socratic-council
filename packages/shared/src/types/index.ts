@@ -466,6 +466,11 @@ export interface ConflictDetection {
   lastUpdated: number;
 }
 
+export interface PairwiseConflict {
+  agents: [AgentId, AgentId];
+  score: number; // 0-1 normalized
+}
+
 export interface DuoLogue {
   participants: [AgentId, AgentId];
   remainingTurns: number;

@@ -188,6 +188,61 @@ export class OpenAIProvider implements BaseProvider {
     let sawDelta = false;
     let buffer = "";
 
+    const processLine = (line: string) => {
+      if (!line.startsWith("data: ")) return;
+      const data = line.slice(6);
+      if (!data || data === "[DONE]") return;
+
+      try {
+        const parsed = JSON.parse(data) as OpenAIStreamEvent;
+
+        if (parsed.type === "response.output_text.delta" && parsed.delta) {
+          sawDelta = true;
+          fullContent += parsed.delta;
+          onChunk({ content: parsed.delta, done: false });
+          return;
+        }
+
+        if (parsed.type === "response.output_text.done" && parsed.text && !sawDelta) {
+          fullContent += parsed.text;
+          onChunk({ content: parsed.text, done: false });
+          return;
+        }
+
+        if (parsed.type === "response.completed" && parsed.response?.usage) {
+          inputTokens = parsed.response.usage.input_tokens ?? inputTokens;
+          outputTokens = parsed.response.usage.output_tokens ?? outputTokens;
+          reasoningTokens =
+            parsed.response.usage.output_tokens_details?.reasoning_tokens ??
+            parsed.response.usage.reasoning_tokens ??
+            reasoningTokens;
+          return;
+        }
+
+        const legacyContent =
+          parsed.output?.[0]?.content?.[0]?.text ??
+          (parsed as { choices?: Array<{ delta?: { content?: string } }> }).choices?.[0]?.delta
+            ?.content ??
+          "";
+
+        if (legacyContent) {
+          fullContent += legacyContent;
+          onChunk({ content: legacyContent, done: false });
+        }
+
+        if (parsed.usage) {
+          inputTokens = parsed.usage.input_tokens ?? inputTokens;
+          outputTokens = parsed.usage.output_tokens ?? outputTokens;
+          reasoningTokens =
+            parsed.usage.output_tokens_details?.reasoning_tokens ??
+            parsed.usage.reasoning_tokens ??
+            reasoningTokens;
+        }
+      } catch {
+        // Ignore parse errors for incomplete chunks
+      }
+    };
+
     await new Promise<void>((resolve, reject) => {
       this.transport.stream(
         {
@@ -206,61 +261,17 @@ export class OpenAIProvider implements BaseProvider {
             buffer = lines.pop() ?? "";
 
             for (const line of lines) {
-              if (!line.startsWith("data: ")) continue;
-              const data = line.slice(6);
-              if (data === "[DONE]") continue;
-
-              try {
-                const parsed = JSON.parse(data) as OpenAIStreamEvent;
-
-                if (parsed.type === "response.output_text.delta" && parsed.delta) {
-                  sawDelta = true;
-                  fullContent += parsed.delta;
-                  onChunk({ content: parsed.delta, done: false });
-                  continue;
-                }
-
-                if (parsed.type === "response.output_text.done" && parsed.text && !sawDelta) {
-                  fullContent += parsed.text;
-                  onChunk({ content: parsed.text, done: false });
-                  continue;
-                }
-
-                if (parsed.type === "response.completed" && parsed.response?.usage) {
-                  inputTokens = parsed.response.usage.input_tokens ?? inputTokens;
-                  outputTokens = parsed.response.usage.output_tokens ?? outputTokens;
-                  reasoningTokens =
-                    parsed.response.usage.output_tokens_details?.reasoning_tokens ??
-                    parsed.response.usage.reasoning_tokens ??
-                    reasoningTokens;
-                  continue;
-                }
-
-                const legacyContent =
-                  parsed.output?.[0]?.content?.[0]?.text ??
-                  (parsed as { choices?: Array<{ delta?: { content?: string } }> }).choices?.[0]
-                    ?.delta?.content ??
-                  "";
-
-                if (legacyContent) {
-                  fullContent += legacyContent;
-                  onChunk({ content: legacyContent, done: false });
-                }
-
-                if (parsed.usage) {
-                  inputTokens = parsed.usage.input_tokens ?? inputTokens;
-                  outputTokens = parsed.usage.output_tokens ?? outputTokens;
-                  reasoningTokens =
-                    parsed.usage.output_tokens_details?.reasoning_tokens ??
-                    parsed.usage.reasoning_tokens ??
-                    reasoningTokens;
-                }
-              } catch {
-                // Ignore parse errors for incomplete chunks
-              }
+              processLine(line);
             }
           },
-          onDone: () => resolve(),
+          onDone: () => {
+            const trailing = buffer.trim();
+            if (trailing) {
+              processLine(trailing);
+            }
+            buffer = "";
+            resolve();
+          },
           onError: (error) => reject(new Error(`${error.code}: ${error.message}`)),
         }
       );
