@@ -21,10 +21,14 @@ const AGENT_NAMES: Record<AgentId, string> = {
 const DISAGREE_CUES: Array<{ cue: string; weight: number }> = [
   // Strong disagreement
   { cue: "disagree", weight: 18 },
+  { cue: "push back", weight: 16 },
   { cue: "incorrect", weight: 18 },
   { cue: "wrong", weight: 18 },
   { cue: "false", weight: 18 },
   { cue: "not true", weight: 16 },
+  { cue: "that's not true", weight: 16 },
+  { cue: "that's false", weight: 16 },
+  { cue: "that's incorrect", weight: 16 },
   { cue: "i reject", weight: 16 },
   { cue: "i refute", weight: 16 },
   { cue: "refute", weight: 16 },
@@ -33,6 +37,20 @@ const DISAGREE_CUES: Array<{ cue: string; weight: number }> = [
   { cue: "unsupported", weight: 14 },
   { cue: "flawed", weight: 14 },
   { cue: "misguided", weight: 14 },
+  { cue: "doesn't follow", weight: 14 },
+  { cue: "does not follow", weight: 14 },
+  { cue: "doesn't hold", weight: 14 },
+  { cue: "does not hold", weight: 14 },
+  { cue: "doesn't make sense", weight: 14 },
+  { cue: "does not make sense", weight: 14 },
+  { cue: "i don't buy", weight: 14 },
+  { cue: "i do not buy", weight: 14 },
+  { cue: "i don't think so", weight: 12 },
+  { cue: "i do not think so", weight: 12 },
+  { cue: "i take issue", weight: 12 },
+  { cue: "i object", weight: 12 },
+  { cue: "i'm not sold", weight: 12 },
+  { cue: "not sold", weight: 12 },
   // Softer tension / pushback
   { cue: "i'm not convinced", weight: 12 },
   { cue: "not convinced", weight: 12 },
@@ -42,10 +60,10 @@ const DISAGREE_CUES: Array<{ cue: string; weight: number }> = [
   { cue: "i'm not sure", weight: 8 },
   { cue: "i don't think", weight: 12 },
   { cue: "i do not think", weight: 12 },
-  { cue: "however", weight: 8 },
-  { cue: "but", weight: 6 },
-  { cue: "yet", weight: 6 },
-  { cue: "still", weight: 6 },
+  { cue: "concern", weight: 8 },
+  { cue: "i worry", weight: 8 },
+  { cue: "i'm concerned", weight: 10 },
+  { cue: "i am concerned", weight: 10 },
   { cue: "counter", weight: 10 },
 ];
 
@@ -53,6 +71,10 @@ const DISAGREE_PATTERNS: Array<{ pattern: RegExp; weight: number }> = [
   { pattern: /\b(i\s+do\s+not|i\s+don't)\s+(agree|buy|think|see)\b/i, weight: 14 },
   { pattern: /\b(that\s+doesn't|that\s+does\s+not)\s+(follow|work|hold)\b/i, weight: 12 },
   { pattern: /\b(you're|you\s+are)\s+(wrong|mistaken)\b/i, weight: 16 },
+  // Discourse markers that often signal pushback (especially after "Name, ...")
+  { pattern: /^(?:\s*[A-Z][a-z]+[,:-]\s*)?(actually|no|but|however|yet|still)\b/i, weight: 10 },
+  { pattern: /\b(i\s+(?:can't|cannot)\s+(?:agree|see)|i\s+don't\s+buy|i\s+do\s+not\s+buy)\b/i, weight: 16 },
+  { pattern: /\b(that\s+seems)\s+(unlikely|off|implausible)\b/i, weight: 10 },
 ];
 
 const AGREE_CUES: Array<{ cue: string; weight: number }> = [
@@ -90,8 +112,9 @@ function scoreMessage(text: string): number {
     if (cueMatches(lower, cue)) score -= weight;
   }
 
-  if (lower.includes("?")) score += 4;
-  if (lower.includes("!")) score += 2;
+  // Punctuation: a *little* signal, but keep subtle to avoid false positives.
+  if (lower.includes("??")) score += 4;
+  if (lower.includes("!")) score += 1;
 
   return Math.max(0, Math.min(100, score));
 }
@@ -110,6 +133,94 @@ function mentionsAgentName(content: string, agentId: AgentId): boolean {
   const name = AGENT_NAMES[agentId];
   if (!name) return false;
   return new RegExp(`\\b${escapeRegExp(name)}\\b`, "i").test(content);
+}
+
+function addressesAgentAtStart(content: string, agentId: AgentId): boolean {
+  const name = AGENT_NAMES[agentId];
+  if (!name) return false;
+  return new RegExp(`^\\s*${escapeRegExp(name)}\\s*[,:-]\\s+`, "i").test(content);
+}
+
+function hasNegation(content: string): boolean {
+  return /\b(no|not|never|cannot|can't|won't|don't|doesn't|didn't|isn't|aren't|wasn't|weren't)\b|\b\w+n't\b/i.test(
+    content
+  );
+}
+
+const STOPWORDS = new Set([
+  "this",
+  "that",
+  "these",
+  "those",
+  "there",
+  "their",
+  "about",
+  "because",
+  "would",
+  "should",
+  "could",
+  "maybe",
+  "really",
+  "very",
+  "just",
+  "also",
+  "with",
+  "without",
+  "into",
+  "from",
+  "have",
+  "has",
+  "had",
+  "will",
+  "then",
+  "than",
+  "when",
+  "where",
+  "what",
+  "which",
+  "who",
+  "whom",
+  "your",
+  "you're",
+  "yours",
+  "ours",
+  "they",
+  "them",
+  "this",
+  "that",
+  "it's",
+  "its",
+  "it's",
+  "i'm",
+  "im",
+  "dont",
+  "can't",
+  "cant",
+  "doesnt",
+  "didnt",
+  "isnt",
+  "arent",
+]);
+
+function tokenSet(content: string): Set<string> {
+  const tokens = content
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .split(" ")
+    .map((t) => t.trim())
+    .filter((t) => t.length >= 4 && !STOPWORDS.has(t));
+  return new Set(tokens);
+}
+
+function overlapRatio(a: string, b: string): number {
+  const setA = tokenSet(a);
+  const setB = tokenSet(b);
+  if (setA.size === 0 || setB.size === 0) return 0;
+  let overlap = 0;
+  for (const token of setA) {
+    if (setB.has(token)) overlap += 1;
+  }
+  return overlap / Math.min(setA.size, setB.size);
 }
 
 export class ConflictDetector {
@@ -181,23 +292,82 @@ export class ConflictDetector {
 
     if (recent.length < 2) return 0;
 
-    const messageScores = recent.map((msg) => scoreMessage(msg.content));
-    const meanScore = messageScores.reduce((total, s) => total + s, 0) / messageScores.length;
-    const peakScore = Math.max(...messageScores);
-    const baseScore = meanScore * 0.75 + peakScore * 0.25;
+    const adjustedScores: number[] = [];
+    let strongByA = 0;
+    let strongByB = 0;
+    let directedCount = 0;
+
+    for (let i = 0; i < recent.length; i += 1) {
+      const msg = recent[i]!;
+      const other = msg.agentId === agentA ? agentB : agentA;
+      const prev = i > 0 ? recent[i - 1] : null;
+
+      const base = scoreMessage(msg.content);
+      const directed =
+        addressesAgentAtStart(msg.content, other) || mentionsAgentName(msg.content, other);
+
+      let adjusted = base;
+
+      // If the message is clearly aimed at the other agent, treat tension cues as more meaningful.
+      if (directed && base > 0) {
+        adjusted = Math.min(100, adjusted + 10);
+        directedCount += 1;
+      }
+
+      // Immediate back-and-forth + negation on overlapping terms tends to be real contradiction.
+      if (prev && prev.agentId === other && base > 0) {
+        adjusted = Math.min(100, adjusted + 6);
+        if (hasNegation(msg.content) && overlapRatio(msg.content, prev.content) >= 0.12) {
+          adjusted = Math.min(100, adjusted + 10);
+        }
+      }
+
+      if (adjusted >= 30) {
+        if (msg.agentId === agentA) strongByA += 1;
+        if (msg.agentId === agentB) strongByB += 1;
+      }
+
+      adjustedScores.push(adjusted);
+    }
+
+    const top = [...adjustedScores].sort((a, b) => b - a).slice(0, Math.min(3, adjustedScores.length));
+    const topMean = top.reduce((total, s) => total + s, 0) / top.length;
+    const peakScore = top[0] ?? 0;
+
+    // Using top-k mean makes the detector more sensitive to real spikes of disagreement
+    // without being diluted by neutral filler turns.
+    const baseScore = topMean * 0.6 + peakScore * 0.4;
 
     const alternationBonus = Math.min(
-      40,
-      countAlternations(recent.map((m) => m.agentId as AgentId)) * 10
+      30,
+      countAlternations(recent.map((m) => m.agentId as AgentId)) * 6
     );
+
     const mentionsBonus = Math.min(
-      14,
+      20,
       recent.reduce((count, msg) => {
         const other = msg.agentId === agentA ? agentB : agentA;
         return mentionsAgentName(msg.content, other) ? count + 1 : count;
-      }, 0) * 3
+      }, 0) * 4
     );
-    const score = Math.min(100, baseScore + alternationBonus + mentionsBonus);
+
+    const directedBonus = Math.min(24, directedCount * 6);
+    const reciprocityBonus = Math.min(26, Math.min(strongByA, strongByB) * 13);
+
+    // Alternation/mentions amplify *existing* tension, but shouldn't create tension on their own.
+    const engagementFactor = Math.min(1, baseScore / 30);
+    const engagementBonus = (alternationBonus + mentionsBonus) * engagementFactor;
+
+    // Sustained tension: multiple turns with meaningful disagreement signals.
+    // Gate on a reasonably high peak so we don't inflate mild, purely-structural back-and-forth.
+    const signalTurns = adjustedScores.filter((s) => s >= 15).length;
+    const sustainedBonus =
+      peakScore >= 28 ? Math.min(20, Math.max(0, signalTurns - 1) * 4) : 0;
+
+    const score = Math.min(
+      100,
+      baseScore + engagementBonus + directedBonus + reciprocityBonus + sustainedBonus
+    );
 
     return Math.round(score);
   }

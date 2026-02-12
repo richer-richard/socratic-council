@@ -33,6 +33,7 @@ export interface DiscussionPreferences {
   showBiddingScores: boolean;
   autoScroll: boolean;
   soundEffects: boolean;
+  moderatorEnabled: boolean;
 }
 
 export interface McpConfig {
@@ -65,6 +66,7 @@ const DEFAULT_CONFIG: AppConfig = {
     showBiddingScores: true,
     autoScroll: true,
     soundEffects: false,
+    moderatorEnabled: true,
   },
   models: {
     openai: "gpt-5.2",

@@ -933,6 +933,30 @@ body {
   box-shadow: 0 22px 36px rgba(6, 8, 13, 0.6);
 }
 
+.discord-message.message-highlight {
+  border-color: rgba(20, 184, 166, 0.55);
+  box-shadow:
+    0 0 0 2px rgba(20, 184, 166, 0.25),
+    0 22px 36px rgba(6, 8, 13, 0.6);
+  animation: message-highlight-pulse 1.4s ease-out;
+}
+
+.discord-message.message-highlight::before {
+  background: rgba(20, 184, 166, 0.85);
+}
+
+@keyframes message-highlight-pulse {
+  0% {
+    transform: translateY(-1px) scale(1.004);
+  }
+  40% {
+    transform: translateY(-1px) scale(1.01);
+  }
+  100% {
+    transform: translateY(0) scale(1);
+  }
+}
+
 .discord-message.has-error {
   border-color: rgba(199, 107, 79, 0.4);
 }
@@ -1331,7 +1355,7 @@ body {
 /* =========================================================================== */
 
 .scroll-to-bottom-button {
-  position: sticky;
+  position: absolute;
   bottom: 24px;
   left: 50%;
   transform: translateX(-50%);

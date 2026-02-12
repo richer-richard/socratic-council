@@ -39,9 +39,16 @@ function ProviderLogo({
       <img
         src={src}
         alt={alt}
-        width={Math.round(size * 0.7)}
-        height={Math.round(size * 0.7)}
-        style={{ display: "block", objectFit: "contain" }}
+        width={size}
+        height={size}
+        style={{
+          display: "block",
+          width: "100%",
+          height: "100%",
+          objectFit: "cover",
+          // Many SVG logo marks have generous viewBox padding; scale slightly so they read as true avatars.
+          transform: "scale(1.12)",
+        }}
         draggable={false}
       />
     </div>

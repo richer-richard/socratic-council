@@ -556,6 +556,23 @@ export function ConfigModal({
                       <div className="toggle-slider" />
                     </label>
                   </div>
+
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <div className="text-sm text-white">Moderator Agent</div>
+                      <div className="text-xs text-gray-400">
+                        Adds occasional moderator notes to keep the discussion focused
+                      </div>
+                    </div>
+                    <label className="toggle-switch">
+                      <input
+                        type="checkbox"
+                        checked={config.preferences.moderatorEnabled}
+                        onChange={(e) => onUpdatePreferences({ moderatorEnabled: e.target.checked })}
+                      />
+                      <div className="toggle-slider" />
+                    </label>
+                  </div>
                 </div>
               </div>
 

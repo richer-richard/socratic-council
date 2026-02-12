@@ -1,3 +1,5 @@
+![Socratic Council App Icon](apps/desktop/src-tauri/app-icon.png)
+
 # 🏛️ Socratic Council
 
 <div align="center">
@@ -228,6 +230,17 @@ Select any model from the supported providers. Models are listed with the latest
 | **Duo-Logue Mode** | Automatic conflict resolution when two agents strongly disagree |
 | **Oracle Tool** | Real-time fact-checking and citation verification |
 | **Dynamic Cost Tracking** | Live USD estimates based on token usage |
+
+### 🖥️ Desktop UI Features
+
+| Feature | Description |
+|---------|-------------|
+| **Conflict Graph** | Live visualization + expandable “Top tension” leaderboard |
+| **Conversation Search** | Search history and jump to results (with highlight) |
+| **Transcript Export** | Export to Markdown, PDF, DOCX, PPTX, and JSON |
+| **Markdown Rendering** | Proper Markdown display, including math (KaTeX) and syntax highlighting |
+| **Virtualized Message List** | Smooth scrolling for long discussions |
+| **Moderator Mode** | Optional moderator agent to set norms and de-escalate when tension spikes |
 
 ### 🖥️ Platforms
 

@@ -14,5 +14,24 @@ export default defineConfig({
     target: "esnext",
     minify: !process.env.TAURI_DEBUG ? "esbuild" : false,
     sourcemap: !!process.env.TAURI_DEBUG,
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          react: ["react", "react-dom"],
+          virtuoso: ["react-virtuoso"],
+          markdown: [
+            "react-markdown",
+            "remark-gfm",
+            "remark-breaks",
+            "remark-math",
+            "rehype-katex",
+            "rehype-highlight",
+            "katex",
+            "highlight.js",
+          ],
+          tauri: ["@tauri-apps/api", "@tauri-apps/plugin-dialog", "@tauri-apps/plugin-fs"],
+        },
+      },
+    },
   },
 });

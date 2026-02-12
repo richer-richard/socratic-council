@@ -1,5 +1,5 @@
-import { useState, useEffect, useRef, useCallback } from "react";
-import type { CSSProperties } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo, forwardRef } from "react";
+import type { CSSProperties, HTMLAttributes } from "react";
 import type { Page } from "../App";
 import { useConfig, PROVIDER_INFO, type Provider } from "../stores/config";
 import { callProvider, apiLogger, type ChatMessage as APIChatMessage } from "../services/api";
@@ -12,8 +12,12 @@ import {
   type ReactionId,
 } from "../components/icons/ReactionIcons";
 import { Markdown } from "../components/Markdown";
+import { ConversationSearch } from "../components/ConversationSearch";
+import { ConversationExport } from "../components/ConversationExport";
 import { ConflictGraph } from "../components/ConflictGraph";
 import { ConflictDetector, CostTrackerEngine, ConversationMemoryManager, createMemoryManager, FairnessManager } from "@socratic-council/core";
+import { calculateMessageCost } from "../utils/cost";
+import { Virtuoso, type VirtuosoHandle } from "react-virtuoso";
 import type {
   ConflictDetection,
   CostTracker,
@@ -23,7 +27,6 @@ import type {
   AgentId as CouncilAgentId,
   ModelId,
 } from "@socratic-council/shared";
-import { MODEL_REGISTRY } from "@socratic-council/shared";
 
 interface ChatProps {
   topic: string;
@@ -36,6 +39,8 @@ interface ChatMessage extends SharedMessage {
   error?: string;
   quotedMessageIds?: string[];
   reactions?: Partial<Record<ReactionId, { count: number; by: string[] }>>;
+  displayName?: string;
+  displayProvider?: Provider;
 }
 
 interface BiddingRound {
@@ -96,6 +101,7 @@ Rules:
 - Directly address a specific point from someone else by name.
 - Add exactly one new claim, example, or counterpoint; don’t restate your thesis.
 - End with one concrete question to the group.
+- If the Moderator gives an instruction, follow it.
 
 Markdown:
 - Markdown is supported (GFM tables, links, **bold**, \`code\`, fenced code blocks, and LaTeX math via $...$ / $$...$$).
@@ -114,6 +120,18 @@ const BASE_SYSTEM_PROMPT = (name: string) => `You are ${name} in a group chat wi
 Do NOT adopt a persona or specialty. Speak as yourself, and keep the tone natural.
 
 ${GROUP_CHAT_GUIDELINES}`;
+
+const MODERATOR_SYSTEM_PROMPT = `You are the Moderator in a group chat with George, Cathy, Grace, Douglas, and Kate.
+
+Your job: keep the discussion focused, fair, and readable.
+
+Rules:
+- Speak rarely and briefly (1–2 sentences, max ~70 words).
+- Prefer plain text. Use Markdown only if plain text is clearly insufficient.
+- Ask at most ONE question.
+- You may suggest who should respond next by name.
+- Do NOT include @quote(...), @react(...), or @tool(...).
+- Do NOT impersonate any agent.`;
 
 
 const AGENT_CONFIG: Record<AgentId, {
@@ -195,6 +213,9 @@ const AGENT_IDS: CouncilAgentId[] = ["george", "cathy", "grace", "douglas", "kat
 const isCouncilAgent = (id: ChatMessage["agentId"]): id is CouncilAgentId =>
   AGENT_IDS.includes(id as CouncilAgentId);
 
+const isModeratorMessage = (msg: { agentId: unknown } & Record<string, unknown>): boolean =>
+  msg.agentId === "system" && msg.displayName === "Moderator";
+
 const REACTION_IDS = REACTION_CATALOG;
 const MAX_CONTEXT_MESSAGES = 16;
 const MAX_TOOL_ITERATIONS = 2;
@@ -264,30 +285,6 @@ function extractActions(raw: string) {
   };
 }
 
-/**
- * Calculate per-message cost based on token usage and model pricing
- * Returns cost in USD (4 decimal places) or null if pricing unavailable
- */
-function calculateMessageCost(
-  modelId: string | undefined,
-  tokens: { input: number; output: number; reasoning?: number } | undefined
-): number | null {
-  if (!modelId || !tokens) return null;
-  
-  const modelInfo = MODEL_REGISTRY.find((m) => m.id === modelId);
-  const pricing = modelInfo?.pricing;
-  
-  if (!pricing || (!pricing.inputCostPer1M && !pricing.outputCostPer1M)) {
-    return null;
-  }
-  
-  const inputCost = ((tokens.input || 0) / 1_000_000) * (pricing.inputCostPer1M ?? 0);
-  const outputCost = ((tokens.output || 0) / 1_000_000) * (pricing.outputCostPer1M ?? 0);
-  const reasoningCost = ((tokens.reasoning || 0) / 1_000_000) * (pricing.reasoningCostPer1M ?? 0);
-  
-  return inputCost + outputCost + reasoningCost;
-}
-
 function applyReactions(
   items: ChatMessage[],
   reactions: Array<{ targetId: string; emoji: ReactionId }>,
@@ -317,6 +314,8 @@ function applyReactions(
 }
 
 export function Chat({ topic, onNavigate }: ChatProps) {
+  type SidePanelView = "default" | "logs" | "search" | "export";
+
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isRunning, setIsRunning] = useState(false);
   const [typingAgents, setTypingAgents] = useState<CouncilAgentId[]>([]);
@@ -326,20 +325,21 @@ export function Chat({ topic, onNavigate }: ChatProps) {
   const [totalTokens, setTotalTokens] = useState({ input: 0, output: 0 });
   const [isPaused, setIsPaused] = useState(false);
   const [errors, setErrors] = useState<string[]>([]);
-  const [showLogs, setShowLogs] = useState(false);
+  const [sidePanelView, setSidePanelView] = useState<SidePanelView>("default");
   const [costState, setCostState] = useState<CostTracker | null>(null);
   const [conflictState, setConflictState] = useState<ConflictDetection | null>(null);
   const [allConflicts, setAllConflicts] = useState<PairwiseConflict[]>([]);
   const [duoLogue, setDuoLogue] = useState<DuoLogueState | null>(null);
   const [reactionPickerTarget, setReactionPickerTarget] = useState<string | null>(null);
   const [recentlyCopiedQuote, setRecentlyCopiedQuote] = useState<string | null>(null);
+  const [highlightedMessageId, setHighlightedMessageId] = useState<string | null>(null);
 
-  const messagesEndRef = useRef<HTMLDivElement>(null);
-  const messagesContainerRef = useRef<HTMLDivElement>(null);
+  const virtuosoRef = useRef<VirtuosoHandle>(null);
   const isAtBottomRef = useRef(true);
   const [showScrollButton, setShowScrollButton] = useState(false);
   const abortRef = useRef(false);
   const activeRequestsRef = useRef<Map<CouncilAgentId, AbortController>>(new Map());
+  const moderatorAbortRef = useRef<AbortController | null>(null);
   const costTrackerRef = useRef<CostTrackerEngine | null>(null);
   const conflictDetectorRef = useRef(new ConflictDetector(60, 12));
   const memoryManagerRef = useRef<ConversationMemoryManager | null>(null);
@@ -353,11 +353,47 @@ export function Chat({ topic, onNavigate }: ChatProps) {
     kate: 0,
   });
   const lastWhisperKeyRef = useRef<string | null>(null);
+  const lastModeratorKeyRef = useRef<string | null>(null);
+  const moderatorInFlightRef = useRef(false);
   const duoLogueRef = useRef<DuoLogueState | null>(null);
 
   const { config, getMaxTurns, getConfiguredProviders } = useConfig();
   const maxTurns = getMaxTurns();
   const configuredProviders = getConfiguredProviders();
+
+  const messageIndexById = useMemo(() => {
+    const map = new Map<string, number>();
+    for (let i = 0; i < messages.length; i += 1) {
+      map.set(messages[i]!.id, i);
+    }
+    return map;
+  }, [messages]);
+
+  const messageById = useMemo(() => {
+    const map = new Map<string, ChatMessage>();
+    for (const message of messages) {
+      map.set(message.id, message);
+    }
+    return map;
+  }, [messages]);
+
+  useEffect(() => {
+    if (!highlightedMessageId) return;
+    const timer = window.setTimeout(() => setHighlightedMessageId(null), 1400);
+    return () => window.clearTimeout(timer);
+  }, [highlightedMessageId]);
+
+  const getAgentLabel = useCallback((agentId: string) => {
+    const agent = (AGENT_CONFIG as Record<string, { name: string }>)[agentId];
+    return agent?.name ?? agentId;
+  }, []);
+
+  const jumpToMessage = useCallback((messageId: string) => {
+    const index = messageIndexById.get(messageId);
+    if (index === undefined) return;
+    virtuosoRef.current?.scrollToIndex({ index, align: "center", behavior: "smooth" });
+    setHighlightedMessageId(messageId);
+  }, [messageIndexById]);
 
   useEffect(() => {
     duoLogueRef.current = duoLogue;
@@ -378,6 +414,7 @@ export function Chat({ topic, onNavigate }: ChatProps) {
     setTypingAgents([]);
     duoLogueRef.current = null;
     lastWhisperKeyRef.current = null;
+    lastModeratorKeyRef.current = null;
     fairnessManagerRef.current = new FairnessManager();
     whisperBonusesRef.current = {
       george: 0,
@@ -388,38 +425,12 @@ export function Chat({ topic, onNavigate }: ChatProps) {
     };
   }, [topic]);
 
-  // Check if user is at bottom of scroll
-  const checkIfAtBottom = useCallback(() => {
-    const container = messagesContainerRef.current;
-    if (!container) return true;
-    const threshold = 100; // pixels from bottom
-    const isAtBottom = container.scrollHeight - container.scrollTop - container.clientHeight < threshold;
-    return isAtBottom;
-  }, []);
-
-  // Handle scroll events to track position
-  const handleScroll = useCallback(() => {
-    const atBottom = checkIfAtBottom();
-    isAtBottomRef.current = atBottom;
-    setShowScrollButton(!atBottom);
-  }, [checkIfAtBottom]);
-
   // Scroll to bottom function
   const scrollToBottom = useCallback(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    virtuosoRef.current?.scrollToIndex({ index: "LAST", align: "end", behavior: "smooth" });
     isAtBottomRef.current = true;
     setShowScrollButton(false);
   }, []);
-
-  // Scroll to bottom when new messages arrive - only if already at bottom
-  useEffect(() => {
-    if (isAtBottomRef.current) {
-      messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-    } else {
-      // Show the scroll button when new messages arrive and not at bottom
-      setShowScrollButton(true);
-    }
-  }, [messages]);
 
   useEffect(() => {
     const agentMessages = messages.filter(
@@ -548,7 +559,7 @@ export function Chat({ topic, onNavigate }: ChatProps) {
     if (memoryManagerRef.current) {
       const context = memoryManagerRef.current.buildContext(agentId);
       const recent = context.recentMessages
-        .filter((m) => isCouncilAgent(m.agentId))
+        .filter((m) => isCouncilAgent(m.agentId) || isModeratorMessage(m as any))
         .slice(-MAX_CONTEXT_MESSAGES);
       return { messages: recent, engagementDebts: context.engagementDebt };
     }
@@ -556,7 +567,7 @@ export function Chat({ topic, onNavigate }: ChatProps) {
     const fallback = messages
       .filter(
         (m) =>
-          isCouncilAgent(m.agentId) &&
+          (isCouncilAgent(m.agentId) || isModeratorMessage(m as any)) &&
           m.content &&
           m.content.trim() !== "" &&
           !m.content.includes("[No response received]") &&
@@ -607,14 +618,23 @@ export function Chat({ topic, onNavigate }: ChatProps) {
       }
 
       for (const msg of contextMessages) {
-        if (!isCouncilAgent(msg.agentId)) continue;
-        if (msg.agentId === agentId) {
-          history.push({ role: "assistant", content: msg.content });
-        } else {
-          const speaker = AGENT_CONFIG[msg.agentId] ?? AGENT_CONFIG.system;
+        if (isCouncilAgent(msg.agentId)) {
+          if (msg.agentId === agentId) {
+            history.push({ role: "assistant", content: msg.content });
+          } else {
+            const speaker = AGENT_CONFIG[msg.agentId] ?? AGENT_CONFIG.system;
+            history.push({
+              role: "user",
+              content: `${speaker.name} (id: ${msg.id}): ${msg.content}`,
+            });
+          }
+          continue;
+        }
+
+        if (isModeratorMessage(msg as any)) {
           history.push({
             role: "user",
-            content: `${speaker.name} (id: ${msg.id}): ${msg.content}`,
+            content: `Moderator (id: ${msg.id}): ${msg.content}`,
           });
         }
       }
@@ -731,6 +751,187 @@ export function Chat({ topic, onNavigate }: ChatProps) {
     }
     return undefined;
   }, [config.proxy]);
+
+  const pickModeratorRuntime = useCallback(() => {
+    if (!config.preferences.moderatorEnabled) return null;
+    const order: Provider[] = ["openai", "anthropic", "google", "deepseek", "kimi"];
+    for (const provider of order) {
+      const credential = config.credentials[provider];
+      const model = config.models[provider];
+      if (credential?.apiKey && model) {
+        return { provider, credential, model };
+      }
+    }
+    return null;
+  }, [config.credentials, config.models, config.preferences.moderatorEnabled]);
+
+  const generateModeratorMessage = useCallback(async (options: {
+    kind: "opening" | "tension";
+    conflict?: ConflictDetection | null;
+  }): Promise<ChatMessage | null> => {
+    if (abortRef.current) return null;
+    if (!config.preferences.moderatorEnabled) return null;
+    if (moderatorInFlightRef.current) return null;
+
+    const runtime = pickModeratorRuntime();
+    if (!runtime) return null;
+
+    const proxy = getProxy();
+    const controller = new AbortController();
+    moderatorAbortRef.current?.abort();
+    moderatorAbortRef.current = controller;
+
+    moderatorInFlightRef.current = true;
+
+    const { provider, credential, model } = runtime;
+    const newMessage: ChatMessage = {
+      id: `msg_${Date.now()}_moderator_${Math.random().toString(36).slice(2, 7)}`,
+      agentId: "system",
+      displayName: "Moderator",
+      displayProvider: provider,
+      content: "",
+      timestamp: Date.now(),
+      isStreaming: true,
+    };
+
+    setMessages((prev) => [...prev, newMessage]);
+
+    let streamingContent = "";
+    try {
+      const recentForContext =
+        options.kind === "opening"
+          ? []
+          : messages
+              .filter((m) => (isCouncilAgent(m.agentId) || isModeratorMessage(m as any)) && !m.isStreaming)
+              .filter((m) => (m.content ?? "").trim().length > 0)
+              .slice(-12);
+
+      const history: APIChatMessage[] = [
+        { role: "system", content: MODERATOR_SYSTEM_PROMPT },
+        { role: "user", content: `Discussion topic: "${topic}"` },
+      ];
+
+      for (const msg of recentForContext) {
+        const speaker = isCouncilAgent(msg.agentId)
+          ? AGENT_CONFIG[msg.agentId].name
+          : "Moderator";
+        history.push({
+          role: "user",
+          content: `${speaker} (id: ${msg.id}): ${msg.content}`,
+        });
+      }
+
+      if (options.kind === "opening") {
+        history.push({
+          role: "user",
+          content:
+            "Write the opening moderator message (1–2 sentences). Re-state the topic in plain language and ask one concrete kickoff question.",
+        });
+      } else {
+        const conflict = options.conflict;
+        const a = conflict?.agentPair?.[0];
+        const b = conflict?.agentPair?.[1];
+        const pct = conflict ? Math.round((conflict.conflictScore / 100) * 100) : null;
+        const pairText =
+          a && b
+            ? `${AGENT_CONFIG[a]?.name ?? a} ↔ ${AGENT_CONFIG[b]?.name ?? b}${pct != null ? ` (${pct}%)` : ""}`
+            : "a pair of agents";
+        history.push({
+          role: "user",
+          content: `Tension detected between ${pairText}. Write a short moderator note (1–2 sentences):
+- Name the core disagreement in one clause.
+- Ask ONE clarifying question aimed at the pair.
+- Optionally invite a quieter agent by name to weigh in with ONE sentence.
+- Keep it calm and concrete.`,
+        });
+      }
+
+      const result = await callProvider(
+        provider,
+        credential,
+        model,
+        history,
+        (chunk) => {
+          if (abortRef.current) return;
+          if (chunk.content) {
+            streamingContent += chunk.content;
+            setMessages((prev) =>
+              prev.map((m) => (m.id === newMessage.id ? { ...m, content: streamingContent } : m))
+            );
+          }
+        },
+        proxy,
+        {
+          signal: controller.signal,
+          idleTimeoutMs: 60000,
+          requestTimeoutMs: 90000,
+        }
+      );
+
+      if (abortRef.current) {
+        setMessages((prev) => prev.filter((m) => m.id !== newMessage.id));
+        return null;
+      }
+
+      const { cleaned } = extractActions(result.content || "");
+      const displayContent = cleaned || normalizeMessageText(result.content || streamingContent || "");
+
+      const finalMessage: ChatMessage = {
+        ...newMessage,
+        content: displayContent || "[No response received]",
+        isStreaming: false,
+        tokens: result.tokens,
+        latencyMs: result.latencyMs,
+        error: result.error,
+        metadata: result.success
+          ? {
+              model: model as ModelId,
+              latencyMs: result.latencyMs,
+            }
+          : undefined,
+      };
+
+      setMessages((prev) => prev.map((m) => (m.id === newMessage.id ? finalMessage : m)));
+
+      if (memoryManagerRef.current && result.success) {
+        memoryManagerRef.current.addMessage(finalMessage);
+      }
+
+      if (result.success) {
+        setTotalTokens((prev) => ({
+          input: prev.input + result.tokens.input,
+          output: prev.output + result.tokens.output,
+        }));
+      }
+
+      return finalMessage;
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === newMessage.id
+            ? { ...m, isStreaming: false, error: errorMessage, content: streamingContent || "[Moderator failed]" }
+            : m
+        )
+      );
+      return null;
+    } finally {
+      moderatorInFlightRef.current = false;
+      moderatorAbortRef.current = null;
+    }
+  }, [config.credentials, config.models, config.preferences.moderatorEnabled, getProxy, messages, pickModeratorRuntime, topic]);
+
+  useEffect(() => {
+    if (!isRunning) return;
+    if (!config.preferences.moderatorEnabled) return;
+    if (!conflictState) return;
+
+    const key = conflictState.agentPair.join("-");
+    if (lastModeratorKeyRef.current === key) return;
+    lastModeratorKeyRef.current = key;
+
+    void generateModeratorMessage({ kind: "tension", conflict: conflictState });
+  }, [config.preferences.moderatorEnabled, conflictState, generateModeratorMessage, isRunning]);
 
   const toggleUserReaction = useCallback((targetId: string, emoji: ReactionId) => {
     setMessages((prev) =>
@@ -1121,6 +1322,10 @@ export function Chat({ topic, onNavigate }: ChatProps) {
     };
     setMessages([topicMessage]);
 
+    if (config.preferences.moderatorEnabled && !abortRef.current) {
+      await generateModeratorMessage({ kind: "opening" });
+    }
+
     let previousSpeaker: CouncilAgentId | null = null;
     let turn = 0;
 
@@ -1232,8 +1437,10 @@ export function Chat({ topic, onNavigate }: ChatProps) {
     maxTurns,
     isPaused,
     config.preferences.showBiddingScores,
+    config.preferences.moderatorEnabled,
     generateBiddingScores,
     generateAgentResponse,
+    generateModeratorMessage,
     generateClosingResponse,
     configuredProviders,
     resetRuntimeState,
@@ -1264,6 +1471,8 @@ export function Chat({ topic, onNavigate }: ChatProps) {
         controller.abort();
       }
       activeRequestsRef.current.clear();
+      moderatorAbortRef.current?.abort();
+      moderatorAbortRef.current = null;
     };
   }, []);
 
@@ -1273,6 +1482,8 @@ export function Chat({ topic, onNavigate }: ChatProps) {
       controller.abort();
     }
     activeRequestsRef.current.clear();
+    moderatorAbortRef.current?.abort();
+    moderatorAbortRef.current = null;
     setIsRunning(false);
     setTypingAgents([]);
     setIsPaused(false);
@@ -1288,6 +1499,8 @@ export function Chat({ topic, onNavigate }: ChatProps) {
         controller.abort();
       }
       activeRequestsRef.current.clear();
+      moderatorAbortRef.current?.abort();
+      moderatorAbortRef.current = null;
 
       // Remove incomplete streaming messages
       setMessages(prev => prev.filter(m => !m.isStreaming));
@@ -1302,6 +1515,28 @@ export function Chat({ topic, onNavigate }: ChatProps) {
   const formatTime = (timestamp: number) => {
     return new Date(timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   };
+
+  const exportMessages = useMemo(() => {
+    return messages
+      .filter((m) => !m.isStreaming && (m.content ?? "").trim().length > 0)
+      .map((m) => {
+        const agent = AGENT_CONFIG[m.agentId] ?? AGENT_CONFIG.system;
+        const providerForModel = m.displayProvider ?? agent.provider;
+        const modelName = m.metadata?.model
+          ? getModelDisplayName(providerForModel, m.metadata.model)
+          : undefined;
+        const model = modelName && modelName !== "Unknown Model" ? modelName : undefined;
+        return {
+          id: m.id,
+          speaker: m.displayName ?? agent.name,
+          model,
+          timestamp: m.timestamp,
+          content: m.content,
+          tokens: m.tokens,
+          costUSD: calculateMessageCost(m.metadata?.model, m.tokens),
+        };
+      });
+  }, [messages, getModelDisplayName]);
 
   return (
     <div className="app-shell flex flex-col h-screen">
@@ -1364,10 +1599,30 @@ export function Chat({ topic, onNavigate }: ChatProps) {
             )}
 
             <button
-              onClick={() => setShowLogs(!showLogs)}
+              onClick={() =>
+                setSidePanelView((prev) => (prev === "logs" ? "default" : "logs"))
+              }
               className="button-secondary text-sm"
             >
               Logs {errors.length > 0 && `(${errors.length})`}
+            </button>
+
+            <button
+              onClick={() =>
+                setSidePanelView((prev) => (prev === "search" ? "default" : "search"))
+              }
+              className="button-secondary text-sm"
+            >
+              Search
+            </button>
+
+            <button
+              onClick={() =>
+                setSidePanelView((prev) => (prev === "export" ? "default" : "export"))
+              }
+              className="button-secondary text-sm"
+            >
+              Export
             </button>
 
             {isRunning && (
@@ -1411,30 +1666,56 @@ export function Chat({ topic, onNavigate }: ChatProps) {
       {/* Main content area */}
       <div className="flex-1 flex flex-col md:flex-row overflow-hidden relative z-10">
         {/* Messages area - Discord style */}
-        <div 
-          ref={messagesContainerRef}
-          onScroll={handleScroll}
-          className="flex-1 overflow-y-auto relative"
-        >
-          <div className="discord-messages">
-            {messages.map((message) => {
+        <div className="flex-1 relative overflow-hidden">
+          <Virtuoso
+            ref={virtuosoRef}
+            style={{ height: "100%" }}
+            className="overflow-y-auto"
+            data={messages}
+            computeItemKey={(_, item) => item.id}
+            followOutput={(isAtBottom) =>
+              config.preferences.autoScroll && isAtBottom ? "smooth" : false
+            }
+            atBottomStateChange={(atBottom) => {
+              isAtBottomRef.current = atBottom;
+              setShowScrollButton(!atBottom);
+            }}
+            components={{
+              List: forwardRef<HTMLDivElement, HTMLAttributes<HTMLDivElement>>((props, ref) => (
+                <div
+                  {...props}
+                  ref={ref}
+                  className={`discord-messages ${props.className ?? ""}`}
+                />
+              )),
+            }}
+            itemContent={(_, message) => {
               const agent = AGENT_CONFIG[message.agentId] ?? AGENT_CONFIG.system;
               const isAgent = isCouncilAgent(message.agentId);
               const isSystem = message.agentId === "system";
               const isTool = message.agentId === "tool";
-              const modelName = isAgent
-                ? getModelDisplayName(agent.provider, message.metadata?.model)
+              const isModerator = isModeratorMessage(message as any);
+              const displayName =
+                typeof message.displayName === "string" && message.displayName.trim()
+                  ? message.displayName
+                  : agent.name;
+              const nameClass = isModerator ? "text-emerald-300" : agent.color;
+              const providerForDisplay = message.displayProvider ?? agent.provider;
+              const modelName = message.metadata?.model
+                ? getModelDisplayName(providerForDisplay, message.metadata.model)
                 : "";
-              const accent = isSystem
-                ? "var(--accent-ink)"
-                : isTool
+              const accent = isModerator
+                ? "var(--accent-emerald)"
+                : isSystem
                   ? "var(--accent-ink)"
-                  : message.agentId === "user"
-                  ? "var(--accent-emerald)"
-                  : `var(--color-${message.agentId})`;
+                  : isTool
+                    ? "var(--accent-ink)"
+                    : message.agentId === "user"
+                      ? "var(--accent-emerald)"
+                      : `var(--color-${message.agentId})`;
               const accentStyle = { "--accent": accent } as CSSProperties;
               const quotedMessages = (message.quotedMessageIds ?? [])
-                .map((qid) => messages.find((msg) => msg.id === qid))
+                .map((qid) => messageById.get(qid))
                 .filter((m): m is ChatMessage => m != null);
               const reactionEntries = message.reactions
                 ? (Object.entries(message.reactions) as [ReactionId, { count: number; by: string[] }][]).filter(
@@ -1452,16 +1733,22 @@ export function Chat({ topic, onNavigate }: ChatProps) {
                     ? "is-streaming" 
                     : "";
 
+              const isHighlighted = highlightedMessageId === message.id;
+
               return (
                 <div
-                  key={message.id}
-                  className={`discord-message message-enter ${messageStatusClass}`}
+                  id={message.id}
+                  className={`discord-message message-enter ${messageStatusClass} ${isHighlighted ? "message-highlight" : ""}`}
                   style={accentStyle}
                 >
                   {/* Avatar */}
                   <div className="discord-avatar">
                     {isSystem || isTool ? (
-                      <SystemIcon size={40} />
+                      message.displayProvider ? (
+                        <ProviderIcon provider={message.displayProvider} size={40} />
+                      ) : (
+                        <SystemIcon size={40} />
+                      )
                     ) : message.agentId === "user" ? (
                       <UserIcon size={40} />
                     ) : (
@@ -1476,10 +1763,10 @@ export function Chat({ topic, onNavigate }: ChatProps) {
                   <div className="discord-message-content">
                     {/* Header: Name (Model) + timestamp */}
                     <div className="discord-message-header">
-                      <span className={`discord-username ${agent.color}`}>
-                        {agent.name}
+                      <span className={`discord-username ${nameClass}`}>
+                        {displayName}
                       </span>
-                      {isAgent && modelName && (
+                      {(isAgent || isModerator) && modelName && (
                         <span className="discord-model">({modelName})</span>
                       )}
                       <span className="discord-timestamp">
@@ -1506,7 +1793,7 @@ export function Chat({ topic, onNavigate }: ChatProps) {
                       return (
                         <div key={qm.id} className="message-quote">
                           <div className="message-quote-header">
-                            {AGENT_CONFIG[qm.agentId].name} · {formatTime(qm.timestamp)}
+                            {(qm.displayName ?? AGENT_CONFIG[qm.agentId].name)} · {formatTime(qm.timestamp)}
                           </div>
                           <div className="message-quote-body">
                             {qm.content.slice(0, 200)}
@@ -1538,7 +1825,7 @@ export function Chat({ topic, onNavigate }: ChatProps) {
                       )}
                     </div>
 
-                  <div className="message-actions">
+                    <div className="message-actions">
                       <button
                         type="button"
                         className="message-action"
@@ -1599,10 +1886,9 @@ export function Chat({ topic, onNavigate }: ChatProps) {
                   </div>
                 </div>
               );
-            })}
-            <div ref={messagesEndRef} />
-          </div>
-          
+            }}
+          />
+
           {/* Scroll to bottom button */}
           {showScrollButton && (
             <button
@@ -1620,7 +1906,7 @@ export function Chat({ topic, onNavigate }: ChatProps) {
 
         {/* Right sidebar - Agent status & Bidding */}
         <div className="w-full md:w-80 md:border-l border-line-soft side-panel p-4 overflow-y-auto">
-          {showLogs ? (
+          {sidePanelView === "logs" ? (
             // Logs panel
             <div className="scale-in">
               <div className="flex items-center justify-between mb-4">
@@ -1628,7 +1914,7 @@ export function Chat({ topic, onNavigate }: ChatProps) {
                   API Logs
                 </h3>
                 <button
-                  onClick={() => setShowLogs(false)}
+                  onClick={() => setSidePanelView("default")}
                   className="button-ghost text-xs"
                 >
                   Close
@@ -1654,6 +1940,26 @@ export function Chat({ topic, onNavigate }: ChatProps) {
                 )}
               </div>
             </div>
+          ) : sidePanelView === "search" ? (
+            <ConversationSearch
+              messages={messages
+                .filter((m) => (m.content ?? "").trim().length > 0)
+                .map((m) => ({
+                  id: m.id,
+                  agentId: m.displayName ?? String(m.agentId),
+                  content: m.content,
+                  timestamp: m.timestamp,
+                }))}
+              getAgentLabel={getAgentLabel}
+              onJumpToMessage={jumpToMessage}
+              onClose={() => setSidePanelView("default")}
+            />
+          ) : sidePanelView === "export" ? (
+            <ConversationExport
+              topic={topic}
+              messages={exportMessages}
+              onClose={() => setSidePanelView("default")}
+            />
           ) : (
             <>
               <h3 className="text-xs font-semibold text-ink-500 uppercase tracking-[0.24em] mb-4">
