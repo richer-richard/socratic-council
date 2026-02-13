@@ -311,7 +311,7 @@ export const PROVIDER_INFO: Record<Provider, {
     defaultBaseUrl: "https://api.deepseek.com",
   },
   kimi: {
-    name: "Kimi (Moonshot)",
+    name: "Moonshot",
     agent: "Kate",
     avatar: "📚",
     color: "text-kate",

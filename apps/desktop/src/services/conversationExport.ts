@@ -1,9 +1,11 @@
+import type { AgentId, PairwiseConflict } from "@socratic-council/shared";
 import type { FileChild } from "docx";
 
 export type ConversationExportFormat = "markdown" | "pdf" | "docx" | "pptx" | "json";
 
 export type ConversationExportMessage = {
   id: string;
+  agentId?: string;
   speaker: string;
   model?: string;
   timestamp: number;
@@ -21,6 +23,11 @@ function isTauri(): boolean {
 
 function formatTime(timestamp: number) {
   return new Date(timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
+function formatUtcTimestamp(date: Date) {
+  const iso = date.toISOString(); // YYYY-MM-DDTHH:mm:ss.sssZ
+  return `${iso.slice(0, 19).replace("T", " ")} UTC`;
 }
 
 function safeBaseName(value: string) {
@@ -63,6 +70,15 @@ function hexToRgb(hex: string) {
   const g = Number.parseInt(normalized.slice(2, 4), 16);
   const b = Number.parseInt(normalized.slice(4, 6), 16);
   return { r, g, b };
+}
+
+function mixRgb(a: { r: number; g: number; b: number }, b: { r: number; g: number; b: number }, t: number) {
+  const clamped = Math.max(0, Math.min(1, t));
+  return {
+    r: Math.round(a.r + (b.r - a.r) * clamped),
+    g: Math.round(a.g + (b.g - a.g) * clamped),
+    b: Math.round(a.b + (b.b - a.b) * clamped),
+  };
 }
 
 async function tryFetchBytes(url: string): Promise<Uint8Array | null> {
@@ -212,8 +228,16 @@ function formatCompactNumber(value: number) {
   }
 }
 
+function formatInteger(value: number) {
+  try {
+    return new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 }).format(value);
+  } catch {
+    return String(Math.round(value));
+  }
+}
+
 function formatUsd(value: number) {
-  return `$${value.toFixed(2)}`;
+  return `$${value.toFixed(4)}`;
 }
 
 type PdfRectDoc = {
@@ -272,6 +296,14 @@ async function buildPdfBytes(options: {
   const messages = options.messages;
   const stats = computeStats(messages);
   const iconDataUrl = await tryFetchDataUrl(APP_ICON_URL);
+  const councilAgents = [
+    { id: "george", name: "George" },
+    { id: "cathy", name: "Cathy" },
+    { id: "grace", name: "Grace" },
+    { id: "douglas", name: "Douglas" },
+    { id: "kate", name: "Kate" },
+  ] as const;
+  const councilAgentIds: AgentId[] = councilAgents.map((a) => a.id);
 
   // Cover
   doc.setFillColor(headerBg.r, headerBg.g, headerBg.b);
@@ -288,14 +320,16 @@ async function buildPdfBytes(options: {
   }
 
   doc.setTextColor(headerFg.r, headerFg.g, headerFg.b);
-  doc.setFontSize(26);
-  doc.text("Socratic Council Transcript", titleX, 58);
+  doc.setFontSize(20);
+  doc.text("SOCRATIC COUNCIL", titleX, 52);
+  doc.setFontSize(18);
+  doc.text("Socratic Seminar Transcript", titleX, 74);
 
   doc.setFontSize(12);
   doc.setTextColor(headerFg.r, headerFg.g, headerFg.b);
-  doc.text(`Topic: ${safeTopic}`, titleX, 82, { maxWidth: pageWidth - titleX - margin });
+  doc.text(`Topic: ${safeTopic}`, titleX, 96, { maxWidth: pageWidth - titleX - margin });
   doc.setTextColor(headerFg.r, headerFg.g, headerFg.b);
-  doc.text(`Exported: ${exportedAt.toLocaleString()}`, titleX, 102);
+  doc.text(`Exported: ${formatUtcTimestamp(exportedAt)}`, titleX, 116);
 
   // Summary cards
   const cardGap = 12;
@@ -335,7 +369,21 @@ async function buildPdfBytes(options: {
   const chartX = margin;
   const chartY = cardY + cardH + 18;
   const chartW = maxWidth;
-  const chartH = 150;
+  const chartPad = 14;
+  const barLabelW = 120;
+  const barRowH = 18;
+  const speakerRowsRaw = stats.speakers.map((s) => ({ speaker: s.speaker, messageCount: s.messageCount }));
+  const maxSpeakerRows = 10;
+  const speakerRows = speakerRowsRaw.slice(0, maxSpeakerRows);
+  if (speakerRowsRaw.length > maxSpeakerRows) {
+    const otherCount = speakerRowsRaw
+      .slice(maxSpeakerRows)
+      .reduce((total, s) => total + s.messageCount, 0);
+    speakerRows.push({ speaker: `Other (${speakerRowsRaw.length - maxSpeakerRows})`, messageCount: otherCount });
+  }
+  const chartHeaderH = 34;
+  const chartFooterH = 18;
+  const chartH = chartPad * 2 + chartHeaderH + speakerRows.length * barRowH + chartFooterH;
 
   doc.setFillColor(cardBg.r, cardBg.g, cardBg.b);
   doc.setDrawColor(cardBorder.r, cardBorder.g, cardBorder.b);
@@ -343,44 +391,121 @@ async function buildPdfBytes(options: {
 
   doc.setTextColor(muted.r, muted.g, muted.b);
   doc.setFontSize(11);
-  doc.text("Messages by Speaker", chartX + 14, chartY + 22);
+  doc.text("Messages by Speaker", chartX + chartPad, chartY + 22);
 
-  const barMax = Math.max(1, ...stats.speakers.map((s) => s.messageCount));
-  const barAreaX = chartX + 14;
-  const barAreaY = chartY + 38;
-  const barAreaW = chartW - 28;
-  const barAreaH = chartH - 56;
-
-  const rowH = Math.max(14, barAreaH / Math.max(1, stats.speakers.length));
+  const barMax = Math.max(1, ...speakerRows.map((s) => s.messageCount));
+  const barAreaX = chartX + chartPad;
+  const barAreaY = chartY + chartPad + chartHeaderH;
+  const barAreaW = chartW - chartPad * 2;
   doc.setFontSize(10);
-  for (let i = 0; i < stats.speakers.length; i += 1) {
-    const s = stats.speakers[i];
-    const rowY = barAreaY + i * rowH;
+  for (let i = 0; i < speakerRows.length; i += 1) {
+    const s = speakerRows[i]!;
+    const rowY = barAreaY + i * barRowH;
     const label = s.speaker.length > 18 ? `${s.speaker.slice(0, 17)}…` : s.speaker;
 
-    const barLabelW = 120;
     const barX = barAreaX + barLabelW;
     const barW = Math.max(0, barAreaW - barLabelW - 40);
     const valueW = (s.messageCount / barMax) * barW;
 
     const accent = hexToRgb(colorForSpeaker(s.speaker));
     doc.setTextColor(muted.r, muted.g, muted.b);
-    doc.text(label, barAreaX, rowY + 10);
+    doc.text(label, barAreaX, rowY + 12);
 
     doc.setFillColor(cardBorder.r, cardBorder.g, cardBorder.b);
-    doc.rect(barX, rowY + 2, barW, 10, "F");
+    doc.rect(barX, rowY + 4, barW, 10, "F");
 
     doc.setFillColor(accent.r, accent.g, accent.b);
-    doc.rect(barX, rowY + 2, valueW, 10, "F");
+    doc.rect(barX, rowY + 4, valueW, 10, "F");
 
     doc.setTextColor(muted.r, muted.g, muted.b);
-    doc.text(String(s.messageCount), barX + barW + 10, rowY + 10);
+    doc.text(String(s.messageCount), barX + barW + 10, rowY + 12);
   }
 
-  if (options.includeCosts && stats.totalCostUSD > 0) {
+  if (options.includeCosts) {
+    // Cost ledger
+    const ledgerX = margin;
+    const ledgerY = chartY + chartH + 18;
+    const ledgerW = maxWidth;
+    const ledgerPad = 14;
+    const ledgerHeaderH = 32;
+    const ledgerRowH = 18;
+    const ledgerFooterH = 28;
+
+    const totals = messages.reduce(
+      (acc, m) => {
+        acc.input += m.tokens?.input ?? 0;
+        acc.output += m.tokens?.output ?? 0;
+        return acc;
+      },
+      { input: 0, output: 0 }
+    );
+
+    const costRows = councilAgents.map((agent) => {
+      const forAgent = messages.filter((m) => {
+        const raw = typeof m.agentId === "string" ? m.agentId : m.speaker.toLowerCase();
+        return raw === agent.id || m.speaker === agent.name;
+      });
+      const inputTokens = forAgent.reduce((sum, m) => sum + (m.tokens?.input ?? 0), 0);
+      const outputTokens = forAgent.reduce((sum, m) => sum + (m.tokens?.output ?? 0), 0);
+      const priced = forAgent.some((m) => m.costUSD != null);
+      const estimatedUSD = forAgent.reduce((sum, m) => sum + (m.costUSD ?? 0), 0);
+      return { name: agent.name, inputTokens, outputTokens, priced, estimatedUSD };
+    });
+
+    const anyPricing = costRows.some((r) => r.priced);
+    const totalEstimatedUSD = costRows.reduce((sum, r) => sum + (r.priced ? r.estimatedUSD : 0), 0);
+    const ledgerH = ledgerPad * 2 + ledgerHeaderH + costRows.length * ledgerRowH + ledgerFooterH;
+
+    doc.setFillColor(cardBg.r, cardBg.g, cardBg.b);
+    doc.setDrawColor(cardBorder.r, cardBorder.g, cardBorder.b);
+    pdfRoundedRect(doc, ledgerX, ledgerY, ledgerW, ledgerH, 10, "DF");
+
     doc.setTextColor(muted.r, muted.g, muted.b);
+    doc.setFontSize(11);
+    doc.text("Cost Ledger", ledgerX + ledgerPad, ledgerY + 22);
+
+    // Badge (tokens)
+    const badgeText = `${formatInteger(totals.input + totals.output)} tokens`;
     doc.setFontSize(10);
-    doc.text(`Total cost: ${formatUsd(stats.totalCostUSD)}`, chartX + 14, chartY + chartH - 14);
+    const badgeW = Math.min(180, doc.getTextWidth(badgeText) + 18);
+    const badgeX = ledgerX + ledgerW - ledgerPad - badgeW;
+    const badgeY = ledgerY + 10;
+    doc.setFillColor(cardBorder.r, cardBorder.g, cardBorder.b);
+    pdfRoundedRect(doc, badgeX, badgeY, badgeW, 20, 10, "F");
+    doc.setTextColor(muted.r, muted.g, muted.b);
+    doc.text(badgeText, badgeX + 9, badgeY + 14);
+
+    let rowY = ledgerY + ledgerPad + ledgerHeaderH;
+    doc.setFontSize(10);
+    for (const row of costRows) {
+      doc.setTextColor(fg.r, fg.g, fg.b);
+      doc.text(row.name, ledgerX + ledgerPad, rowY + 12);
+
+      const costLabel = row.priced ? formatUsd(row.estimatedUSD) : "—";
+      doc.setTextColor(muted.r, muted.g, muted.b);
+      doc.text(
+        `${row.inputTokens}/${row.outputTokens} · ${costLabel}`,
+        ledgerX + ledgerW - ledgerPad,
+        rowY + 12,
+        { align: "right" }
+      );
+      rowY += ledgerRowH;
+    }
+
+    // Footer total
+    doc.setDrawColor(cardBorder.r, cardBorder.g, cardBorder.b);
+    doc.line(ledgerX + ledgerPad, rowY + 6, ledgerX + ledgerW - ledgerPad, rowY + 6);
+    doc.setTextColor(muted.r, muted.g, muted.b);
+    doc.text("Estimated total", ledgerX + ledgerPad, rowY + 22);
+    doc.setTextColor(fg.r, fg.g, fg.b);
+    doc.text(
+      anyPricing ? formatUsd(totalEstimatedUSD) : "Pricing not configured",
+      ledgerX + ledgerW - ledgerPad,
+      rowY + 22,
+      {
+        align: "right",
+      }
+    );
   }
 
   // Transcript pages
@@ -464,6 +589,159 @@ async function buildPdfBytes(options: {
     }
 
     y += blockH + 14;
+  }
+
+  // Conflict graph (end of export)
+  {
+    let conflicts: PairwiseConflict[] = [];
+    type ConflictMessage = { id: string; agentId: AgentId; content: string; timestamp: number };
+    try {
+      const { ConflictDetector } = await import("@socratic-council/core");
+      const detector = new ConflictDetector(60, 12);
+      const councilAgentIdSet = new Set<AgentId>(councilAgentIds);
+      const isCouncilAgentId = (value: string): value is AgentId =>
+        councilAgentIdSet.has(value as AgentId);
+      const councilMessages = messages
+        .map((m): ConflictMessage | null => {
+          const raw = typeof m.agentId === "string" ? m.agentId : m.speaker.toLowerCase();
+          if (!isCouncilAgentId(raw)) return null;
+          return {
+            id: m.id,
+            agentId: raw,
+            content: m.content,
+            timestamp: m.timestamp,
+          };
+        })
+        .filter((m): m is ConflictMessage => m != null);
+
+      if (councilMessages.length >= 2) {
+        conflicts = detector.evaluateAll(councilMessages, councilAgentIds).pairs;
+      }
+    } catch {
+      conflicts = [];
+    }
+
+    doc.addPage();
+    const titleY = margin;
+    doc.setTextColor(fg.r, fg.g, fg.b);
+    doc.setFontSize(18);
+    doc.text("Conflict Graph", margin, titleY);
+    doc.setTextColor(muted.r, muted.g, muted.b);
+    doc.setFontSize(10);
+    doc.text("Heuristic pairwise tension scores (0–100%). Higher = more sustained disagreement.", margin, titleY + 18);
+
+    if (conflicts.length === 0) {
+      doc.setTextColor(muted.r, muted.g, muted.b);
+      doc.setFontSize(12);
+      doc.text("Not enough agent messages to compute conflicts.", margin, titleY + 52);
+    } else {
+      const idToName = new Map(councilAgents.map((a) => [a.id, a.name] as const));
+
+      const agentHex: Record<string, string> = {
+        george: "3B82F6",
+        cathy: "F59E0B",
+        grace: "10B981",
+        douglas: "F87171",
+        kate: "2DD4BF",
+      };
+
+      const low = { r: 59, g: 130, b: 246 };
+      const high = { r: 220, g: 38, b: 38 };
+
+      const graphX = margin;
+      const graphY = titleY + 40;
+      const graphW = maxWidth;
+      const graphH = 300;
+
+      doc.setFillColor(cardBg.r, cardBg.g, cardBg.b);
+      doc.setDrawColor(cardBorder.r, cardBorder.g, cardBorder.b);
+      pdfRoundedRect(doc, graphX, graphY, graphW, graphH, 10, "DF");
+
+      const cx = graphX + graphW / 2;
+      const cy = graphY + graphH / 2 - 10;
+      const radius = Math.min(graphW, graphH) / 2 - 70;
+
+      const positions = councilAgents.map((a, i) => {
+        const angle = -Math.PI / 2 + (2 * Math.PI * i) / councilAgents.length;
+        return {
+          id: a.id,
+          name: a.name,
+          x: cx + radius * Math.cos(angle),
+          y: cy + radius * Math.sin(angle),
+        };
+      });
+
+      const posById = new Map(positions.map((p) => [p.id, p] as const));
+      const sortedPairs = [...conflicts].sort((a, b) => b.score - a.score);
+
+      // Edges
+      for (const pair of conflicts) {
+        const a = pair.agents[0];
+        const b = pair.agents[1];
+        const pA = posById.get(a);
+        const pB = posById.get(b);
+        if (!pA || !pB) continue;
+
+        const c = mixRgb(low, high, pair.score);
+        doc.setDrawColor(c.r, c.g, c.b);
+        doc.setLineWidth(1 + Math.min(1, pair.score) * 3);
+        doc.line(pA.x, pA.y, pB.x, pB.y);
+      }
+
+      // Nodes
+      doc.setLineWidth(1);
+      for (const p of positions) {
+        const hex = agentHex[p.id] ?? "64748B";
+        const rgb = hexToRgb(hex);
+
+        doc.setFillColor(rgb.r, rgb.g, rgb.b);
+        doc.circle(p.x, p.y, 10, "F");
+        doc.setFillColor(cardBg.r, cardBg.g, cardBg.b);
+        doc.circle(p.x, p.y, 4, "F");
+
+        doc.setTextColor(fg.r, fg.g, fg.b);
+        doc.setFontSize(10);
+        doc.text(p.name, p.x, p.y + 26, { align: "center" });
+      }
+
+      // Legend
+      const legendY = graphY + graphH - 34;
+      doc.setTextColor(muted.r, muted.g, muted.b);
+      doc.setFontSize(9);
+      doc.text("Low", graphX + 18, legendY + 12);
+      doc.text("High", graphX + graphW - 18, legendY + 12, { align: "right" });
+
+      const legendX = graphX + 50;
+      const legendW = graphW - 100;
+      const legendH = 8;
+      const steps = 18;
+      for (let s = 0; s < steps; s += 1) {
+        const t = s / (steps - 1);
+        const c = mixRgb(low, high, t);
+        doc.setFillColor(c.r, c.g, c.b);
+        doc.rect(legendX + (legendW * s) / steps, legendY + 4, legendW / steps + 1, legendH, "F");
+      }
+
+      // Top tensions list
+      const listY = graphY + graphH + 22;
+      doc.setTextColor(muted.r, muted.g, muted.b);
+      doc.setFontSize(11);
+      doc.text("Top tensions", margin, listY);
+
+      let rowY = listY + 16;
+      doc.setFontSize(10);
+      for (const pair of sortedPairs) {
+        const a = idToName.get(pair.agents[0]) ?? pair.agents[0];
+        const b = idToName.get(pair.agents[1]) ?? pair.agents[1];
+        const label = `${a} ↔ ${b}`;
+        doc.setTextColor(fg.r, fg.g, fg.b);
+        doc.text(label, margin, rowY);
+        doc.setTextColor(muted.r, muted.g, muted.b);
+        doc.text(`${Math.round(pair.score * 100)}%`, margin + maxWidth, rowY, { align: "right" });
+        rowY += 16;
+        if (rowY > pageHeight - margin - 20) break;
+      }
+    }
   }
 
   // Footers

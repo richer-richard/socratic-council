@@ -1001,7 +1001,9 @@ export function Chat({ topic, onNavigate }: ChatProps) {
     const model = config.models[agentConfig.provider];
 
     if (!credential?.apiKey) {
-      const errorMsg = `No API key configured for ${PROVIDER_INFO[agentConfig.provider].name}`;
+      const providerName =
+        agentConfig.provider === "kimi" ? "Kimi" : PROVIDER_INFO[agentConfig.provider].name;
+      const errorMsg = `No API key configured for ${providerName}`;
       apiLogger.log("error", agentConfig.provider, errorMsg);
       setErrors(prev => [...prev, errorMsg]);
       return null;
@@ -1544,6 +1546,7 @@ export function Chat({ topic, onNavigate }: ChatProps) {
         const model = modelName && modelName !== "Unknown Model" ? modelName : undefined;
         return {
           id: m.id,
+          agentId: m.agentId,
           speaker: m.displayName ?? agent.name,
           model,
           timestamp: m.timestamp,

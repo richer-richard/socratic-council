@@ -120,7 +120,8 @@ export function ConfigModal({
         });
       } else {
         setTestResults((prev) => ({ ...prev, [provider]: "failed" }));
-        setTestError(`Connection test failed for ${PROVIDER_INFO[provider].name}`);
+        const providerName = provider === "kimi" ? "Kimi" : PROVIDER_INFO[provider].name;
+        setTestError(`Connection test failed for ${providerName}`);
       }
     } catch (error) {
       console.error(`Error testing ${provider}:`, error);
@@ -199,6 +200,7 @@ export function ConfigModal({
                 const isEditing = editingProvider === provider;
                 const isTesting = testingProvider === provider;
                 const testResult = testResults[provider];
+                const providerName = provider === "kimi" ? "Kimi" : info.name;
 
                 return (
                   <div
@@ -216,7 +218,7 @@ export function ConfigModal({
                         </div>
                         <div>
                           <div className="flex items-center gap-2 flex-wrap">
-                            <span className="font-semibold text-white">{info.name}</span>
+                            <span className="font-semibold text-white">{providerName}</span>
                             {isConfigured && credential?.verified && (
                               <span className="badge badge-success">Verified ✓</span>
                             )}
