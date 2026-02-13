@@ -55,7 +55,9 @@ graph LR
 
 ## 🏛️ Meet the Council
 
-Each AI persona has a unique name, personality, and configurable AI provider:
+> Note: The old persona labels (e.g. “Logician”, “Ethicist”, …) are **legacy**. In the current desktop app, agents are neutral by default unless you customize their System Prompt in Settings.
+
+Each agent has a unique name and configurable AI provider:
 
 <div align="center">
 
@@ -417,11 +419,20 @@ Agents can query the Oracle to resolve factual disputes:
 git clone https://github.com/richer-richard/socratic-council-of-five.git
 cd socratic-council-of-five
 
+# Enable pnpm via Corepack (recommended)
+corepack enable
+
 # Install dependencies
 pnpm install
 
-# Run in development mode
-pnpm dev
+# Desktop app (Tauri + Rust)
+pnpm --filter @socratic-council/desktop tauri:dev
+
+# Web UI only (no Tauri)
+pnpm dev:desktop
+
+# CLI dev (watch build)
+pnpm dev:cli
 
 # Run tests
 pnpm test

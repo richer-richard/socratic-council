@@ -213,8 +213,11 @@ const AGENT_IDS: CouncilAgentId[] = ["george", "cathy", "grace", "douglas", "kat
 const isCouncilAgent = (id: ChatMessage["agentId"]): id is CouncilAgentId =>
   AGENT_IDS.includes(id as CouncilAgentId);
 
-const isModeratorMessage = (msg: { agentId: unknown } & Record<string, unknown>): boolean =>
-  msg.agentId === "system" && msg.displayName === "Moderator";
+const isModeratorMessage = (msg: unknown): boolean => {
+  if (!msg || typeof msg !== "object") return false;
+  const record = msg as Record<string, unknown>;
+  return record.agentId === "system" && record.displayName === "Moderator";
+};
 
 const REACTION_IDS = REACTION_CATALOG;
 const MAX_CONTEXT_MESSAGES = 16;
@@ -572,7 +575,7 @@ export function Chat({ topic, onNavigate }: ChatProps) {
     if (memoryManagerRef.current) {
       const context = memoryManagerRef.current.buildContext(agentId);
       const recent = context.recentMessages
-        .filter((m) => isCouncilAgent(m.agentId) || isModeratorMessage(m as any))
+        .filter((m) => isCouncilAgent(m.agentId) || isModeratorMessage(m))
         .slice(-MAX_CONTEXT_MESSAGES);
       return { messages: recent, engagementDebts: context.engagementDebt };
     }
@@ -580,7 +583,7 @@ export function Chat({ topic, onNavigate }: ChatProps) {
     const fallback = messages
       .filter(
         (m) =>
-          (isCouncilAgent(m.agentId) || isModeratorMessage(m as any)) &&
+          (isCouncilAgent(m.agentId) || isModeratorMessage(m)) &&
           m.content &&
           m.content.trim() !== "" &&
           !m.content.includes("[No response received]") &&
@@ -644,7 +647,7 @@ export function Chat({ topic, onNavigate }: ChatProps) {
           continue;
         }
 
-        if (isModeratorMessage(msg as any)) {
+        if (isModeratorMessage(msg)) {
           history.push({
             role: "user",
             content: `Moderator (id: ${msg.id}): ${msg.content}`,
@@ -812,12 +815,12 @@ export function Chat({ topic, onNavigate }: ChatProps) {
     let streamingContent = "";
     try {
       const recentForContext =
-        options.kind === "opening"
-          ? []
-          : messages
-              .filter((m) => (isCouncilAgent(m.agentId) || isModeratorMessage(m as any)) && !m.isStreaming)
-              .filter((m) => (m.content ?? "").trim().length > 0)
-              .slice(-12);
+            options.kind === "opening"
+              ? []
+              : messages
+                  .filter((m) => (isCouncilAgent(m.agentId) || isModeratorMessage(m)) && !m.isStreaming)
+                  .filter((m) => (m.content ?? "").trim().length > 0)
+                  .slice(-12);
 
       const history: APIChatMessage[] = [
         { role: "system", content: MODERATOR_SYSTEM_PROMPT },
@@ -1699,7 +1702,7 @@ export function Chat({ topic, onNavigate }: ChatProps) {
               const isAgent = isCouncilAgent(message.agentId);
               const isSystem = message.agentId === "system";
               const isTool = message.agentId === "tool";
-              const isModerator = isModeratorMessage(message as any);
+              const isModerator = isModeratorMessage(message);
               const displayName =
                 typeof message.displayName === "string" && message.displayName.trim()
                   ? message.displayName
