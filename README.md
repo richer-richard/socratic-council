@@ -4,11 +4,21 @@
 
 Socratic Council is a local-first desktop app that runs a five-agent “seminar” on any topic. You provide one or more AI provider API keys, type a topic, and watch five agents discuss it in a turn-taking group chat. The app includes search, quoting, export, conflict visualization, and token/cost tracking.
 
-This repo currently ships **source only** (no DMGs/installer downloads). If you can run a Tauri + React project, you can run Socratic Council.
+This repo currently ships **source only** (no installer downloads). If you can run a Tauri + React project, you can run Socratic Council.
+
+At a glance:
+- Local-first: runs on your machine
+- Bring-your-own-keys: uses real provider APIs
+- Multi-agent: five speakers + optional moderator
+- Built-in tools: quoting, reactions, search, export, conflict graph, cost ledger
 
 ## Table of contents
 
 - [Quickstart (copy/paste)](#quickstart-copypaste)
+- [How it works](#how-it-works)
+  - [Architecture](#architecture)
+  - [Conversation loop](#conversation-loop)
+  - [Export pipeline](#export-pipeline)
 - [Prerequisites](#prerequisites)
   - [All platforms](#all-platforms)
   - [macOS prerequisites](#macos-prerequisites)
@@ -57,6 +67,58 @@ pnpm --filter @socratic-council/desktop tauri:dev
 Notes:
 - The **first build can take a while** (Rust + frontend dependencies).
 - If you hit an error, jump to [Troubleshooting](#troubleshooting) and run the “diagnostics” commands.
+
+## How it works
+
+### Architecture
+
+Socratic Council is a pnpm monorepo with a desktop app and shared TypeScript packages.
+
+```mermaid
+flowchart TB
+  subgraph Apps["Apps"]
+    Desktop["Desktop app\napps/desktop\nTauri v2 + React"] --> Core
+    CLI["CLI app (WIP)\napps/cli\nNode + TypeScript"] --> Core
+  end
+
+  Core["@socratic-council/core\nbidding • cost • conflict • memory"] --> SDK["@socratic-council/sdk\nproviders • transport • streaming"]
+  Core --> Shared["@socratic-council/shared\ntypes • constants • model registry"]
+  SDK --> Providers["Provider APIs\n(OpenAI / Anthropic / Google / DeepSeek / Kimi)"]
+```
+
+### Conversation loop
+
+At runtime the app repeatedly selects a speaker, streams their response, applies structured “actions” in the text, then updates the UI and analytics.
+
+```mermaid
+flowchart LR
+  U["You\n(topic / prompt)"] --> UI["Chat UI"]
+  UI --> Ctx["Build context\n(sliding window + memory)"]
+  Ctx --> Bid["Bidding round\n(select next speaker)"]
+  Bid --> Gen["Provider streaming\n(agent response)"]
+  Gen --> Parse["Parse actions\n@quote / @react / @tool"]
+  Parse --> Msg["Finalize message\n(store + render)"]
+  Parse -->|Tool call| Oracle["Oracle tool\nsearch / verify / cite"]
+  Oracle --> ToolRes["Insert tool result message\nTool result (oracle.*): ..."]
+  Msg --> Cost["Cost tracker\n(tokens + USD estimate)"]
+  Msg --> Conf["Conflict detector\npairwise tension"]
+  Cost --> UI
+  Conf --> UI
+  ToolRes --> UI
+```
+
+### Export pipeline
+
+Exports are generated locally from the transcript plus computed statistics (speaker counts, tokens, costs, conflict graph).
+
+```mermaid
+flowchart TB
+  T["Transcript\n(messages + metadata)"] --> S["Stats\n(messages by speaker • cost ledger)"]
+  T --> C["Conflict graph\n(pairwise scores)"]
+  S --> E["Export renderer\nMarkdown / JSON / PDF / DOCX / PPTX"]
+  C --> E
+  E --> F["File on disk"]
+```
 
 ## Prerequisites
 
@@ -253,6 +315,16 @@ The app can export a conversation to:
 
 Exports are generated locally.
 
+Format guide:
+
+| Format | Best for | Notes |
+|---|---|---|
+| Markdown | Sharing in docs/issues | Plain text, easiest to diff |
+| JSON | Programmatic processing | Stable schema for tooling |
+| PDF | Printing / sending | Includes charts and summaries |
+| DOCX | Editing in Word | Structured sections, tables |
+| PPTX | Slides / presentation | Graphics-first summary |
+
 ### Logs
 
 Logs are intended for debugging provider calls and app behavior. If something looks wrong, logs often explain why.
@@ -334,7 +406,7 @@ Run the desktop app in dev mode:
 pnpm --filter @socratic-council/desktop tauri:dev
 ```
 
-Build a production bundle (local artifact only; not released by this repo right now):
+Build a production bundle (local artifact only; not distributed by this repo right now):
 
 ```bash
 pnpm --filter @socratic-council/desktop tauri:build
