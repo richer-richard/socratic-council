@@ -17,6 +17,7 @@ import { ConversationExport } from "../components/ConversationExport";
 import { ConflictGraph } from "../components/ConflictGraph";
 import { ConflictDetector, CostTrackerEngine, ConversationMemoryManager, createMemoryManager, FairnessManager } from "@socratic-council/core";
 import { calculateMessageCost } from "../utils/cost";
+import { splitIntoInlineQuoteSegments } from "../utils/inlineQuotes";
 import { Virtuoso, type VirtuosoHandle } from "react-virtuoso";
 import type {
   ConflictDetection,
@@ -281,7 +282,7 @@ function extractActions(raw: string) {
     if (!quoteTargets.includes(targetId)) {
       quoteTargets.push(targetId);
     }
-    return "";
+    return `@quote(${targetId})`;
   });
 
   cleaned = cleaned.replace(ACTION_PATTERNS.react, (_, target, emoji) => {
@@ -720,20 +721,10 @@ export function Chat({ topic, onNavigate }: ChatProps) {
   );
 
   const resolveQuoteTargets = useCallback(
-    (agentId: CouncilAgentId, explicit: string[]): string[] => {
-      if (explicit.length > 0) return explicit;
-      // Fallback: pick the most relevant from engagement debts or most recent message
-      const debts = memoryManagerRef.current?.getEngagementDebts(agentId) ?? [];
-      if (debts.length > 0) {
-        const id = debts[0]?.messageId;
-        return id ? [id] : [];
-      }
-      const recent = [...messages]
-        .reverse()
-        .find((m) => isCouncilAgent(m.agentId) && m.agentId !== agentId && !m.isStreaming);
-      return recent?.id ? [recent.id] : [];
+    (_agentId: CouncilAgentId, explicit: string[]): string[] => {
+      return explicit;
     },
-    [messages]
+    []
   );
 
   const buildToolContextMessages = useCallback((results: Array<{ name: string; output: string; error?: string }>) => {
@@ -1725,9 +1716,6 @@ export function Chat({ topic, onNavigate }: ChatProps) {
                       ? "var(--accent-emerald)"
                       : `var(--color-${message.agentId})`;
               const accentStyle = { "--accent": accent } as CSSProperties;
-              const quotedMessages = (message.quotedMessageIds ?? [])
-                .map((qid) => messageById.get(qid))
-                .filter((m): m is ChatMessage => m != null);
               const reactionEntries = message.reactions
                 ? (Object.entries(message.reactions) as [ReactionId, { count: number; by: string[] }][]).filter(
                     ([, reaction]) => reaction?.count
@@ -1796,34 +1784,6 @@ export function Chat({ topic, onNavigate }: ChatProps) {
                       })()}
                     </div>
 
-                    {quotedMessages.map((qm) => {
-                      const qReactions = qm.reactions
-                        ? (Object.entries(qm.reactions) as [ReactionId, { count: number; by: string[] }][])
-                            .filter(([, r]) => r?.count)
-                        : [];
-                      return (
-                        <div key={qm.id} className="message-quote">
-                          <div className="message-quote-header">
-                            {(qm.displayName ?? AGENT_CONFIG[qm.agentId].name)} · {formatTime(qm.timestamp)}
-                          </div>
-                          <div className="message-quote-body">
-                            {qm.content.slice(0, 200)}
-                            {qm.content.length > 200 ? "…" : ""}
-                          </div>
-                          {qReactions.length > 0 && (
-                            <div className="message-quote-reactions">
-                              {qReactions.map(([reactionId, reaction]) => (
-                                <div key={reactionId} className="reaction-chip">
-                                  <ReactionIcon type={reactionId} size={14} />
-                                  <span>{reaction.count}</span>
-                                </div>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })}
-
                     {/* Message body */}
                     <div className="discord-message-body">
                       {message.isStreaming ? (
@@ -1831,7 +1791,71 @@ export function Chat({ topic, onNavigate }: ChatProps) {
                           {message.content}
                         </div>
                       ) : (
-                        <Markdown content={message.content} className="markdown-content" />
+                        splitIntoInlineQuoteSegments(message.content).map((segment, idx) => {
+                          if (segment.type === "quote") {
+                            const qm = messageById.get(segment.id);
+                            if (!qm) {
+                              return (
+                                <div key={`${message.id}-quote-${idx}`} className="message-quote">
+                                  <div className="message-quote-header">
+                                    Missing quote · @quote({segment.id})
+                                  </div>
+                                  <div className="message-quote-body">
+                                    Message not found.
+                                  </div>
+                                </div>
+                              );
+                            }
+
+                            const qReactions = qm.reactions
+                              ? (Object.entries(qm.reactions) as [ReactionId, { count: number; by: string[] }][])
+                                  .filter(([, r]) => r?.count)
+                              : [];
+
+                            return (
+                              <div key={`${message.id}-quote-${idx}`} className="message-quote">
+                                <div className="message-quote-header">
+                                  {(qm.displayName ?? AGENT_CONFIG[qm.agentId].name)} · {formatTime(qm.timestamp)}
+                                </div>
+                                <div className="message-quote-body">
+                                  {qm.content.slice(0, 200)}
+                                  {qm.content.length > 200 ? "…" : ""}
+                                </div>
+                                {qReactions.length > 0 && (
+                                  <div className="message-quote-reactions">
+                                    {qReactions.map(([reactionId, reaction]) => (
+                                      <div key={reactionId} className="reaction-chip">
+                                        <ReactionIcon type={reactionId} size={14} />
+                                        <span>{reaction.count}</span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          }
+
+                          if (!segment.text) return null;
+                          if (segment.text.trim() === "") {
+                            return (
+                              <div
+                                key={`${message.id}-text-${idx}`}
+                                className="markdown-content"
+                                style={{ whiteSpace: "pre-wrap" }}
+                              >
+                                {segment.text}
+                              </div>
+                            );
+                          }
+
+                          return (
+                            <Markdown
+                              key={`${message.id}-text-${idx}`}
+                              content={segment.text}
+                              className="markdown-content"
+                            />
+                          );
+                        })
                       )}
                       {message.isStreaming && (
                         <span className="typing-indicator">

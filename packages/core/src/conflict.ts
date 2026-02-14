@@ -212,15 +212,43 @@ function tokenSet(content: string): Set<string> {
   return new Set(tokens);
 }
 
-function overlapRatio(a: string, b: string): number {
+type TokenSimilarity = {
+  sizeA: number;
+  sizeB: number;
+  overlapCount: number;
+  unionCount: number;
+  jaccard: number;
+};
+
+function tokenSimilarity(a: string, b: string): TokenSimilarity {
   const setA = tokenSet(a);
   const setB = tokenSet(b);
-  if (setA.size === 0 || setB.size === 0) return 0;
   let overlap = 0;
   for (const token of setA) {
     if (setB.has(token)) overlap += 1;
   }
-  return overlap / Math.min(setA.size, setB.size);
+  const union = setA.size + setB.size - overlap;
+  const jaccard = union > 0 ? overlap / union : 0;
+
+  return {
+    sizeA: setA.size,
+    sizeB: setB.size,
+    overlapCount: overlap,
+    unionCount: union,
+    jaccard,
+  };
+}
+
+function messageSignalWeight(content: string, baseScore: number): number {
+  // If the message contains explicit disagreement cues (baseScore already high),
+  // do not dampen it even if it's short.
+  if (baseScore >= 16) return 1;
+
+  const len = content.trim().length;
+  if (len >= 160) return 1;
+  if (len >= 80) return 0.9;
+  if (len >= 40) return 0.8;
+  return 0.7;
 }
 
 export class ConflictDetector {
@@ -315,12 +343,29 @@ export class ConflictDetector {
       }
 
       // Immediate back-and-forth + negation on overlapping terms tends to be real contradiction.
-      if (prev && prev.agentId === other && base > 0) {
-        adjusted = Math.min(100, adjusted + 6);
-        if (hasNegation(msg.content) && overlapRatio(msg.content, prev.content) >= 0.12) {
-          adjusted = Math.min(100, adjusted + 10);
+      if (prev && prev.agentId === other) {
+        if (base > 0) {
+          adjusted = Math.min(100, adjusted + 6);
+        }
+
+        if (hasNegation(msg.content)) {
+          const sim = tokenSimilarity(msg.content, prev.content);
+          const minTokens = 8;
+          if (
+            sim.sizeA >= minTokens &&
+            sim.sizeB >= minTokens &&
+            sim.overlapCount >= 3 &&
+            sim.jaccard >= 0.12
+          ) {
+            adjusted = Math.min(100, adjusted + (base > 0 ? 10 : 14));
+          }
         }
       }
+
+      // Damp very short / low-signal messages so they don't dominate the score
+      // purely due to structural bonuses.
+      const signalWeight = messageSignalWeight(msg.content, base);
+      adjusted = Math.round(adjusted * signalWeight);
 
       if (adjusted >= 30) {
         if (msg.agentId === agentA) strongByA += 1;
@@ -330,13 +375,28 @@ export class ConflictDetector {
       adjustedScores.push(adjusted);
     }
 
-    const top = [...adjustedScores].sort((a, b) => b - a).slice(0, Math.min(3, adjustedScores.length));
-    const topMean = top.reduce((total, s) => total + s, 0) / top.length;
-    const peakScore = top[0] ?? 0;
+    const recentCount = Math.min(4, adjustedScores.length);
+    const recentScores = adjustedScores.slice(-recentCount);
+    const recentPeak = Math.max(...recentScores);
 
-    // Using top-k mean makes the detector more sensitive to real spikes of disagreement
-    // without being diluted by neutral filler turns.
-    const baseScore = topMean * 0.6 + peakScore * 0.4;
+    // Recency-weighted mean encourages the score to decay as conversations cool down.
+    let weightedSum = 0;
+    let weightTotal = 0;
+    for (let i = 0; i < adjustedScores.length; i += 1) {
+      const w = i + 1; // more weight for newer messages
+      weightedSum += adjustedScores[i]! * w;
+      weightTotal += w;
+    }
+    const weightedMean = weightTotal > 0 ? weightedSum / weightTotal : 0;
+
+    let baseScore = weightedMean * 0.7 + recentPeak * 0.3;
+
+    // Cooldown penalty: if the tail is calm, reduce lingering tension from older spikes.
+    const tailCount = Math.min(3, adjustedScores.length);
+    const tail = adjustedScores.slice(-tailCount);
+    const tailMean = tail.reduce((total, s) => total + s, 0) / tail.length;
+    const cooldownPenalty = Math.min(10, Math.max(0, 16 - tailMean) * 0.6);
+    baseScore = Math.max(0, baseScore - cooldownPenalty);
 
     const alternationBonus = Math.min(
       30,
@@ -362,7 +422,7 @@ export class ConflictDetector {
     // Gate on a reasonably high peak so we don't inflate mild, purely-structural back-and-forth.
     const signalTurns = adjustedScores.filter((s) => s >= 15).length;
     const sustainedBonus =
-      peakScore >= 28 ? Math.min(20, Math.max(0, signalTurns - 1) * 4) : 0;
+      recentPeak >= 28 ? Math.min(20, Math.max(0, signalTurns - 1) * 4) : 0;
 
     const score = Math.min(
       100,
