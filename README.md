@@ -103,8 +103,8 @@ Socratic Council is not distributed through an app store or package manager.
 1. Open the Releases page:
    https://github.com/richer-richard/socratic-council-of-five/releases/latest
 2. Download the DMG that matches your Mac:
-   - Apple Silicon (arm64): `Socratic.Council_0.1.0_aarch64.dmg`
-   - Intel (x64): `Socratic.Council_0.1.0_x64.dmg`
+   - Apple Silicon (arm64): `Socratic.Council_0.1.1_aarch64.dmg`
+   - Intel (x64): `Socratic.Council_0.1.1_x64.dmg`
 3. Open the DMG and drag `Socratic Council.app` into `/Applications`.
 4. First launch: releases are not notarized yet. If macOS blocks the app, right-click it in Finder → Open → Open.
 

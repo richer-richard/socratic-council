@@ -1,6 +1,6 @@
 [package]
 name = "socratic-council"
-version = "0.1.0"
+version = "0.1.1"
 description = "Socratic Council of Five - Multi-Agent Debate Application"
 authors = ["Socratic Council Team"]
 edition = "2021"
