@@ -294,12 +294,9 @@ export interface ModelInfo {
 
 export type AgentId = "george" | "cathy" | "grace" | "douglas" | "kate";
 
-export type AgentPersona = "logician" | "ethicist" | "futurist" | "skeptic" | "historian";
-
 export interface AgentConfig {
   id: AgentId;
   name: string;
-  persona: AgentPersona;
   provider: Provider;
   model: ModelId;
   systemPrompt: string;
@@ -311,7 +308,6 @@ export interface AgentConfig {
 export const AgentConfigSchema = z.object({
   id: z.enum(["george", "cathy", "grace", "douglas", "kate"]),
   name: z.string().min(1).max(50),
-  persona: z.enum(["logician", "ethicist", "futurist", "skeptic", "historian"]),
   provider: z.enum(["openai", "anthropic", "google", "deepseek", "kimi"]),
   model: z.string(),
   systemPrompt: z.string(),

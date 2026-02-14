@@ -1,7 +1,7 @@
 {
   "name": "socratic-council",
   "version": "1.0.0",
-  "description": "A real-time multi-agent group chat where five AI personas debate any topic",
+  "description": "A real-time multi-agent group chat where five AI agents debate any topic",
   "private": true,
   "type": "module",
   "packageManager": "pnpm@9.15.0",

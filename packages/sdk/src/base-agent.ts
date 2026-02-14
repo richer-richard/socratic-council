@@ -6,7 +6,6 @@
 import type {
   AgentConfig,
   AgentId,
-  AgentPersona,
   AgentResponse,
   Bid,
   CouncilContext,
@@ -18,7 +17,6 @@ import type {
 export interface BaseAgent {
   id: AgentId;
   name: string;
-  persona: AgentPersona;
   provider: Provider;
   config: AgentConfig;
 
