@@ -271,6 +271,14 @@ export interface KimiRequest {
 
 export type ModelId = OpenAIModel | AnthropicModel | GeminiModel | DeepSeekModel | KimiModel;
 
+export const ModelIdSchema = z.union([
+  z.enum(OpenAIModels),
+  z.enum(AnthropicModels),
+  z.enum(GeminiModels),
+  z.enum(DeepSeekModels),
+  z.enum(KimiModels),
+]);
+
 export interface ModelInfo {
   id: ModelId;
   provider: Provider;
@@ -309,7 +317,7 @@ export const AgentConfigSchema = z.object({
   id: z.enum(["george", "cathy", "grace", "douglas", "kate"]),
   name: z.string().min(1).max(50),
   provider: z.enum(["openai", "anthropic", "google", "deepseek", "kimi"]),
-  model: z.string(),
+  model: ModelIdSchema,
   systemPrompt: z.string(),
   avatar: z.string().optional(),
   temperature: z.number().min(0).max(2).optional(),

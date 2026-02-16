@@ -209,6 +209,8 @@ export function createFetchTransport(options: FetchTransportOptions = {}): Trans
     let idleTimer: ReturnType<typeof setInterval> | null = null;
     let lastChunkAt = Date.now();
 
+    const { signal, cleanup: cleanupTimeout } = withTimeout(req.signal, timeoutMs);
+
     const cleanup = () => {
       if (hardTimeout) {
         clearTimeout(hardTimeout);
@@ -218,6 +220,7 @@ export function createFetchTransport(options: FetchTransportOptions = {}): Trans
         clearInterval(idleTimer);
         idleTimer = null;
       }
+      cleanupTimeout();
     };
 
     const finishError = (error: TransportFailure) => {
@@ -245,8 +248,6 @@ export function createFetchTransport(options: FetchTransportOptions = {}): Trans
         finishError(new TransportFailure("STREAM_IDLE_TIMEOUT", `No data for ${idleTimeoutMs}ms`));
       }
     }, 5000);
-
-    const { signal, cleanup: cleanupTimeout } = withTimeout(req.signal, timeoutMs);
 
     const attemptLive = async () => {
       const dispatcher = await getDispatcher();
@@ -279,21 +280,25 @@ export function createFetchTransport(options: FetchTransportOptions = {}): Trans
 
       const decoder = new TextDecoder();
 
-      while (!finished) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        if (value) {
-          lastChunkAt = Date.now();
-          const text = decoder.decode(value, { stream: true });
-          if (text) handlers.onChunk(text);
+      try {
+        while (!finished) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          if (value) {
+            lastChunkAt = Date.now();
+            const text = decoder.decode(value, { stream: true });
+            if (text) handlers.onChunk(text);
+          }
         }
-      }
 
-      const tail = decoder.decode();
-      if (tail) handlers.onChunk(tail);
+        const tail = decoder.decode();
+        if (tail) handlers.onChunk(tail);
 
-      if (!finished) {
-        finishDone();
+        if (!finished) {
+          finishDone();
+        }
+      } finally {
+        reader.cancel().catch(() => {});
       }
     };
 
@@ -307,9 +312,12 @@ export function createFetchTransport(options: FetchTransportOptions = {}): Trans
             ? new TransportFailure("ABORTED", "Request aborted")
             : new TransportFailure("FETCH_STREAM_FAILED", "Streaming failed", error);
 
-      if (failure.code === "ABORTED") {
-        finishError(failure);
-        cleanupTimeout();
+      if (failure.code === "ABORTED" || req.signal?.aborted) {
+        finishError(
+          failure.code === "ABORTED"
+            ? failure
+            : new TransportFailure("ABORTED", "Request aborted")
+        );
         return;
       }
 
@@ -334,21 +342,22 @@ export function createFetchTransport(options: FetchTransportOptions = {}): Trans
               fallback.status
             )
           );
-          cleanupTimeout();
           return;
         }
 
         await replayBufferedStream(fallback.body, handlers.onChunk, req.signal);
         finishDone();
       } catch (fallbackError) {
-        finishError(
-          fallbackError instanceof TransportFailure
-            ? fallbackError
-            : new TransportFailure("FALLBACK_FAILED", "Fallback request failed", fallbackError)
-        );
+        if (req.signal?.aborted) {
+          finishError(new TransportFailure("ABORTED", "Request aborted"));
+        } else {
+          finishError(
+            fallbackError instanceof TransportFailure
+              ? fallbackError
+              : new TransportFailure("FALLBACK_FAILED", "Fallback request failed", fallbackError)
+          );
+        }
       }
-    } finally {
-      cleanupTimeout();
     }
   };
 

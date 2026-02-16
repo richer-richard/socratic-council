@@ -140,7 +140,12 @@ export class GoogleProvider implements BaseProvider {
       throw new Error(`Google API error: ${status} - ${responseBody}`);
     }
 
-    const data = JSON.parse(responseBody);
+    let data;
+    try {
+      data = JSON.parse(responseBody);
+    } catch {
+      throw new Error(`Google API returned invalid JSON: ${responseBody.slice(0, 200)}`);
+    }
     const latencyMs = Date.now() - startTime;
 
     // Extract content from Gemini response

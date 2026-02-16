@@ -85,6 +85,10 @@ export function runBiddingRound(
   excludeAgent?: AgentId,
   whisperBonuses: Partial<Record<AgentId, number>> = {}
 ): BiddingRound {
+  if (agentIds.length === 0) {
+    throw new Error("No agents available for bidding round");
+  }
+
   const roundId = generateBiddingRoundId();
   const bids: Bid[] = [];
   const scores: Record<string, number> = {};

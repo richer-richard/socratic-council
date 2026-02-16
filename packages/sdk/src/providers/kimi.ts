@@ -103,19 +103,25 @@ export class KimiProvider implements BaseProvider {
       throw new Error(`Kimi API error: ${status} - ${responseBody}`);
     }
 
-    const data = JSON.parse(responseBody);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let data: any;
+    try {
+      data = JSON.parse(responseBody);
+    } catch {
+      throw new Error(`Kimi API returned invalid JSON: ${responseBody.slice(0, 200)}`);
+    }
     const latencyMs = Date.now() - startTime;
 
     const choice = data.choices?.[0];
-    const content = choice?.message?.content ?? "";
+    const content = choice?.message?.content as string ?? "";
 
     return {
       content,
       tokens: {
-        input: data.usage?.prompt_tokens ?? 0,
-        output: data.usage?.completion_tokens ?? 0,
+        input: (data.usage?.prompt_tokens as number) ?? 0,
+        output: (data.usage?.completion_tokens as number) ?? 0,
       },
-      finishReason: this.mapFinishReason(choice?.finish_reason),
+      finishReason: this.mapFinishReason(choice?.finish_reason as string | undefined),
       latencyMs,
     };
   }

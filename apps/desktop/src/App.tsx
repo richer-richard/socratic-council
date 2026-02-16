@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import { Home } from "./pages/Home";
 import { Settings } from "./pages/Settings";
 import { Chat } from "./pages/Chat";
@@ -16,12 +16,12 @@ export default function App() {
     topic: null,
   });
 
-  const navigate = (page: Page, topic?: string) => {
-    setState({
+  const navigate = useCallback((page: Page, topic?: string) => {
+    setState((prev) => ({
       currentPage: page,
-      topic: topic ?? state.topic,
-    });
-  };
+      topic: topic ?? prev.topic,
+    }));
+  }, []);
 
   return (
     <div className="h-screen flex flex-col bg-gray-900">

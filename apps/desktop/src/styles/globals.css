@@ -1159,6 +1159,25 @@ body {
   border-radius: 10px;
   padding: 0.6rem 0.8rem;
   margin-bottom: 0.6rem;
+  transition: background 0.15s ease, box-shadow 0.15s ease;
+}
+
+.message-quote + .message-quote {
+  margin-top: -0.3rem;
+}
+
+.message-quote-clickable {
+  cursor: pointer;
+}
+
+.message-quote-clickable:hover {
+  background: rgba(255, 255, 255, 0.12);
+  box-shadow: 0 0 12px 2px rgba(52, 211, 153, 0.18);
+}
+
+.message-quote-clickable:focus-visible {
+  outline: 2px solid rgba(52, 211, 153, 0.5);
+  outline-offset: 2px;
 }
 
 .message-quote-header {

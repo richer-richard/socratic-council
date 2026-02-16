@@ -17,7 +17,7 @@ import { ConversationExport } from "../components/ConversationExport";
 import { ConflictGraph } from "../components/ConflictGraph";
 import { ConflictDetector, CostTrackerEngine, ConversationMemoryManager, createMemoryManager, FairnessManager } from "@socratic-council/core";
 import { calculateMessageCost } from "../utils/cost";
-import { splitIntoInlineQuoteSegments } from "../utils/inlineQuotes";
+import { splitIntoInlineQuoteSegments, stripQuoteTokens } from "../utils/inlineQuotes";
 import { Virtuoso, type VirtuosoHandle } from "react-virtuoso";
 import type {
   ConflictDetection,
@@ -376,6 +376,8 @@ export function Chat({ topic, onNavigate }: ChatProps) {
   const { config, getMaxTurns, getConfiguredProviders } = useConfig();
   const maxTurns = getMaxTurns();
   const configuredProviders = getConfiguredProviders();
+  const configRef = useRef(config);
+  configRef.current = config;
   const virtuosoComponents = useMemo(() => ({ List: DiscordVirtuosoList }), []);
 
   const messageIndexById = useMemo(() => {
@@ -987,9 +989,10 @@ export function Chat({ topic, onNavigate }: ChatProps) {
     // Check if aborted before starting
     if (abortRef.current) return null;
 
+    const currentConfig = configRef.current;
     const agentConfig = AGENT_CONFIG[agentId];
-    const credential = config.credentials[agentConfig.provider];
-    const model = config.models[agentConfig.provider];
+    const credential = currentConfig.credentials[agentConfig.provider];
+    const model = currentConfig.models[agentConfig.provider];
 
     if (!credential?.apiKey) {
       const providerName =
@@ -1219,7 +1222,7 @@ export function Chat({ topic, onNavigate }: ChatProps) {
       activeRequestsRef.current.delete(agentId);
       setTypingAgents((prev) => prev.filter((id) => id !== agentId));
     }
-  }, [config, buildConversationHistory, buildToolContextMessages, getProxy, resolveQuoteTargets]);
+  }, [buildConversationHistory, buildToolContextMessages, getProxy, resolveQuoteTargets]);
 
   const generateClosingResponse = useCallback(
     async (agentId: CouncilAgentId, turnsCompleted: number): Promise<ChatMessage | null> => {
@@ -1382,6 +1385,8 @@ export function Chat({ topic, onNavigate }: ChatProps) {
 
       if (abortRef.current) break;
 
+      let actualSpeaker: CouncilAgentId | null = null;
+
       if (responses.every((response) => !response || response.error)) {
         // If failed, try another agent
         const alternates = AGENT_IDS.filter(
@@ -1390,13 +1395,24 @@ export function Chat({ topic, onNavigate }: ChatProps) {
 
         if (alternates.length > 0 && !abortRef.current) {
           const alternate = alternates[Math.floor(Math.random() * alternates.length)];
-          await generateAgentResponse(alternate);
+          const fallbackResponse = await generateAgentResponse(alternate);
+          if (fallbackResponse && !fallbackResponse.error) {
+            actualSpeaker = alternate;
+          }
+        }
+      } else {
+        // Find the agent that actually responded successfully
+        for (let i = 0; i < winners.length; i++) {
+          if (responses[i] && !responses[i]!.error) {
+            actualSpeaker = winners[i]!;
+            break;
+          }
         }
       }
 
       if (abortRef.current) break;
 
-      previousSpeaker = winners[0] ?? previousSpeaker;
+      previousSpeaker = actualSpeaker ?? previousSpeaker;
       // Record speaker for fairness tracking
       if (previousSpeaker) {
         fairnessManagerRef.current.recordSpeaker(previousSpeaker);
@@ -1510,11 +1526,13 @@ export function Chat({ topic, onNavigate }: ChatProps) {
       activeRequestsRef.current.clear();
       moderatorAbortRef.current?.abort();
       moderatorAbortRef.current = null;
-
-      // Remove incomplete streaming messages
-      setMessages(prev => prev.filter(m => !m.isStreaming));
       setTypingAgents([]);
       setIsPaused(true);
+
+      // Give abort handlers a tick to settle, then clean up incomplete messages
+      setTimeout(() => {
+        setMessages(prev => prev.filter(m => !m.isStreaming));
+      }, 50);
     }
   };
 
@@ -1812,14 +1830,24 @@ export function Chat({ topic, onNavigate }: ChatProps) {
                                   .filter(([, r]) => r?.count)
                               : [];
 
+                            const strippedContent = stripQuoteTokens(qm.content);
+                            const truncated = strippedContent.slice(0, 200);
+                            const ellipsis = strippedContent.length > 200 ? "\u2026" : "";
+
                             return (
-                              <div key={`${message.id}-quote-${idx}`} className="message-quote">
+                              <div
+                                key={`${message.id}-quote-${idx}`}
+                                className="message-quote message-quote-clickable"
+                                onClick={() => jumpToMessage(segment.id)}
+                                role="button"
+                                tabIndex={0}
+                                onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") jumpToMessage(segment.id); }}
+                              >
                                 <div className="message-quote-header">
                                   {(qm.displayName ?? AGENT_CONFIG[qm.agentId].name)} · {formatTime(qm.timestamp)}
                                 </div>
                                 <div className="message-quote-body">
-                                  {qm.content.slice(0, 200)}
-                                  {qm.content.length > 200 ? "…" : ""}
+                                  {truncated}{ellipsis}
                                 </div>
                                 {qReactions.length > 0 && (
                                   <div className="message-quote-reactions">

@@ -200,9 +200,12 @@ export class ConversationMemoryManager {
     if (message && !message.quotedBy.includes(quotingAgent)) {
       message.quotedBy.push(quotingAgent);
       message.engagementScore = calculateEngagementScore(message);
-      
+
       // Clear engagement debt if the quoting agent owed it
-      this.clearEngagementDebt(quotingAgent, message.agentId as AgentId, messageId);
+      const creditor = message.agentId;
+      if (creditor !== "system" && creditor !== "user" && creditor !== "tool") {
+        this.clearEngagementDebt(quotingAgent, creditor, messageId);
+      }
     }
   }
 
@@ -394,8 +397,8 @@ export class ConversationMemoryManager {
       if (msg.agentId === "system") continue;
       
       const speaker = msg.agentId === "user" ? "User" : AGENT_NAMES[msg.agentId as AgentId] || msg.agentId;
-      const quotedInfo = msg.quotedBy.length > 0 
-        ? ` [Quoted by: ${msg.quotedBy.map(id => AGENT_NAMES[id]).join(", ")}]` 
+      const quotedInfo = msg.quotedBy.length > 0
+        ? ` [Quoted by: ${msg.quotedBy.map(id => AGENT_NAMES[id] || id).join(", ")}]`
         : "";
       
       lines.push(`**${speaker}** (id: ${msg.id})${quotedInfo}:`);
