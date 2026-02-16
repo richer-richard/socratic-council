@@ -123,6 +123,8 @@ export function createTauriTransport(options: { proxy?: ProxyConfig; logger?: Tr
     let lastChunkAt = Date.now();
     const requestId = `req_${Date.now()}_${Math.random().toString(36).slice(2)}`;
 
+    let abortHandler: (() => void) | null = null;
+
     const cleanup = () => {
       if (hardTimeoutTimer) {
         clearTimeout(hardTimeoutTimer);
@@ -135,6 +137,10 @@ export function createTauriTransport(options: { proxy?: ProxyConfig; logger?: Tr
       if (unlisten) {
         unlisten();
         unlisten = null;
+      }
+      if (abortHandler && req.signal) {
+        req.signal.removeEventListener("abort", abortHandler);
+        abortHandler = null;
       }
     };
 
@@ -168,8 +174,22 @@ export function createTauriTransport(options: { proxy?: ProxyConfig; logger?: Tr
       }
     }, 5000);
 
+    // Honor the abort signal: if the caller aborts, finish immediately
+    if (req.signal?.aborted) {
+      finishError(toTransportFailure("ABORTED", "Request aborted"));
+      return;
+    }
+
+    if (req.signal) {
+      abortHandler = () => {
+        finishError(toTransportFailure("ABORTED", "Request aborted"));
+      };
+      req.signal.addEventListener("abort", abortHandler, { once: true });
+    }
+
     try {
       unlisten = await tauriListen("http-stream-chunk", (payload: unknown) => {
+        if (finished) return;
         const chunk = payload as TauriStreamChunk;
         if (chunk.request_id !== requestId) return;
 

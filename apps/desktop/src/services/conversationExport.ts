@@ -2,7 +2,7 @@ import type { AgentId, PairwiseConflict } from "@socratic-council/shared";
 import type { FileChild } from "docx";
 import { splitIntoInlineQuoteSegments, stripQuoteTokens } from "../utils/inlineQuotes";
 
-export type ConversationExportFormat = "markdown" | "pdf" | "docx" | "pptx" | "json";
+export type ConversationExportFormat = "pdf" | "docx" | "markdown" | "pptx";
 
 export type ConversationExportMessage = {
   id: string;
@@ -1221,27 +1221,21 @@ async function pickSavePath(format: ConversationExportFormat, defaultBaseName: s
   if (!isTauri()) return null;
   const { save } = await import("@tauri-apps/plugin-dialog");
 
-  const extension =
-    format === "markdown"
-      ? "md"
-      : format === "pdf"
-        ? "pdf"
-        : format === "docx"
-          ? "docx"
-          : format === "pptx"
-            ? "pptx"
-            : "json";
+  const extensionMap: Record<ConversationExportFormat, string> = {
+    pdf: "pdf",
+    docx: "docx",
+    markdown: "md",
+    pptx: "pptx",
+  };
+  const extension = extensionMap[format];
 
-  const filters =
-    format === "markdown"
-      ? [{ name: "Markdown", extensions: ["md"] }]
-      : format === "pdf"
-        ? [{ name: "PDF", extensions: ["pdf"] }]
-        : format === "docx"
-          ? [{ name: "Word", extensions: ["docx"] }]
-          : format === "pptx"
-            ? [{ name: "PowerPoint", extensions: ["pptx"] }]
-            : [{ name: "JSON", extensions: ["json"] }];
+  const filterMap: Record<ConversationExportFormat, { name: string; extensions: string[] }[]> = {
+    pdf: [{ name: "PDF", extensions: ["pdf"] }],
+    docx: [{ name: "Word", extensions: ["docx"] }],
+    markdown: [{ name: "Markdown", extensions: ["md"] }],
+    pptx: [{ name: "PowerPoint", extensions: ["pptx"] }],
+  };
+  const filters = filterMap[format];
 
   const base = safeBaseName(defaultBaseName) || "socratic-council";
   const path = await save({
@@ -1284,16 +1278,13 @@ export async function exportConversation(options: {
     `socratic-council-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-")}`;
 
   const format = options.format;
-  const extension =
-    format === "markdown"
-      ? "md"
-      : format === "pdf"
-        ? "pdf"
-        : format === "docx"
-          ? "docx"
-          : format === "pptx"
-            ? "pptx"
-            : "json";
+  const extMap: Record<ConversationExportFormat, string> = {
+    pdf: "pdf",
+    docx: "docx",
+    markdown: "md",
+    pptx: "pptx",
+  };
+  const extension = extMap[format];
 
   const fileName = `${safeBaseName(baseFileName)}.${extension}`;
   const path = (await pickSavePath(format, fileName)) ?? null;
@@ -1308,28 +1299,16 @@ export async function exportConversation(options: {
   let data: Uint8Array;
   let mime = "application/octet-stream";
 
-  if (format === "markdown") {
-    const text = buildMarkdown(buildOptions);
-    data = new TextEncoder().encode(text);
-    mime = "text/markdown";
-  } else if (format === "json") {
-    const text = JSON.stringify(
-      {
-        exportedAt: new Date().toISOString(),
-        topic: options.topic,
-        messages: options.messages,
-      },
-      null,
-      2
-    );
-    data = new TextEncoder().encode(text + "\n");
-    mime = "application/json";
-  } else if (format === "pdf") {
+  if (format === "pdf") {
     data = await buildPdfBytes(buildOptions);
     mime = "application/pdf";
   } else if (format === "docx") {
     data = await buildDocxBytes(buildOptions);
     mime = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+  } else if (format === "markdown") {
+    const text = buildMarkdown(buildOptions);
+    data = new TextEncoder().encode(text);
+    mime = "text/markdown";
   } else {
     data = await buildPptxBytes({ topic: options.topic, messages });
     mime = "application/vnd.openxmlformats-officedocument.presentationml.presentation";

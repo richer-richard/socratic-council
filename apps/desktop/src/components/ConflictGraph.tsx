@@ -44,7 +44,7 @@ const AGENT_HEX: Record<string, string> = {
 };
 
 export function ConflictGraph({ conflicts, agents }: ConflictGraphProps) {
-  const [isExpanded, setIsExpanded] = useState(false);
+  const [isExpanded, setIsExpanded] = useState(true);
 
   // Build index map: agentId -> position index
   const idxMap = new Map<AgentId, number>();
