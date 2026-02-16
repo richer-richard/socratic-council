@@ -113,10 +113,11 @@ export class KimiProvider implements BaseProvider {
     const latencyMs = Date.now() - startTime;
 
     const choice = data.choices?.[0];
-    const content = choice?.message?.content as string ?? "";
+    const content = (choice?.message?.content as string) ?? "";
+    const reasoning = (choice?.message?.reasoning_content as string) ?? "";
 
     return {
-      content,
+      content: content || reasoning,
       tokens: {
         input: (data.usage?.prompt_tokens as number) ?? 0,
         output: (data.usage?.completion_tokens as number) ?? 0,
@@ -139,6 +140,7 @@ export class KimiProvider implements BaseProvider {
     const body = this.buildRequestBody(agent, messages, options, true);
 
     let fullContent = "";
+    let reasoningContent = "";
     let inputTokens = 0;
     let outputTokens = 0;
     let finishReason: "stop" | "length" | "error" = "stop";
@@ -149,6 +151,14 @@ export class KimiProvider implements BaseProvider {
         const data = JSON.parse(jsonStr);
         const choice = data.choices?.[0];
         const delta = choice?.delta;
+
+        // Kimi K2.5 streams reasoning tokens via reasoning_content before
+        // the actual content.  Accumulate them so we can fall back to the
+        // reasoning output when the model fails to produce regular content
+        // (known issue: missing </think> tag causes content to stay empty).
+        if (delta?.reasoning_content) {
+          reasoningContent += delta.reasoning_content;
+        }
 
         if (delta?.content) {
           fullContent += delta.content;
@@ -195,7 +205,7 @@ export class KimiProvider implements BaseProvider {
     onChunk({ content: "", done: true });
 
     return {
-      content: fullContent,
+      content: fullContent || reasoningContent,
       tokens: {
         input: inputTokens,
         output: outputTokens,
