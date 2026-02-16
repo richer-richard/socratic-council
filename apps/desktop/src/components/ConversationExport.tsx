@@ -5,16 +5,25 @@ import {
   type ConversationExportMessage,
 } from "../services/conversationExport";
 
-const FORMAT_LABELS: Record<ConversationExportFormat, string> = {
-  markdown: "Markdown (.md)",
-  pdf: "PDF (.pdf)",
-  docx: "Word (.docx)",
-  pptx: "PowerPoint (.pptx)",
-  json: "JSON (.json)",
-};
-
 function defaultBaseName() {
   return `socratic-council-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-")}`;
+}
+
+function isTauri(): boolean {
+  return (
+    typeof window !== "undefined" &&
+    ("__TAURI__" in window || "__TAURI_INTERNALS__" in window)
+  );
+}
+
+async function openPath(path: string) {
+  if (!isTauri()) return;
+  try {
+    const { openPath: tauriOpen } = await import("@tauri-apps/plugin-opener");
+    await tauriOpen(path);
+  } catch {
+    // ignore - best effort
+  }
 }
 
 export function ConversationExport({
@@ -26,12 +35,12 @@ export function ConversationExport({
   messages: ConversationExportMessage[];
   onClose: () => void;
 }) {
-  const [format, setFormat] = useState<ConversationExportFormat>("markdown");
+  const format: ConversationExportFormat = "pdf";
   const [includeTokens, setIncludeTokens] = useState(true);
   const [includeCosts, setIncludeCosts] = useState(true);
   const [baseFileName, setBaseFileName] = useState(defaultBaseName);
   const [isExporting, setIsExporting] = useState(false);
-  const [lastResult, setLastResult] = useState<string | null>(null);
+  const [lastResult, setLastResult] = useState<{ label: string; path: string | null } | null>(null);
   const [lastError, setLastError] = useState<string | null>(null);
 
   const exportCount = useMemo(() => messages.filter((m) => m.content.trim().length > 0).length, [messages]);
@@ -49,7 +58,11 @@ export function ConversationExport({
         includeCosts,
         baseFileName,
       });
-      setLastResult(result.path ? `Saved: ${result.path}` : "Downloaded");
+      setLastResult(
+        result.path
+          ? { label: result.path, path: result.path }
+          : { label: "Downloaded", path: null }
+      );
     } catch (error) {
       setLastError(error instanceof Error ? error.message : String(error));
     } finally {
@@ -73,20 +86,12 @@ export function ConversationExport({
           Export {exportCount} message{exportCount === 1 ? "" : "s"}
         </div>
 
-        <label className="block text-xs text-ink-500">
+        <div className="text-xs text-ink-500">
           Format
-          <select
-            className="mt-1 w-full rounded-xl bg-white/5 border border-white/10 px-3 py-2 text-sm text-ink-900 focus:outline-none focus:ring-2 focus:ring-emerald-400/30"
-            value={format}
-            onChange={(e) => setFormat(e.target.value as ConversationExportFormat)}
-          >
-            {Object.entries(FORMAT_LABELS).map(([value, label]) => (
-              <option key={value} value={value}>
-                {label}
-              </option>
-            ))}
-          </select>
-        </label>
+          <div className="mt-1 w-full rounded-xl bg-white/5 border border-white/10 px-3 py-2 text-sm text-ink-900">
+            PDF (.pdf)
+          </div>
+        </div>
 
         <label className="block text-xs text-ink-500">
           File name
@@ -123,10 +128,25 @@ export function ConversationExport({
           disabled={isExporting || exportCount === 0}
           onClick={doExport}
         >
-          {isExporting ? "Exporting…" : "Export…"}
+          {isExporting ? "Exporting\u2026" : "Export\u2026"}
         </button>
 
-        {lastResult && <div className="text-xs text-emerald-200/90">{lastResult}</div>}
+        {lastResult && (
+          <div className="text-xs text-emerald-200/90 overflow-hidden">
+            <div className="truncate" title={lastResult.label}>
+              Saved: {lastResult.label}
+            </div>
+            {lastResult.path && (
+              <button
+                type="button"
+                className="mt-1 button-secondary text-xs px-3 py-1"
+                onClick={() => openPath(lastResult.path!)}
+              >
+                Open
+              </button>
+            )}
+          </div>
+        )}
         {lastError && <div className="text-xs text-red-200/90">{lastError}</div>}
       </div>
     </div>

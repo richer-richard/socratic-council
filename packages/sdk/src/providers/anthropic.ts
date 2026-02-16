@@ -114,7 +114,12 @@ export class AnthropicProvider implements BaseProvider {
       throw new Error(`Anthropic API error: ${status} - ${body}`);
     }
 
-    const data = JSON.parse(body) as AnthropicResponse;
+    let data: AnthropicResponse;
+    try {
+      data = JSON.parse(body) as AnthropicResponse;
+    } catch {
+      throw new Error(`Anthropic API returned invalid JSON: ${body.slice(0, 200)}`);
+    }
     const latencyMs = Date.now() - startTime;
 
     // Extract content from the response

@@ -149,7 +149,12 @@ export class OpenAIProvider implements BaseProvider {
       throw new Error(`OpenAI API error: ${status} - ${body}`);
     }
 
-    const data = JSON.parse(body) as OpenAIResponsesResponse;
+    let data: OpenAIResponsesResponse;
+    try {
+      data = JSON.parse(body) as OpenAIResponsesResponse;
+    } catch {
+      throw new Error(`OpenAI API returned invalid JSON: ${body.slice(0, 200)}`);
+    }
     const latencyMs = Date.now() - startTime;
 
     // Extract content from the response

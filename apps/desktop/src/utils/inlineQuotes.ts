@@ -5,6 +5,17 @@ export type InlineQuoteSegment =
 const QUOTE_TOKEN_RE = /@quote\(([^)]+)\)/g;
 
 /**
+ * Strip all @quote(...) tokens from text, leaving only the actual message content.
+ * Collapses any leftover whitespace artifacts.
+ */
+export function stripQuoteTokens(content: string): string {
+  return content
+    .replace(QUOTE_TOKEN_RE, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+/**
  * Splits message content into interleaved text + quote-token segments.
  * Quote tokens are preserved as dedicated segments in their original order.
  */

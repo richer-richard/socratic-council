@@ -8,7 +8,7 @@ import chalk from "chalk";
 import ora from "ora";
 import Conf from "conf";
 import type { AgentId, ModelId, Provider, ProviderCredentials } from "@socratic-council/shared";
-import { DEFAULT_AGENTS, getModelsByProvider } from "@socratic-council/shared";
+import { DEFAULT_AGENTS, getModelsByProvider, getModelInfo } from "@socratic-council/shared";
 import { Council, type CouncilEvent } from "@socratic-council/core";
 import { ProviderManager, createFetchTransport, type ProxyConfig } from "@socratic-council/sdk";
 
@@ -79,8 +79,9 @@ function parseProxyUrl(raw?: string): ProxyConfig | undefined {
     if (!["http", "https", "socks5", "socks5h"].includes(type)) {
       return undefined;
     }
-    const port = url.port ? parseInt(url.port, 10) : 0;
-    if (!url.hostname || !port) return undefined;
+    if (!url.port || !url.hostname) return undefined;
+    const port = parseInt(url.port, 10);
+    if (port < 1 || port > 65535) return undefined;
     const username = url.username ? decodeURIComponent(url.username) : undefined;
     const password = url.password ? decodeURIComponent(url.password) : undefined;
 
@@ -483,12 +484,13 @@ async function startDiscussion(): Promise<void> {
 
   // Build agent configs with selected models
   const agentModels = config.get("agentModels") ?? {};
-  const agents = { ...DEFAULT_AGENTS };
-  for (const [agentId, model] of Object.entries(agentModels)) {
-    if (agents[agentId as AgentId]) {
-      agents[agentId as AgentId].model = model as ModelId;
-    }
-  }
+  const agents = Object.fromEntries(
+    Object.entries(DEFAULT_AGENTS).map(([id, cfg]) => {
+      const stored = agentModels[id as AgentId] as string | undefined;
+      const model = stored && getModelInfo(stored) ? (stored as ModelId) : cfg.model;
+      return [id, { ...cfg, model }];
+    })
+  ) as Record<AgentId, typeof DEFAULT_AGENTS[AgentId]>;
 
   // Create council
   const council = new Council(

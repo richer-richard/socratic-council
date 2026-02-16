@@ -1,5 +1,6 @@
 import type { AgentId, PairwiseConflict } from "@socratic-council/shared";
 import type { FileChild } from "docx";
+import { splitIntoInlineQuoteSegments, stripQuoteTokens } from "../utils/inlineQuotes";
 
 export type ConversationExportFormat = "markdown" | "pdf" | "docx" | "pptx" | "json";
 
@@ -508,6 +509,12 @@ async function buildPdfBytes(options: {
     );
   }
 
+  // Build a message lookup for resolving inline quotes
+  const messageMap = new Map<string, ConversationExportMessage>();
+  for (const m of messages) {
+    messageMap.set(m.id, m);
+  }
+
   // Transcript pages
   doc.addPage();
   let y = margin;
@@ -532,23 +539,60 @@ async function buildPdfBytes(options: {
       return parts.join(" · ");
     })();
 
-    doc.setFontSize(11);
+    // Parse segments for inline quotes
+    const segments = splitIntoInlineQuoteSegments(msg.content);
+
+    // Pre-compute layout for all segments
+    type SegmentLayout =
+      | { kind: "text"; lines: string[] }
+      | { kind: "quote"; header: string; lines: string[] };
+
+    const segmentLayouts: SegmentLayout[] = [];
     const contentMaxW = maxWidth - cardPad * 2;
-    const paragraphs = msg.content.trim().split("\n");
-    const contentLines: string[] = [];
-    for (const p of paragraphs) {
-      const trimmed = p.replace(/\s+$/g, "");
-      if (!trimmed) {
-        contentLines.push("");
-        continue;
+    const quoteMaxW = contentMaxW - 20; // indent for quote block
+
+    for (const seg of segments) {
+      if (seg.type === "quote") {
+        const qm = messageMap.get(seg.id);
+        if (!qm) continue;
+        const qSpeaker = qm.speaker || "Unknown";
+        const qHeader = `${qSpeaker} \u00b7 ${formatTime(qm.timestamp)}`;
+        const strippedBody = stripQuoteTokens(qm.content).slice(0, 200);
+        const bodyText = strippedBody + (stripQuoteTokens(qm.content).length > 200 ? "\u2026" : "");
+        doc.setFontSize(10);
+        const qLines = doc.splitTextToSize(bodyText, quoteMaxW) as string[];
+        segmentLayouts.push({ kind: "quote", header: qHeader, lines: qLines });
+      } else {
+        const text = seg.text.trim();
+        if (!text) continue;
+        doc.setFontSize(11);
+        const paragraphs = text.split("\n");
+        const lines: string[] = [];
+        for (const p of paragraphs) {
+          const trimmed = p.replace(/\s+$/g, "");
+          if (!trimmed) { lines.push(""); continue; }
+          const wrapped = doc.splitTextToSize(trimmed, contentMaxW) as string[];
+          lines.push(...wrapped);
+        }
+        if (lines.length > 0) {
+          segmentLayouts.push({ kind: "text", lines });
+        }
       }
-      const wrapped = doc.splitTextToSize(trimmed, contentMaxW) as string[];
-      contentLines.push(...wrapped);
     }
 
+    // Calculate total block height
     const headerH = 18;
     const metaH = metaLine ? 14 : 0;
-    const contentH = Math.max(1, contentLines.length) * lineH;
+    let contentH = 0;
+    for (const layout of segmentLayouts) {
+      if (layout.kind === "quote") {
+        // quote header + body lines + padding
+        contentH += 12 + layout.lines.length * 12 + 14;
+      } else {
+        contentH += layout.lines.length * lineH;
+      }
+    }
+    contentH = Math.max(lineH, contentH);
     const blockH = cardPad + headerH + (metaH ? metaH + 6 : 6) + contentH + cardPad;
 
     if (y + blockH > pageHeight - margin) {
@@ -581,11 +625,41 @@ async function buildPdfBytes(options: {
       textY += 6;
     }
 
-    doc.setTextColor(fg.r, fg.g, fg.b);
-    doc.setFontSize(11);
-    for (const line of contentLines.length ? contentLines : [""]) {
-      doc.text(line, cardX + cardPad, textY);
-      textY += lineH;
+    // Render segments
+    const quoteBg = hexToRgb("E8ECF0");
+    const quoteBorder = hexToRgb("94A3B8");
+    for (const layout of segmentLayouts) {
+      if (layout.kind === "quote") {
+        const qBlockH = 12 + layout.lines.length * 12 + 6;
+        // Quote background
+        doc.setFillColor(quoteBg.r, quoteBg.g, quoteBg.b);
+        pdfRoundedRect(doc, cardX + cardPad, textY - 4, contentMaxW, qBlockH, 6, "F");
+        // Quote left bar
+        doc.setFillColor(quoteBorder.r, quoteBorder.g, quoteBorder.b);
+        doc.rect(cardX + cardPad, textY - 4, 3, qBlockH, "F");
+
+        // Quote header
+        doc.setTextColor(muted.r, muted.g, muted.b);
+        doc.setFontSize(8);
+        doc.text(layout.header.toUpperCase(), cardX + cardPad + 10, textY + 6);
+        textY += 12;
+
+        // Quote body
+        doc.setTextColor(fg.r, fg.g, fg.b);
+        doc.setFontSize(10);
+        for (const line of layout.lines) {
+          doc.text(line, cardX + cardPad + 10, textY + 4);
+          textY += 12;
+        }
+        textY += 8; // spacing after quote
+      } else {
+        doc.setTextColor(fg.r, fg.g, fg.b);
+        doc.setFontSize(11);
+        for (const line of layout.lines) {
+          doc.text(line, cardX + cardPad, textY);
+          textY += lineH;
+        }
+      }
     }
 
     y += blockH + 14;
