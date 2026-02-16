@@ -340,6 +340,7 @@ export function Chat({ topic, onNavigate }: ChatProps) {
   const [currentBidding, setCurrentBidding] = useState<BiddingRound | null>(null);
   const [totalTokens, setTotalTokens] = useState({ input: 0, output: 0 });
   const [isPaused, setIsPaused] = useState(false);
+  const pausedRef = useRef(false);
   const [errors, setErrors] = useState<string[]>([]);
   const [sidePanelView, setSidePanelView] = useState<SidePanelView>("default");
   const [costState, setCostState] = useState<CostTracker | null>(null);
@@ -1323,6 +1324,7 @@ export function Chat({ topic, onNavigate }: ChatProps) {
   const runDiscussion = useCallback(async () => {
     setIsRunning(true);
     abortRef.current = false;
+    pausedRef.current = false;
     resetRuntimeState();
 
     // Add topic as system message
@@ -1343,7 +1345,7 @@ export function Chat({ topic, onNavigate }: ChatProps) {
 
     while (!abortRef.current && (maxTurns === Infinity || turn < maxTurns)) {
       // Check for pause
-      while (isPaused && !abortRef.current) {
+      while (pausedRef.current && !abortRef.current) {
         await new Promise(resolve => setTimeout(resolve, 100));
       }
 
@@ -1460,7 +1462,6 @@ export function Chat({ topic, onNavigate }: ChatProps) {
   }, [
     topic,
     maxTurns,
-    isPaused,
     config.preferences.showBiddingScores,
     config.preferences.moderatorEnabled,
     generateBiddingScores,
@@ -1503,6 +1504,7 @@ export function Chat({ topic, onNavigate }: ChatProps) {
 
   const handleStop = () => {
     abortRef.current = true;
+    pausedRef.current = false;
     for (const controller of activeRequestsRef.current.values()) {
       controller.abort();
     }
@@ -1512,14 +1514,18 @@ export function Chat({ topic, onNavigate }: ChatProps) {
     setIsRunning(false);
     setTypingAgents([]);
     setIsPaused(false);
+    // Immediately remove any in-flight streaming messages
+    setMessages(prev => prev.filter(m => !m.isStreaming));
   };
 
   const handlePauseResume = () => {
     if (isPaused) {
-      // Resume - just clear the paused flag
+      // Resume - clear the paused flag
+      pausedRef.current = false;
       setIsPaused(false);
     } else {
-      // Pause - abort all in-progress requests
+      // Pause - abort all in-progress requests immediately
+      pausedRef.current = true;
       for (const controller of activeRequestsRef.current.values()) {
         controller.abort();
       }
@@ -1529,10 +1535,8 @@ export function Chat({ topic, onNavigate }: ChatProps) {
       setTypingAgents([]);
       setIsPaused(true);
 
-      // Give abort handlers a tick to settle, then clean up incomplete messages
-      setTimeout(() => {
-        setMessages(prev => prev.filter(m => !m.isStreaming));
-      }, 50);
+      // Immediately remove incomplete streaming messages
+      setMessages(prev => prev.filter(m => !m.isStreaming));
     }
   };
 
@@ -1616,7 +1620,7 @@ export function Chat({ topic, onNavigate }: ChatProps) {
               <div className="badge">
                 {Object.values(costState.agentCosts).some((agent) => agent.pricingAvailable)
                   ? `$${costState.totalEstimatedUSD.toFixed(4)}`
-                  : "Cost N/A"}
+                  : "$N/A"}
               </div>
             )}
 

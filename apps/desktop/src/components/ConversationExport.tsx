@@ -26,6 +26,13 @@ async function openPath(path: string) {
   }
 }
 
+const FORMAT_OPTIONS: { value: ConversationExportFormat; label: string }[] = [
+  { value: "pdf", label: "PDF (.pdf)" },
+  { value: "docx", label: "DOCX (.docx)" },
+  { value: "markdown", label: "Markdown (.md)" },
+  { value: "pptx", label: "PPTX (.pptx)" },
+];
+
 export function ConversationExport({
   topic,
   messages,
@@ -35,7 +42,7 @@ export function ConversationExport({
   messages: ConversationExportMessage[];
   onClose: () => void;
 }) {
-  const format: ConversationExportFormat = "pdf";
+  const [format, setFormat] = useState<ConversationExportFormat>("pdf");
   const [includeTokens, setIncludeTokens] = useState(true);
   const [includeCosts, setIncludeCosts] = useState(true);
   const [baseFileName, setBaseFileName] = useState(defaultBaseName);
@@ -81,17 +88,25 @@ export function ConversationExport({
         </button>
       </div>
 
-      <div className="panel-card p-3 space-y-3">
+      <div className="panel-card p-3 space-y-3 overflow-hidden">
         <div className="text-xs text-ink-500">
           Export {exportCount} message{exportCount === 1 ? "" : "s"}
         </div>
 
-        <div className="text-xs text-ink-500">
+        <label className="block text-xs text-ink-500">
           Format
-          <div className="mt-1 w-full rounded-xl bg-white/5 border border-white/10 px-3 py-2 text-sm text-ink-900">
-            PDF (.pdf)
-          </div>
-        </div>
+          <select
+            className="mt-1 w-full rounded-xl bg-white/5 border border-white/10 px-3 py-2 text-sm text-ink-900 focus:outline-none focus:ring-2 focus:ring-emerald-400/30"
+            value={format}
+            onChange={(e) => setFormat(e.target.value as ConversationExportFormat)}
+          >
+            {FORMAT_OPTIONS.map((opt) => (
+              <option key={opt.value} value={opt.value}>
+                {opt.label}
+              </option>
+            ))}
+          </select>
+        </label>
 
         <label className="block text-xs text-ink-500">
           File name
@@ -132,8 +147,8 @@ export function ConversationExport({
         </button>
 
         {lastResult && (
-          <div className="text-xs text-emerald-200/90 overflow-hidden">
-            <div className="truncate" title={lastResult.label}>
+          <div className="text-xs text-emerald-200/90 min-w-0 overflow-hidden">
+            <div className="truncate max-w-full" title={lastResult.label}>
               Saved: {lastResult.label}
             </div>
             {lastResult.path && (
@@ -147,7 +162,7 @@ export function ConversationExport({
             )}
           </div>
         )}
-        {lastError && <div className="text-xs text-red-200/90">{lastError}</div>}
+        {lastError && <div className="text-xs text-red-200/90 break-words">{lastError}</div>}
       </div>
     </div>
   );
