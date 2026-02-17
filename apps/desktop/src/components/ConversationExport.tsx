@@ -21,8 +21,8 @@ async function openPath(path: string) {
   try {
     const { openPath: tauriOpen } = await import("@tauri-apps/plugin-opener");
     await tauriOpen(path);
-  } catch {
-    // ignore - best effort
+  } catch (err) {
+    console.error("Failed to open file:", err);
   }
 }
 

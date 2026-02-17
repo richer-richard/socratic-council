@@ -1,5 +1,5 @@
 import type { PairwiseConflict, AgentId } from "@socratic-council/shared";
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 
 interface ConflictGraphProps {
   conflicts: PairwiseConflict[];
@@ -44,8 +44,6 @@ const AGENT_HEX: Record<string, string> = {
 };
 
 export function ConflictGraph({ conflicts, agents }: ConflictGraphProps) {
-  const [isExpanded, setIsExpanded] = useState(true);
-
   // Build index map: agentId -> position index
   const idxMap = new Map<AgentId, number>();
   agents.forEach((a, i) => idxMap.set(a.id, i));
@@ -55,8 +53,6 @@ export function ConflictGraph({ conflicts, agents }: ConflictGraphProps) {
   const sortedPairs = useMemo(() => {
     return [...conflicts].sort((a, b) => b.score - a.score);
   }, [conflicts]);
-
-  const strongestPair = sortedPairs[0] ?? null;
 
   const renderPairLabel = (pair: PairwiseConflict) => {
     const a = nameById.get(pair.agents[0]) ?? pair.agents[0];
@@ -130,52 +126,23 @@ export function ConflictGraph({ conflicts, agents }: ConflictGraphProps) {
         <span className="text-[10px] text-ink-400">High</span>
       </div>
 
-      {strongestPair && (
-        <button
-          type="button"
-          className="mt-3 w-full text-left hover:opacity-90 transition-opacity"
-          onClick={() => setIsExpanded((prev) => !prev)}
-          aria-expanded={isExpanded}
-          title={isExpanded ? "Collapse tension list" : "Expand tension list"}
-        >
-          {isExpanded ? (
-            <>
-              <div className="text-[11px] text-ink-500">Top tension</div>
-              <div className="mt-2 space-y-1">
-                {sortedPairs.map((pair) => {
-                  const key = `${pair.agents[0]}-${pair.agents[1]}`;
-                  return (
-                    <div key={key} className="grid grid-cols-[1fr,3.25rem] items-center gap-3 text-[11px]">
-                      <div className="truncate">{renderPairLabel(pair)}</div>
-                      <div className="text-ink-400 tabular-nums text-right">
-                        {Math.round(pair.score * 100)}%
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </>
-          ) : (
-            <>
-              <div className="grid grid-cols-[6.5rem,1fr,3.25rem] items-center gap-3 text-[11px] text-ink-500">
-                <span className="whitespace-nowrap">Top tension</span>
-                <span className="truncate">{renderPairLabel(strongestPair)}</span>
-                <span className="text-ink-400 tabular-nums text-right">
-                  {Math.round(strongestPair.score * 100)}%
-                </span>
-              </div>
-              {sortedPairs[1] && (
-                <div className="grid grid-cols-[6.5rem,1fr,3.25rem] items-center gap-3 text-[11px] text-ink-500 mt-1">
-                  <span aria-hidden="true" />
-                  <span className="truncate">{renderPairLabel(sortedPairs[1])}</span>
-                  <span className="text-ink-400 tabular-nums text-right">
-                    {Math.round(sortedPairs[1].score * 100)}%
-                  </span>
+      {sortedPairs.length > 0 && (
+        <div className="mt-3">
+          <div className="text-[11px] text-ink-500">Top tension</div>
+          <div className="mt-2 space-y-1">
+            {sortedPairs.map((pair) => {
+              const key = `${pair.agents[0]}-${pair.agents[1]}`;
+              return (
+                <div key={key} className="grid grid-cols-[1fr,3.25rem] items-center gap-3 text-[11px]">
+                  <div className="truncate">{renderPairLabel(pair)}</div>
+                  <div className="text-ink-400 tabular-nums text-right">
+                    {Math.round(pair.score * 100)}%
+                  </div>
                 </div>
-              )}
-            </>
-          )}
-        </button>
+              );
+            })}
+          </div>
+        </div>
       )}
 
       <p className="mt-2 text-[11px] text-ink-400 leading-relaxed">
