@@ -106,30 +106,42 @@ if $INSTALL_NODE; then
   ok "Node.js v${CURRENT_NODE} installed"
 fi
 
-# ── 1d. Corepack + pnpm ─────────────────────────────────────
-info "Checking corepack …"
-if ! command -v corepack &>/dev/null; then
-  warn "corepack not found (Node.js 25+ no longer bundles it) — installing via npm"
-  npm install -g corepack 2>/dev/null || sudo npm install -g corepack
-fi
+# ── 1d. pnpm ─────────────────────────────────────────────────
+# The repo pins pnpm@9.15.0 via the packageManager field. We need a working
+# pnpm — either via corepack or a standalone install. Check what's already
+# available and only install what's missing.
 
-info "Enabling corepack …"
-COREPACK_BIN="$(command -v corepack 2>/dev/null)"
-if [[ -n "$COREPACK_BIN" ]]; then
-  "$COREPACK_BIN" enable 2>/dev/null || sudo "$COREPACK_BIN" enable
-  ok "Corepack enabled"
+info "Checking pnpm …"
+if command -v pnpm &>/dev/null; then
+  PNPM_VER="$(pnpm -v 2>/dev/null || echo "none")"
+  if [[ "$PNPM_VER" != "none" ]]; then
+    ok "pnpm v${PNPM_VER} (already installed)"
+  fi
 else
-  fail "Could not find corepack after install. Check your Node.js installation."
-fi
+  # pnpm not found — try corepack first, fall back to standalone install
+  info "pnpm not found — setting up via corepack …"
 
-# pnpm version is pinned by the repo's packageManager field — corepack handles it.
-# We just verify it works.
-info "Checking pnpm (version pinned to 9.15.0 by repo) …"
-PNPM_VER="$(pnpm -v 2>/dev/null || echo "none")"
-if [[ "$PNPM_VER" == "none" ]]; then
-  warn "pnpm not responding — corepack will fetch it on first use"
-else
-  ok "pnpm v${PNPM_VER}"
+  if ! command -v corepack &>/dev/null; then
+    info "corepack not found (Node.js 25+ no longer bundles it) — installing via npm"
+    npm install -g --force corepack 2>/dev/null || sudo npm install -g --force corepack 2>/dev/null || true
+  fi
+
+  if command -v corepack &>/dev/null; then
+    COREPACK_BIN="$(command -v corepack)"
+    "$COREPACK_BIN" enable 2>/dev/null || sudo "$COREPACK_BIN" enable 2>/dev/null || true
+  fi
+
+  # If pnpm still isn't available, install it standalone
+  if ! command -v pnpm &>/dev/null; then
+    info "Installing pnpm standalone via npm …"
+    npm install -g pnpm 2>/dev/null || sudo npm install -g pnpm
+  fi
+
+  PNPM_VER="$(pnpm -v 2>/dev/null || echo "none")"
+  if [[ "$PNPM_VER" == "none" ]]; then
+    fail "Could not install pnpm. Check your Node.js installation."
+  fi
+  ok "pnpm v${PNPM_VER} installed"
 fi
 
 # ── 1e. Rust (stable ≥ 1.77.2) ──────────────────────────────
