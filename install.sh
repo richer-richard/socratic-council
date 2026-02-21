@@ -107,9 +107,20 @@ if $INSTALL_NODE; then
 fi
 
 # ── 1d. Corepack + pnpm ─────────────────────────────────────
+info "Checking corepack …"
+if ! command -v corepack &>/dev/null; then
+  warn "corepack not found (Node.js 25+ no longer bundles it) — installing via npm"
+  npm install -g corepack 2>/dev/null || sudo npm install -g corepack
+fi
+
 info "Enabling corepack …"
-corepack enable 2>/dev/null || sudo corepack enable
-ok "Corepack enabled"
+COREPACK_BIN="$(command -v corepack 2>/dev/null)"
+if [[ -n "$COREPACK_BIN" ]]; then
+  "$COREPACK_BIN" enable 2>/dev/null || sudo "$COREPACK_BIN" enable
+  ok "Corepack enabled"
+else
+  fail "Could not find corepack after install. Check your Node.js installation."
+fi
 
 # pnpm version is pinned by the repo's packageManager field — corepack handles it.
 # We just verify it works.
