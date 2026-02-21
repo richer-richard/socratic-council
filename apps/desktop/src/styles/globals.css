@@ -1022,6 +1022,22 @@ body {
   color: var(--ink-500);
 }
 
+.discord-stopwatch {
+  font-size: 0.6875rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-500);
+  background: rgba(255, 255, 255, 0.06);
+  padding: 0.1rem 0.4rem;
+  border-radius: 3px;
+  letter-spacing: 0.02em;
+}
+
+.discord-stopwatch.is-ticking {
+  color: var(--accent-emerald);
+  background: rgba(20, 184, 166, 0.12);
+}
+
 .discord-timestamp {
   font-size: 0.7rem;
   color: var(--ink-500);
