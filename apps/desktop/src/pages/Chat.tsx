@@ -224,6 +224,35 @@ const REACTION_IDS = REACTION_CATALOG;
 const MAX_CONTEXT_MESSAGES = 16;
 const MAX_TOOL_ITERATIONS = 2;
 
+/** Live stopwatch displayed while an AI agent is streaming a response. */
+function LiveStopwatch({ startTime, isStreaming, finalMs }: {
+  startTime: number;
+  isStreaming: boolean;
+  finalMs?: number;
+}) {
+  const [elapsed, setElapsed] = useState(0);
+
+  useEffect(() => {
+    if (!isStreaming) return;
+    let raf: number;
+    const tick = () => {
+      setElapsed(Date.now() - startTime);
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [isStreaming, startTime]);
+
+  const ms = isStreaming ? elapsed : (finalMs ?? 0);
+  const seconds = (ms / 1000).toFixed(3);
+
+  return (
+    <span className={`discord-stopwatch${isStreaming ? " is-ticking" : ""}`}>
+      {seconds}s
+    </span>
+  );
+}
+
 const DiscordVirtuosoList = forwardRef<HTMLDivElement, HTMLAttributes<HTMLDivElement>>(
   function DiscordVirtuosoList({ className, ...props }, ref) {
     return (
@@ -1789,6 +1818,13 @@ export function Chat({ topic, onNavigate }: ChatProps) {
                       </span>
                       {(isAgent || isModerator) && modelName && (
                         <span className="discord-model">({modelName})</span>
+                      )}
+                      {(isAgent || isModerator) && (message.isStreaming || message.latencyMs != null) && (
+                        <LiveStopwatch
+                          startTime={message.timestamp}
+                          isStreaming={!!message.isStreaming}
+                          finalMs={message.latencyMs}
+                        />
                       )}
                       <span className="discord-timestamp">
                         {formatTime(message.timestamp)}
