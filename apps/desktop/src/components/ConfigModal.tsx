@@ -4,7 +4,9 @@ import {
   type ProxyType,
   type AppConfig,
   PROVIDER_INFO,
+  LOCKED_MODELS,
   DISCUSSION_LENGTHS,
+  isProvider,
 } from "../stores/config";
 import { getModelsByProvider } from "@socratic-council/shared";
 import { ProviderIcon } from "./icons/ProviderIcons";
@@ -50,6 +52,16 @@ const MODEL_OPTIONS: Record<Provider, { id: string; name: string; description?: 
     name: model.name,
     description: model.description,
   })),
+  qwen: getModelsByProvider("qwen").map((model) => ({
+    id: model.id,
+    name: model.name,
+    description: model.description,
+  })),
+  minimax: getModelsByProvider("minimax").map((model) => ({
+    id: model.id,
+    name: model.name,
+    description: model.description,
+  })),
 };
 
 export function ConfigModal({
@@ -59,7 +71,7 @@ export function ConfigModal({
   onUpdateCredential,
   onUpdateProxy,
   onUpdatePreferences,
-  onUpdateModel,
+  onUpdateModel: _onUpdateModel,
 }: ConfigModalProps) {
   const [activeTab, setActiveTab] = useState<TabType>("api-keys");
   const [editingProvider, setEditingProvider] = useState<Provider | null>(null);
@@ -72,6 +84,8 @@ export function ConfigModal({
     google: null,
     deepseek: null,
     kimi: null,
+    qwen: null,
+    minimax: null,
   });
   const [testError, setTestError] = useState<string | null>(null);
 
@@ -150,7 +164,7 @@ export function ConfigModal({
             </div>
           </div>
           <div className="flex items-center gap-3">
-            <span className="badge badge-info">{configuredCount}/5 providers</span>
+            <span className="badge badge-info">{configuredCount}/{PROVIDERS.length} providers</span>
             <button
               onClick={onClose}
               className="text-gray-400 hover:text-white p-2 rounded-lg hover:bg-gray-700 transition-colors"
@@ -366,13 +380,17 @@ export function ConfigModal({
           {activeTab === "models" && (
             <div className="space-y-4 scale-in">
               <p className="text-gray-400 text-sm mb-4">
-                Configure which AI model each council member uses. Different models have different capabilities and pricing.
+                Models are locked to one fixed model per character to keep council behavior consistent.
               </p>
 
               {PROVIDERS.map((provider) => {
                 const info = PROVIDER_INFO[provider];
                 const models = MODEL_OPTIONS[provider];
-                const currentModel = config.models[provider] || models[0]?.id;
+                const currentModel = LOCKED_MODELS[provider];
+                const model = models.find((m) => m.id === currentModel) ?? {
+                  id: currentModel,
+                  name: currentModel,
+                };
 
                 return (
                   <div
@@ -387,19 +405,18 @@ export function ConfigModal({
                       </div>
                     </div>
 
-                    <select
-                      value={currentModel}
-                      onChange={(e) => onUpdateModel(provider, e.target.value)}
-                      className="w-full bg-gray-900 border border-gray-600 rounded-lg px-4 py-2.5
-                        text-white focus:outline-none focus:border-primary transition-colors"
-                    >
-                      {models.map((model) => (
-                        <option key={model.id} value={model.id}>
-                          {model.name}
-                          {model.description ? ` — ${model.description}` : ""} ({model.id})
-                        </option>
-                      ))}
-                    </select>
+                    <div className="w-full bg-gray-900 border border-gray-600 rounded-lg px-4 py-3 text-white">
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="min-w-0">
+                          <div className="font-medium truncate">{model.name}</div>
+                          <div className="text-xs text-gray-400 truncate">
+                            {model.description ? `${model.description} ` : ""}
+                            ({model.id})
+                          </div>
+                        </div>
+                        <span className="badge badge-info">Locked</span>
+                      </div>
+                    </div>
                   </div>
                 );
               })}
@@ -653,14 +670,18 @@ export function ConfigModal({
                             // Update each setting category
                             if (imported.credentials) {
                               Object.entries(imported.credentials).forEach(([p, c]) => {
-                                onUpdateCredential(p as Provider, c as { apiKey: string });
+                                if (isProvider(p)) {
+                                  onUpdateCredential(p, c as { apiKey: string });
+                                }
                               });
                             }
                             if (imported.proxy) onUpdateProxy(imported.proxy);
                             if (imported.preferences) onUpdatePreferences(imported.preferences);
                             if (imported.models) {
                               Object.entries(imported.models).forEach(([p, m]) => {
-                                onUpdateModel(p as Provider, m as string);
+                                if (isProvider(p)) {
+                                  _onUpdateModel(p, m as string);
+                                }
                               });
                             }
                           } catch (err) {

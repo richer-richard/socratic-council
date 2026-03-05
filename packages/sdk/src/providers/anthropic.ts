@@ -36,6 +36,14 @@ interface AnthropicRequest {
   temperature?: number;
   top_p?: number;
   top_k?: number;
+  thinking?:
+    | {
+        type: "enabled";
+        budget_tokens: number;
+      }
+    | {
+        type: "adaptive";
+      };
   stream?: boolean;
   metadata?: {
     user_id?: string;
@@ -48,7 +56,8 @@ interface AnthropicResponse {
   role: string;
   content: Array<{
     type: string;
-    text: string;
+    text?: string;
+    thinking?: string;
   }>;
   model: string;
   stop_reason: string;
@@ -60,9 +69,16 @@ interface AnthropicResponse {
 
 interface AnthropicStreamEvent {
   type: string;
+  index?: number;
+  content_block?: {
+    type?: string;
+    text?: string;
+  };
   delta?: {
     type?: string;
     text?: string;
+    thinking?: string;
+    stop_reason?: string;
   };
   usage?: {
     input_tokens: number;
@@ -74,6 +90,55 @@ interface AnthropicStreamEvent {
       output_tokens: number;
     };
   };
+}
+
+function supportsExtendedThinking(model: AnthropicModel): boolean {
+  return model.includes("opus-4") || model.includes("sonnet-4") || model.includes("haiku-4");
+}
+
+function isClaudeOpus46(model: AnthropicModel): boolean {
+  return model === "claude-opus-4-6";
+}
+
+function buildThinkingConfig(
+  model: AnthropicModel,
+  maxTokens: number
+):
+  | {
+      type: "enabled";
+      budget_tokens: number;
+    }
+  | {
+      type: "adaptive";
+    }
+  | undefined {
+  if (!supportsExtendedThinking(model)) return undefined;
+
+  // Claude Opus 4.6 supports adaptive thinking mode.
+  if (isClaudeOpus46(model)) {
+    return { type: "adaptive" };
+  }
+
+  // Anthropic requires max_tokens > thinking.budget_tokens.
+  const budgetUpperBound = Math.min(8192, maxTokens - 256);
+  if (budgetUpperBound < 1024) {
+    return undefined;
+  }
+
+  return {
+    type: "enabled",
+    budget_tokens: budgetUpperBound,
+  };
+}
+
+function mapStopReason(reason?: string): "stop" | "length" | "error" {
+  if (!reason || reason === "end_turn" || reason === "stop_sequence" || reason === "tool_use") {
+    return "stop";
+  }
+  if (reason === "max_tokens") {
+    return "length";
+  }
+  return "error";
 }
 
 export class AnthropicProvider implements BaseProvider {
@@ -125,16 +190,22 @@ export class AnthropicProvider implements BaseProvider {
     // Extract content from the response
     const content = data.content
       .filter((c) => c.type === "text")
-      .map((c) => c.text)
+      .map((c) => c.text ?? "")
+      .join("");
+    const thinking = data.content
+      .filter((c) => c.type === "thinking")
+      .map((c) => c.thinking ?? c.text ?? "")
       .join("");
 
     return {
       content,
+      thinking: thinking || undefined,
       tokens: {
         input: data.usage.input_tokens,
         output: data.usage.output_tokens,
+        reasoning: thinking ? data.usage.output_tokens : undefined,
       },
-      finishReason: data.stop_reason === "end_turn" ? "stop" : "length",
+      finishReason: mapStopReason(data.stop_reason),
       latencyMs,
     };
   }
@@ -154,21 +225,48 @@ export class AnthropicProvider implements BaseProvider {
     });
 
     let fullContent = "";
+    let fullThinking = "";
     let inputTokens = 0;
     let outputTokens = 0;
+    let finishReason: "stop" | "length" | "error" = "stop";
+    const blockTypes = new Map<number, string>();
     const parser = createSseParser((dataLine) => {
       const data = dataLine.trim();
       if (!data || data === "[DONE]") return;
       try {
         const event = JSON.parse(data) as AnthropicStreamEvent;
 
-        if (event.type === "content_block_delta" && event.delta?.text) {
-          fullContent += event.delta.text;
-          onChunk({ content: event.delta.text, done: false });
+        if (event.type === "content_block_start") {
+          const idx = typeof event.index === "number" ? event.index : -1;
+          if (idx >= 0) {
+            blockTypes.set(idx, event.content_block?.type ?? "text");
+          }
+        }
+
+        if (event.type === "content_block_delta" && (event.delta?.text || event.delta?.thinking)) {
+          const idx = typeof event.index === "number" ? event.index : -1;
+          const blockType = idx >= 0 ? blockTypes.get(idx) : undefined;
+          const deltaType = event.delta.type ?? "";
+          const isThinking = blockType === "thinking" || deltaType.includes("thinking");
+          const thinkingDelta = event.delta.thinking ?? event.delta.text ?? "";
+          const textDelta = event.delta.text ?? "";
+
+          if (isThinking) {
+            if (thinkingDelta) {
+              fullThinking += thinkingDelta;
+              onChunk({ content: "", thinking: thinkingDelta, done: false });
+            }
+          } else if (textDelta) {
+            fullContent += textDelta;
+            onChunk({ content: textDelta, done: false });
+          }
         }
 
         if (event.type === "message_delta" && event.usage) {
           outputTokens = event.usage.output_tokens;
+        }
+        if (event.type === "message_delta" && event.delta?.stop_reason) {
+          finishReason = mapStopReason(event.delta.stop_reason);
         }
 
         if (event.type === "message_start") {
@@ -215,11 +313,13 @@ export class AnthropicProvider implements BaseProvider {
 
     return {
       content: fullContent,
+      thinking: fullThinking || undefined,
       tokens: {
         input: inputTokens,
         output: outputTokens,
+        reasoning: fullThinking ? outputTokens : undefined,
       },
-      finishReason: "stop",
+      finishReason,
       latencyMs,
     };
   }
@@ -272,9 +372,14 @@ export class AnthropicProvider implements BaseProvider {
       request.system = systemMessage.content;
     }
 
-    // Add temperature (Anthropic supports 0-1 range)
-    const temp = options?.temperature ?? agent.temperature ?? 1;
-    request.temperature = Math.min(1, Math.max(0, temp));
+    const thinking = buildThinkingConfig(model, request.max_tokens);
+    if (thinking) {
+      request.thinking = thinking;
+    } else {
+      // Anthropic thinking mode is not compatible with temperature overrides.
+      const temp = options?.temperature ?? agent.temperature ?? 1;
+      request.temperature = Math.min(1, Math.max(0, temp));
+    }
 
     return request;
   }

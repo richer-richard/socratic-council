@@ -24,10 +24,28 @@ import { createSseParser } from "./sse.js";
 import { type Transport, createFetchTransport } from "../transport.js";
 
 // Models that support reasoning.effort parameter
-const REASONING_MODELS: OpenAIModel[] = ["o1", "o3", "o4-mini", "gpt-5.2-pro"];
+const REASONING_MODELS: OpenAIModel[] = [
+  "o1",
+  "o3",
+  "o4-mini",
+  "gpt-5.3-codex",
+  "gpt-5.2-pro",
+  "gpt-5.2",
+  "gpt-5-mini",
+  "gpt-5-nano",
+];
 
 // Models that DON'T support temperature (reasoning models use reasoning.effort instead)
-const NO_TEMPERATURE_MODELS: OpenAIModel[] = ["o1", "o3", "o4-mini"];
+const NO_TEMPERATURE_MODELS: OpenAIModel[] = [
+  "o1",
+  "o3",
+  "o4-mini",
+  "gpt-5.3-codex",
+  "gpt-5.2-pro",
+  "gpt-5.2",
+  "gpt-5-mini",
+  "gpt-5-nano",
+];
 
 interface OpenAIResponsesRequest {
   model: string;
@@ -37,7 +55,8 @@ interface OpenAIResponsesRequest {
   max_output_tokens?: number;
   top_p?: number;
   reasoning?: {
-    effort?: "low" | "medium" | "high";
+    effort?: "minimal" | "low" | "medium" | "high" | "xhigh";
+    summary?: "auto" | "concise" | "detailed";
   };
   stream?: boolean;
 }
@@ -68,6 +87,14 @@ interface OpenAIStreamEvent {
   type: string;
   delta?: string;
   text?: string;
+  reasoning?: string;
+  part?: {
+    type?: string;
+    text?: string;
+  };
+  summary?: {
+    text?: string;
+  };
   response?: {
     usage?: {
       input_tokens?: number;
@@ -108,6 +135,50 @@ function extractOutputText(data: OpenAIResponsesResponse): string {
   // Fallback for SDK-style response helpers
   const fallback = (data as { output_text?: string }).output_text;
   return fallback ?? "";
+}
+
+function extractOutputThinking(data: OpenAIResponsesResponse): string {
+  const chunks =
+    data.output
+      ?.flatMap((item) => item.content ?? [])
+      .filter((content) => {
+        const type = (content as { type?: string }).type ?? "";
+        return type.includes("reasoning") || type.includes("summary");
+      })
+      .map((content) => (content as { text?: string }).text ?? "")
+      .filter(Boolean) ?? [];
+  return chunks.join("");
+}
+
+function reasoningEffortForModel(model: OpenAIModel): "high" | "xhigh" {
+  if (model === "gpt-5.3-codex" || model === "gpt-5.2" || model === "gpt-5.2-pro") {
+    return "xhigh";
+  }
+  return "high";
+}
+
+function extractReasoningChunk(event: OpenAIStreamEvent): string {
+  if (typeof event.reasoning === "string" && event.reasoning.length > 0) {
+    return event.reasoning;
+  }
+
+  const type = event.type ?? "";
+  if (!type.includes("reasoning") && !type.includes("summary")) return "";
+
+  if (typeof event.delta === "string" && event.delta.length > 0) {
+    return event.delta;
+  }
+  if (typeof event.text === "string" && event.text.length > 0) {
+    return event.text;
+  }
+  if (typeof event.part?.text === "string" && event.part.text.length > 0) {
+    return event.part.text;
+  }
+  if (typeof event.summary?.text === "string" && event.summary.text.length > 0) {
+    return event.summary.text;
+  }
+
+  return "";
 }
 
 export class OpenAIProvider implements BaseProvider {
@@ -159,9 +230,11 @@ export class OpenAIProvider implements BaseProvider {
 
     // Extract content from the response
     const content = extractOutputText(data);
+    const thinking = extractOutputThinking(data);
 
     return {
       content,
+      thinking: thinking || undefined,
       tokens: {
         input: data.usage.input_tokens,
         output: data.usage.output_tokens,
@@ -191,6 +264,7 @@ export class OpenAIProvider implements BaseProvider {
     let inputTokens = 0;
     let outputTokens = 0;
     let reasoningTokens = 0;
+    let fullThinking = "";
     let sawDelta = false;
 
     const parser = createSseParser((data) => {
@@ -208,6 +282,13 @@ export class OpenAIProvider implements BaseProvider {
         if (parsed.type === "response.output_text.done" && parsed.text && !sawDelta) {
           fullContent += parsed.text;
           onChunk({ content: parsed.text, done: false });
+          return;
+        }
+
+        const reasoningChunk = extractReasoningChunk(parsed);
+        if (reasoningChunk) {
+          fullThinking += reasoningChunk;
+          onChunk({ content: "", thinking: reasoningChunk, done: false });
           return;
         }
 
@@ -274,6 +355,7 @@ export class OpenAIProvider implements BaseProvider {
 
     return {
       content: fullContent,
+      thinking: fullThinking || undefined,
       tokens: {
         input: inputTokens,
         output: outputTokens,
@@ -345,7 +427,7 @@ export class OpenAIProvider implements BaseProvider {
 
     // Handle reasoning effort for reasoning models
     if (REASONING_MODELS.includes(model)) {
-      request.reasoning = { effort: "medium" };
+      request.reasoning = { effort: reasoningEffortForModel(model), summary: "auto" };
     }
 
     return request;

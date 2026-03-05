@@ -37,6 +37,8 @@ const AGENT_COLORS: Record<AgentId | "system" | "user", (text: string) => string
   grace: chalk.green,
   douglas: chalk.yellow,
   kate: chalk.cyan,
+  quinn: chalk.cyanBright,
+  mary: chalk.hex("#f472b6"),
   system: chalk.gray,
   user: chalk.white.bold,
 };
@@ -48,6 +50,8 @@ const AGENT_BG_COLORS: Record<AgentId, (text: string) => string> = {
   grace: chalk.bgGreen.black,
   douglas: chalk.bgYellow.black,
   kate: chalk.bgCyan.black,
+  quinn: chalk.bgCyanBright.black,
+  mary: chalk.bgHex("#f472b6").black,
 };
 
 // Agent emoji avatars
@@ -57,6 +61,8 @@ const AGENT_AVATARS: Record<AgentId | "system" | "user", string> = {
   grace: "🌱",
   douglas: "🔶",
   kate: "📚",
+  quinn: "🧠",
+  mary: "🟢",
   system: "⚙️",
   user: "👤",
 };
@@ -68,6 +74,8 @@ const AGENT_ROLES: Record<AgentId, string> = {
   grace: "Futurist",
   douglas: "Skeptic",
   kate: "Historian",
+  quinn: "Strategist",
+  mary: "Operator",
 };
 
 function parseProxyUrl(raw?: string): ProxyConfig | undefined {
@@ -142,10 +150,12 @@ function showBanner(): void {
 
   const members = [
     { id: "george" as AgentId, provider: "OpenAI GPT-5.2" },
-    { id: "cathy" as AgentId, provider: "Anthropic Claude 4.5" },
-    { id: "grace" as AgentId, provider: "Google Gemini 3" },
+    { id: "cathy" as AgentId, provider: "Anthropic Claude 4.6" },
+    { id: "grace" as AgentId, provider: "Google Gemini 3.1" },
     { id: "douglas" as AgentId, provider: "DeepSeek Reasoner" },
     { id: "kate" as AgentId, provider: "Kimi K2.5" },
+    { id: "quinn" as AgentId, provider: "Qwen 3.5 Plus" },
+    { id: "mary" as AgentId, provider: "MiniMax M2.5" },
   ];
 
   members.forEach((m) => {
@@ -271,13 +281,15 @@ async function configureAgentModels(): Promise<void> {
   console.log(chalk.gray("  ─────────────────────────────────────────────"));
   console.log();
 
-  const agents: AgentId[] = ["george", "cathy", "grace", "douglas", "kate"];
+  const agents: AgentId[] = ["george", "cathy", "grace", "douglas", "kate", "quinn", "mary"];
   const agentProviders: Record<AgentId, Provider> = {
     george: "openai",
     cathy: "anthropic",
     grace: "google",
     douglas: "deepseek",
     kate: "kimi",
+    quinn: "qwen",
+    mary: "minimax",
   };
 
   for (const agentId of agents) {
@@ -509,6 +521,8 @@ async function startDiscussion(): Promise<void> {
     grace: { messages: 0, tokens: 0 },
     douglas: { messages: 0, tokens: 0 },
     kate: { messages: 0, tokens: 0 },
+    quinn: { messages: 0, tokens: 0 },
+    mary: { messages: 0, tokens: 0 },
   };
 
   // Set up event handling for group chat display

@@ -49,8 +49,18 @@ export function ConversationExport({
   const [isExporting, setIsExporting] = useState(false);
   const [lastResult, setLastResult] = useState<{ label: string; path: string | null } | null>(null);
   const [lastError, setLastError] = useState<string | null>(null);
+  const forceUsageMeta = format === "pdf" || format === "docx" || format === "markdown";
 
-  const exportCount = useMemo(() => messages.filter((m) => m.content.trim().length > 0).length, [messages]);
+  const exportCount = useMemo(
+    () =>
+      messages.filter(
+        (m) =>
+          m.content.trim().length > 0 ||
+          (m.fullResponse?.trim().length ?? 0) > 0 ||
+          (m.thinking?.trim().length ?? 0) > 0
+      ).length,
+    [messages]
+  );
 
   const doExport = async () => {
     setIsExporting(true);
@@ -61,8 +71,8 @@ export function ConversationExport({
         format,
         topic,
         messages,
-        includeTokens,
-        includeCosts,
+        includeTokens: forceUsageMeta ? true : includeTokens,
+        includeCosts: forceUsageMeta ? true : includeCosts,
         baseFileName,
       });
       setLastResult(
@@ -122,7 +132,8 @@ export function ConversationExport({
           <label className="flex items-center gap-2">
             <input
               type="checkbox"
-              checked={includeTokens}
+              checked={forceUsageMeta ? true : includeTokens}
+              disabled={forceUsageMeta}
               onChange={(e) => setIncludeTokens(e.target.checked)}
             />
             Include tokens
@@ -130,12 +141,18 @@ export function ConversationExport({
           <label className="flex items-center gap-2">
             <input
               type="checkbox"
-              checked={includeCosts}
+              checked={forceUsageMeta ? true : includeCosts}
+              disabled={forceUsageMeta}
               onChange={(e) => setIncludeCosts(e.target.checked)}
             />
             Include cost
           </label>
         </div>
+        {forceUsageMeta && (
+          <div className="text-[11px] text-ink-500">
+            For PDF, DOCX, and Markdown exports, tokens and cost metadata are always included.
+          </div>
+        )}
 
         <button
           type="button"

@@ -118,6 +118,7 @@ export class KimiProvider implements BaseProvider {
 
     return {
       content: content || reasoning,
+      thinking: reasoning || undefined,
       tokens: {
         input: (data.usage?.prompt_tokens as number) ?? 0,
         output: (data.usage?.completion_tokens as number) ?? 0,
@@ -157,7 +158,9 @@ export class KimiProvider implements BaseProvider {
         // reasoning output when the model fails to produce regular content
         // (known issue: missing </think> tag causes content to stay empty).
         if (delta?.reasoning_content) {
-          reasoningContent += delta.reasoning_content;
+          const deltaThinking = String(delta.reasoning_content);
+          reasoningContent += deltaThinking;
+          onChunk({ content: "", thinking: deltaThinking, done: false });
         }
 
         if (delta?.content) {
@@ -206,6 +209,7 @@ export class KimiProvider implements BaseProvider {
 
     return {
       content: fullContent || reasoningContent,
+      thinking: reasoningContent || undefined,
       tokens: {
         input: inputTokens,
         output: outputTokens,

@@ -1,7 +1,7 @@
 {
   "name": "socratic-council",
   "version": "1.0.0",
-  "description": "A real-time multi-agent group chat where five AI agents debate any topic",
+  "description": "A real-time multi-agent group chat where seven AI agents debate any topic",
   "private": true,
   "type": "module",
   "packageManager": "pnpm@9.15.0",
@@ -32,13 +32,15 @@
     "anthropic",
     "gemini",
     "deepseek",
-    "kimi"
+    "kimi",
+    "qwen",
+    "minimax"
   ],
   "author": "Socratic Council Team",
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
-    "url": "https://github.com/richer-richard/socratic-council-of-five.git"
+    "url": "https://github.com/richer-richard/socratic-council.git"
   },
   "devDependencies": {
     "@eslint/js": "^9.13.0",

@@ -16,6 +16,23 @@ import type {
 export const MODEL_REGISTRY: ModelInfo[] = [
   // OpenAI Models (latest first)
   {
+    id: "gpt-5.3-codex",
+    provider: "openai",
+    name: "GPT-5.3 Codex",
+    description: "Coding-specialized GPT-5 family model with advanced reasoning",
+    contextWindow: 400000,
+    maxOutputTokens: 100000,
+    supportsThinking: true,
+    supportsVision: true,
+    supportsStreaming: true,
+    pricing: {
+      // Estimated using current GPT-5.2 Pro schedule until dedicated pricing is finalized.
+      inputCostPer1M: 2.50,
+      outputCostPer1M: 10.00,
+      reasoningCostPer1M: 15.00,
+    },
+  },
+  {
     id: "gpt-5.2-pro",
     provider: "openai",
     name: "GPT-5.2 Pro",
@@ -38,7 +55,7 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     description: "Flagship model for complex tasks",
     contextWindow: 128000,
     maxOutputTokens: 16384,
-    supportsThinking: false,
+    supportsThinking: true,
     supportsVision: true,
     supportsStreaming: true,
     pricing: {
@@ -53,7 +70,7 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     description: "Fast and cost-efficient",
     contextWindow: 128000,
     maxOutputTokens: 16384,
-    supportsThinking: false,
+    supportsThinking: true,
     supportsVision: true,
     supportsStreaming: true,
     pricing: {
@@ -68,7 +85,7 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     description: "Ultra-fast for routing and summaries",
     contextWindow: 128000,
     maxOutputTokens: 8192,
-    supportsThinking: false,
+    supportsThinking: true,
     supportsVision: false,
     supportsStreaming: true,
     pricing: {
@@ -310,10 +327,25 @@ export const MODEL_REGISTRY: ModelInfo[] = [
 
   // Google Gemini Models (latest first)
   {
+    id: "gemini-3.1-pro-preview",
+    provider: "google",
+    name: "Gemini 3.1 Pro",
+    description: "Best multimodal and agentic model",
+    contextWindow: 1000000,
+    maxOutputTokens: 65536,
+    supportsThinking: true,
+    supportsVision: true,
+    supportsStreaming: true,
+    pricing: {
+      inputCostPer1M: 1.25,
+      outputCostPer1M: 5.00,
+    },
+  },
+  {
     id: "gemini-3-pro-preview",
     provider: "google",
-    name: "Gemini 3 Pro",
-    description: "Best multimodal and agentic model",
+    name: "Gemini 3 Pro (Legacy)",
+    description: "Legacy alias retained for compatibility",
     contextWindow: 1000000,
     maxOutputTokens: 65536,
     supportsThinking: true,
@@ -659,6 +691,55 @@ export const MODEL_REGISTRY: ModelInfo[] = [
       outputCostPer1M: 0.17,
     },
   },
+
+  // Qwen models (Alibaba Cloud Bailian / DashScope compatible mode)
+  {
+    id: "qwen3.5-plus",
+    provider: "qwen",
+    name: "Qwen 3.5 Plus",
+    description: "General-purpose high-capability model",
+    contextWindow: 131072,
+    maxOutputTokens: 8192,
+    supportsThinking: true,
+    supportsVision: false,
+    supportsStreaming: true,
+    pricing: {
+      inputCostPer1M: 0.56,
+      outputCostPer1M: 1.68,
+    },
+  },
+
+  // MiniMax models
+  {
+    id: "MiniMax-M2.5",
+    provider: "minimax",
+    name: "MiniMax M2.5",
+    description: "Latest flagship text model",
+    contextWindow: 1000000,
+    maxOutputTokens: 64000,
+    supportsThinking: true,
+    supportsVision: false,
+    supportsStreaming: true,
+    pricing: {
+      inputCostPer1M: 0.60,
+      outputCostPer1M: 2.40,
+    },
+  },
+  {
+    id: "minimax-m2.5",
+    provider: "minimax",
+    name: "MiniMax M2.5 (Alias)",
+    description: "Lowercase alias retained for compatibility",
+    contextWindow: 1000000,
+    maxOutputTokens: 64000,
+    supportsThinking: true,
+    supportsVision: false,
+    supportsStreaming: true,
+    pricing: {
+      inputCostPer1M: 0.60,
+      outputCostPer1M: 2.40,
+    },
+  },
 ];
 
 // =============================================================================
@@ -671,6 +752,8 @@ export const API_ENDPOINTS: Record<Provider, string> = {
   google: "https://generativelanguage.googleapis.com/v1beta/models",
   deepseek: "https://api.deepseek.com/v1/chat/completions",
   kimi: "https://api.moonshot.cn/v1/chat/completions",
+  qwen: "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
+  minimax: "https://api.minimaxi.com/anthropic/v1/messages",
 };
 
 // =============================================================================
@@ -678,7 +761,7 @@ export const API_ENDPOINTS: Record<Provider, string> = {
 // =============================================================================
 
 function baseSystemPrompt(name: string): string {
-  return `You are ${name} in the Socratic Council.
+  return `You are ${name} in the Socratic Council with George, Cathy, Grace, Douglas, Kate, Quinn, and Mary.
 
 CONVERSATION STYLE:
 - Keep responses short and direct.
@@ -697,10 +780,10 @@ export const DEFAULT_AGENTS: Record<AgentId, AgentConfig> = {
     id: "george",
     name: "George",
     provider: "openai",
-    model: "gpt-5.2",
+    model: "gpt-5.3-codex",
     systemPrompt: baseSystemPrompt("George"),
-    temperature: 0.7,
-    maxTokens: 2048,
+    temperature: 1,
+    maxTokens: 4096,
   },
   cathy: {
     id: "cathy",
@@ -708,17 +791,17 @@ export const DEFAULT_AGENTS: Record<AgentId, AgentConfig> = {
     provider: "anthropic",
     model: "claude-opus-4-6",
     systemPrompt: baseSystemPrompt("Cathy"),
-    temperature: 0.8,
-    maxTokens: 2048,
+    temperature: 1,
+    maxTokens: 8192,
   },
   grace: {
     id: "grace",
     name: "Grace",
     provider: "google",
-    model: "gemini-3-pro-preview",
+    model: "gemini-3.1-pro-preview",
     systemPrompt: baseSystemPrompt("Grace"),
-    temperature: 0.9,
-    maxTokens: 2048,
+    temperature: 1,
+    maxTokens: 4096,
   },
   douglas: {
     id: "douglas",
@@ -726,8 +809,8 @@ export const DEFAULT_AGENTS: Record<AgentId, AgentConfig> = {
     provider: "deepseek",
     model: "deepseek-reasoner",
     systemPrompt: baseSystemPrompt("Douglas"),
-    temperature: 0.6,
-    maxTokens: 2048,
+    temperature: 1,
+    maxTokens: 4096,
   },
   kate: {
     id: "kate",
@@ -735,8 +818,26 @@ export const DEFAULT_AGENTS: Record<AgentId, AgentConfig> = {
     provider: "kimi",
     model: "kimi-k2.5",
     systemPrompt: baseSystemPrompt("Kate"),
-    temperature: 0.7,
-    maxTokens: 2048,
+    temperature: 1,
+    maxTokens: 4096,
+  },
+  quinn: {
+    id: "quinn",
+    name: "Quinn",
+    provider: "qwen",
+    model: "qwen3.5-plus",
+    systemPrompt: baseSystemPrompt("Quinn"),
+    temperature: 1,
+    maxTokens: 4096,
+  },
+  mary: {
+    id: "mary",
+    name: "Mary",
+    provider: "minimax",
+    model: "minimax-m2.5",
+    systemPrompt: baseSystemPrompt("Mary"),
+    temperature: 1,
+    maxTokens: 4096,
   },
 };
 

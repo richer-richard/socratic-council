@@ -9,8 +9,24 @@
 
 import { useState, useEffect, useCallback } from "react";
 
-export type Provider = "openai" | "anthropic" | "google" | "deepseek" | "kimi";
+export type Provider =
+  | "openai"
+  | "anthropic"
+  | "google"
+  | "deepseek"
+  | "kimi"
+  | "qwen"
+  | "minimax";
 export type ProxyType = "none" | "http" | "https" | "socks5" | "socks5h";
+const VALID_PROVIDERS = [
+  "openai",
+  "anthropic",
+  "google",
+  "deepseek",
+  "kimi",
+  "qwen",
+  "minimax",
+] as const;
 
 export interface ProxyConfig {
   type: ProxyType;
@@ -50,6 +66,21 @@ export interface AppConfig {
   mcp: McpConfig;
 }
 
+// Each character is locked to one model.
+export const LOCKED_MODELS: Record<Provider, string> = {
+  openai: "gpt-5.3-codex",
+  anthropic: "claude-opus-4-6",
+  google: "gemini-3.1-pro-preview",
+  deepseek: "deepseek-reasoner",
+  kimi: "kimi-k2.5",
+  qwen: "qwen3.5-plus",
+  minimax: "minimax-m2.5",
+};
+
+export function isProvider(value: unknown): value is Provider {
+  return typeof value === "string" && VALID_PROVIDERS.includes(value as Provider);
+}
+
 // Claude Opus 4.6 - default for Cathy
 const CLAUDE_OPUS_4_6_MODEL_ID = "claude-opus-4-6";
 
@@ -68,13 +99,7 @@ const DEFAULT_CONFIG: AppConfig = {
     soundEffects: false,
     moderatorEnabled: true,
   },
-  models: {
-    openai: "gpt-5.2",
-    anthropic: CLAUDE_OPUS_4_6_MODEL_ID,
-    google: "gemini-3-pro-preview",
-    deepseek: "deepseek-reasoner",
-    kimi: "kimi-k2.5",
-  },
+  models: { ...LOCKED_MODELS },
   mcp: {
     enabled: false,
     serverUrl: "",
@@ -106,6 +131,41 @@ function normalizeProxyConfig(input?: Partial<ProxyConfig>): ProxyConfig {
   };
 }
 
+function sanitizeCredentials(input: unknown): Partial<Record<Provider, ProviderCredential>> {
+  if (!input || typeof input !== "object") {
+    return {};
+  }
+
+  const result: Partial<Record<Provider, ProviderCredential>> = {};
+
+  for (const [rawProvider, rawCredential] of Object.entries(input)) {
+    if (!isProvider(rawProvider)) continue;
+    if (!rawCredential || typeof rawCredential !== "object") continue;
+
+    const apiKey = (rawCredential as Partial<ProviderCredential>).apiKey;
+    if (typeof apiKey !== "string" || apiKey.trim() === "") continue;
+
+    const baseUrl = (rawCredential as Partial<ProviderCredential>).baseUrl;
+    const verified = (rawCredential as Partial<ProviderCredential>).verified;
+    const lastTested = (rawCredential as Partial<ProviderCredential>).lastTested;
+
+    result[rawProvider] = {
+      apiKey: apiKey.trim(),
+      ...(typeof baseUrl === "string" && baseUrl.trim() !== "" ? { baseUrl: baseUrl.trim() } : {}),
+      ...(typeof verified === "boolean" ? { verified } : {}),
+      ...(typeof lastTested === "number" && Number.isFinite(lastTested) ? { lastTested } : {}),
+    };
+  }
+
+  return result;
+}
+
+function sanitizeModels(input: unknown): Partial<Record<Provider, string>> {
+  // Model selection is locked per character, so persisted values are ignored.
+  void input;
+  return { ...LOCKED_MODELS };
+}
+
 const STORAGE_KEY = "socratic-council-config";
 
 // Discussion length presets (in turns)
@@ -125,10 +185,10 @@ export function loadConfig(): AppConfig {
       
       // Merge with defaults, removing deprecated fields
       const merged: AppConfig = {
-        credentials: parsed.credentials ?? {},
+        credentials: sanitizeCredentials(parsed.credentials),
         proxy: normalizeProxyConfig({ ...DEFAULT_CONFIG.proxy, ...parsed.proxy }),
         preferences: { ...DEFAULT_CONFIG.preferences, ...parsed.preferences },
-        models: { ...DEFAULT_CONFIG.models, ...parsed.models },
+        models: { ...LOCKED_MODELS, ...sanitizeModels(parsed.models) },
         mcp: { ...DEFAULT_CONFIG.mcp, ...parsed.mcp },
       };
 
@@ -145,6 +205,7 @@ export function loadConfig(): AppConfig {
       if (needsMigration) {
         merged.models = { ...merged.models, anthropic: CLAUDE_OPUS_4_6_MODEL_ID };
       }
+      merged.models = { ...LOCKED_MODELS };
 
       // Clean up deprecated proxyOverrides if it exists
       if ("proxyOverrides" in parsed) {
@@ -180,6 +241,10 @@ export function useConfig() {
   }, []);
 
   const updateCredential = useCallback((provider: Provider, credential: ProviderCredential | null) => {
+    if (!isProvider(provider)) {
+      return;
+    }
+
     setConfigState((prev) => {
       const newCredentials = { ...prev.credentials };
       if (credential === null) {
@@ -203,11 +268,16 @@ export function useConfig() {
   }, []);
 
   const updateModel = useCallback((provider: Provider, model: string) => {
+    if (!isProvider(provider)) {
+      return;
+    }
+    void model;
+
     setConfigState((prev) => ({
       ...prev,
       models: {
         ...prev.models,
-        [provider]: model,
+        [provider]: LOCKED_MODELS[provider],
       },
     }));
   }, []);
@@ -220,8 +290,8 @@ export function useConfig() {
   }, []);
 
   const getConfiguredProviders = useCallback((): Provider[] => {
-    return (Object.keys(config.credentials) as Provider[]).filter(
-      (p) => config.credentials[p]?.apiKey
+    return Object.keys(config.credentials).filter(
+      (p): p is Provider => isProvider(p) && !!config.credentials[p]?.apiKey
     );
   }, [config.credentials]);
 
@@ -279,7 +349,7 @@ export const PROVIDER_INFO: Record<Provider, {
     agent: "George",
     avatar: "🔷",
     color: "text-george",
-    description: "GPT-5.2, o3, o4-mini models",
+    description: "GPT-5.3 Codex / GPT-5.2 family models",
     keyPrefix: "sk-",
     defaultBaseUrl: "https://api.openai.com",
   },
@@ -297,7 +367,7 @@ export const PROVIDER_INFO: Record<Provider, {
     agent: "Grace",
     avatar: "🌱",
     color: "text-grace",
-    description: "Gemini 3 Pro, Flash models",
+    description: "Gemini 3.1 Pro, Flash models",
     keyPrefix: "AIza",
     defaultBaseUrl: "https://generativelanguage.googleapis.com",
   },
@@ -318,6 +388,24 @@ export const PROVIDER_INFO: Record<Provider, {
     description: "Kimi K2.5, Moonshot models",
     keyPrefix: "sk-",
     defaultBaseUrl: "https://api.moonshot.cn",
+  },
+  qwen: {
+    name: "Qwen",
+    agent: "Quinn",
+    avatar: "🧠",
+    color: "text-quinn",
+    description: "Qwen 3.5 Plus (Alibaba Cloud Bailian)",
+    keyPrefix: "sk-",
+    defaultBaseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+  },
+  minimax: {
+    name: "MiniMax",
+    agent: "Mary",
+    avatar: "🟢",
+    color: "text-mary",
+    description: "MiniMax M2.5 (Anthropic-compatible CN endpoint)",
+    keyPrefix: "sk-",
+    defaultBaseUrl: "https://api.minimaxi.com/anthropic",
   },
 };
 

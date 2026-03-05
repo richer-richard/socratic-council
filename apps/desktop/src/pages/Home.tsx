@@ -19,31 +19,38 @@ const AGENT_CARDS: Array<{
   { provider: "google", name: "Grace", color: "var(--color-grace)" },
   { provider: "deepseek", name: "Douglas", color: "var(--color-douglas)" },
   { provider: "kimi", name: "Kate", color: "var(--color-kate)" },
+  { provider: "qwen", name: "Quinn", color: "var(--color-quinn)" },
+  { provider: "minimax", name: "Mary", color: "var(--color-mary)" },
 ];
 
 const MODEL_DISPLAY: Record<string, string> = {
+  "gpt-5.3-codex": "GPT-5.3 Codex",
   "gpt-5.2": "GPT-5.2",
   "gpt-5.2-pro": "GPT-5.2 Pro",
   "claude-opus-4-6": "Opus 4.6",
   "claude-opus-4-5-20251101": "Opus 4.5",
   "claude-sonnet-4-5-20250929": "Sonnet 4.5",
-  "gemini-3-pro-preview": "Gemini 3 Pro",
+  "gemini-3.1-pro-preview": "Gemini 3.1 Pro",
+  "gemini-3-pro-preview": "Gemini 3.1 Pro",
   "gemini-3-flash-preview": "Gemini 3 Flash",
   "gemini-2.5-pro": "Gemini 2.5 Pro",
   "deepseek-reasoner": "Reasoner",
   "deepseek-chat": "Chat",
   "kimi-k2.5": "K2.5",
   "kimi-k2-thinking": "K2 Thinking",
+  "qwen3.5-plus": "Qwen 3.5 Plus",
+  "MiniMax-M2.5": "MiniMax M2.5",
+  "minimax-m2.5": "MiniMax M2.5",
 };
 
-/** SVG council icon — pentagon with 5 connected nodes */
+/** SVG council icon — heptagon with 7 connected nodes */
 function CouncilIcon() {
-  // Pentagon vertices (cx=60, cy=58, r=40), starting from top
-  const pts = Array.from({ length: 5 }, (_, i) => {
-    const angle = (-Math.PI / 2) + (2 * Math.PI * i) / 5;
+  // Heptagon vertices (cx=60, cy=58, r=40), starting from top
+  const pts = Array.from({ length: 7 }, (_, i) => {
+    const angle = (-Math.PI / 2) + (2 * Math.PI * i) / 7;
     return { x: 60 + 40 * Math.cos(angle), y: 58 + 40 * Math.sin(angle) };
   });
-  const colors = ["#60a5fa", "#fbbf24", "#34d399", "#f87171", "#2dd4bf"];
+  const colors = ["#60a5fa", "#fbbf24", "#34d399", "#f87171", "#2dd4bf", "#22d3ee", "#f472b6"];
 
   return (
     <svg viewBox="0 0 120 116" width="80" height="76" aria-hidden="true">
@@ -131,7 +138,7 @@ export function Home({ onNavigate }: HomeProps) {
         <span className="font-medium">Settings</span>
         {configuredProviders.length > 0 && (
           <span className="ml-1 px-2 py-0.5 text-xs rounded-full badge badge-success">
-            {configuredProviders.length}/5
+            {configuredProviders.length}/{AGENT_CARDS.length}
           </span>
         )}
       </button>
@@ -144,9 +151,9 @@ export function Home({ onNavigate }: HomeProps) {
             <CouncilIcon />
           </div>
           <h1 className="elegant-title">Socratic Council</h1>
-          <p className="elegant-subtitle">of Five</p>
+          <p className="elegant-subtitle">of Seven</p>
           <p className="text-[1.05rem] text-ink-500 max-w-lg mx-auto mt-5 leading-relaxed">
-            Five AI agents. One topic. No holds barred.
+            Seven AI agents. One topic. No holds barred.
           </p>
         </div>
 

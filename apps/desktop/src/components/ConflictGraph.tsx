@@ -6,21 +6,6 @@ interface ConflictGraphProps {
   agents: { id: AgentId; name: string; color: string }[];
 }
 
-// Pentagon layout: 5 nodes evenly spaced in a circle
-const POSITIONS: Array<{ x: number; y: number }> = (() => {
-  const cx = 120;
-  const cy = 110;
-  const r = 80;
-  return Array.from({ length: 5 }, (_, i) => {
-    // Start from top (-90deg) and go clockwise
-    const angle = (-Math.PI / 2) + (2 * Math.PI * i) / 5;
-    return {
-      x: cx + r * Math.cos(angle),
-      y: cy + r * Math.sin(angle),
-    };
-  });
-})();
-
 function scoreToColor(score: number): string {
   // Blue (low conflict) to Red (high conflict)
   const clamped = Math.max(0, Math.min(1, score));
@@ -41,9 +26,25 @@ const AGENT_HEX: Record<string, string> = {
   "text-grace": "#10b981",
   "text-douglas": "#F87171",
   "text-kate": "#2DD4BF",
+  "text-quinn": "#22D3EE",
+  "text-mary": "#F472B6",
 };
 
 export function ConflictGraph({ conflicts, agents }: ConflictGraphProps) {
+  const positions = useMemo(() => {
+    const count = Math.max(agents.length, 1);
+    const cx = 120;
+    const cy = 110;
+    const r = count <= 5 ? 80 : 88;
+    return Array.from({ length: count }, (_, i) => {
+      const angle = (-Math.PI / 2) + (2 * Math.PI * i) / count;
+      return {
+        x: cx + r * Math.cos(angle),
+        y: cy + r * Math.sin(angle),
+      };
+    });
+  }, [agents.length]);
+
   // Build index map: agentId -> position index
   const idxMap = new Map<AgentId, number>();
   agents.forEach((a, i) => idxMap.set(a.id, i));
@@ -75,8 +76,8 @@ export function ConflictGraph({ conflicts, agents }: ConflictGraphProps) {
           const iA = idxMap.get(pair.agents[0]);
           const iB = idxMap.get(pair.agents[1]);
           if (iA === undefined || iB === undefined) return null;
-          const pA = POSITIONS[iA]!;
-          const pB = POSITIONS[iB]!;
+          const pA = positions[iA]!;
+          const pB = positions[iB]!;
           const key = `${pair.agents[0]}-${pair.agents[1]}`;
           return (
             <line
@@ -94,7 +95,7 @@ export function ConflictGraph({ conflicts, agents }: ConflictGraphProps) {
         })}
         {/* Nodes */}
         {agents.map((agent, i) => {
-          const pos = POSITIONS[i]!;
+          const pos = positions[i]!;
           const fill = AGENT_HEX[agent.color] ?? "#888";
           return (
             <g key={agent.id}>

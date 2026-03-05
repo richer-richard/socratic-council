@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "Socratic Council of Five",
+        "title": "Socratic Council",
         "maximized": true,
         "minWidth": 1024,
         "minHeight": 700,
