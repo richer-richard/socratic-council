@@ -10,6 +10,8 @@ import { AnthropicProvider } from "./anthropic.js";
 import { GoogleProvider } from "./google.js";
 import { DeepSeekProvider } from "./deepseek.js";
 import { KimiProvider } from "./kimi.js";
+import { QwenProvider } from "./qwen.js";
+import { MiniMaxProvider } from "./minimax.js";
 import type { Transport } from "../transport.js";
 
 // Re-export all providers
@@ -18,6 +20,8 @@ export { AnthropicProvider } from "./anthropic.js";
 export { GoogleProvider } from "./google.js";
 export { DeepSeekProvider } from "./deepseek.js";
 export { KimiProvider, type KimiCompletionOptions } from "./kimi.js";
+export { QwenProvider } from "./qwen.js";
+export { MiniMaxProvider } from "./minimax.js";
 export * from "./base.js";
 
 /**
@@ -39,6 +43,10 @@ export function createProvider(
       return new DeepSeekProvider(apiKey, options);
     case "kimi":
       return new KimiProvider(apiKey, options);
+    case "qwen":
+      return new QwenProvider(apiKey, options);
+    case "minimax":
+      return new MiniMaxProvider(apiKey, options);
     default:
       throw new Error(`Unknown provider: ${provider}`);
   }
@@ -97,6 +105,24 @@ export class ProviderManager {
         "kimi",
         new KimiProvider(credentials.kimi.apiKey, {
           baseUrl: credentials.kimi.baseUrl,
+          transport: this.transport,
+        })
+      );
+    }
+    if (credentials.qwen?.apiKey) {
+      this.providers.set(
+        "qwen",
+        new QwenProvider(credentials.qwen.apiKey, {
+          baseUrl: credentials.qwen.baseUrl,
+          transport: this.transport,
+        })
+      );
+    }
+    if (credentials.minimax?.apiKey) {
+      this.providers.set(
+        "minimax",
+        new MiniMaxProvider(credentials.minimax.apiKey, {
+          baseUrl: credentials.minimax.baseUrl,
           transport: this.transport,
         })
       );

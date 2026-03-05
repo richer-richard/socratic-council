@@ -1,9 +1,9 @@
 /**
- * @fileoverview DeepSeek API provider implementation
- * Uses OpenAI-compatible format with /v1/chat/completions endpoint
+ * @fileoverview Qwen API provider implementation
+ * Uses OpenAI-compatible format via Alibaba Cloud DashScope compatible-mode endpoint.
  */
 
-import type { AgentConfig, DeepSeekModel, DeepSeekRequest } from "@socratic-council/shared";
+import type { AgentConfig, QwenModel, QwenRequest } from "@socratic-council/shared";
 import { API_ENDPOINTS } from "@socratic-council/shared";
 import type {
   BaseProvider,
@@ -16,8 +16,16 @@ import { createHeaders, resolveEndpoint } from "./base.js";
 import { createSseParser } from "./sse.js";
 import { type Transport, createFetchTransport } from "../transport.js";
 
-export class DeepSeekProvider implements BaseProvider {
-  readonly provider = "deepseek" as const;
+type StreamUsage = {
+  prompt_tokens?: number;
+  completion_tokens?: number;
+  completion_tokens_details?: {
+    reasoning_tokens?: number;
+  };
+};
+
+export class QwenProvider implements BaseProvider {
+  readonly provider = "qwen" as const;
   readonly apiKey: string;
   private readonly endpoint: string;
   private readonly transport: Transport;
@@ -26,35 +34,38 @@ export class DeepSeekProvider implements BaseProvider {
     this.apiKey = apiKey;
     this.endpoint = resolveEndpoint(
       options?.baseUrl,
-      "/v1/chat/completions",
-      API_ENDPOINTS.deepseek
+      "/chat/completions",
+      API_ENDPOINTS.qwen
     );
     this.transport = options?.transport ?? createFetchTransport();
   }
 
-  /**
-   * Build the request body for DeepSeek API (OpenAI-compatible format)
-   */
+  private normalizeModel(model: string): QwenModel {
+    // Canonical model required by current council mapping.
+    if (model === "qwen3.5-plus") return "qwen3.5-plus";
+    return "qwen3.5-plus";
+  }
+
   private buildRequestBody(
     agent: AgentConfig,
     messages: ChatMessage[],
     options: CompletionOptions = {},
     stream = false
-  ): DeepSeekRequest {
-    const request: DeepSeekRequest = {
-      model: agent.model as DeepSeekModel,
+  ): QwenRequest {
+    const request: QwenRequest = {
+      model: this.normalizeModel(agent.model),
       messages: messages.map((msg) => ({
         role: msg.role,
         content: msg.content,
       })),
+      // Explicitly enable reasoning output for Qwen 3.5 Plus.
+      enable_thinking: true,
       stream,
     };
 
-    // Temperature (DeepSeek supports 0-2)
     const temperature = options.temperature ?? agent.temperature ?? 1;
     request.temperature = Math.max(0, Math.min(2, temperature));
 
-    // Max tokens
     if (options.maxTokens) {
       request.max_tokens = options.maxTokens;
     } else if (agent.maxTokens) {
@@ -64,9 +75,6 @@ export class DeepSeekProvider implements BaseProvider {
     return request;
   }
 
-  /**
-   * Generate a completion (non-streaming)
-   */
   async complete(
     agent: AgentConfig,
     messages: ChatMessage[],
@@ -78,14 +86,14 @@ export class DeepSeekProvider implements BaseProvider {
     const { status, body: responseBody } = await this.transport.request({
       url: this.endpoint,
       method: "POST",
-      headers: createHeaders("deepseek", this.apiKey),
+      headers: createHeaders("qwen", this.apiKey),
       body: JSON.stringify(body),
       timeoutMs: options.timeoutMs,
       signal: options.signal,
     });
 
     if (status < 200 || status >= 300) {
-      throw new Error(`DeepSeek API error: ${status} - ${responseBody}`);
+      throw new Error(`Qwen API error: ${status} - ${responseBody}`);
     }
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -93,32 +101,26 @@ export class DeepSeekProvider implements BaseProvider {
     try {
       data = JSON.parse(responseBody);
     } catch {
-      throw new Error(`DeepSeek API returned invalid JSON: ${responseBody.slice(0, 200)}`);
+      throw new Error(`Qwen API returned invalid JSON: ${responseBody.slice(0, 200)}`);
     }
-    const latencyMs = Date.now() - startTime;
 
     const choice = data.choices?.[0];
-    const content = choice?.message?.content as string ?? "";
-
-    // DeepSeek V3.2 includes reasoning_content for deepseek-reasoner model
-    const reasoningContent = choice?.message?.reasoning_content;
+    const content = (choice?.message?.content as string) ?? "";
+    const thinking = (choice?.message?.reasoning_content as string) ?? "";
 
     return {
       content,
-      thinking: reasoningContent || undefined,
+      thinking: thinking || undefined,
       tokens: {
         input: (data.usage?.prompt_tokens as number) ?? 0,
         output: (data.usage?.completion_tokens as number) ?? 0,
-        reasoning: reasoningContent ? (data.usage?.completion_tokens_details?.reasoning_tokens as number | undefined) : undefined,
+        reasoning: (data.usage?.completion_tokens_details?.reasoning_tokens as number | undefined),
       },
       finishReason: this.mapFinishReason(choice?.finish_reason as string | undefined),
-      latencyMs,
+      latencyMs: Date.now() - startTime,
     };
   }
 
-  /**
-   * Generate a streaming completion
-   */
   async completeStream(
     agent: AgentConfig,
     messages: ChatMessage[],
@@ -134,18 +136,15 @@ export class DeepSeekProvider implements BaseProvider {
     let outputTokens = 0;
     let reasoningTokens: number | undefined;
     let finishReason: "stop" | "length" | "error" = "stop";
+
     const parser = createSseParser((dataLine) => {
       const jsonStr = dataLine.trim();
       if (!jsonStr || jsonStr === "[DONE]") return;
       try {
-        const data = JSON.parse(jsonStr);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const data: any = JSON.parse(jsonStr);
         const choice = data.choices?.[0];
         const delta = choice?.delta;
-
-        if (delta?.content) {
-          fullContent += delta.content;
-          onChunk({ content: delta.content, done: false });
-        }
 
         if (delta?.reasoning_content) {
           const deltaThinking = String(delta.reasoning_content);
@@ -153,19 +152,24 @@ export class DeepSeekProvider implements BaseProvider {
           onChunk({ content: "", thinking: deltaThinking, done: false });
         }
 
-        if (data.usage) {
-          inputTokens = data.usage.prompt_tokens ?? inputTokens;
-          outputTokens = data.usage.completion_tokens ?? outputTokens;
-          if (data.usage.completion_tokens_details?.reasoning_tokens) {
-            reasoningTokens = data.usage.completion_tokens_details.reasoning_tokens;
-          }
+        if (delta?.content) {
+          const deltaContent = String(delta.content);
+          fullContent += deltaContent;
+          onChunk({ content: deltaContent, done: false });
+        }
+
+        const usage = data.usage as StreamUsage | undefined;
+        if (usage) {
+          inputTokens = usage.prompt_tokens ?? inputTokens;
+          outputTokens = usage.completion_tokens ?? outputTokens;
+          reasoningTokens = usage.completion_tokens_details?.reasoning_tokens ?? reasoningTokens;
         }
 
         if (choice?.finish_reason) {
           finishReason = this.mapFinishReason(choice.finish_reason);
         }
       } catch {
-        // Skip malformed JSON lines
+        // Skip malformed lines
       }
     });
 
@@ -174,16 +178,14 @@ export class DeepSeekProvider implements BaseProvider {
         {
           url: this.endpoint,
           method: "POST",
-          headers: createHeaders("deepseek", this.apiKey),
+          headers: createHeaders("qwen", this.apiKey),
           body: JSON.stringify(body),
           timeoutMs: options.timeoutMs,
           idleTimeoutMs: options.idleTimeoutMs,
           signal: options.signal,
         },
         {
-          onChunk: (text) => {
-            parser.push(text);
-          },
+          onChunk: (text) => parser.push(text),
           onDone: () => {
             parser.flush();
             resolve();
@@ -208,12 +210,10 @@ export class DeepSeekProvider implements BaseProvider {
     };
   }
 
-  /**
-   * Map DeepSeek finish reasons to our standard format
-   */
   private mapFinishReason(reason?: string): "stop" | "length" | "error" {
     switch (reason) {
       case "stop":
+      case "tool_calls":
         return "stop";
       case "length":
         return "length";
@@ -222,23 +222,19 @@ export class DeepSeekProvider implements BaseProvider {
     }
   }
 
-  /**
-   * Test the connection to DeepSeek API
-   */
   async testConnection(): Promise<boolean> {
     try {
       const { status } = await this.transport.request({
         url: this.endpoint,
         method: "POST",
-        headers: createHeaders("deepseek", this.apiKey),
+        headers: createHeaders("qwen", this.apiKey),
         body: JSON.stringify({
-          model: "deepseek-chat",
+          model: "qwen3.5-plus",
           messages: [{ role: "user", content: "Hello" }],
           max_tokens: 10,
         }),
         timeoutMs: 15000,
       });
-
       return status >= 200 && status < 300;
     } catch {
       return false;

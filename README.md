@@ -2,14 +2,14 @@
 
 # Socratic Council
 
-Socratic Council is a local-first desktop app that runs a five-agent "seminar" on any topic. You provide one or more AI provider API keys, type a topic, and watch five agents discuss it in a turn-taking group chat. The app includes search, quoting, export, conflict visualization, and token/cost tracking.
+Socratic Council is a local-first desktop app that runs a seven-agent "seminar" on any topic. You provide one or more AI provider API keys, type a topic, and watch seven agents discuss it in a turn-taking group chat. The app includes search, quoting, export, conflict visualization, and token/cost tracking.
 
 This repo ships **source only** (no installer downloads). Follow this guide to build it from source.
 
 At a glance:
 - **Local-first** — runs entirely on your machine
-- **Bring-your-own-keys** — uses real provider APIs (OpenAI, Anthropic, Google Gemini, DeepSeek, Kimi)
-- **Multi-agent** — five speakers + optional moderator
+- **Bring-your-own-keys** — uses real provider APIs (OpenAI, Anthropic, Google Gemini, DeepSeek, Kimi, Qwen, MiniMax)
+- **Multi-agent** — seven speakers + optional moderator
 - **Built-in tools** — quoting, reactions, search, export, conflict graph, cost ledger
 
 ---
@@ -19,8 +19,8 @@ At a glance:
 If you just want to build and install the app in one shot:
 
 ```bash
-git clone https://github.com/richer-richard/socratic-council-of-five.git
-cd socratic-council-of-five
+git clone https://github.com/richer-richard/socratic-council.git
+cd socratic-council
 ./install.sh
 ```
 
@@ -337,8 +337,8 @@ pnpm -v
 ### Step 5 — Clone and install
 
 ```bash
-git clone https://github.com/richer-richard/socratic-council-of-five.git
-cd socratic-council-of-five
+git clone https://github.com/richer-richard/socratic-council.git
+cd socratic-council
 ```
 
 Install all workspace dependencies (JavaScript/TypeScript packages across the monorepo):
@@ -352,7 +352,7 @@ This runs pnpm's workspace resolution and installs dependencies for all packages
 | Workspace | Path | What it installs |
 |---|---|---|
 | `@socratic-council/shared` | `packages/shared` | Shared types, constants, model registry |
-| `@socratic-council/sdk` | `packages/sdk` | Provider SDK (OpenAI, Anthropic, Google, DeepSeek, Kimi), transport layer |
+| `@socratic-council/sdk` | `packages/sdk` | Provider SDK (OpenAI, Anthropic, Google, DeepSeek, Kimi, Qwen, MiniMax), transport layer |
 | `@socratic-council/core` | `packages/core` | Council orchestration logic (bidding, conflict, cost, memory) |
 | `@socratic-council/desktop` | `apps/desktop` | Tauri v2 + React frontend, Tauri CLI (`@tauri-apps/cli`) |
 | `@socratic-council/cli` | `apps/cli` | CLI app (work in progress) |
@@ -820,7 +820,7 @@ cd apps/desktop/src-tauri && cargo clean && cd -
 ## Monorepo layout
 
 ```
-socratic-council-of-five/
+socratic-council/
 ├── apps/
 │   ├── desktop/                 # Tauri v2 + React desktop app
 │   │   ├── src/                 # React frontend (TypeScript, TSX)

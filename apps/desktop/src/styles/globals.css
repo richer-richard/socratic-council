@@ -29,6 +29,8 @@
   --color-grace: #34d399;
   --color-douglas: #f87171;
   --color-kate: #2dd4bf;
+  --color-quinn: #22d3ee;
+  --color-mary: #f472b6;
 }
 
 body {
@@ -1012,6 +1014,24 @@ body {
   letter-spacing: 0.08em;
 }
 
+.discord-thinking-pill {
+  font-size: 0.65rem;
+  color: #67e8f9;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  border: 1px solid rgba(34, 211, 238, 0.35);
+  background: rgba(34, 211, 238, 0.12);
+  border-radius: 999px;
+  padding: 0.1rem 0.4rem;
+}
+
+.discord-thinking-pill.is-complete {
+  color: #86efac;
+  border-color: rgba(74, 222, 128, 0.35);
+  background: rgba(74, 222, 128, 0.12);
+}
+
 .discord-role {
   font-size: 0.65rem;
   text-transform: uppercase;
@@ -1066,6 +1086,35 @@ body {
   font-size: 1rem;
   line-height: 1.65;
   word-wrap: break-word;
+}
+
+.thinking-panel {
+  margin-top: 0.65rem;
+  border: 1px solid rgba(34, 211, 238, 0.28);
+  border-radius: 12px;
+  background: rgba(15, 23, 42, 0.5);
+  overflow: hidden;
+}
+
+.thinking-summary {
+  cursor: pointer;
+  font-size: 0.72rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #67e8f9;
+  font-weight: 700;
+  padding: 0.45rem 0.7rem;
+  background: rgba(34, 211, 238, 0.1);
+}
+
+.thinking-content {
+  padding: 0.65rem 0.7rem 0.75rem;
+  color: var(--ink-700);
+  font-size: 0.86rem;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  max-height: 16rem;
+  overflow: auto;
 }
 
 .markdown-content {

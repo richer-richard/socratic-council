@@ -39,6 +39,8 @@ interface ChatMessage extends SharedMessage {
   latencyMs?: number;
   error?: string;
   quotedMessageIds?: string[];
+  thinking?: string;
+  fullResponse?: string;
   reactions?: Partial<Record<ReactionId, { count: number; by: string[] }>>;
   displayName?: string;
   displayProvider?: Provider;
@@ -59,6 +61,7 @@ interface DuoLogueState {
 // Model display names mapping - includes both full dated IDs and aliases
 const MODEL_DISPLAY_NAMES: Record<string, string> = {
   // OpenAI
+  "gpt-5.3-codex": "GPT-5.3 Codex",
   "gpt-5.2-pro": "GPT-5.2 Pro",
   "gpt-5.2": "GPT-5.2",
   "gpt-5-mini": "GPT-5 Mini",
@@ -80,7 +83,8 @@ const MODEL_DISPLAY_NAMES: Record<string, string> = {
   "claude-3-5-haiku-20241022": "Claude 3.5 Haiku",
   "claude-3-opus-20240229": "Claude 3 Opus",
   // Google
-  "gemini-3-pro-preview": "Gemini 3 Pro",
+  "gemini-3.1-pro-preview": "Gemini 3.1 Pro",
+  "gemini-3-pro-preview": "Gemini 3.1 Pro",
   "gemini-3-flash-preview": "Gemini 3 Flash",
   "gemini-2.5-pro": "Gemini 2.5 Pro",
   "gemini-2.5-flash": "Gemini 2.5 Flash",
@@ -91,6 +95,11 @@ const MODEL_DISPLAY_NAMES: Record<string, string> = {
   "kimi-k2.5": "Kimi K2.5",
   "kimi-k2-thinking": "Kimi K2 Thinking",
   "moonshot-v1-128k": "Moonshot V1 128K",
+  // Qwen
+  "qwen3.5-plus": "Qwen 3.5 Plus",
+  // MiniMax
+  "MiniMax-M2.5": "MiniMax M2.5",
+  "minimax-m2.5": "MiniMax M2.5",
 };
 
 const GROUP_CHAT_GUIDELINES = `
@@ -98,9 +107,11 @@ You are in a real-time group chat. Keep responses short and engaging.
 
 Rules:
 - 1–2 short paragraphs (max ~140 words).
+- Be assertive: challenge weak claims directly and name the specific assumption you reject.
 - Avoid headings and long bullet lists (keep it chatty). Use them only if plain text is clearly insufficient.
 - Directly address a specific point from someone else by name.
 - Add exactly one new claim, example, or counterpoint; don’t restate your thesis.
+- Include one concrete test, falsifiable criterion, or counterexample when possible.
 - End with one concrete question to the group.
 - If the Moderator gives an instruction, follow it.
 
@@ -116,20 +127,35 @@ Quoting/Reactions:
 ${getToolPrompt()}
 `;
 
-const BASE_SYSTEM_PROMPT = (name: string) => `You are ${name} in a group chat with George, Cathy, Grace, Douglas, and Kate.
+const BASE_SYSTEM_PROMPT = (name: string) => `You are ${name} in a group chat with George, Cathy, Grace, Douglas, Kate, Quinn, and Mary.
 
 Do NOT adopt a persona or specialty. Speak as yourself, and keep the tone natural.
 
+Proactive behavior requirements:
+- If someone is vague, force precision by asking for a measurable claim.
+- If someone makes a strong claim, pressure-test it with one concrete challenge.
+- If the room is converging too quickly, introduce one serious dissenting angle.
+- If someone has been quiet recently, invite them by name into the exact point of dispute.
+
 ${GROUP_CHAT_GUIDELINES}`;
 
-const MODERATOR_SYSTEM_PROMPT = `You are the Moderator in a group chat with George, Cathy, Grace, Douglas, and Kate.
+const MODERATOR_SYSTEM_PROMPT = `You are the Moderator in a group chat with George, Cathy, Grace, Douglas, Kate, Quinn, and Mary.
 
-Your job: keep the discussion focused, fair, and readable.
+Your job: keep the discussion focused, fair, rigorous, and productive.
 
 Rules:
-- Speak rarely and briefly (1–2 sentences, max ~70 words).
+- Speak briefly (1–3 sentences, max ~90 words).
 - Prefer plain text. Use Markdown only if plain text is clearly insufficient.
 - Ask at most ONE question.
+- You may do any of the following when useful:
+  1) kickoff framing with one measurable objective,
+  2) periodic synthesis (agreed/disputed/unresolved),
+  3) participation balancing (invite underrepresented voices),
+  4) evidence-quality checks (claim vs evidence),
+  5) drift correction back to topic,
+  6) contradiction spotlighting with a clarifying question,
+  7) near-end closure prompt with decision criteria.
+- Keep interventions sparse and high-signal to avoid unnecessary cost.
 - You may suggest who should respond next by name.
 - Do NOT include @quote(...), @react(...), or @tool(...).
 - Do NOT impersonate any agent.`;
@@ -183,6 +209,22 @@ const AGENT_CONFIG: Record<AgentId, {
     provider: "kimi",
     systemPrompt: BASE_SYSTEM_PROMPT("Kate"),
   },
+  quinn: {
+    name: "Quinn",
+    color: "text-quinn",
+    bgColor: "bg-quinn/10",
+    borderColor: "border-quinn",
+    provider: "qwen",
+    systemPrompt: BASE_SYSTEM_PROMPT("Quinn"),
+  },
+  mary: {
+    name: "Mary",
+    color: "text-mary",
+    bgColor: "bg-mary/10",
+    borderColor: "border-mary",
+    provider: "minimax",
+    systemPrompt: BASE_SYSTEM_PROMPT("Mary"),
+  },
   system: {
     name: "System",
     color: "text-ink-500",
@@ -209,7 +251,7 @@ const AGENT_CONFIG: Record<AgentId, {
   },
 };
 
-const AGENT_IDS: CouncilAgentId[] = ["george", "cathy", "grace", "douglas", "kate"];
+const AGENT_IDS: CouncilAgentId[] = ["george", "cathy", "grace", "douglas", "kate", "quinn", "mary"];
 
 const isCouncilAgent = (id: ChatMessage["agentId"]): id is CouncilAgentId =>
   AGENT_IDS.includes(id as CouncilAgentId);
@@ -373,6 +415,13 @@ export function Chat({ topic, onNavigate }: ChatProps) {
   const [errors, setErrors] = useState<string[]>([]);
   const [sidePanelView, setSidePanelView] = useState<SidePanelView>("default");
   const [costState, setCostState] = useState<CostTracker | null>(null);
+  const [moderatorUsage, setModeratorUsage] = useState({
+    inputTokens: 0,
+    outputTokens: 0,
+    reasoningTokens: 0,
+    estimatedUSD: 0,
+    pricingAvailable: false,
+  });
   const [conflictState, setConflictState] = useState<ConflictDetection | null>(null);
   const [allConflicts, setAllConflicts] = useState<PairwiseConflict[]>([]);
   const [duoLogue, setDuoLogue] = useState<DuoLogueState | null>(null);
@@ -397,15 +446,26 @@ export function Chat({ topic, onNavigate }: ChatProps) {
     grace: 0,
     douglas: 0,
     kate: 0,
+    quinn: 0,
+    mary: 0,
   });
+  const cyclePendingRef = useRef<CouncilAgentId[]>([]);
+  const recentSpeakersRef = useRef<CouncilAgentId[]>([]);
   const lastWhisperKeyRef = useRef<string | null>(null);
   const lastModeratorKeyRef = useRef<string | null>(null);
+  const lastModeratorBalanceKeyRef = useRef<string | null>(null);
+  const lastModeratorSynthesisTurnRef = useRef(0);
+  const moderatorClosurePostedRef = useRef(false);
   const moderatorInFlightRef = useRef(false);
   const duoLogueRef = useRef<DuoLogueState | null>(null);
 
   const { config, getMaxTurns, getConfiguredProviders } = useConfig();
   const maxTurns = getMaxTurns();
   const configuredProviders = getConfiguredProviders();
+  const configuredAgentIds = useMemo(
+    () => AGENT_IDS.filter((id) => configuredProviders.includes(AGENT_CONFIG[id].provider)),
+    [configuredProviders]
+  );
   const configRef = useRef(config);
   configRef.current = config;
   const virtuosoComponents = useMemo(() => ({ List: DiscordVirtuosoList }), []);
@@ -454,6 +514,13 @@ export function Chat({ topic, onNavigate }: ChatProps) {
     memoryManagerRef.current = createMemoryManager({ windowSize: MAX_CONTEXT_MESSAGES });
     memoryManagerRef.current.setTopic(topic);
     setTotalTokens({ input: 0, output: 0 });
+    setModeratorUsage({
+      inputTokens: 0,
+      outputTokens: 0,
+      reasoningTokens: 0,
+      estimatedUSD: 0,
+      pricingAvailable: false,
+    });
     setCurrentBidding(null);
     setShowBidding(false);
     setErrors([]);
@@ -464,6 +531,9 @@ export function Chat({ topic, onNavigate }: ChatProps) {
     duoLogueRef.current = null;
     lastWhisperKeyRef.current = null;
     lastModeratorKeyRef.current = null;
+    lastModeratorBalanceKeyRef.current = null;
+    lastModeratorSynthesisTurnRef.current = 0;
+    moderatorClosurePostedRef.current = false;
     fairnessManagerRef.current = new FairnessManager();
     whisperBonusesRef.current = {
       george: 0,
@@ -471,7 +541,11 @@ export function Chat({ topic, onNavigate }: ChatProps) {
       grace: 0,
       douglas: 0,
       kate: 0,
+      quinn: 0,
+      mary: 0,
     };
+    cyclePendingRef.current = [];
+    recentSpeakersRef.current = [];
   }, [topic]);
 
   // Scroll to bottom function
@@ -536,15 +610,25 @@ export function Chat({ topic, onNavigate }: ChatProps) {
   const generateBiddingScores = useCallback((
     excludeAgent?: CouncilAgentId,
     eligibleAgents: CouncilAgentId[] = AGENT_IDS,
-    focusAgents?: CouncilAgentId[]
+    focusAgents?: CouncilAgentId[],
+    cyclePending: CouncilAgentId[] = []
   ): BiddingRound => {
-    const scores = {} as Record<CouncilAgentId, number>;
+    const scores = {
+      george: 0,
+      cathy: 0,
+      grace: 0,
+      douglas: 0,
+      kate: 0,
+      quinn: 0,
+      mary: 0,
+    } as Record<CouncilAgentId, number>;
     let maxScore = -Infinity;
     let winner: CouncilAgentId = eligibleAgents[0] ?? AGENT_IDS[0];
     let hasWinner = false;
 
     const fairnessAdjustments = fairnessManagerRef.current.calculateAdjustments(eligibleAgents);
     const fairnessById = new Map(fairnessAdjustments.map((a) => [a.agentId, a]));
+    const pendingSet = new Set(cyclePending);
 
     // Only include agents that have API keys configured
     for (const agentId of eligibleAgents) {
@@ -578,8 +662,11 @@ export function Chat({ topic, onNavigate }: ChatProps) {
 
       // Conflict focus bonus nudges disagreeing pair to respond without locking out others
       const conflictFocusBonus = focusAgents?.includes(agentId) ? 8 : 0;
+      // Round-robin cycle bonus enforces "everyone speaks once per cycle" while retaining bidding.
+      const cycleBonus =
+        pendingSet.size === 0 ? 0 : pendingSet.has(agentId) ? 16 : -120;
 
-      const score = baseScore + whisperBonus + engagementDebtBonus + fairnessBonus + conflictFocusBonus;
+      const score = baseScore + whisperBonus + engagementDebtBonus + fairnessBonus + conflictFocusBonus + cycleBonus;
 
       if (whisperBonus) {
         whisperBonusesRef.current[agentId] = 0;
@@ -793,20 +880,17 @@ export function Chat({ topic, onNavigate }: ChatProps) {
 
   const pickModeratorRuntime = useCallback(() => {
     if (!config.preferences.moderatorEnabled) return null;
-    const order: Provider[] = ["openai", "anthropic", "google", "deepseek", "kimi"];
-    for (const provider of order) {
-      const credential = config.credentials[provider];
-      const model = config.models[provider];
-      if (credential?.apiKey && model) {
-        return { provider, credential, model };
-      }
-    }
-    return null;
-  }, [config.credentials, config.models, config.preferences.moderatorEnabled]);
+    const credential = config.credentials.openai;
+    if (!credential?.apiKey) return null;
+    // Moderator is fixed to GPT-5.2 (standard) for consistent behavior.
+    return { provider: "openai" as const, credential, model: "gpt-5.2" as const };
+  }, [config.credentials.openai, config.preferences.moderatorEnabled]);
 
   const generateModeratorMessage = useCallback(async (options: {
-    kind: "opening" | "tension";
+    kind: "opening" | "tension" | "synthesis" | "balance" | "closure";
     conflict?: ConflictDetection | null;
+    turn?: number;
+    remainingTurns?: number;
   }): Promise<ChatMessage | null> => {
     if (abortRef.current) return null;
     if (!config.preferences.moderatorEnabled) return null;
@@ -831,19 +915,21 @@ export function Chat({ topic, onNavigate }: ChatProps) {
       content: "",
       timestamp: Date.now(),
       isStreaming: true,
+      metadata: { model: model as ModelId, latencyMs: 0 },
     };
 
     setMessages((prev) => [...prev, newMessage]);
 
     let streamingContent = "";
+    let streamingThinking = "";
     try {
       const recentForContext =
-            options.kind === "opening"
-              ? []
-              : messages
-                  .filter((m) => (isCouncilAgent(m.agentId) || isModeratorMessage(m)) && !m.isStreaming)
-                  .filter((m) => (m.content ?? "").trim().length > 0)
-                  .slice(-12);
+        options.kind === "opening"
+          ? []
+          : messages
+              .filter((m) => (isCouncilAgent(m.agentId) || isModeratorMessage(m)) && !m.isStreaming)
+              .filter((m) => (m.content ?? "").trim().length > 0)
+              .slice(-12);
 
       const history: APIChatMessage[] = [
         { role: "system", content: MODERATOR_SYSTEM_PROMPT },
@@ -864,9 +950,9 @@ export function Chat({ topic, onNavigate }: ChatProps) {
         history.push({
           role: "user",
           content:
-            "Write the opening moderator message (1–2 sentences). Re-state the topic in plain language and ask one concrete kickoff question.",
+            "Write the opening moderator message (1–2 sentences). Re-state the topic in plain language, set one measurable objective, and ask one concrete kickoff question.",
         });
-      } else {
+      } else if (options.kind === "tension") {
         const conflict = options.conflict;
         const a = conflict?.agentPair?.[0];
         const b = conflict?.agentPair?.[1];
@@ -883,6 +969,31 @@ export function Chat({ topic, onNavigate }: ChatProps) {
 - Optionally invite a quieter agent by name to weigh in with ONE sentence.
 - Keep it calm and concrete.`,
         });
+      } else if (options.kind === "synthesis") {
+        history.push({
+          role: "user",
+          content: `Provide a short synthesis for turn ${options.turn ?? "current"}:
+- One clause: what the group currently agrees on.
+- One clause: the sharpest unresolved disagreement.
+- Ask exactly one question that can move the discussion toward evidence or decision criteria.`,
+        });
+      } else if (options.kind === "balance") {
+        history.push({
+          role: "user",
+          content: `Participation seems concentrated in a few voices.
+Write a brief intervention that:
+- names this pattern neutrally,
+- invites one quieter agent by name,
+- asks one concrete question that advances the topic.`,
+        });
+      } else {
+        history.push({
+          role: "user",
+          content: `The discussion is near the end (remaining turns: ${options.remainingTurns ?? "few"}).
+Write a concise closure prompt that asks the council to:
+- state their strongest surviving claim in one line, and
+- give one explicit condition that would change their mind.`,
+        });
       }
 
       const result = await callProvider(
@@ -894,8 +1005,17 @@ export function Chat({ topic, onNavigate }: ChatProps) {
           if (abortRef.current) return;
           if (chunk.content) {
             streamingContent += chunk.content;
+          }
+          if (chunk.thinking) {
+            streamingThinking += chunk.thinking;
+          }
+          if (chunk.content || chunk.thinking) {
             setMessages((prev) =>
-              prev.map((m) => (m.id === newMessage.id ? { ...m, content: streamingContent } : m))
+              prev.map((m) =>
+                m.id === newMessage.id
+                  ? { ...m, content: streamingContent, thinking: streamingThinking }
+                  : m
+              )
             );
           }
         },
@@ -922,12 +1042,12 @@ export function Chat({ topic, onNavigate }: ChatProps) {
         tokens: result.tokens,
         latencyMs: result.latencyMs,
         error: result.error,
-        metadata: result.success
-          ? {
-              model: model as ModelId,
-              latencyMs: result.latencyMs,
-            }
-          : undefined,
+        thinking: result.thinking || streamingThinking || undefined,
+        fullResponse: result.content || streamingContent || undefined,
+        metadata: {
+          model: model as ModelId,
+          latencyMs: result.latencyMs,
+        },
       };
 
       setMessages((prev) => prev.map((m) => (m.id === newMessage.id ? finalMessage : m)));
@@ -941,6 +1061,15 @@ export function Chat({ topic, onNavigate }: ChatProps) {
           input: prev.input + result.tokens.input,
           output: prev.output + result.tokens.output,
         }));
+
+        const moderatorCost = calculateMessageCost(model, result.tokens);
+        setModeratorUsage((prev) => ({
+          inputTokens: prev.inputTokens + result.tokens.input,
+          outputTokens: prev.outputTokens + result.tokens.output,
+          reasoningTokens: prev.reasoningTokens + (result.tokens.reasoning ?? 0),
+          estimatedUSD: prev.estimatedUSD + (moderatorCost ?? 0),
+          pricingAvailable: prev.pricingAvailable || moderatorCost != null,
+        }));
       }
 
       return finalMessage;
@@ -949,7 +1078,14 @@ export function Chat({ topic, onNavigate }: ChatProps) {
       setMessages((prev) =>
         prev.map((m) =>
           m.id === newMessage.id
-            ? { ...m, isStreaming: false, error: errorMessage, content: streamingContent || "[Moderator failed]" }
+            ? {
+                ...m,
+                isStreaming: false,
+                error: errorMessage,
+                content: streamingContent || "[Moderator failed]",
+                thinking: streamingThinking || undefined,
+                metadata: { model: model as ModelId, latencyMs: Date.now() - newMessage.timestamp },
+              }
             : m
         )
       );
@@ -958,7 +1094,7 @@ export function Chat({ topic, onNavigate }: ChatProps) {
       moderatorInFlightRef.current = false;
       moderatorAbortRef.current = null;
     }
-  }, [config.credentials, config.models, config.preferences.moderatorEnabled, getProxy, messages, pickModeratorRuntime, topic]);
+  }, [config.preferences.moderatorEnabled, getProxy, messages, pickModeratorRuntime, topic]);
 
   useEffect(() => {
     if (!isRunning) return;
@@ -1049,6 +1185,7 @@ export function Chat({ topic, onNavigate }: ChatProps) {
       content: "",
       timestamp: Date.now(),
       isStreaming: true,
+      metadata: { model: model as ModelId, latencyMs: 0 },
     };
 
     setMessages(prev => [...prev, newMessage]);
@@ -1058,7 +1195,8 @@ export function Chat({ topic, onNavigate }: ChatProps) {
     activeRequestsRef.current.set(agentId, controller);
 
     const idleTimeoutMs = 120000;
-    const requestTimeoutMs = agentConfig.provider === "google" ? 240000 : 180000;
+    const requestTimeoutMs =
+      agentConfig.provider === "google" || agentConfig.provider === "openai" ? 240000 : 180000;
     const proxy = getProxy();
 
     apiLogger.log("info", agentConfig.provider, "Dispatching request", {
@@ -1069,6 +1207,7 @@ export function Chat({ topic, onNavigate }: ChatProps) {
     });
 
     let streamingContent = "";
+    let streamingThinking = "";
     let lastStreamFlushAt = 0;
     let streamFlushTimer: ReturnType<typeof setTimeout> | null = null;
     const clearStreamFlushTimer = () => {
@@ -1077,20 +1216,24 @@ export function Chat({ topic, onNavigate }: ChatProps) {
         streamFlushTimer = null;
       }
     };
-    const flushStreamingContent = (force = false) => {
+    const flushStreamingMessage = (force = false) => {
       if (abortRef.current) return;
       const now = Date.now();
       if (!force && now - lastStreamFlushAt < 50) return;
       lastStreamFlushAt = now;
       setMessages((prev) =>
-        prev.map((m) => (m.id === newMessage.id ? { ...m, content: streamingContent } : m))
+        prev.map((m) =>
+          m.id === newMessage.id
+            ? { ...m, content: streamingContent, thinking: streamingThinking || undefined }
+            : m
+        )
       );
     };
     const scheduleStreamFlush = () => {
       if (streamFlushTimer) return;
       streamFlushTimer = setTimeout(() => {
         streamFlushTimer = null;
-        flushStreamingContent(true);
+        flushStreamingMessage(true);
       }, 60);
     };
 
@@ -1100,10 +1243,13 @@ export function Chat({ topic, onNavigate }: ChatProps) {
 
       const runCompletion = async (history: APIChatMessage[], currentModel: string) => {
         streamingContent = "";
+        streamingThinking = "";
         lastStreamFlushAt = 0;
         clearStreamFlushTimer();
         setMessages((prev) =>
-          prev.map((m) => (m.id === newMessage.id ? { ...m, content: "" } : m))
+          prev.map((m) =>
+            m.id === newMessage.id ? { ...m, content: "", thinking: undefined } : m
+          )
         );
 
         return callProvider(
@@ -1116,13 +1262,16 @@ export function Chat({ topic, onNavigate }: ChatProps) {
             if (chunk.content) {
               streamingContent += chunk.content;
             }
+            if (chunk.thinking) {
+              streamingThinking += chunk.thinking;
+            }
             if (chunk.done) {
               clearStreamFlushTimer();
-              flushStreamingContent(true);
+              flushStreamingMessage(true);
               return;
             }
             if (Date.now() - lastStreamFlushAt >= 50) {
-              flushStreamingContent(true);
+              flushStreamingMessage(true);
             } else {
               scheduleStreamFlush();
             }
@@ -1201,6 +1350,8 @@ export function Chat({ topic, onNavigate }: ChatProps) {
       const finalMessage: ChatMessage = {
         ...newMessage,
         content: displayContent,
+        thinking: result.thinking || streamingThinking || undefined,
+        fullResponse: result.content || streamingContent || undefined,
         isStreaming: false,
         tokens: result.tokens,
         latencyMs: result.latencyMs,
@@ -1275,11 +1426,13 @@ export function Chat({ topic, onNavigate }: ChatProps) {
         content: "",
         timestamp: Date.now(),
         isStreaming: true,
+        metadata: { model: model as ModelId, latencyMs: 0 },
       };
 
       setMessages((prev) => [...prev, newMessage]);
 
       let streamingContent = "";
+      let streamingThinking = "";
       try {
         const history = buildClosingConversationHistory(agentId, turnsCompleted);
         const result = await callProvider(
@@ -1291,8 +1444,21 @@ export function Chat({ topic, onNavigate }: ChatProps) {
             if (abortRef.current) return;
             if (chunk.content) {
               streamingContent += chunk.content;
+            }
+            if (chunk.thinking) {
+              streamingThinking += chunk.thinking;
+            }
+            if (chunk.content || chunk.thinking) {
               setMessages((prev) =>
-                prev.map((m) => (m.id === newMessage.id ? { ...m, content: streamingContent } : m))
+                prev.map((m) =>
+                  m.id === newMessage.id
+                    ? {
+                        ...m,
+                        content: streamingContent,
+                        thinking: streamingThinking || undefined,
+                      }
+                    : m
+                )
               );
             }
           },
@@ -1316,6 +1482,8 @@ export function Chat({ topic, onNavigate }: ChatProps) {
         const finalMessage: ChatMessage = {
           ...newMessage,
           content: displayContent || "[No response received]",
+          thinking: result.thinking || streamingThinking || undefined,
+          fullResponse: result.content || streamingContent || undefined,
           isStreaming: false,
           tokens: result.tokens,
           latencyMs: result.latencyMs,
@@ -1369,6 +1537,7 @@ export function Chat({ topic, onNavigate }: ChatProps) {
       await generateModeratorMessage({ kind: "opening" });
     }
 
+    cyclePendingRef.current = [...configuredAgentIds];
     let previousSpeaker: CouncilAgentId | null = null;
     let turn = 0;
 
@@ -1384,10 +1553,24 @@ export function Chat({ topic, onNavigate }: ChatProps) {
       setTypingAgents([]);
 
       setCurrentTurn(turn + 1);
+      const pending = cyclePendingRef.current.filter((id) => configuredAgentIds.includes(id));
+      if (pending.length === 0) {
+        cyclePendingRef.current = [...configuredAgentIds];
+      } else {
+        cyclePendingRef.current = pending;
+      }
+      const pendingNow = cyclePendingRef.current;
 
       // Run bidding round
       const focusAgents = duoLogueRef.current?.remainingTurns ? duoLogueRef.current.participants : undefined;
-      const bidding = generateBiddingScores(previousSpeaker ?? undefined, AGENT_IDS, focusAgents);
+      const excludeForRound =
+        pendingNow.length > 1 ? previousSpeaker ?? undefined : undefined;
+      const bidding = generateBiddingScores(
+        excludeForRound,
+        AGENT_IDS,
+        focusAgents,
+        pendingNow
+      );
 
       if (config.preferences.showBiddingScores) {
         setCurrentBidding(bidding);
@@ -1400,53 +1583,39 @@ export function Chat({ topic, onNavigate }: ChatProps) {
 
       // Generate responses from top agents (group chat style)
       const rankedAgents = (Object.entries(bidding.scores) as [CouncilAgentId, number][])
-        .filter(([agentId, score]) => score > 0 && configuredProviders.includes(AGENT_CONFIG[agentId].provider))
+        .filter(
+          ([agentId, score]) =>
+            score > 0 &&
+            configuredProviders.includes(AGENT_CONFIG[agentId].provider) &&
+            pendingNow.includes(agentId)
+        )
         .sort((a, b) => b[1] - a[1])
         .map(([agentId]) => agentId);
 
-      // Single speaker mode - only one agent speaks at a time for more natural conversation
-      const maxConcurrentSpeakers = 1;
-      const winners = rankedAgents.slice(0, Math.max(1, maxConcurrentSpeakers));
-
-      if (winners.length === 0) {
+      const selectedSpeaker = rankedAgents[0];
+      if (!selectedSpeaker) {
         break;
       }
 
-      const responses = await Promise.all(winners.map((winner) => generateAgentResponse(winner)));
-
-      if (abortRef.current) break;
-
-      let actualSpeaker: CouncilAgentId | null = null;
-
-      if (responses.every((response) => !response || response.error)) {
-        // If failed, try another agent
-        const alternates = AGENT_IDS.filter(
-          (id) => !winners.includes(id) && configuredProviders.includes(AGENT_CONFIG[id].provider)
-        );
-
-        if (alternates.length > 0 && !abortRef.current) {
-          const alternate = alternates[Math.floor(Math.random() * alternates.length)];
-          const fallbackResponse = await generateAgentResponse(alternate);
-          if (fallbackResponse && !fallbackResponse.error) {
-            actualSpeaker = alternate;
-          }
-        }
-      } else {
-        // Find the agent that actually responded successfully
-        for (let i = 0; i < winners.length; i++) {
-          if (responses[i] && !responses[i]!.error) {
-            actualSpeaker = winners[i]!;
-            break;
-          }
-        }
+      // Strict per-cycle fairness: each cycle slot belongs to one agent only.
+      // Retry once for the same agent; never re-route to alternates in the same turn.
+      let response = await generateAgentResponse(selectedSpeaker);
+      if ((!response || response.error) && !abortRef.current) {
+        response = await generateAgentResponse(selectedSpeaker);
       }
+      if (abortRef.current) break;
+
+      const actualSpeaker: CouncilAgentId | null =
+        response && !response.error ? selectedSpeaker : null;
 
       if (abortRef.current) break;
 
-      previousSpeaker = actualSpeaker ?? previousSpeaker;
-      // Record speaker for fairness tracking
-      if (previousSpeaker) {
-        fairnessManagerRef.current.recordSpeaker(previousSpeaker);
+      // Consume the cycle slot regardless of call success to preserve one-slot-per-agent cycles.
+      cyclePendingRef.current = cyclePendingRef.current.filter((id) => id !== selectedSpeaker);
+      if (actualSpeaker) {
+        previousSpeaker = actualSpeaker;
+        fairnessManagerRef.current.recordSpeaker(actualSpeaker);
+        recentSpeakersRef.current = [...recentSpeakersRef.current.slice(-5), actualSpeaker];
       }
       turn++;
 
@@ -1460,6 +1629,32 @@ export function Chat({ topic, onNavigate }: ChatProps) {
           const nextDuo = { ...duoLogueRef.current, remainingTurns: remaining };
           duoLogueRef.current = nextDuo;
           setDuoLogue(nextDuo);
+        }
+      }
+
+      if (config.preferences.moderatorEnabled && !abortRef.current) {
+        if (turn > 0 && turn % 7 === 0 && lastModeratorSynthesisTurnRef.current !== turn) {
+          lastModeratorSynthesisTurnRef.current = turn;
+          await generateModeratorMessage({ kind: "synthesis", turn });
+        }
+
+        const recentSpeakers = recentSpeakersRef.current.slice(-6);
+        const uniqueSpeakers = Array.from(new Set(recentSpeakers));
+        if (recentSpeakers.length >= 6 && uniqueSpeakers.length <= 2) {
+          const balanceKey = `${turn}:${uniqueSpeakers.sort().join("-")}`;
+          if (lastModeratorBalanceKeyRef.current !== balanceKey) {
+            lastModeratorBalanceKeyRef.current = balanceKey;
+            await generateModeratorMessage({ kind: "balance", turn });
+          }
+        }
+
+        if (
+          maxTurns !== Infinity &&
+          !moderatorClosurePostedRef.current &&
+          maxTurns - turn <= 3
+        ) {
+          moderatorClosurePostedRef.current = true;
+          await generateModeratorMessage({ kind: "closure", remainingTurns: maxTurns - turn });
         }
       }
 
@@ -1497,6 +1692,7 @@ export function Chat({ topic, onNavigate }: ChatProps) {
     generateAgentResponse,
     generateModeratorMessage,
     generateClosingResponse,
+    configuredAgentIds,
     configuredProviders,
     resetRuntimeState,
   ]);
@@ -1578,7 +1774,13 @@ export function Chat({ topic, onNavigate }: ChatProps) {
 
   const exportMessages = useMemo(() => {
     return messages
-      .filter((m) => !m.isStreaming && (m.content ?? "").trim().length > 0)
+      .filter(
+        (m) =>
+          !m.isStreaming &&
+          ((m.content ?? "").trim().length > 0 ||
+            (m.fullResponse ?? "").trim().length > 0 ||
+            (m.thinking ?? "").trim().length > 0)
+      )
       .map((m) => {
         const agent = AGENT_CONFIG[m.agentId] ?? AGENT_CONFIG.system;
         const providerForModel = m.displayProvider ?? agent.provider;
@@ -1593,11 +1795,19 @@ export function Chat({ topic, onNavigate }: ChatProps) {
           model,
           timestamp: m.timestamp,
           content: m.content,
+          fullResponse: m.fullResponse || m.content,
+          thinking: m.thinking,
+          latencyMs: m.latencyMs ?? m.metadata?.latencyMs,
           tokens: m.tokens,
           costUSD: calculateMessageCost(m.metadata?.model, m.tokens),
         };
       });
   }, [messages, getModelDisplayName]);
+
+  const totalEstimatedCostUSD = (costState?.totalEstimatedUSD ?? 0) + moderatorUsage.estimatedUSD;
+  const hasAnyPricing =
+    (costState ? Object.values(costState.agentCosts).some((agent) => agent.pricingAvailable) : false) ||
+    moderatorUsage.pricingAvailable;
 
   return (
     <div className="app-shell flex flex-col h-screen">
@@ -1647,8 +1857,8 @@ export function Chat({ topic, onNavigate }: ChatProps) {
 
             {costState && (
               <div className="badge">
-                {Object.values(costState.agentCosts).some((agent) => agent.pricingAvailable)
-                  ? `$${costState.totalEstimatedUSD.toFixed(4)}`
+                {hasAnyPricing
+                  ? `$${totalEstimatedCostUSD.toFixed(4)}`
                   : "$N/A"}
               </div>
             )}
@@ -1819,6 +2029,13 @@ export function Chat({ topic, onNavigate }: ChatProps) {
                       {(isAgent || isModerator) && modelName && (
                         <span className="discord-model">({modelName})</span>
                       )}
+                      {(isAgent || isModerator) && !!message.thinking?.trim() && (
+                        <span
+                          className={`discord-thinking-pill${message.isStreaming ? "" : " is-complete"}`}
+                        >
+                          {message.isStreaming ? "Thinking" : "Thought Summary"}
+                        </span>
+                      )}
                       {(isAgent || isModerator) && (message.isStreaming || message.latencyMs != null) && (
                         <LiveStopwatch
                           startTime={message.timestamp}
@@ -1831,7 +2048,11 @@ export function Chat({ topic, onNavigate }: ChatProps) {
                       </span>
                       {message.tokens && (
                         <span className="discord-tokens">
-                          {message.tokens.input}+{message.tokens.output} tokens
+                          {message.tokens.input}+{message.tokens.output}
+                          {message.tokens.reasoning && message.tokens.reasoning > 0
+                            ? ` +r${message.tokens.reasoning}`
+                            : ""}{" "}
+                          tokens
                         </span>
                       )}
                       {(() => {
@@ -1931,6 +2152,14 @@ export function Chat({ topic, onNavigate }: ChatProps) {
                           <span className="typing-dot" />
                           <span className="typing-dot" />
                         </span>
+                      )}
+                      {!!message.thinking?.trim() && (
+                        <details className="thinking-panel">
+                          <summary className="thinking-summary">
+                            Thought Summary ({message.thinking.length.toLocaleString()} chars)
+                          </summary>
+                          <div className="thinking-content">{message.thinking}</div>
+                        </details>
                       )}
                     </div>
 
@@ -2178,6 +2407,7 @@ export function Chat({ topic, onNavigate }: ChatProps) {
                         : "—";
                       const inputTokens = breakdown?.inputTokens ?? 0;
                       const outputTokens = breakdown?.outputTokens ?? 0;
+                      const reasoningTokens = breakdown?.reasoningTokens ?? 0;
 
                       return (
                         <div key={agentId} className="flex items-center justify-between">
@@ -2185,16 +2415,29 @@ export function Chat({ topic, onNavigate }: ChatProps) {
                             {agent.name}
                           </span>
                           <span className="text-ink-500">
-                            {inputTokens}/{outputTokens} · {costLabel}
+                            {inputTokens}/{outputTokens}
+                            {reasoningTokens > 0 ? ` · r:${reasoningTokens}` : ""} · {costLabel}
                           </span>
                         </div>
                       );
                     })}
+                    <div className="flex items-center justify-between">
+                      <span className="text-emerald-300">Moderator</span>
+                      <span className="text-ink-500">
+                        {moderatorUsage.inputTokens}/{moderatorUsage.outputTokens}
+                        {moderatorUsage.reasoningTokens > 0
+                          ? ` · r:${moderatorUsage.reasoningTokens}`
+                          : ""} ·{" "}
+                        {moderatorUsage.pricingAvailable
+                          ? `$${moderatorUsage.estimatedUSD.toFixed(4)}`
+                          : "—"}
+                      </span>
+                    </div>
                     <div className="pt-2 border-t border-line-soft flex items-center justify-between">
                       <span className="text-ink-500">Estimated total</span>
                       <span className="text-ink-900">
-                        {Object.values(costState.agentCosts).some((agent) => agent.pricingAvailable)
-                          ? `$${costState.totalEstimatedUSD.toFixed(4)}`
+                        {hasAnyPricing
+                          ? `$${totalEstimatedCostUSD.toFixed(4)}`
                           : "Pricing not configured"}
                       </span>
                     </div>

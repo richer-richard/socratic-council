@@ -21,6 +21,7 @@ export interface CompletionOptions {
 
 export interface CompletionResult {
   content: string;
+  thinking?: string;
   tokens: {
     input: number;
     output: number;
@@ -32,6 +33,7 @@ export interface CompletionResult {
 
 export interface StreamChunk {
   content: string;
+  thinking?: string;
   done: boolean;
 }
 
@@ -106,6 +108,17 @@ export function createHeaders(
       return {
         ...baseHeaders,
         Authorization: `Bearer ${apiKey}`,
+      };
+    case "qwen":
+      return {
+        ...baseHeaders,
+        Authorization: `Bearer ${apiKey}`,
+      };
+    case "minimax":
+      return {
+        ...baseHeaders,
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01",
       };
     default:
       return baseHeaders;

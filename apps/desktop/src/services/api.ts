@@ -19,11 +19,13 @@ export interface ChatMessage {
 
 export interface StreamChunk {
   content: string;
+  thinking?: string;
   done: boolean;
 }
 
 export interface CompletionResult {
   content: string;
+  thinking?: string;
   tokens: {
     input: number;
     output: number;
@@ -106,6 +108,8 @@ const PROVIDER_AGENT_MAP: Record<Provider, AgentId> = {
   google: "grace",
   deepseek: "douglas",
   kimi: "kate",
+  qwen: "quinn",
+  minimax: "mary",
 };
 
 function buildAgentConfig(provider: Provider, model: string): AgentConfig {
@@ -213,6 +217,7 @@ export async function callProvider(
   }
 
   let fullContent = "";
+  let fullThinking = "";
 
   const streamOptions: CompletionOptions = {
     maxTokens: agent.maxTokens,
@@ -230,6 +235,9 @@ export async function callProvider(
         if (chunk.content) {
           fullContent += chunk.content;
         }
+        if (chunk.thinking) {
+          fullThinking += chunk.thinking;
+        }
         onChunk(chunk);
       },
       streamOptions
@@ -237,6 +245,7 @@ export async function callProvider(
 
     return {
       content: result.content || fullContent,
+      thinking: result.thinking || fullThinking || undefined,
       tokens: result.tokens,
       latencyMs: result.latencyMs,
       success: true,
@@ -250,6 +259,7 @@ export async function callProvider(
 
     return {
       content: fullContent,
+      thinking: fullThinking || undefined,
       tokens: { input: 0, output: 0 },
       latencyMs: Date.now() - startTime,
       success: false,

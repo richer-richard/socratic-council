@@ -9,13 +9,21 @@ import { z } from "zod";
 // PROVIDER TYPES
 // =============================================================================
 
-export type Provider = "openai" | "anthropic" | "google" | "deepseek" | "kimi";
+export type Provider =
+  | "openai"
+  | "anthropic"
+  | "google"
+  | "deepseek"
+  | "kimi"
+  | "qwen"
+  | "minimax";
 
 // =============================================================================
 // OPENAI MODELS & PARAMETERS
 // =============================================================================
 
 export const OpenAIModels = [
+  "gpt-5.3-codex",
   "gpt-5.2-pro",
   "gpt-5.2",
   "gpt-5-mini",
@@ -38,11 +46,12 @@ export const OpenAIConfigSchema = z.object({
   frequency_penalty: z.number().min(-2).max(2).optional(),
   presence_penalty: z.number().min(-2).max(2).optional(),
   // For reasoning models (o1, o3, o4-mini)
-  reasoning_effort: z.enum(["low", "medium", "high"]).optional(),
+  reasoning_effort: z.enum(["minimal", "low", "medium", "high", "xhigh"]).optional(),
   // New Responses API format
   reasoning: z
     .object({
-      effort: z.enum(["low", "medium", "high"]).optional(),
+      effort: z.enum(["minimal", "low", "medium", "high", "xhigh"]).optional(),
+      summary: z.enum(["auto", "concise", "detailed"]).optional(),
     })
     .optional(),
   stream: z.boolean().optional().default(true),
@@ -60,10 +69,11 @@ export interface OpenAIRequest {
   top_p?: number;
   // Preferred Responses API format
   reasoning?: {
-    effort?: "low" | "medium" | "high";
+    effort?: "minimal" | "low" | "medium" | "high" | "xhigh";
+    summary?: "auto" | "concise" | "detailed";
   };
   // Deprecated (kept for compatibility)
-  reasoning_effort?: "low" | "medium" | "high";
+  reasoning_effort?: "minimal" | "low" | "medium" | "high" | "xhigh";
   stream?: boolean;
 }
 
@@ -125,6 +135,8 @@ export interface AnthropicRequest {
 // =============================================================================
 
 export const GeminiModels = [
+  "gemini-3.1-pro-preview",
+  // Legacy alias retained for migration/back-compat
   "gemini-3-pro-preview",
   "gemini-3-pro-image-preview",
   "gemini-3-flash-preview",
@@ -171,6 +183,7 @@ export interface GeminiRequest {
     topK?: number;
     thinkingConfig?: {
       thinkingBudget?: number;
+      includeThoughts?: boolean;
     };
   };
 }
@@ -266,10 +279,91 @@ export interface KimiRequest {
 }
 
 // =============================================================================
+// QWEN MODELS & PARAMETERS
+// =============================================================================
+
+export const QwenModels = ["qwen3.5-plus"] as const;
+
+export type QwenModel = (typeof QwenModels)[number];
+
+export const QwenConfigSchema = z.object({
+  model: z.enum(QwenModels),
+  temperature: z.number().min(0).max(2).optional().default(1),
+  max_tokens: z.number().min(1).max(128000).optional(),
+  top_p: z.number().min(0).max(1).optional(),
+  stream: z.boolean().optional().default(true),
+});
+
+export type QwenConfig = z.infer<typeof QwenConfigSchema>;
+
+export interface QwenRequest {
+  model: QwenModel;
+  messages: Array<{
+    role: "user" | "assistant" | "system";
+    content: string;
+  }>;
+  enable_thinking?: boolean;
+  temperature?: number;
+  max_tokens?: number;
+  top_p?: number;
+  stream?: boolean;
+}
+
+// =============================================================================
+// MINIMAX MODELS & PARAMETERS
+// =============================================================================
+
+export const MiniMaxModels = [
+  "MiniMax-M2.5",
+  // Lowercase alias retained for migration/back-compat.
+  "minimax-m2.5",
+] as const;
+
+export type MiniMaxModel = (typeof MiniMaxModels)[number];
+
+export const MiniMaxConfigSchema = z.object({
+  model: z.enum(MiniMaxModels),
+  temperature: z.number().min(0).max(1).optional().default(1),
+  max_tokens: z.number().min(1).max(128000).optional(),
+  top_p: z.number().min(0).max(1).optional(),
+  stream: z.boolean().optional().default(true),
+});
+
+export type MiniMaxConfig = z.infer<typeof MiniMaxConfigSchema>;
+
+export interface MiniMaxRequest {
+  model: MiniMaxModel;
+  messages: Array<{
+    role: "user" | "assistant";
+    content: string | Array<{ type: "text"; text: string }>;
+  }>;
+  system?: string;
+  thinking?: {
+    type: "enabled";
+    budget_tokens?: number;
+  };
+  reasoning_split?: boolean;
+  metadata?: {
+    user_id?: string;
+  };
+  temperature?: number;
+  max_tokens?: number;
+  top_p?: number;
+  stream?: boolean;
+}
+
+// =============================================================================
 // UNIFIED MODEL TYPE
 // =============================================================================
 
-export type ModelId = OpenAIModel | AnthropicModel | GeminiModel | DeepSeekModel | KimiModel;
+export type ModelId =
+  | OpenAIModel
+  | AnthropicModel
+  | GeminiModel
+  | DeepSeekModel
+  | KimiModel
+  | QwenModel
+  | MiniMaxModel;
 
 export const ModelIdSchema = z.union([
   z.enum(OpenAIModels),
@@ -277,6 +371,8 @@ export const ModelIdSchema = z.union([
   z.enum(GeminiModels),
   z.enum(DeepSeekModels),
   z.enum(KimiModels),
+  z.enum(QwenModels),
+  z.enum(MiniMaxModels),
 ]);
 
 export interface ModelInfo {
@@ -300,7 +396,14 @@ export interface ModelInfo {
 // AGENT TYPES
 // =============================================================================
 
-export type AgentId = "george" | "cathy" | "grace" | "douglas" | "kate";
+export type AgentId =
+  | "george"
+  | "cathy"
+  | "grace"
+  | "douglas"
+  | "kate"
+  | "quinn"
+  | "mary";
 
 export interface AgentConfig {
   id: AgentId;
@@ -314,9 +417,9 @@ export interface AgentConfig {
 }
 
 export const AgentConfigSchema = z.object({
-  id: z.enum(["george", "cathy", "grace", "douglas", "kate"]),
+  id: z.enum(["george", "cathy", "grace", "douglas", "kate", "quinn", "mary"]),
   name: z.string().min(1).max(50),
-  provider: z.enum(["openai", "anthropic", "google", "deepseek", "kimi"]),
+  provider: z.enum(["openai", "anthropic", "google", "deepseek", "kimi", "qwen", "minimax"]),
   model: ModelIdSchema,
   systemPrompt: z.string(),
   avatar: z.string().optional(),
@@ -411,6 +514,8 @@ export interface ProviderCredentials {
   google?: { apiKey: string; baseUrl?: string };
   deepseek?: { apiKey: string; baseUrl?: string };
   kimi?: { apiKey: string; baseUrl?: string };
+  qwen?: { apiKey: string; baseUrl?: string };
+  minimax?: { apiKey: string; baseUrl?: string };
 }
 
 export const ProviderCredentialsSchema = z.object({
@@ -419,6 +524,8 @@ export const ProviderCredentialsSchema = z.object({
   google: z.object({ apiKey: z.string().min(1), baseUrl: z.string().optional() }).optional(),
   deepseek: z.object({ apiKey: z.string().min(1), baseUrl: z.string().optional() }).optional(),
   kimi: z.object({ apiKey: z.string().min(1), baseUrl: z.string().optional() }).optional(),
+  qwen: z.object({ apiKey: z.string().min(1), baseUrl: z.string().optional() }).optional(),
+  minimax: z.object({ apiKey: z.string().min(1), baseUrl: z.string().optional() }).optional(),
 });
 
 // =============================================================================

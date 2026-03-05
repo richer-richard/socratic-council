@@ -77,6 +77,8 @@ const AGENT_NAMES: Record<AgentId, string> = {
   grace: "Grace",
   douglas: "Douglas",
   kate: "Kate",
+  quinn: "Quinn",
+  mary: "Mary",
 };
 
 // =============================================================================
@@ -158,6 +160,8 @@ export class ConversationMemoryManager {
       grace: 0,
       douglas: 0,
       kate: 0,
+      quinn: 0,
+      mary: 0,
     };
   }
 
@@ -232,7 +236,7 @@ export class ConversationMemoryManager {
     const speakerId = message.agentId;
     if (speakerId === "system" || speakerId === "user" || speakerId === "tool") return;
 
-    const agentIds: AgentId[] = ["george", "cathy", "grace", "douglas", "kate"];
+    const agentIds: AgentId[] = ["george", "cathy", "grace", "douglas", "kate", "quinn", "mary"];
 
     for (const targetAgent of agentIds) {
       if (targetAgent === speakerId) continue;
@@ -447,6 +451,8 @@ export class ConversationMemoryManager {
       grace: 0,
       douglas: 0,
       kate: 0,
+      quinn: 0,
+      mary: 0,
     };
     this.topic = "";
   }

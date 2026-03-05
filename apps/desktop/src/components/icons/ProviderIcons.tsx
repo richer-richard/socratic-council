@@ -9,6 +9,8 @@ import anthropicLogo from "../../assets/providers/anthropic.svg";
 import googleLogo from "../../assets/providers/google.svg";
 import deepseekLogo from "../../assets/providers/deepseek.svg";
 import kimiLogo from "../../assets/providers/kimi.svg";
+import qwenLogo from "../../assets/providers/qwen.png";
+import minimaxLogo from "../../assets/providers/minimax.png";
 
 interface IconProps {
   className?: string;
@@ -82,6 +84,16 @@ export function KimiIcon({ className = "", size = 24 }: IconProps) {
   return <ProviderLogo src={kimiLogo} alt="Kimi" className={className} size={size} />;
 }
 
+/** Qwen */
+export function QwenIcon({ className = "", size = 24 }: IconProps) {
+  return <ProviderLogo src={qwenLogo} alt="Qwen" className={className} size={size} />;
+}
+
+/** MiniMax */
+export function MiniMaxIcon({ className = "", size = 24 }: IconProps) {
+  return <ProviderLogo src={minimaxLogo} alt="MiniMax" className={className} size={size} />;
+}
+
 /** System icon for system messages */
 export function SystemIcon({ className = "", size = 24 }: IconProps) {
   return (
@@ -141,6 +153,10 @@ export function getProviderIcon(provider: Provider): React.ComponentType<IconPro
       return DeepSeekIcon;
     case "kimi":
       return KimiIcon;
+    case "qwen":
+      return QwenIcon;
+    case "minimax":
+      return MiniMaxIcon;
     default:
       return SystemIcon;
   }

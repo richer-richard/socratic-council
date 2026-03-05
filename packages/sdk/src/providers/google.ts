@@ -104,7 +104,8 @@ export class GoogleProvider implements BaseProvider {
     // Thinking config for models that support it (gemini-2.5-pro, gemini-3-pro-preview)
     if (modelInfo?.supportsThinking && agent.model.includes("pro")) {
       generationConfig.thinkingConfig = {
-        thinkingBudget: 8192, // Default thinking budget
+        thinkingBudget: 24576, // Max thinking budget supported by current schema
+        includeThoughts: true,
       };
     }
 
@@ -150,13 +151,22 @@ export class GoogleProvider implements BaseProvider {
 
     // Extract content from Gemini response
     const candidate = data.candidates?.[0];
-    const content = candidate?.content?.parts?.map((p: { text?: string }) => p.text ?? "").join("") ?? "";
+    const parts = candidate?.content?.parts ?? [];
+    const content = parts
+      .filter((p: { text?: string; thought?: boolean }) => p.text && !p.thought)
+      .map((p: { text?: string }) => p.text ?? "")
+      .join("");
+    const thinking = parts
+      .filter((p: { text?: string; thought?: boolean }) => p.text && p.thought)
+      .map((p: { text?: string }) => p.text ?? "")
+      .join("");
     
     // Extract token usage
     const usageMetadata = data.usageMetadata ?? {};
 
     return {
       content,
+      thinking: thinking || undefined,
       tokens: {
         input: usageMetadata.promptTokenCount ?? 0,
         output: usageMetadata.candidatesTokenCount ?? 0,
@@ -184,6 +194,7 @@ export class GoogleProvider implements BaseProvider {
     let inputTokens = 0;
     let outputTokens = 0;
     let reasoningTokens: number | undefined;
+    let fullThinking = "";
     let finishReason: "stop" | "length" | "error" = "stop";
     const parser = createSseParser((dataLine) => {
       const jsonStr = dataLine.trim();
@@ -194,7 +205,10 @@ export class GoogleProvider implements BaseProvider {
         const parts = candidate?.content?.parts ?? [];
 
         for (const part of parts) {
-          if (part.text) {
+          if (part.text && part.thought) {
+            fullThinking += part.text;
+            onChunk({ content: "", thinking: part.text, done: false });
+          } else if (part.text) {
             fullContent += part.text;
             onChunk({ content: part.text, done: false });
           }
@@ -242,6 +256,7 @@ export class GoogleProvider implements BaseProvider {
 
     return {
       content: fullContent,
+      thinking: fullThinking || undefined,
       tokens: {
         input: inputTokens,
         output: outputTokens,

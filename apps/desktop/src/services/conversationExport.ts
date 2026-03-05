@@ -11,6 +11,9 @@ export type ConversationExportMessage = {
   model?: string;
   timestamp: number;
   content: string;
+  fullResponse?: string;
+  thinking?: string;
+  latencyMs?: number;
   tokens?: { input: number; output: number; reasoning?: number };
   costUSD?: number | null;
 };
@@ -29,6 +32,27 @@ function formatTime(timestamp: number) {
 function formatUtcTimestamp(date: Date) {
   const iso = date.toISOString(); // YYYY-MM-DDTHH:mm:ss.sssZ
   return `${iso.slice(0, 19).replace("T", " ")} UTC`;
+}
+
+function formatLatencyMs(latencyMs?: number) {
+  if (latencyMs == null || !Number.isFinite(latencyMs)) return null;
+  return `${(latencyMs / 1000).toFixed(3)}s`;
+}
+
+function getResponseContent(msg: ConversationExportMessage) {
+  return (msg.fullResponse ?? msg.content ?? "").trim();
+}
+
+function getThinkingContent(msg: ConversationExportMessage) {
+  return (msg.thinking ?? "").trim();
+}
+
+function getCombinedExportBody(msg: ConversationExportMessage) {
+  const response = getResponseContent(msg);
+  const thinking = getThinkingContent(msg);
+  if (!thinking) return response;
+  if (!response) return `Thinking:\n${thinking}`;
+  return `${response}\n\nThinking:\n${thinking}`;
 }
 
 function safeBaseName(value: string) {
@@ -189,10 +213,23 @@ function buildMarkdown(options: {
   includeCosts: boolean;
 }) {
   const lines: string[] = [];
+  const stats = computeStats(options.messages);
   lines.push("# Socratic Council Transcript");
   lines.push("");
   lines.push(`**Topic:** ${options.topic}`);
   lines.push(`**Exported:** ${new Date().toLocaleString()}`);
+  lines.push(`**Messages:** ${stats.messageCount}`);
+  lines.push(`**Speakers:** ${stats.speakerCount}`);
+  if (options.includeTokens) {
+    lines.push(
+      `**Total Tokens:** ${stats.totalTokensIn}/${stats.totalTokensOut}${
+        stats.totalTokensReasoning > 0 ? ` (r:${stats.totalTokensReasoning})` : ""
+      }`
+    );
+  }
+  if (options.includeCosts) {
+    lines.push(`**Estimated Total Cost:** $${stats.totalCostUSD.toFixed(4)}`);
+  }
   lines.push("");
   lines.push("---");
   lines.push("");
@@ -202,17 +239,33 @@ function buildMarkdown(options: {
     if (msg.model) headerParts.splice(1, 0, `(${msg.model})`);
     lines.push(headerParts.join(" · "));
 
+    const latencyLine = formatLatencyMs(msg.latencyMs);
     if (options.includeTokens && msg.tokens) {
-      const tokensLine = `${msg.tokens.input}/${msg.tokens.output} tokens`;
+      const reasoning = msg.tokens.reasoning != null && msg.tokens.reasoning > 0
+        ? ` (r:${msg.tokens.reasoning})`
+        : "";
+      const tokensLine = `${msg.tokens.input}/${msg.tokens.output}${reasoning} tokens`;
       const costLine =
         options.includeCosts && msg.costUSD != null ? ` · $${msg.costUSD.toFixed(4)}` : "";
-      lines.push(`_${tokensLine}${costLine}_`);
+      const latencyPart = latencyLine ? ` · ${latencyLine}` : "";
+      lines.push(`_${tokensLine}${costLine}${latencyPart}_`);
     } else if (options.includeCosts && msg.costUSD != null) {
-      lines.push(`_$${msg.costUSD.toFixed(4)}_`);
+      const latencyPart = latencyLine ? ` · ${latencyLine}` : "";
+      lines.push(`_$${msg.costUSD.toFixed(4)}${latencyPart}_`);
+    } else if (latencyLine) {
+      lines.push(`_${latencyLine}_`);
     }
 
     lines.push("");
-    lines.push(msg.content.trim());
+    lines.push("**Response**");
+    lines.push("");
+    lines.push(getResponseContent(msg) || "[No response recorded]");
+    if (getThinkingContent(msg)) {
+      lines.push("");
+      lines.push("**Thinking**");
+      lines.push("");
+      lines.push(getThinkingContent(msg));
+    }
     lines.push("");
     lines.push("---");
     lines.push("");
@@ -303,6 +356,8 @@ async function buildPdfBytes(options: {
     { id: "grace", name: "Grace" },
     { id: "douglas", name: "Douglas" },
     { id: "kate", name: "Kate" },
+    { id: "quinn", name: "Quinn" },
+    { id: "mary", name: "Mary" },
   ] as const;
   const councilAgentIds: AgentId[] = councilAgents.map((a) => a.id);
 
@@ -342,8 +397,8 @@ async function buildPdfBytes(options: {
     { label: "Messages", value: formatCompactNumber(stats.messageCount) },
     { label: "Speakers", value: formatCompactNumber(stats.speakerCount) },
     {
-      label: "Tokens (in/out)",
-      value: `${formatCompactNumber(stats.totalTokensIn)}/${formatCompactNumber(stats.totalTokensOut)}`,
+      label: "Tokens (in/out/r)",
+      value: `${formatCompactNumber(stats.totalTokensIn)}/${formatCompactNumber(stats.totalTokensOut)}/${formatCompactNumber(stats.totalTokensReasoning)}`,
     },
   ];
 
@@ -436,22 +491,49 @@ async function buildPdfBytes(options: {
       (acc, m) => {
         acc.input += m.tokens?.input ?? 0;
         acc.output += m.tokens?.output ?? 0;
+        acc.reasoning += m.tokens?.reasoning ?? 0;
         return acc;
       },
-      { input: 0, output: 0 }
+      { input: 0, output: 0, reasoning: 0 }
     );
 
-    const costRows = councilAgents.map((agent) => {
-      const forAgent = messages.filter((m) => {
+    const speakerToAgentId = new Map<string, string>(
+      councilAgents.map((agent) => [agent.name, agent.id] as const)
+    );
+    speakerToAgentId.set("Moderator", "system");
+
+    const observedSpeakers = Array.from(
+      new Set(messages.map((m) => m.speaker).filter((name) => name.trim().length > 0))
+    );
+    const preferredOrder = [...councilAgents.map((a) => a.name), "Moderator"];
+    const orderedSpeakers = [
+      ...preferredOrder.filter((name) => observedSpeakers.includes(name)),
+      ...observedSpeakers.filter((name) => !preferredOrder.includes(name)),
+    ];
+
+    const costRows = orderedSpeakers.map((speakerName) => {
+      const targetAgentId = speakerToAgentId.get(speakerName);
+      const forSpeaker = messages.filter((m) => {
+        if (m.speaker === speakerName) return true;
+        if (!targetAgentId) return false;
         const raw = typeof m.agentId === "string" ? m.agentId : m.speaker.toLowerCase();
-        return raw === agent.id || m.speaker === agent.name;
+        return raw === targetAgentId;
       });
-      const inputTokens = forAgent.reduce((sum, m) => sum + (m.tokens?.input ?? 0), 0);
-      const outputTokens = forAgent.reduce((sum, m) => sum + (m.tokens?.output ?? 0), 0);
-      const priced = forAgent.some((m) => m.costUSD != null);
-      const estimatedUSD = forAgent.reduce((sum, m) => sum + (m.costUSD ?? 0), 0);
-      return { name: agent.name, inputTokens, outputTokens, priced, estimatedUSD };
-    });
+      const inputTokens = forSpeaker.reduce((sum, m) => sum + (m.tokens?.input ?? 0), 0);
+      const outputTokens = forSpeaker.reduce((sum, m) => sum + (m.tokens?.output ?? 0), 0);
+      const reasoningTokens = forSpeaker.reduce((sum, m) => sum + (m.tokens?.reasoning ?? 0), 0);
+      const priced = forSpeaker.some((m) => m.costUSD != null);
+      const estimatedUSD = forSpeaker.reduce((sum, m) => sum + (m.costUSD ?? 0), 0);
+      return {
+        name: speakerName,
+        inputTokens,
+        outputTokens,
+        reasoningTokens,
+        priced,
+        estimatedUSD,
+        messageCount: forSpeaker.length,
+      };
+    }).filter((row) => row.messageCount > 0);
 
     const anyPricing = costRows.some((r) => r.priced);
     const totalEstimatedUSD = costRows.reduce((sum, r) => sum + (r.priced ? r.estimatedUSD : 0), 0);
@@ -466,7 +548,7 @@ async function buildPdfBytes(options: {
     doc.text("Cost Ledger", ledgerX + ledgerPad, ledgerY + 22);
 
     // Badge (tokens)
-    const badgeText = `${formatInteger(totals.input + totals.output)} tokens`;
+    const badgeText = `${formatInteger(totals.input + totals.output)} tokens (r:${formatInteger(totals.reasoning)})`;
     doc.setFontSize(10);
     const badgeW = Math.min(180, doc.getTextWidth(badgeText) + 18);
     const badgeX = ledgerX + ledgerW - ledgerPad - badgeW;
@@ -484,8 +566,9 @@ async function buildPdfBytes(options: {
 
       const costLabel = row.priced ? formatUsd(row.estimatedUSD) : "—";
       doc.setTextColor(muted.r, muted.g, muted.b);
+      const reasoning = row.reasoningTokens && row.reasoningTokens > 0 ? ` · r:${row.reasoningTokens}` : "";
       doc.text(
-        `${row.inputTokens}/${row.outputTokens} · ${costLabel}`,
+        `${row.inputTokens}/${row.outputTokens}${reasoning} · ${costLabel}`,
         ledgerX + ledgerW - ledgerPad,
         rowY + 12,
         { align: "right" }
@@ -536,11 +619,15 @@ async function buildPdfBytes(options: {
         parts.push(`${inOut}${reasoning}`);
       }
       if (options.includeCosts && msg.costUSD != null) parts.push(formatUsd(msg.costUSD));
+      const latencyText = formatLatencyMs(msg.latencyMs);
+      if (latencyText) parts.push(latencyText);
       return parts.join(" · ");
     })();
 
+    const responseBody = getResponseContent(msg);
+    const thinkingBody = getThinkingContent(msg);
     // Parse segments for inline quotes
-    const segments = splitIntoInlineQuoteSegments(msg.content);
+    const segments = splitIntoInlineQuoteSegments(responseBody || msg.content || "");
 
     // Pre-compute layout for all segments
     type SegmentLayout =
@@ -557,8 +644,10 @@ async function buildPdfBytes(options: {
         if (!qm) continue;
         const qSpeaker = qm.speaker || "Unknown";
         const qHeader = `${qSpeaker} \u00b7 ${formatTime(qm.timestamp)}`;
-        const strippedBody = stripQuoteTokens(qm.content).slice(0, 200);
-        const bodyText = strippedBody + (stripQuoteTokens(qm.content).length > 200 ? "\u2026" : "");
+        const quoteContent = getResponseContent(qm) || qm.content;
+        const stripped = stripQuoteTokens(quoteContent);
+        const strippedBody = stripped.slice(0, 200);
+        const bodyText = strippedBody + (stripped.length > 200 ? "\u2026" : "");
         doc.setFontSize(10);
         const qLines = doc.splitTextToSize(bodyText, quoteMaxW) as string[];
         segmentLayouts.push({ kind: "quote", header: qHeader, lines: qLines });
@@ -578,6 +667,13 @@ async function buildPdfBytes(options: {
           segmentLayouts.push({ kind: "text", lines });
         }
       }
+    }
+
+    if (thinkingBody) {
+      doc.setFontSize(10);
+      const heading = doc.splitTextToSize("Thinking:", contentMaxW) as string[];
+      const thoughtLines = doc.splitTextToSize(thinkingBody, contentMaxW) as string[];
+      segmentLayouts.push({ kind: "text", lines: [...heading, ...thoughtLines] });
     }
 
     // Calculate total block height
@@ -682,7 +778,7 @@ async function buildPdfBytes(options: {
           return {
             id: m.id,
             agentId: raw,
-            content: m.content,
+            content: getResponseContent(m) || m.content,
             timestamp: m.timestamp,
           };
         })
@@ -717,6 +813,8 @@ async function buildPdfBytes(options: {
         grace: "10B981",
         douglas: "F87171",
         kate: "2DD4BF",
+        quinn: "22D3EE",
+        mary: "F472B6",
       };
 
       const low = { r: 59, g: 130, b: 246 };
@@ -916,20 +1014,20 @@ async function buildDocxBytes(options: {
     width: { size: 100, type: WidthType.PERCENTAGE },
     rows: [
       new TableRow({
-        children: [
-          headerCell("Speaker"),
-          headerCell("Messages"),
-          headerCell("Tokens (in/out)"),
-          headerCell("Cost"),
-        ],
-      }),
+              children: [
+                headerCell("Speaker"),
+                headerCell("Messages"),
+                headerCell("Tokens (in/out/r)"),
+                headerCell("Cost"),
+              ],
+            }),
       ...stats.speakers.map(
         (s) =>
           new TableRow({
             children: [
               bodyCell(s.speaker),
               bodyCell(String(s.messageCount)),
-              bodyCell(`${s.tokensIn}/${s.tokensOut}`),
+              bodyCell(`${s.tokensIn}/${s.tokensOut}${s.tokensReasoning > 0 ? ` (r:${s.tokensReasoning})` : ""}`),
               bodyCell(options.includeCosts && s.costUSD > 0 ? formatUsd(s.costUSD) : "—"),
             ],
           })
@@ -945,16 +1043,22 @@ async function buildDocxBytes(options: {
     const header = `${msg.speaker}${msg.model ? ` (${msg.model})` : ""} · ${formatTime(msg.timestamp)}`;
     children.push(new Paragraph({ text: header, heading: HeadingLevel.HEADING_3 }));
 
+    const latencyText = formatLatencyMs(msg.latencyMs);
     if (options.includeTokens && msg.tokens) {
-      const tokensLine = `${msg.tokens.input}/${msg.tokens.output} tokens`;
+      const reasoning = msg.tokens.reasoning != null && msg.tokens.reasoning > 0
+        ? ` (r:${msg.tokens.reasoning})`
+        : "";
+      const tokensLine = `${msg.tokens.input}/${msg.tokens.output}${reasoning} tokens`;
       const costLine =
         options.includeCosts && msg.costUSD != null ? ` · $${msg.costUSD.toFixed(4)}` : "";
-      children.push(new Paragraph({ text: `${tokensLine}${costLine}` }));
+      children.push(new Paragraph({ text: `${tokensLine}${costLine}${latencyText ? ` · ${latencyText}` : ""}` }));
     } else if (options.includeCosts && msg.costUSD != null) {
-      children.push(new Paragraph({ text: `$${msg.costUSD.toFixed(4)}` }));
+      children.push(new Paragraph({ text: `$${msg.costUSD.toFixed(4)}${latencyText ? ` · ${latencyText}` : ""}` }));
+    } else if (latencyText) {
+      children.push(new Paragraph({ text: latencyText }));
     }
 
-    const contentLines = msg.content.trim().split("\n");
+    const contentLines = getCombinedExportBody(msg).split("\n");
     const runs = contentLines.flatMap((line, idx) => {
       const run = new TextRun({ text: line });
       return idx === 0 ? [run] : [new TextRun({ text: line, break: 1 })];
@@ -1013,6 +1117,7 @@ async function buildPptxBytes(options: {
     w: 12.1,
     h: 0.8,
     fontSize: 36,
+    fontFace: "Palatino Linotype",
     color: fg,
     bold: true,
   });
@@ -1033,7 +1138,6 @@ async function buildPptxBytes(options: {
     color: muted,
   });
 
-  // Snapshot slide (simple infographic)
   const snapshot = pptx.addSlide();
   snapshot.background = { color: bg };
   snapshot.addText("Council Snapshot", {
@@ -1157,56 +1261,109 @@ async function buildPptxBytes(options: {
     });
   }
 
-  const entries = options.messages.map((m) => {
-    const compact = m.content.replace(/\s+/g, " ").trim();
-    const clipped = compact.length > 260 ? `${compact.slice(0, 257)}…` : compact;
-    return `[${formatTime(m.timestamp)}] ${m.speaker}: ${clipped}`;
-  });
+  for (let i = 0; i < options.messages.length; i += 1) {
+    const msg = options.messages[i]!;
+    const response = getResponseContent(msg) || "[No response recorded]";
+    const thinking = getThinkingContent(msg);
+    const latencyText = formatLatencyMs(msg.latencyMs);
+    const tokenText = msg.tokens
+      ? `${msg.tokens.input}/${msg.tokens.output}${msg.tokens.reasoning ? ` (r:${msg.tokens.reasoning})` : ""} tokens`
+      : null;
+    const costText = msg.costUSD != null ? `$${msg.costUSD.toFixed(4)}` : null;
+    const metaParts = [
+      msg.model ?? "Unknown model",
+      formatTime(msg.timestamp),
+      latencyText,
+      tokenText,
+      costText,
+    ].filter((part): part is string => !!part);
 
-  const perSlide = 8;
-  for (let i = 0; i < entries.length; i += perSlide) {
     const slide = pptx.addSlide();
     slide.background = { color: bg };
-    const chunk = entries.slice(i, i + perSlide);
     slide.addShape(pptx.ShapeType.rect, {
       x: 0,
       y: 0,
       w: 13.33,
-      h: 0.6,
+      h: 0.72,
       fill: { color: card },
       line: { color: card },
     });
-    slide.addText(`Transcript (${i + 1}–${Math.min(i + perSlide, entries.length)})`, {
+    slide.addText(`Agent: ${msg.speaker}`, {
       x: 0.6,
-      y: 0.16,
+      y: 0.18,
       w: 12.1,
-      h: 0.4,
-      fontSize: 18,
-      color: muted,
+      h: 0.42,
+      fontSize: 20,
+      color: fg,
       bold: true,
     });
+    slide.addText(metaParts.join(" · "), {
+      x: 0.6,
+      y: 0.76,
+      w: 12.1,
+      h: 0.32,
+      fontSize: 10,
+      color: muted,
+    });
+
     slide.addShape(pptx.ShapeType.roundRect, {
       x: 0.6,
-      y: 0.95,
+      y: 1.2,
       w: 12.1,
-      h: 6.2,
+      h: 2.85,
       fill: { color: card },
       line: { color: border, width: 1 },
     });
-    slide.addText(chunk.join("\n\n"), {
+    slide.addText("Response", {
+      x: 0.85,
+      y: 1.34,
+      w: 11.6,
+      h: 0.24,
+      fontSize: 11,
+      color: muted,
+      bold: true,
+    });
+    slide.addText(response, {
       x: 0.9,
-      y: 1.15,
+      y: 1.62,
       w: 11.5,
-      h: 5.85,
-      fontSize: 14,
+      h: 2.3,
+      fontSize: 11,
       color: fg,
       valign: "top",
     });
-    slide.addText(`Page ${Math.floor(i / perSlide) + 1} of ${Math.ceil(entries.length / perSlide)}`, {
+
+    slide.addShape(pptx.ShapeType.roundRect, {
       x: 0.6,
-      y: 7.15,
+      y: 4.25,
       w: 12.1,
-      h: 0.3,
+      h: 2.95,
+      fill: { color: card },
+      line: { color: border, width: 1 },
+    });
+    slide.addText("Thinking", {
+      x: 0.85,
+      y: 4.39,
+      w: 11.6,
+      h: 0.24,
+      fontSize: 11,
+      color: muted,
+      bold: true,
+    });
+    slide.addText(thinking || "[No thinking trace captured]", {
+      x: 0.9,
+      y: 4.67,
+      w: 11.5,
+      h: 2.38,
+      fontSize: 10,
+      color: fg,
+      valign: "top",
+    });
+    slide.addText(`Response ${i + 1} of ${options.messages.length}`, {
+      x: 0.6,
+      y: 7.2,
+      w: 12.1,
+      h: 0.24,
       fontSize: 10,
       color: muted,
       align: "right",
@@ -1269,9 +1426,13 @@ export async function exportConversation(options: {
   includeCosts?: boolean;
   baseFileName?: string;
 }): Promise<{ path: string | null }> {
-  const includeTokens = options.includeTokens ?? true;
-  const includeCosts = options.includeCosts ?? true;
-  const messages = options.messages.filter((m) => m.content.trim().length > 0);
+  const mustIncludeUsageMeta =
+    options.format === "pdf" || options.format === "docx" || options.format === "markdown";
+  const includeTokens = mustIncludeUsageMeta ? true : options.includeTokens ?? true;
+  const includeCosts = mustIncludeUsageMeta ? true : options.includeCosts ?? true;
+  const messages = options.messages.filter(
+    (m) => getResponseContent(m).length > 0 || getThinkingContent(m).length > 0
+  );
 
   const baseFileName =
     options.baseFileName ??
