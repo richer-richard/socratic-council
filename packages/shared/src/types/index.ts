@@ -23,6 +23,8 @@ export type Provider =
 // =============================================================================
 
 export const OpenAIModels = [
+  "gpt-5.4",
+  "gpt-5.3-chat-latest",
   "gpt-5.3-codex",
   "gpt-5.2-pro",
   "gpt-5.2",

@@ -61,6 +61,8 @@ interface DuoLogueState {
 // Model display names mapping - includes both full dated IDs and aliases
 const MODEL_DISPLAY_NAMES: Record<string, string> = {
   // OpenAI
+  "gpt-5.4": "GPT-5.4",
+  "gpt-5.3-chat-latest": "GPT-5.3 Instant",
   "gpt-5.3-codex": "GPT-5.3 Codex",
   "gpt-5.2-pro": "GPT-5.2 Pro",
   "gpt-5.2": "GPT-5.2",
@@ -882,8 +884,8 @@ export function Chat({ topic, onNavigate }: ChatProps) {
     if (!config.preferences.moderatorEnabled) return null;
     const credential = config.credentials.openai;
     if (!credential?.apiKey) return null;
-    // Moderator is fixed to GPT-5.2 (standard) for consistent behavior.
-    return { provider: "openai" as const, credential, model: "gpt-5.2" as const };
+    // Moderator is fixed to GPT-5.3 Instant for lower-latency coordination messages.
+    return { provider: "openai" as const, credential, model: "gpt-5.3-chat-latest" as const };
   }, [config.credentials.openai, config.preferences.moderatorEnabled]);
 
   const generateModeratorMessage = useCallback(async (options: {

@@ -28,6 +28,7 @@ const REASONING_MODELS: OpenAIModel[] = [
   "o1",
   "o3",
   "o4-mini",
+  "gpt-5.4",
   "gpt-5.3-codex",
   "gpt-5.2-pro",
   "gpt-5.2",
@@ -40,6 +41,7 @@ const NO_TEMPERATURE_MODELS: OpenAIModel[] = [
   "o1",
   "o3",
   "o4-mini",
+  "gpt-5.4",
   "gpt-5.3-codex",
   "gpt-5.2-pro",
   "gpt-5.2",
@@ -151,7 +153,12 @@ function extractOutputThinking(data: OpenAIResponsesResponse): string {
 }
 
 function reasoningEffortForModel(model: OpenAIModel): "high" | "xhigh" {
-  if (model === "gpt-5.3-codex" || model === "gpt-5.2" || model === "gpt-5.2-pro") {
+  if (
+    model === "gpt-5.4" ||
+    model === "gpt-5.3-codex" ||
+    model === "gpt-5.2" ||
+    model === "gpt-5.2-pro"
+  ) {
     return "xhigh";
   }
   return "high";

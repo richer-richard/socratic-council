@@ -24,6 +24,8 @@ const AGENT_CARDS: Array<{
 ];
 
 const MODEL_DISPLAY: Record<string, string> = {
+  "gpt-5.4": "GPT-5.4",
+  "gpt-5.3-chat-latest": "GPT-5.3 Instant",
   "gpt-5.3-codex": "GPT-5.3 Codex",
   "gpt-5.2": "GPT-5.2",
   "gpt-5.2-pro": "GPT-5.2 Pro",
