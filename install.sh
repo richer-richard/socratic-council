@@ -8,12 +8,15 @@
 # What it does:
 #   1. Checks / installs every prerequisite (Xcode CLT, Homebrew,
 #      Node.js 22+, pnpm, Rust stable)
-#   2. Installs workspace dependencies (pnpm install)
-#   3. Builds the production Tauri app (tauri:build)
-#   4. Mounts the DMG, copies .app to /Applications, ejects
+#   2. Installs workspace dependencies
+#   3. Builds the production .app bundle
+#   4. Copies .app to /Applications
 #   5. Opens the app
 # ──────────────────────────────────────────────────────────────
 set -euo pipefail
+
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+cd "$SCRIPT_DIR"
 
 # ── Colours / helpers ────────────────────────────────────────
 RED='\033[0;31m'
@@ -28,6 +31,24 @@ ok()    { printf "${GREEN}[  OK]${NC}  %s\n" "$*"; }
 warn()  { printf "${YELLOW}[WARN]${NC}  %s\n" "$*"; }
 fail()  { printf "${RED}[FAIL]${NC}  %s\n" "$*"; exit 1; }
 step()  { printf "\n${BOLD}━━━ %s ━━━${NC}\n" "$*"; }
+
+activate_homebrew() {
+  local brew_bin=""
+
+  if command -v brew &>/dev/null; then
+    brew_bin="$(command -v brew)"
+  elif [[ -x /opt/homebrew/bin/brew ]]; then
+    brew_bin="/opt/homebrew/bin/brew"
+  elif [[ -x /usr/local/bin/brew ]]; then
+    brew_bin="/usr/local/bin/brew"
+  fi
+
+  [[ -n "$brew_bin" ]] || return 1
+  eval "$("$brew_bin" shellenv)"
+}
+
+PINNED_PNPM_VERSION="$(awk -F'"' '/"packageManager"/ {split($4, parts, "@"); print parts[2]; exit}' package.json)"
+[[ -n "$PINNED_PNPM_VERSION" ]] || fail "Could not determine the pinned pnpm version from package.json."
 
 # ── Require macOS ────────────────────────────────────────────
 [[ "$(uname -s)" == "Darwin" ]] || fail "This script is macOS-only."
@@ -59,15 +80,12 @@ fi
 
 # ── 1b. Homebrew ─────────────────────────────────────────────
 info "Checking Homebrew …"
-if command -v brew &>/dev/null; then
+if activate_homebrew; then
   ok "Homebrew $(brew --version | head -1 | awk '{print $2}')"
 else
   info "Installing Homebrew …"
-  /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-  # Add brew to PATH for Apple Silicon
-  if [[ -f /opt/homebrew/bin/brew ]]; then
-    eval "$(/opt/homebrew/bin/brew shellenv)"
-  fi
+  NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+  activate_homebrew || fail "Homebrew installed, but the script could not add it to PATH."
   ok "Homebrew installed"
 fi
 
@@ -107,40 +125,43 @@ if $INSTALL_NODE; then
 fi
 
 # ── 1d. pnpm ─────────────────────────────────────────────────
-# The repo pins pnpm@9.15.0 via the packageManager field. We need a working
-# pnpm — either via corepack or a standalone install. Check what's already
-# available and only install what's missing.
+# The repo pins pnpm via the packageManager field. We need that exact version
+# so the workspace install and Tauri beforeBuildCommand both resolve the same
+# toolchain on a clean clone.
 
-info "Checking pnpm …"
+info "Checking pnpm (need v${PINNED_PNPM_VERSION}) …"
 if command -v pnpm &>/dev/null; then
   PNPM_VER="$(pnpm -v 2>/dev/null || echo "none")"
-  if [[ "$PNPM_VER" != "none" ]]; then
-    ok "pnpm v${PNPM_VER} (already installed)"
+  if [[ "$PNPM_VER" == "$PINNED_PNPM_VERSION" ]]; then
+    ok "pnpm v${PNPM_VER}"
+  else
+    warn "pnpm v${PNPM_VER} does not match pinned v${PINNED_PNPM_VERSION} — will replace it"
   fi
-else
-  # pnpm not found — try corepack first, fall back to standalone install
-  info "pnpm not found — setting up via corepack …"
+fi
 
+if ! command -v pnpm &>/dev/null || [[ "${PNPM_VER:-none}" != "$PINNED_PNPM_VERSION" ]]; then
   if ! command -v corepack &>/dev/null; then
-    info "corepack not found (Node.js 25+ no longer bundles it) — installing via npm"
-    npm install -g --force corepack 2>/dev/null || sudo npm install -g --force corepack 2>/dev/null || true
+    info "corepack not found — installing via npm …"
+    npm install -g --force corepack 2>/dev/null || sudo npm install -g --force corepack
   fi
 
   if command -v corepack &>/dev/null; then
     COREPACK_BIN="$(command -v corepack)"
     "$COREPACK_BIN" enable 2>/dev/null || sudo "$COREPACK_BIN" enable 2>/dev/null || true
-  fi
-
-  # If pnpm still isn't available, install it standalone
-  if ! command -v pnpm &>/dev/null; then
-    info "Installing pnpm standalone via npm …"
-    npm install -g pnpm 2>/dev/null || sudo npm install -g pnpm
+    "$COREPACK_BIN" prepare "pnpm@${PINNED_PNPM_VERSION}" --activate 2>/dev/null || \
+      sudo "$COREPACK_BIN" prepare "pnpm@${PINNED_PNPM_VERSION}" --activate 2>/dev/null || true
   fi
 
   PNPM_VER="$(pnpm -v 2>/dev/null || echo "none")"
-  if [[ "$PNPM_VER" == "none" ]]; then
-    fail "Could not install pnpm. Check your Node.js installation."
+  if [[ "$PNPM_VER" != "$PINNED_PNPM_VERSION" ]]; then
+    info "Installing pinned pnpm via npm …"
+    npm install -g "pnpm@${PINNED_PNPM_VERSION}" 2>/dev/null || sudo npm install -g "pnpm@${PINNED_PNPM_VERSION}"
+    export PATH="$(npm prefix -g)/bin:$PATH"
+    hash -r
   fi
+
+  PNPM_VER="$(pnpm -v 2>/dev/null || echo "none")"
+  [[ "$PNPM_VER" == "$PINNED_PNPM_VERSION" ]] || fail "Could not install pnpm v${PINNED_PNPM_VERSION}. Check your Node.js installation."
   ok "pnpm v${PNPM_VER} installed"
 fi
 
@@ -189,35 +210,29 @@ printf "  %-18s %s\n" "Cargo:" "$(cargo -V | awk '{print $2}')"
 # ─────────────────────────────────────────────────────────────
 # 2. INSTALL WORKSPACE DEPENDENCIES
 # ─────────────────────────────────────────────────────────────
-step "2/7  Installing workspace dependencies (pnpm install)"
-pnpm install
+step "2/7  Installing workspace dependencies"
+pnpm install --force --frozen-lockfile
 ok "Dependencies installed"
 
 # ─────────────────────────────────────────────────────────────
 # 3. BUILD PRODUCTION APP
 # ─────────────────────────────────────────────────────────────
 step "3/7  Building production desktop app (this may take 10-30 min on first run)"
-pnpm --filter @socratic-council/desktop tauri:build
-ok "Production build complete"
+pnpm --filter @socratic-council/desktop exec tauri build --bundles app
+ok "Production app bundle complete"
 
 # ─────────────────────────────────────────────────────────────
 # 4. LOCATE BUILD ARTIFACTS
 # ─────────────────────────────────────────────────────────────
-step "4/7  Locating build artifacts"
+step "4/7  Locating app bundle"
 
 BUNDLE_DIR="apps/desktop/src-tauri/target/release/bundle"
-
-# Find the DMG
-DMG_PATH="$(find "${BUNDLE_DIR}/dmg" -name '*.dmg' -type f 2>/dev/null | head -1)"
-# Find the .app (fallback if DMG isn't available)
 APP_PATH="$(find "${BUNDLE_DIR}/macos" -name '*.app' -maxdepth 1 -type d 2>/dev/null | head -1)"
 
-if [[ -n "$DMG_PATH" ]]; then
-  ok "DMG found: ${DMG_PATH}"
-elif [[ -n "$APP_PATH" ]]; then
+if [[ -n "$APP_PATH" ]]; then
   ok ".app found: ${APP_PATH}"
 else
-  fail "No .dmg or .app found in ${BUNDLE_DIR}. Build may have failed."
+  fail "No .app found in ${BUNDLE_DIR}. Build may have failed."
 fi
 
 # ─────────────────────────────────────────────────────────────
@@ -228,54 +243,17 @@ step "5/7  Installing to /Applications"
 APP_NAME="Socratic Council.app"
 DEST="/Applications/${APP_NAME}"
 
-if [[ -n "$DMG_PATH" ]]; then
-  info "Mounting DMG …"
-
-  # Mount and capture the mount point
-  MOUNT_OUTPUT="$(hdiutil attach "$DMG_PATH" -nobrowse -noverify 2>&1)"
-  MOUNT_POINT="$(echo "$MOUNT_OUTPUT" | grep '/Volumes/' | awk -F'\t' '{print $NF}' | head -1)"
-
-  if [[ -z "$MOUNT_POINT" ]]; then
-    fail "Failed to mount DMG. Output:\n${MOUNT_OUTPUT}"
-  fi
-  ok "Mounted at: ${MOUNT_POINT}"
-
-  # Find the .app inside the mounted DMG
-  DMG_APP="$(find "$MOUNT_POINT" -name '*.app' -maxdepth 1 -type d | head -1)"
-  if [[ -z "$DMG_APP" ]]; then
-    hdiutil detach "$MOUNT_POINT" -quiet 2>/dev/null || true
-    fail "No .app found inside the mounted DMG."
-  fi
-
-  # Remove existing installation if present
-  if [[ -d "$DEST" ]]; then
-    warn "Removing existing ${DEST} …"
-    rm -rf "$DEST"
-  fi
-
-  info "Copying to /Applications …"
-  cp -R "$DMG_APP" "/Applications/"
-  ok "Installed: ${DEST}"
-
-  # ── 6. EJECT ───────────────────────────────────────────────
-  step "6/7  Ejecting DMG"
-  hdiutil detach "$MOUNT_POINT" -quiet 2>/dev/null || hdiutil detach "$MOUNT_POINT" -force 2>/dev/null || true
-  ok "DMG ejected"
-
-elif [[ -n "$APP_PATH" ]]; then
-  # Direct .app copy (no DMG to eject)
-  if [[ -d "$DEST" ]]; then
-    warn "Removing existing ${DEST} …"
-    rm -rf "$DEST"
-  fi
-
-  info "Copying .app to /Applications …"
-  cp -R "$APP_PATH" "/Applications/"
-  ok "Installed: ${DEST}"
-
-  step "6/7  Eject (skipped — no DMG)"
-  ok "Nothing to eject"
+if [[ -d "$DEST" ]]; then
+  warn "Removing existing ${DEST} …"
+  rm -rf "$DEST"
 fi
+
+info "Copying .app to /Applications …"
+ditto "$APP_PATH" "$DEST"
+ok "Installed: ${DEST}"
+
+step "6/7  Eject (skipped — .app install)"
+ok "Nothing to eject"
 
 # ─────────────────────────────────────────────────────────────
 # 7. OPEN THE APP

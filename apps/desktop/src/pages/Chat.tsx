@@ -2415,8 +2415,7 @@ Write a concise closure prompt that asks the council to:
                             {agent.name}
                           </span>
                           <span className="text-ink-500">
-                            {inputTokens}/{outputTokens}
-                            {reasoningTokens > 0 ? ` · r:${reasoningTokens}` : ""} · {costLabel}
+                            {inputTokens}/{outputTokens} · r:{reasoningTokens} · {costLabel}
                           </span>
                         </div>
                       );
@@ -2424,10 +2423,8 @@ Write a concise closure prompt that asks the council to:
                     <div className="flex items-center justify-between">
                       <span className="text-emerald-300">Moderator</span>
                       <span className="text-ink-500">
-                        {moderatorUsage.inputTokens}/{moderatorUsage.outputTokens}
-                        {moderatorUsage.reasoningTokens > 0
-                          ? ` · r:${moderatorUsage.reasoningTokens}`
-                          : ""} ·{" "}
+                        {moderatorUsage.inputTokens}/{moderatorUsage.outputTokens} ·
+                        r:{moderatorUsage.reasoningTokens} ·{" "}
                         {moderatorUsage.pricingAvailable
                           ? `$${moderatorUsage.estimatedUSD.toFixed(4)}`
                           : "—"}

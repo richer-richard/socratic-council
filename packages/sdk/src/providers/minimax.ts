@@ -20,6 +20,11 @@ import { type Transport, createFetchTransport } from "../transport.js";
 interface MiniMaxUsage {
   input_tokens?: number;
   output_tokens?: number;
+  completion_tokens?: number;
+  reasoning_tokens?: number;
+  completion_tokens_details?: {
+    reasoning_tokens?: number;
+  };
   output_tokens_details?: {
     reasoning_tokens?: number;
   };
@@ -66,6 +71,21 @@ function buildSafeThinking(maxTokens: number):
     type: "enabled",
     budget_tokens: budgetTokens,
   };
+}
+
+function extractReasoningTokens(usage: MiniMaxUsage | undefined): number | undefined {
+  if (!usage) return undefined;
+  return (
+    usage.output_tokens_details?.reasoning_tokens ??
+    usage.completion_tokens_details?.reasoning_tokens ??
+    usage.reasoning_tokens
+  );
+}
+
+function estimateReasoningTokensFromThinking(thinking: string): number | undefined {
+  const trimmed = thinking.trim();
+  if (!trimmed) return undefined;
+  return Math.max(1, Math.ceil(trimmed.length / 4));
 }
 
 export class MiniMaxProvider implements BaseProvider {
@@ -164,8 +184,8 @@ export class MiniMaxProvider implements BaseProvider {
       thinking: thinking || undefined,
       tokens: {
         input: data.usage?.input_tokens ?? 0,
-        output: data.usage?.output_tokens ?? 0,
-        reasoning: data.usage?.output_tokens_details?.reasoning_tokens,
+        output: data.usage?.output_tokens ?? data.usage?.completion_tokens ?? 0,
+        reasoning: extractReasoningTokens(data.usage) ?? estimateReasoningTokensFromThinking(thinking),
       },
       finishReason: this.mapFinishReason(data.stop_reason),
       latencyMs: Date.now() - startTime,
@@ -229,14 +249,20 @@ export class MiniMaxProvider implements BaseProvider {
           const usage = event.usage ?? event.message?.usage;
           if (usage) {
             inputTokens = usage.input_tokens ?? inputTokens;
-            outputTokens = usage.output_tokens ?? outputTokens;
-            reasoningTokens = usage.output_tokens_details?.reasoning_tokens ?? reasoningTokens;
+            outputTokens = usage.output_tokens ?? usage.completion_tokens ?? outputTokens;
+            reasoningTokens = extractReasoningTokens(usage) ?? reasoningTokens;
           }
         }
 
         if (event.type === "message_delta" && event.usage) {
-          outputTokens = event.usage.output_tokens ?? outputTokens;
-          reasoningTokens = event.usage.output_tokens_details?.reasoning_tokens ?? reasoningTokens;
+          outputTokens = event.usage.output_tokens ?? event.usage.completion_tokens ?? outputTokens;
+          reasoningTokens = extractReasoningTokens(event.usage) ?? reasoningTokens;
+        }
+
+        if (event.type === "message_stop" && event.usage) {
+          inputTokens = event.usage.input_tokens ?? inputTokens;
+          outputTokens = event.usage.output_tokens ?? event.usage.completion_tokens ?? outputTokens;
+          reasoningTokens = extractReasoningTokens(event.usage) ?? reasoningTokens;
         }
       } catch {
         // Ignore malformed chunks.
@@ -273,7 +299,7 @@ export class MiniMaxProvider implements BaseProvider {
       tokens: {
         input: inputTokens,
         output: outputTokens,
-        reasoning: reasoningTokens,
+        reasoning: reasoningTokens ?? estimateReasoningTokensFromThinking(fullThinking),
       },
       finishReason,
       latencyMs: Date.now() - startTime,
