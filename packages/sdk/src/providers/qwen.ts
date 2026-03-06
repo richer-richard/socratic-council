@@ -19,10 +19,31 @@ import { type Transport, createFetchTransport } from "../transport.js";
 type StreamUsage = {
   prompt_tokens?: number;
   completion_tokens?: number;
+  output_tokens?: number;
+  reasoning_tokens?: number;
   completion_tokens_details?: {
     reasoning_tokens?: number;
   };
+  output_tokens_details?: {
+    reasoning_tokens?: number;
+  };
 };
+
+function estimateReasoningTokensFromThinking(thinking: string): number | undefined {
+  const trimmed = thinking.trim();
+  if (!trimmed) return undefined;
+  // Rough token estimate fallback used only when provider omits reasoning usage.
+  return Math.max(1, Math.ceil(trimmed.length / 4));
+}
+
+function extractReasoningTokens(usage: StreamUsage | undefined): number | undefined {
+  if (!usage) return undefined;
+  return (
+    usage.completion_tokens_details?.reasoning_tokens ??
+    usage.output_tokens_details?.reasoning_tokens ??
+    usage.reasoning_tokens
+  );
+}
 
 export class QwenProvider implements BaseProvider {
   readonly provider = "qwen" as const;
@@ -72,6 +93,10 @@ export class QwenProvider implements BaseProvider {
       request.max_tokens = agent.maxTokens;
     }
 
+    if (stream) {
+      request.stream_options = { include_usage: true };
+    }
+
     return request;
   }
 
@@ -113,8 +138,10 @@ export class QwenProvider implements BaseProvider {
       thinking: thinking || undefined,
       tokens: {
         input: (data.usage?.prompt_tokens as number) ?? 0,
-        output: (data.usage?.completion_tokens as number) ?? 0,
-        reasoning: (data.usage?.completion_tokens_details?.reasoning_tokens as number | undefined),
+        output: (data.usage?.completion_tokens as number) ?? (data.usage?.output_tokens as number) ?? 0,
+        reasoning:
+          (extractReasoningTokens(data.usage as StreamUsage | undefined) as number | undefined) ??
+          estimateReasoningTokensFromThinking(thinking),
       },
       finishReason: this.mapFinishReason(choice?.finish_reason as string | undefined),
       latencyMs: Date.now() - startTime,
@@ -161,8 +188,8 @@ export class QwenProvider implements BaseProvider {
         const usage = data.usage as StreamUsage | undefined;
         if (usage) {
           inputTokens = usage.prompt_tokens ?? inputTokens;
-          outputTokens = usage.completion_tokens ?? outputTokens;
-          reasoningTokens = usage.completion_tokens_details?.reasoning_tokens ?? reasoningTokens;
+          outputTokens = usage.completion_tokens ?? usage.output_tokens ?? outputTokens;
+          reasoningTokens = extractReasoningTokens(usage) ?? reasoningTokens;
         }
 
         if (choice?.finish_reason) {
@@ -203,7 +230,7 @@ export class QwenProvider implements BaseProvider {
       tokens: {
         input: inputTokens,
         output: outputTokens,
-        reasoning: reasoningTokens,
+        reasoning: reasoningTokens ?? estimateReasoningTokensFromThinking(fullThinking),
       },
       finishReason,
       latencyMs: Date.now() - startTime,

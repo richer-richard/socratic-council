@@ -24,7 +24,7 @@ cd socratic-council
 ./install.sh
 ```
 
-The script automatically checks for (and installs if missing) Xcode CLT, Homebrew, Node.js 22+, pnpm, and Rust — then builds the production app, bundles the DMG, copies `Socratic Council.app` to `/Applications`, ejects the DMG, and opens the app.
+The script automatically checks for (and installs if missing) Xcode CLT, Homebrew, Node.js 22+, pnpm, and Rust — then builds the production `.app` bundle, copies `Socratic Council.app` to `/Applications`, and opens the app.
 
 > **Already have everything installed?** The script detects existing tools and skips them (it will upgrade if needed but never downgrade).
 

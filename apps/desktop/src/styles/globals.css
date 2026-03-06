@@ -405,7 +405,9 @@ body {
   display: flex;
   justify-content: center;
   gap: 0.75rem;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  padding-bottom: 0.2rem;
 }
 
 .agent-card {
@@ -419,9 +421,9 @@ body {
   backdrop-filter: blur(14px);
   border: 1px solid var(--line-soft);
   box-shadow: 0 12px 30px rgba(6, 8, 13, 0.45);
-  min-width: 100px;
-  flex: 1 1 0;
-  max-width: 140px;
+  min-width: 132px;
+  max-width: 132px;
+  flex: 0 0 132px;
   transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
   --agent-color: var(--ink-500);
 }
@@ -450,6 +452,7 @@ body {
   font-size: 0.7rem;
   color: var(--ink-700);
   font-weight: 500;
+  white-space: nowrap;
 }
 
 .agent-card-status {

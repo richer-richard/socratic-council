@@ -21,6 +21,34 @@ export interface KimiCompletionOptions extends CompletionOptions {
   useSearch?: boolean;
 }
 
+interface KimiUsage {
+  prompt_tokens?: number;
+  completion_tokens?: number;
+  output_tokens?: number;
+  reasoning_tokens?: number;
+  completion_tokens_details?: {
+    reasoning_tokens?: number;
+  };
+  output_tokens_details?: {
+    reasoning_tokens?: number;
+  };
+}
+
+function extractReasoningTokens(usage: KimiUsage | undefined): number | undefined {
+  if (!usage) return undefined;
+  return (
+    usage.completion_tokens_details?.reasoning_tokens ??
+    usage.output_tokens_details?.reasoning_tokens ??
+    usage.reasoning_tokens
+  );
+}
+
+function estimateReasoningTokensFromThinking(thinking: string): number | undefined {
+  const trimmed = thinking.trim();
+  if (!trimmed) return undefined;
+  return Math.max(1, Math.ceil(trimmed.length / 4));
+}
+
 export class KimiProvider implements BaseProvider {
   readonly provider = "kimi" as const;
   readonly apiKey: string;
@@ -115,13 +143,15 @@ export class KimiProvider implements BaseProvider {
     const choice = data.choices?.[0];
     const content = (choice?.message?.content as string) ?? "";
     const reasoning = (choice?.message?.reasoning_content as string) ?? "";
+    const usage = data.usage as KimiUsage | undefined;
 
     return {
       content: content || reasoning,
       thinking: reasoning || undefined,
       tokens: {
-        input: (data.usage?.prompt_tokens as number) ?? 0,
-        output: (data.usage?.completion_tokens as number) ?? 0,
+        input: usage?.prompt_tokens ?? 0,
+        output: usage?.completion_tokens ?? usage?.output_tokens ?? 0,
+        reasoning: extractReasoningTokens(usage) ?? estimateReasoningTokensFromThinking(reasoning),
       },
       finishReason: this.mapFinishReason(choice?.finish_reason as string | undefined),
       latencyMs,
@@ -144,6 +174,7 @@ export class KimiProvider implements BaseProvider {
     let reasoningContent = "";
     let inputTokens = 0;
     let outputTokens = 0;
+    let reasoningTokens: number | undefined;
     let finishReason: "stop" | "length" | "error" = "stop";
     const parser = createSseParser((dataLine) => {
       const jsonStr = dataLine.trim();
@@ -168,9 +199,11 @@ export class KimiProvider implements BaseProvider {
           onChunk({ content: delta.content, done: false });
         }
 
-        if (data.usage) {
-          inputTokens = data.usage.prompt_tokens ?? inputTokens;
-          outputTokens = data.usage.completion_tokens ?? outputTokens;
+        const usage = data.usage as KimiUsage | undefined;
+        if (usage) {
+          inputTokens = usage.prompt_tokens ?? inputTokens;
+          outputTokens = usage.completion_tokens ?? usage.output_tokens ?? outputTokens;
+          reasoningTokens = extractReasoningTokens(usage) ?? reasoningTokens;
         }
 
         if (choice?.finish_reason) {
@@ -213,6 +246,7 @@ export class KimiProvider implements BaseProvider {
       tokens: {
         input: inputTokens,
         output: outputTokens,
+        reasoning: reasoningTokens ?? estimateReasoningTokensFromThinking(reasoningContent),
       },
       finishReason,
       latencyMs: Date.now() - startTime,

@@ -144,7 +144,7 @@ export function Home({ onNavigate }: HomeProps) {
       </button>
 
       {/* Main Content */}
-      <div className="relative z-10 flex flex-col items-center max-w-3xl w-full">
+      <div className="relative z-10 flex flex-col items-center max-w-6xl w-full">
         {/* Title Section */}
         <div className="text-center mb-10 scale-in">
           <div className="mb-5 flex justify-center" style={{ animation: "float 6s ease-in-out infinite" }}>
