@@ -11,7 +11,8 @@
 #   2. Installs workspace dependencies
 #   3. Builds the production .app bundle
 #   4. Copies .app to /Applications
-#   5. Opens the app
+#   5. Cleans local build caches from the cloned repo
+#   6. Opens the app
 # ──────────────────────────────────────────────────────────────
 set -euo pipefail
 
@@ -31,6 +32,30 @@ ok()    { printf "${GREEN}[  OK]${NC}  %s\n" "$*"; }
 warn()  { printf "${YELLOW}[WARN]${NC}  %s\n" "$*"; }
 fail()  { printf "${RED}[FAIL]${NC}  %s\n" "$*"; exit 1; }
 step()  { printf "\n${BOLD}━━━ %s ━━━${NC}\n" "$*"; }
+
+cleanup_local_build_artifacts() {
+  local path=""
+  local cleanup_paths=(
+    "node_modules"
+    ".pnpm-store"
+    "apps/cli/node_modules"
+    "apps/desktop/node_modules"
+    "packages/core/node_modules"
+    "packages/sdk/node_modules"
+    "packages/shared/node_modules"
+    "apps/cli/dist"
+    "apps/desktop/dist"
+    "packages/core/dist"
+    "packages/sdk/dist"
+    "packages/shared/dist"
+    "apps/desktop/src-tauri/target"
+  )
+
+  for path in "${cleanup_paths[@]}"; do
+    [[ -e "$path" ]] || continue
+    rm -rf "$path"
+  done
+}
 
 activate_homebrew() {
   local brew_bin=""
@@ -252,8 +277,9 @@ info "Copying .app to /Applications …"
 ditto "$APP_PATH" "$DEST"
 ok "Installed: ${DEST}"
 
-step "6/7  Eject (skipped — .app install)"
-ok "Nothing to eject"
+step "6/7  Cleaning local build caches"
+cleanup_local_build_artifacts
+ok "Removed workspace dependencies and build artifacts from the cloned repo"
 
 # ─────────────────────────────────────────────────────────────
 # 7. OPEN THE APP

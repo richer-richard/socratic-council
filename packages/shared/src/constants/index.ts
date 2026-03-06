@@ -16,6 +16,36 @@ import type {
 export const MODEL_REGISTRY: ModelInfo[] = [
   // OpenAI Models (latest first)
   {
+    id: "gpt-5.4",
+    provider: "openai",
+    name: "GPT-5.4",
+    description: "Default GPT-5 model with frontier reasoning, instruction following, and coding",
+    contextWindow: 1_050_000,
+    maxOutputTokens: 128000,
+    supportsThinking: true,
+    supportsVision: true,
+    supportsStreaming: true,
+    pricing: {
+      inputCostPer1M: 2.50,
+      outputCostPer1M: 15.00,
+    },
+  },
+  {
+    id: "gpt-5.3-chat-latest",
+    provider: "openai",
+    name: "GPT-5.3 Instant",
+    description: "Fast GPT-5.3 Chat alias that points to the current instant snapshot used in ChatGPT",
+    contextWindow: 128000,
+    maxOutputTokens: 16384,
+    supportsThinking: false,
+    supportsVision: true,
+    supportsStreaming: true,
+    pricing: {
+      inputCostPer1M: 0.40,
+      outputCostPer1M: 2.00,
+    },
+  },
+  {
     id: "gpt-5.3-codex",
     provider: "openai",
     name: "GPT-5.3 Codex",
@@ -780,7 +810,7 @@ export const DEFAULT_AGENTS: Record<AgentId, AgentConfig> = {
     id: "george",
     name: "George",
     provider: "openai",
-    model: "gpt-5.3-codex",
+    model: "gpt-5.4",
     systemPrompt: baseSystemPrompt("George"),
     temperature: 1,
     maxTokens: 4096,

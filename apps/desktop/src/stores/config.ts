@@ -68,7 +68,7 @@ export interface AppConfig {
 
 // Each character is locked to one model.
 export const LOCKED_MODELS: Record<Provider, string> = {
-  openai: "gpt-5.3-codex",
+  openai: "gpt-5.4",
   anthropic: "claude-opus-4-6",
   google: "gemini-3.1-pro-preview",
   deepseek: "deepseek-reasoner",
@@ -349,7 +349,7 @@ export const PROVIDER_INFO: Record<Provider, {
     agent: "George",
     avatar: "🔷",
     color: "text-george",
-    description: "GPT-5.3 Codex / GPT-5.2 family models",
+    description: "GPT-5.4 (default), GPT-5.3 Instant, GPT-5.3 Codex",
     keyPrefix: "sk-",
     defaultBaseUrl: "https://api.openai.com",
   },
