@@ -3,7 +3,15 @@ import type { CSSProperties, HTMLAttributes } from "react";
 import type { Page } from "../App";
 import { useConfig, PROVIDER_INFO, type Provider } from "../stores/config";
 import { callProvider, apiLogger, type ChatMessage as APIChatMessage } from "../services/api";
+import {
+  type DiscussionSession,
+  type ModeratorUsageSnapshot,
+  type SessionMessage as PersistedSessionMessage,
+  type SessionPhase,
+  type SessionStatus,
+} from "../services/sessions";
 import { getToolPrompt, runToolCall, type ToolCall } from "../services/tools";
+import { CouncilMark } from "../components/CouncilMark";
 import { ProviderIcon, SystemIcon, UserIcon } from "../components/icons/ProviderIcons";
 import {
   ReactionIcon,
@@ -24,27 +32,17 @@ import type {
   CostTracker,
   PairwiseConflict,
   WhisperMessage,
-  Message as SharedMessage,
   AgentId as CouncilAgentId,
   ModelId,
 } from "@socratic-council/shared";
 
 interface ChatProps {
-  topic: string;
-  onNavigate: (page: Page) => void;
+  session: DiscussionSession;
+  onNavigate: (page: Page, sessionId?: string) => void;
+  onPersistSession: (session: DiscussionSession) => void;
 }
 
-interface ChatMessage extends SharedMessage {
-  isStreaming?: boolean;
-  latencyMs?: number;
-  error?: string;
-  quotedMessageIds?: string[];
-  thinking?: string;
-  fullResponse?: string;
-  reactions?: Partial<Record<ReactionId, { count: number; by: string[] }>>;
-  displayName?: string;
-  displayProvider?: Provider;
-}
+type ChatMessage = PersistedSessionMessage;
 
 interface BiddingRound {
   scores: Record<CouncilAgentId, number>;
@@ -255,7 +253,7 @@ const AGENT_CONFIG: Record<AgentId, {
 
 const AGENT_IDS: CouncilAgentId[] = ["george", "cathy", "grace", "douglas", "kate", "quinn", "mary"];
 
-const isCouncilAgent = (id: ChatMessage["agentId"]): id is CouncilAgentId =>
+const isCouncilAgent = (id: unknown): id is CouncilAgentId =>
   AGENT_IDS.includes(id as CouncilAgentId);
 
 const isModeratorMessage = (msg: unknown): boolean => {
@@ -267,6 +265,42 @@ const isModeratorMessage = (msg: unknown): boolean => {
 const REACTION_IDS = REACTION_CATALOG;
 const MAX_CONTEXT_MESSAGES = 16;
 const MAX_TOOL_ITERATIONS = 2;
+const DEFAULT_MODERATOR_USAGE: ModeratorUsageSnapshot = {
+  inputTokens: 0,
+  outputTokens: 0,
+  reasoningTokens: 0,
+  estimatedUSD: 0,
+  pricingAvailable: false,
+};
+
+function createWhisperBonuses(): Record<CouncilAgentId, number> {
+  return {
+    george: 0,
+    cathy: 0,
+    grace: 0,
+    douglas: 0,
+    kate: 0,
+    quinn: 0,
+    mary: 0,
+  };
+}
+
+function normalizeSessionForChat(session: DiscussionSession): DiscussionSession {
+  return {
+    ...session,
+    status: session.status === "running" ? "paused" : session.status,
+    messages: session.messages.filter((message) => !message.isStreaming),
+    runtime: {
+      ...session.runtime,
+      phase:
+        session.status === "completed"
+          ? "completed"
+          : session.runtime.phase === "completed"
+            ? "discussion"
+            : session.runtime.phase,
+    },
+  };
+}
 
 /** Live stopwatch displayed while an AI agent is streaming a response. */
 function LiveStopwatch({ startTime, isStreaming, finalMs }: {
@@ -402,31 +436,32 @@ function applyReactions(
   });
 }
 
-export function Chat({ topic, onNavigate }: ChatProps) {
+export function Chat({ session, onNavigate, onPersistSession }: ChatProps) {
   type SidePanelView = "default" | "logs" | "search" | "export";
 
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const normalizedSession = useMemo(() => normalizeSessionForChat(session), [session]);
+  const topic = normalizedSession.topic;
+
+  const [messages, setMessages] = useState<ChatMessage[]>(normalizedSession.messages);
   const [isRunning, setIsRunning] = useState(false);
   const [typingAgents, setTypingAgents] = useState<CouncilAgentId[]>([]);
-  const [currentTurn, setCurrentTurn] = useState(0);
+  const [currentTurn, setCurrentTurn] = useState(normalizedSession.currentTurn);
   const [showBidding, setShowBidding] = useState(false);
   const [currentBidding, setCurrentBidding] = useState<BiddingRound | null>(null);
-  const [totalTokens, setTotalTokens] = useState({ input: 0, output: 0 });
-  const [isPaused, setIsPaused] = useState(false);
-  const pausedRef = useRef(false);
-  const [errors, setErrors] = useState<string[]>([]);
+  const [totalTokens, setTotalTokens] = useState(normalizedSession.totalTokens);
+  const [isPaused, setIsPaused] = useState(normalizedSession.status === "paused");
+  const [sessionStatus, setSessionStatus] = useState<SessionStatus>(normalizedSession.status);
+  const [lastSavedAt, setLastSavedAt] = useState(normalizedSession.updatedAt);
+  const pausedRef = useRef(normalizedSession.status === "paused");
+  const [errors, setErrors] = useState<string[]>(normalizedSession.errors);
   const [sidePanelView, setSidePanelView] = useState<SidePanelView>("default");
   const [costState, setCostState] = useState<CostTracker | null>(null);
-  const [moderatorUsage, setModeratorUsage] = useState({
-    inputTokens: 0,
-    outputTokens: 0,
-    reasoningTokens: 0,
-    estimatedUSD: 0,
-    pricingAvailable: false,
-  });
+  const [moderatorUsage, setModeratorUsage] = useState<ModeratorUsageSnapshot>(
+    normalizedSession.moderatorUsage
+  );
   const [conflictState, setConflictState] = useState<ConflictDetection | null>(null);
   const [allConflicts, setAllConflicts] = useState<PairwiseConflict[]>([]);
-  const [duoLogue, setDuoLogue] = useState<DuoLogueState | null>(null);
+  const [duoLogue, setDuoLogue] = useState<DuoLogueState | null>(normalizedSession.duoLogue);
   const [reactionPickerTarget, setReactionPickerTarget] = useState<string | null>(null);
   const [recentlyCopiedQuote, setRecentlyCopiedQuote] = useState<string | null>(null);
   const [highlightedMessageId, setHighlightedMessageId] = useState<string | null>(null);
@@ -440,26 +475,34 @@ export function Chat({ topic, onNavigate }: ChatProps) {
   const costTrackerRef = useRef<CostTrackerEngine | null>(null);
   const conflictDetectorRef = useRef(new ConflictDetector(60, 12));
   const memoryManagerRef = useRef<ConversationMemoryManager | null>(null);
-  const hasStartedRef = useRef(false);
+  const hasStartedRef = useRef(
+    normalizedSession.status !== "draft" ||
+      normalizedSession.messages.length > 0 ||
+      normalizedSession.currentTurn > 0
+  );
   const fairnessManagerRef = useRef(new FairnessManager());
   const whisperBonusesRef = useRef<Record<CouncilAgentId, number>>({
-    george: 0,
-    cathy: 0,
-    grace: 0,
-    douglas: 0,
-    kate: 0,
-    quinn: 0,
-    mary: 0,
+    ...createWhisperBonuses(),
+    ...normalizedSession.runtime.whisperBonuses,
   });
-  const cyclePendingRef = useRef<CouncilAgentId[]>([]);
-  const recentSpeakersRef = useRef<CouncilAgentId[]>([]);
-  const lastWhisperKeyRef = useRef<string | null>(null);
-  const lastModeratorKeyRef = useRef<string | null>(null);
-  const lastModeratorBalanceKeyRef = useRef<string | null>(null);
-  const lastModeratorSynthesisTurnRef = useRef(0);
-  const moderatorClosurePostedRef = useRef(false);
+  const cyclePendingRef = useRef<CouncilAgentId[]>(normalizedSession.runtime.cyclePending);
+  const recentSpeakersRef = useRef<CouncilAgentId[]>(normalizedSession.runtime.recentSpeakers);
+  const lastWhisperKeyRef = useRef<string | null>(normalizedSession.runtime.lastWhisperKey);
+  const lastModeratorKeyRef = useRef<string | null>(normalizedSession.runtime.lastModeratorKey);
+  const lastModeratorBalanceKeyRef = useRef<string | null>(
+    normalizedSession.runtime.lastModeratorBalanceKey
+  );
+  const lastModeratorSynthesisTurnRef = useRef(normalizedSession.runtime.lastModeratorSynthesisTurn);
+  const moderatorClosurePostedRef = useRef(normalizedSession.runtime.moderatorClosurePosted);
   const moderatorInFlightRef = useRef(false);
-  const duoLogueRef = useRef<DuoLogueState | null>(null);
+  const duoLogueRef = useRef<DuoLogueState | null>(normalizedSession.duoLogue);
+  const messagesRef = useRef<ChatMessage[]>(normalizedSession.messages);
+  const currentTurnRef = useRef(normalizedSession.currentTurn);
+  const previousSpeakerRef = useRef<CouncilAgentId | null>(normalizedSession.runtime.previousSpeaker);
+  const phaseRef = useRef<SessionPhase>(normalizedSession.runtime.phase);
+  const closingQueueRef = useRef<CouncilAgentId[]>(normalizedSession.runtime.closingQueue);
+  const closingNoticePostedRef = useRef(normalizedSession.runtime.closingNoticePosted);
+  const lastPersistSignatureRef = useRef("");
 
   const { config, getMaxTurns, getConfiguredProviders } = useConfig();
   const maxTurns = getMaxTurns();
@@ -486,6 +529,10 @@ export function Chat({ topic, onNavigate }: ChatProps) {
       map.set(message.id, message);
     }
     return map;
+  }, [messages]);
+
+  useEffect(() => {
+    messagesRef.current = messages;
   }, [messages]);
 
   useEffect(() => {
@@ -516,13 +563,9 @@ export function Chat({ topic, onNavigate }: ChatProps) {
     memoryManagerRef.current = createMemoryManager({ windowSize: MAX_CONTEXT_MESSAGES });
     memoryManagerRef.current.setTopic(topic);
     setTotalTokens({ input: 0, output: 0 });
-    setModeratorUsage({
-      inputTokens: 0,
-      outputTokens: 0,
-      reasoningTokens: 0,
-      estimatedUSD: 0,
-      pricingAvailable: false,
-    });
+    setModeratorUsage(DEFAULT_MODERATOR_USAGE);
+    currentTurnRef.current = 0;
+    setCurrentTurn(0);
     setCurrentBidding(null);
     setShowBidding(false);
     setErrors([]);
@@ -530,6 +573,10 @@ export function Chat({ topic, onNavigate }: ChatProps) {
     setAllConflicts([]);
     setDuoLogue(null);
     setTypingAgents([]);
+    previousSpeakerRef.current = null;
+    phaseRef.current = "discussion";
+    closingQueueRef.current = [];
+    closingNoticePostedRef.current = false;
     duoLogueRef.current = null;
     lastWhisperKeyRef.current = null;
     lastModeratorKeyRef.current = null;
@@ -537,18 +584,82 @@ export function Chat({ topic, onNavigate }: ChatProps) {
     lastModeratorSynthesisTurnRef.current = 0;
     moderatorClosurePostedRef.current = false;
     fairnessManagerRef.current = new FairnessManager();
-    whisperBonusesRef.current = {
-      george: 0,
-      cathy: 0,
-      grace: 0,
-      douglas: 0,
-      kate: 0,
-      quinn: 0,
-      mary: 0,
-    };
+    whisperBonusesRef.current = createWhisperBonuses();
     cyclePendingRef.current = [];
     recentSpeakersRef.current = [];
   }, [topic]);
+
+  const hydrateRuntimeState = useCallback((source: DiscussionSession) => {
+    costTrackerRef.current = new CostTrackerEngine(AGENT_IDS);
+    memoryManagerRef.current = createMemoryManager({ windowSize: MAX_CONTEXT_MESSAGES });
+    memoryManagerRef.current.setTopic(source.topic);
+
+    const effectiveRecentSpeakers =
+      source.runtime.recentSpeakers.length > 0
+        ? source.runtime.recentSpeakers
+        : source.messages
+            .filter(
+              (message): message is ChatMessage & { agentId: CouncilAgentId } =>
+                isCouncilAgent(message.agentId)
+            )
+            .map((message) => message.agentId)
+            .slice(-fairnessManagerRef.current.getWindowSize());
+
+    fairnessManagerRef.current = new FairnessManager();
+    for (const speaker of effectiveRecentSpeakers) {
+      fairnessManagerRef.current.recordSpeaker(speaker);
+    }
+
+    const nextModeratorUsage: ModeratorUsageSnapshot = {
+      ...DEFAULT_MODERATOR_USAGE,
+    };
+
+    for (const message of source.messages) {
+      if (isCouncilAgent(message.agentId)) {
+        if (message.tokens && message.metadata?.model) {
+          costTrackerRef.current.recordUsage(message.agentId, message.tokens, message.metadata.model);
+        }
+
+        memoryManagerRef.current.addMessage(message);
+
+        for (const quoteId of message.quotedMessageIds ?? []) {
+          memoryManagerRef.current.recordQuote(quoteId, message.agentId);
+        }
+
+        for (const [reactionId, reaction] of Object.entries(message.reactions ?? {})) {
+          if (!reaction) continue;
+          for (const actorId of reaction.by) {
+            if (isCouncilAgent(actorId)) {
+              memoryManagerRef.current.recordReaction(message.id, actorId, reactionId);
+            }
+          }
+        }
+
+        continue;
+      }
+
+      if (isModeratorMessage(message)) {
+        memoryManagerRef.current.addMessage(message);
+
+        if (message.tokens) {
+          const moderatorCost = calculateMessageCost(message.metadata?.model, message.tokens);
+          nextModeratorUsage.inputTokens += message.tokens.input;
+          nextModeratorUsage.outputTokens += message.tokens.output;
+          nextModeratorUsage.reasoningTokens += message.tokens.reasoning ?? 0;
+          nextModeratorUsage.estimatedUSD += moderatorCost ?? 0;
+          nextModeratorUsage.pricingAvailable =
+            nextModeratorUsage.pricingAvailable || moderatorCost != null;
+        }
+      }
+    }
+
+    setCostState(costTrackerRef.current.getState());
+    setModeratorUsage(nextModeratorUsage);
+  }, []);
+
+  useEffect(() => {
+    hydrateRuntimeState(normalizedSession);
+  }, [hydrateRuntimeState, normalizedSession]);
 
   // Scroll to bottom function
   const scrollToBottom = useCallback(() => {
@@ -928,7 +1039,7 @@ export function Chat({ topic, onNavigate }: ChatProps) {
       const recentForContext =
         options.kind === "opening"
           ? []
-          : messages
+          : messagesRef.current
               .filter((m) => (isCouncilAgent(m.agentId) || isModeratorMessage(m)) && !m.isStreaming)
               .filter((m) => (m.content ?? "").trim().length > 0)
               .slice(-12);
@@ -1096,7 +1207,7 @@ Write a concise closure prompt that asks the council to:
       moderatorInFlightRef.current = false;
       moderatorAbortRef.current = null;
     }
-  }, [config.preferences.moderatorEnabled, getProxy, messages, pickModeratorRuntime, topic]);
+  }, [config.preferences.moderatorEnabled, getProxy, pickModeratorRuntime, topic]);
 
   useEffect(() => {
     if (!isRunning) return;
@@ -1520,53 +1631,53 @@ Write a concise closure prompt that asks the council to:
   );
 
   // Main discussion loop
-  const runDiscussion = useCallback(async () => {
-    setIsRunning(true);
+  const runDiscussion = useCallback(async (mode: "fresh" | "resume" = "resume") => {
+    if (mode === "fresh") {
+      resetRuntimeState();
+
+      const topicMessage: ChatMessage = {
+        id: `msg_${Date.now()}`,
+        agentId: "system",
+        content: `Discussion Topic: "${topic}"`,
+        timestamp: Date.now(),
+      };
+
+      setMessages([topicMessage]);
+      cyclePendingRef.current = [...configuredAgentIds];
+    } else {
+      if (phaseRef.current === "completed") {
+        return;
+      }
+
+      if (phaseRef.current === "discussion") {
+        const pending = cyclePendingRef.current.filter((id) => configuredAgentIds.includes(id));
+        cyclePendingRef.current = pending.length > 0 ? pending : [...configuredAgentIds];
+      }
+    }
+
     abortRef.current = false;
     pausedRef.current = false;
-    resetRuntimeState();
+    setIsPaused(false);
+    setIsRunning(true);
+    setSessionStatus("running");
+    setTypingAgents([]);
 
-    // Add topic as system message
-    const topicMessage: ChatMessage = {
-      id: `msg_${Date.now()}`,
-      agentId: "system",
-      content: `Discussion Topic: "${topic}"`,
-      timestamp: Date.now(),
-    };
-    setMessages([topicMessage]);
-
-    if (config.preferences.moderatorEnabled && !abortRef.current) {
+    if (mode === "fresh" && config.preferences.moderatorEnabled && !abortRef.current) {
       await generateModeratorMessage({ kind: "opening" });
     }
 
-    cyclePendingRef.current = [...configuredAgentIds];
-    let previousSpeaker: CouncilAgentId | null = null;
-    let turn = 0;
-
-    while (!abortRef.current && (maxTurns === Infinity || turn < maxTurns)) {
-      // Check for pause
-      while (pausedRef.current && !abortRef.current) {
-        await new Promise(resolve => setTimeout(resolve, 100));
-      }
-
-      if (abortRef.current) break;
-
-      // Reset typing state when resuming from pause
-      setTypingAgents([]);
-
-      setCurrentTurn(turn + 1);
+    while (
+      !abortRef.current &&
+      phaseRef.current === "discussion" &&
+      (maxTurns === Infinity || currentTurnRef.current < maxTurns)
+    ) {
       const pending = cyclePendingRef.current.filter((id) => configuredAgentIds.includes(id));
-      if (pending.length === 0) {
-        cyclePendingRef.current = [...configuredAgentIds];
-      } else {
-        cyclePendingRef.current = pending;
-      }
+      cyclePendingRef.current = pending.length > 0 ? pending : [...configuredAgentIds];
       const pendingNow = cyclePendingRef.current;
 
-      // Run bidding round
       const focusAgents = duoLogueRef.current?.remainingTurns ? duoLogueRef.current.participants : undefined;
       const excludeForRound =
-        pendingNow.length > 1 ? previousSpeaker ?? undefined : undefined;
+        pendingNow.length > 1 ? previousSpeakerRef.current ?? undefined : undefined;
       const bidding = generateBiddingScores(
         excludeForRound,
         AGENT_IDS,
@@ -1577,13 +1688,12 @@ Write a concise closure prompt that asks the council to:
       if (config.preferences.showBiddingScores) {
         setCurrentBidding(bidding);
         setShowBidding(true);
-        await new Promise(resolve => setTimeout(resolve, 1500));
+        await new Promise((resolve) => setTimeout(resolve, 1500));
         setShowBidding(false);
       }
 
       if (abortRef.current) break;
 
-      // Generate responses from top agents (group chat style)
       const rankedAgents = (Object.entries(bidding.scores) as [CouncilAgentId, number][])
         .filter(
           ([agentId, score]) =>
@@ -1599,8 +1709,6 @@ Write a concise closure prompt that asks the council to:
         break;
       }
 
-      // Strict per-cycle fairness: each cycle slot belongs to one agent only.
-      // Retry once for the same agent; never re-route to alternates in the same turn.
       let response = await generateAgentResponse(selectedSpeaker);
       if ((!response || response.error) && !abortRef.current) {
         response = await generateAgentResponse(selectedSpeaker);
@@ -1610,16 +1718,15 @@ Write a concise closure prompt that asks the council to:
       const actualSpeaker: CouncilAgentId | null =
         response && !response.error ? selectedSpeaker : null;
 
-      if (abortRef.current) break;
-
-      // Consume the cycle slot regardless of call success to preserve one-slot-per-agent cycles.
       cyclePendingRef.current = cyclePendingRef.current.filter((id) => id !== selectedSpeaker);
       if (actualSpeaker) {
-        previousSpeaker = actualSpeaker;
+        previousSpeakerRef.current = actualSpeaker;
         fairnessManagerRef.current.recordSpeaker(actualSpeaker);
         recentSpeakersRef.current = [...recentSpeakersRef.current.slice(-5), actualSpeaker];
       }
-      turn++;
+
+      currentTurnRef.current += 1;
+      setCurrentTurn(currentTurnRef.current);
 
       if (duoLogueRef.current) {
         const remaining = duoLogueRef.current.remainingTurns - 1;
@@ -1635,53 +1742,89 @@ Write a concise closure prompt that asks the council to:
       }
 
       if (config.preferences.moderatorEnabled && !abortRef.current) {
-        if (turn > 0 && turn % 7 === 0 && lastModeratorSynthesisTurnRef.current !== turn) {
-          lastModeratorSynthesisTurnRef.current = turn;
-          await generateModeratorMessage({ kind: "synthesis", turn });
+        if (
+          currentTurnRef.current > 0 &&
+          currentTurnRef.current % 7 === 0 &&
+          lastModeratorSynthesisTurnRef.current !== currentTurnRef.current
+        ) {
+          lastModeratorSynthesisTurnRef.current = currentTurnRef.current;
+          await generateModeratorMessage({ kind: "synthesis", turn: currentTurnRef.current });
         }
 
         const recentSpeakers = recentSpeakersRef.current.slice(-6);
         const uniqueSpeakers = Array.from(new Set(recentSpeakers));
         if (recentSpeakers.length >= 6 && uniqueSpeakers.length <= 2) {
-          const balanceKey = `${turn}:${uniqueSpeakers.sort().join("-")}`;
+          const balanceKey = `${currentTurnRef.current}:${uniqueSpeakers.sort().join("-")}`;
           if (lastModeratorBalanceKeyRef.current !== balanceKey) {
             lastModeratorBalanceKeyRef.current = balanceKey;
-            await generateModeratorMessage({ kind: "balance", turn });
+            await generateModeratorMessage({ kind: "balance", turn: currentTurnRef.current });
           }
         }
 
         if (
           maxTurns !== Infinity &&
           !moderatorClosurePostedRef.current &&
-          maxTurns - turn <= 3
+          maxTurns - currentTurnRef.current <= 3
         ) {
           moderatorClosurePostedRef.current = true;
-          await generateModeratorMessage({ kind: "closure", remainingTurns: maxTurns - turn });
+          await generateModeratorMessage({
+            kind: "closure",
+            remainingTurns: maxTurns - currentTurnRef.current,
+          });
         }
       }
 
-      // Small delay between turns
-      await new Promise(resolve => setTimeout(resolve, 500));
+      await new Promise((resolve) => setTimeout(resolve, 500));
     }
 
-    if (!abortRef.current && turn > 0) {
-      const closingNotice: ChatMessage = {
-        id: `msg_${Date.now()}_closing_notice`,
-        agentId: "system",
-        content:
-          `Discussion ended after ${turn} turns. Closing round: quick goodbyes + feedback.`,
-        timestamp: Date.now(),
-      };
-      setMessages((prev) => [...prev, closingNotice]);
+    if (
+      !abortRef.current &&
+      phaseRef.current === "discussion" &&
+      currentTurnRef.current > 0
+    ) {
+      phaseRef.current = "closing";
 
-      const closingAgents = AGENT_IDS.filter((id) =>
-        configuredProviders.includes(AGENT_CONFIG[id].provider)
-      );
-
-      for (const agentId of closingAgents) {
-        if (abortRef.current) break;
-        await generateClosingResponse(agentId, turn);
+      if (!closingNoticePostedRef.current) {
+        const closingNotice: ChatMessage = {
+          id: `msg_${Date.now()}_closing_notice`,
+          agentId: "system",
+          content:
+            `Discussion ended after ${currentTurnRef.current} turns. Closing round: quick goodbyes + feedback.`,
+          timestamp: Date.now(),
+        };
+        closingNoticePostedRef.current = true;
+        setMessages((prev) => [...prev, closingNotice]);
       }
+
+      if (closingQueueRef.current.length === 0) {
+        closingQueueRef.current = AGENT_IDS.filter((id) =>
+          configuredProviders.includes(AGENT_CONFIG[id].provider)
+        );
+      }
+    }
+
+    while (
+      !abortRef.current &&
+      phaseRef.current === "closing" &&
+      closingQueueRef.current.length > 0
+    ) {
+      const nextAgent = closingQueueRef.current[0];
+      if (!nextAgent) break;
+
+      await generateClosingResponse(nextAgent, currentTurnRef.current);
+      if (abortRef.current) break;
+
+      closingQueueRef.current = closingQueueRef.current.slice(1);
+    }
+
+    if (
+      !abortRef.current &&
+      phaseRef.current === "closing" &&
+      closingQueueRef.current.length === 0
+    ) {
+      phaseRef.current = "completed";
+      setSessionStatus("completed");
+      setIsPaused(false);
     }
 
     setIsRunning(false);
@@ -1702,9 +1845,9 @@ Write a concise closure prompt that asks the council to:
   // Start discussion when providers become available
   useEffect(() => {
     if (hasStartedRef.current) return;
-    if (configuredProviders.length > 0) {
+    if (configuredProviders.length > 0 && normalizedSession.status === "draft" && normalizedSession.messages.length === 0) {
       hasStartedRef.current = true;
-      runDiscussion();
+      void runDiscussion("fresh");
     } else if (messages.length === 0) {
       setMessages([{
         id: `msg_${Date.now()}`,
@@ -1714,7 +1857,7 @@ Write a concise closure prompt that asks the council to:
         error: "No API keys configured",
       }]);
     }
-  }, [configuredProviders.length, messages.length, runDiscussion]);
+  }, [configuredProviders.length, messages.length, normalizedSession.messages.length, normalizedSession.status, runDiscussion]);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -1729,9 +1872,9 @@ Write a concise closure prompt that asks the council to:
     };
   }, []);
 
-  const handleStop = () => {
+  const handlePause = () => {
     abortRef.current = true;
-    pausedRef.current = false;
+    pausedRef.current = true;
     for (const controller of activeRequestsRef.current.values()) {
       controller.abort();
     }
@@ -1740,34 +1883,133 @@ Write a concise closure prompt that asks the council to:
     moderatorAbortRef.current = null;
     setIsRunning(false);
     setTypingAgents([]);
-    setIsPaused(false);
-    // Immediately remove any in-flight streaming messages
-    setMessages(prev => prev.filter(m => !m.isStreaming));
+    setCurrentBidding(null);
+    setShowBidding(false);
+    setIsPaused(true);
+    setSessionStatus("paused");
+    setMessages((prev) => prev.filter((message) => !message.isStreaming));
   };
 
   const handlePauseResume = () => {
     if (isPaused) {
-      // Resume - clear the paused flag
-      pausedRef.current = false;
-      setIsPaused(false);
+      hasStartedRef.current = true;
+      void runDiscussion("resume");
     } else {
-      // Pause - abort all in-progress requests immediately
-      pausedRef.current = true;
-      for (const controller of activeRequestsRef.current.values()) {
-        controller.abort();
-      }
-      activeRequestsRef.current.clear();
-      moderatorAbortRef.current?.abort();
-      moderatorAbortRef.current = null;
-      setTypingAgents([]);
-      setIsPaused(true);
-
-      // Immediately remove incomplete streaming messages
-      setMessages(prev => prev.filter(m => !m.isStreaming));
+      handlePause();
     }
   };
 
+  const handleBackToWorkstation = () => {
+    if (isRunning) {
+      handlePause();
+    }
+    onNavigate("home", normalizedSession.id);
+  };
+
+  const persistSessionSnapshot = useCallback(() => {
+    const nextUpdatedAt = Date.now();
+    const persistedMessages = messages.filter((message) => !message.isStreaming);
+    const nextStatus: SessionStatus =
+      phaseRef.current === "completed"
+        ? "completed"
+        : isPaused
+          ? "paused"
+          : isRunning
+            ? "running"
+            : sessionStatus;
+    const messageFingerprint = persistedMessages.reduce((hash, message) => {
+      const reactionCount = Object.values(message.reactions ?? {}).reduce(
+        (count, reaction) => count + (reaction?.count ?? 0),
+        0
+      );
+
+      return (
+        (hash * 31 +
+          message.id.length +
+          message.content.length +
+          (message.error?.length ?? 0) +
+          (message.thinking?.length ?? 0) +
+          (message.fullResponse?.length ?? 0) +
+          reactionCount) %
+        2147483647
+      );
+    }, 7);
+    const signature = [
+      nextStatus,
+      phaseRef.current,
+      currentTurnRef.current,
+      totalTokens.input,
+      totalTokens.output,
+      errors.join("|"),
+      duoLogue?.remainingTurns ?? 0,
+      closingQueueRef.current.join(","),
+      messageFingerprint,
+      persistedMessages.length,
+    ].join("::");
+
+    if (lastPersistSignatureRef.current === signature) {
+      return;
+    }
+    lastPersistSignatureRef.current = signature;
+
+    onPersistSession({
+      id: normalizedSession.id,
+      topic,
+      title: normalizedSession.title,
+      createdAt: normalizedSession.createdAt,
+      updatedAt: nextUpdatedAt,
+      lastOpenedAt: Math.max(normalizedSession.lastOpenedAt, normalizedSession.updatedAt),
+      status: nextStatus,
+      currentTurn: currentTurnRef.current,
+      totalTokens,
+      moderatorUsage,
+      messages: persistedMessages,
+      errors,
+      duoLogue,
+      runtime: {
+        phase: phaseRef.current,
+        cyclePending: cyclePendingRef.current,
+        previousSpeaker: previousSpeakerRef.current,
+        recentSpeakers: recentSpeakersRef.current,
+        whisperBonuses: whisperBonusesRef.current,
+        lastWhisperKey: lastWhisperKeyRef.current,
+        lastModeratorKey: lastModeratorKeyRef.current,
+        lastModeratorBalanceKey: lastModeratorBalanceKeyRef.current,
+        lastModeratorSynthesisTurn: lastModeratorSynthesisTurnRef.current,
+        moderatorClosurePosted: moderatorClosurePostedRef.current,
+        closingQueue: closingQueueRef.current,
+        closingNoticePosted: closingNoticePostedRef.current,
+      },
+    });
+
+    setLastSavedAt(nextUpdatedAt);
+  }, [
+    errors,
+    isPaused,
+    isRunning,
+    messages,
+    moderatorUsage,
+    normalizedSession.createdAt,
+    normalizedSession.id,
+    normalizedSession.lastOpenedAt,
+    normalizedSession.title,
+    normalizedSession.updatedAt,
+    onPersistSession,
+    sessionStatus,
+    topic,
+    totalTokens,
+    duoLogue,
+  ]);
+
+  useEffect(() => {
+    persistSessionSnapshot();
+  }, [persistSessionSnapshot]);
+
   const displayMaxTurns = maxTurns === Infinity ? "\u221E" : maxTurns;
+  const formattedLastSavedAt = new Date(lastSavedAt).toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 
   // Format timestamp for Discord-style display
   const formatTime = (timestamp: number) => {
@@ -1815,30 +2057,32 @@ Write a concise closure prompt that asks the council to:
     <div className="app-shell flex flex-col h-screen">
       <div className="ambient-canvas" aria-hidden="true" />
       {/* Header */}
-      <div className="app-header px-6 py-4 relative z-10">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-          <div className="flex items-center gap-4">
+      <div className="app-header px-6 py-4 relative z-10 chat-workstation-header">
+        <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+          <div className="chat-session-hero">
             <button
-              onClick={() => {
-                handleStop();
-                onNavigate("home");
-              }}
+              onClick={handleBackToWorkstation}
               className="button-ghost"
             >
-              &larr; Back
+              &larr; Workstation
             </button>
             <div className="divider-vertical"></div>
-            <div>
-              <h1 className="text-lg font-semibold text-ink-900 flex items-center gap-2">
-                Socratic Council
-              </h1>
-              <p className="text-sm text-ink-500 truncate max-w-lg">
-                {topic}
-              </p>
+            <div className="chat-session-mark">
+              <CouncilMark size={34} />
+            </div>
+            <div className="chat-meta-stack">
+              <div className="chat-kicker-row">
+                <span className={`session-status session-status-${sessionStatus}`}>
+                  {sessionStatus === "completed" ? "Completed" : isPaused ? "Paused" : isRunning ? "Running" : "Saved"}
+                </span>
+                <span className="chat-autosave-pill">Autosaved locally at {formattedLastSavedAt}</span>
+              </div>
+              <h1 className="chat-session-title">Socratic Council</h1>
+              <p className="chat-session-topic">{topic}</p>
             </div>
           </div>
 
-          <div className="flex flex-wrap items-center gap-3 justify-start lg:justify-end">
+          <div className="flex flex-wrap items-center gap-3 justify-start xl:justify-end">
             <div className="flex items-center gap-2">
               <div className="text-sm text-ink-500">
                 Turn {currentTurn}/{displayMaxTurns}
@@ -1898,39 +2142,26 @@ Write a concise closure prompt that asks the council to:
               Export
             </button>
 
-            {isRunning && (
-              <>
-                <button
-                  onClick={handlePauseResume}
-                  className="button-secondary p-2"
-                  title={isPaused ? "Resume" : "Pause"}
-                >
+            {sessionStatus !== "completed" && (isRunning || isPaused || sessionStatus === "paused" || currentTurn > 0) && (
+              <button
+                onClick={handlePauseResume}
+                className={`session-control-button ${isPaused ? "is-resume" : ""}`}
+                title={isPaused ? "Resume session" : "Pause and save session"}
+              >
+                <span className="session-control-icon">
                   {isPaused ? (
-                    // Play icon inside circle
-                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <circle cx="12" cy="12" r="10" />
-                      <polygon points="10 8 16 12 10 16 10 8" fill="currentColor" stroke="none" />
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.25" strokeLinecap="round" strokeLinejoin="round">
+                      <polygon points="8 6 18 12 8 18 8 6" fill="currentColor" stroke="none" />
                     </svg>
                   ) : (
-                    // Pause icon inside circle
-                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <circle cx="12" cy="12" r="10" />
-                      <line x1="10" y1="9" x2="10" y2="15" strokeWidth="2.5" />
-                      <line x1="14" y1="9" x2="14" y2="15" strokeWidth="2.5" />
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.25" strokeLinecap="round" strokeLinejoin="round">
+                      <line x1="10" y1="7" x2="10" y2="17" />
+                      <line x1="14" y1="7" x2="14" y2="17" />
                     </svg>
                   )}
-                </button>
-                <button
-                  onClick={handleStop}
-                  className="button-primary p-2"
-                  title="Stop"
-                >
-                  {/* Stop icon (square) */}
-                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <rect x="6" y="6" width="12" height="12" rx="2" fill="currentColor" stroke="none" />
-                  </svg>
-                </button>
-              </>
+                </span>
+                <span>{isPaused ? "Resume Session" : "Pause & Save"}</span>
+              </button>
             )}
           </div>
         </div>
@@ -2475,12 +2706,11 @@ Write a concise closure prompt that asks the council to:
                     <div className="pt-2 border-t border-line-soft">
                       <button
                         onClick={() => {
-                          handleStop();
-                          onNavigate("home");
+                          onNavigate("home", normalizedSession.id);
                         }}
                         className="w-full button-primary text-sm"
                       >
-                        New Discussion
+                        Back To Workstation
                       </button>
                     </div>
                   </div>

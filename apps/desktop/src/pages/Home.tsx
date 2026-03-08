@@ -1,12 +1,17 @@
-import { useState, useMemo } from "react";
-import type { Page } from "../App";
+import { useMemo, useState } from "react";
+
+import { CouncilMark } from "../components/CouncilMark";
 import { ConfigModal } from "../components/ConfigModal";
 import { Starfield } from "../components/Starfield";
 import { ProviderIcon } from "../components/icons/ProviderIcons";
+import type { SessionSummary, SessionStatus } from "../services/sessions";
 import { useConfig, getShuffledTopics, PROVIDER_INFO, type Provider } from "../stores/config";
 
 interface HomeProps {
-  onNavigate: (page: Page, topic?: string) => void;
+  sessions: SessionSummary[];
+  activeSessionId: string | null;
+  onCreateSession: (topic: string) => void;
+  onOpenSession: (sessionId: string) => void;
 }
 
 const AGENT_CARDS: Array<{
@@ -23,64 +28,25 @@ const AGENT_CARDS: Array<{
   { provider: "minimax", name: "Mary", color: "var(--color-mary)" },
 ];
 
-const MODEL_DISPLAY: Record<string, string> = {
-  "gpt-5.4": "GPT-5.4",
-  "gpt-5.3-chat-latest": "GPT-5.3 Instant",
-  "gpt-5.3-codex": "GPT-5.3 Codex",
-  "gpt-5.2": "GPT-5.2",
-  "gpt-5.2-pro": "GPT-5.2 Pro",
-  "claude-opus-4-6": "Opus 4.6",
-  "claude-opus-4-5-20251101": "Opus 4.5",
-  "claude-sonnet-4-5-20250929": "Sonnet 4.5",
-  "gemini-3.1-pro-preview": "Gemini 3.1 Pro",
-  "gemini-3-pro-preview": "Gemini 3.1 Pro",
-  "gemini-3-flash-preview": "Gemini 3 Flash",
-  "gemini-2.5-pro": "Gemini 2.5 Pro",
-  "deepseek-reasoner": "Reasoner",
-  "deepseek-chat": "Chat",
-  "kimi-k2.5": "K2.5",
-  "kimi-k2-thinking": "K2 Thinking",
-  "qwen3.5-plus": "Qwen 3.5 Plus",
-  "MiniMax-M2.5": "MiniMax M2.5",
-  "minimax-m2.5": "MiniMax M2.5",
+const STATUS_LABELS: Record<SessionStatus, string> = {
+  draft: "Draft",
+  running: "Running",
+  paused: "Paused",
+  completed: "Complete",
 };
 
-/** SVG council icon — heptagon with 7 connected nodes */
-function CouncilIcon() {
-  // Heptagon vertices (cx=60, cy=58, r=40), starting from top
-  const pts = Array.from({ length: 7 }, (_, i) => {
-    const angle = (-Math.PI / 2) + (2 * Math.PI * i) / 7;
-    return { x: 60 + 40 * Math.cos(angle), y: 58 + 40 * Math.sin(angle) };
-  });
-  const colors = ["#60a5fa", "#fbbf24", "#34d399", "#f87171", "#2dd4bf", "#22d3ee", "#f472b6"];
-
-  return (
-    <svg viewBox="0 0 120 116" width="80" height="76" aria-hidden="true">
-      {/* Connecting lines (all 10 pairs) */}
-      {pts.map((a, i) =>
-        pts.slice(i + 1).map((b, j) => (
-          <line
-            key={`${i}-${i + 1 + j}`}
-            x1={a.x} y1={a.y} x2={b.x} y2={b.y}
-            stroke="rgba(148,163,184,0.25)" strokeWidth="1"
-          />
-        ))
-      )}
-      {/* Nodes */}
-      {pts.map((p, i) => (
-        <g key={i}>
-          <circle cx={p.x} cy={p.y} r={10} fill={colors[i]} opacity={0.18} />
-          <circle cx={p.x} cy={p.y} r={6} fill={colors[i]} />
-        </g>
-      ))}
-    </svg>
-  );
-}
-
-/** SVG gear icon */
 function GearIcon({ size = 20 }: { size?: number }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
       <path d="M12 8v1m0 6v1m4-4h-1m-6 0H8m5.66 2.66l-.71.71m-3.9-3.9l-.71.71m4.61 0l.71.71m-3.9 3.9l.71.71" />
       <circle cx="12" cy="12" r="3" />
       <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
@@ -88,18 +54,85 @@ function GearIcon({ size = 20 }: { size?: number }) {
   );
 }
 
-/** SVG alert triangle icon */
-function AlertIcon({ size = 22 }: { size?: number }) {
+function ArchiveIcon({ size = 16 }: { size?: number }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <rect x="3" y="4" width="18" height="4" rx="1" />
+      <path d="M5 8v11a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8" />
+      <path d="M10 12h4" />
+    </svg>
+  );
+}
+
+function ArrowIcon({ size = 18 }: { size?: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.25"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <line x1="5" y1="12" x2="19" y2="12" />
+      <polyline points="12 5 19 12 12 19" />
+    </svg>
+  );
+}
+
+function AlertIcon({ size = 18 }: { size?: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z" />
       <line x1="12" y1="9" x2="12" y2="13" />
       <line x1="12" y1="17" x2="12.01" y2="17" />
     </svg>
   );
 }
 
-export function Home({ onNavigate }: HomeProps) {
+function formatRelativeTime(timestamp: number): string {
+  const diffMs = timestamp - Date.now();
+  const absMs = Math.abs(diffMs);
+  const minutes = Math.round(absMs / 60000);
+
+  if (minutes < 1) return "just now";
+  if (minutes < 60) return `${minutes}m ago`;
+
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+
+  const days = Math.round(hours / 24);
+  if (days < 7) return `${days}d ago`;
+
+  return new Date(timestamp).toLocaleDateString([], { month: "short", day: "numeric" });
+}
+
+export function Home({
+  sessions,
+  activeSessionId,
+  onCreateSession,
+  onOpenSession,
+}: HomeProps) {
   const [topic, setTopic] = useState("");
   const [showSettings, setShowSettings] = useState(false);
   const [showApiWarning, setShowApiWarning] = useState(false);
@@ -113,7 +146,9 @@ export function Home({ onNavigate }: HomeProps) {
     getConfiguredProviders,
   } = useConfig();
 
-  const sampleTopics = useMemo(() => getShuffledTopics(4), []);
+  const configuredProviders = getConfiguredProviders();
+  const sampleTopics = useMemo(() => getShuffledTopics(5), []);
+  const recentSessions = useMemo(() => sessions.slice(0, 8), [sessions]);
 
   const handleStart = () => {
     if (!topic.trim()) return;
@@ -121,167 +156,200 @@ export function Home({ onNavigate }: HomeProps) {
       setShowApiWarning(true);
       return;
     }
-    onNavigate("chat", topic.trim());
+
+    onCreateSession(topic.trim());
   };
 
-  const configuredProviders = getConfiguredProviders();
-
   return (
-    <div className="app-shell flex-1 flex flex-col items-center justify-center p-8 overflow-auto relative">
+    <div className="app-shell workstation-shell flex-1 overflow-hidden relative">
       <div className="ambient-canvas" aria-hidden="true" />
       <Starfield />
 
-      {/* Settings Button */}
-      <button
-        onClick={() => setShowSettings(true)}
-        className="absolute top-6 right-6 z-10 flex items-center gap-2 button-secondary"
-      >
-        <GearIcon size={18} />
-        <span className="font-medium">Settings</span>
-        {configuredProviders.length > 0 && (
-          <span className="ml-1 px-2 py-0.5 text-xs rounded-full badge badge-success">
-            {configuredProviders.length}/{AGENT_CARDS.length}
-          </span>
-        )}
-      </button>
-
-      {/* Main Content */}
-      <div className="relative z-10 flex flex-col items-center max-w-6xl w-full">
-        {/* Title Section */}
-        <div className="text-center mb-10 scale-in">
-          <div className="mb-5 flex justify-center" style={{ animation: "float 6s ease-in-out infinite" }}>
-            <CouncilIcon />
+      <aside className="workstation-sidebar">
+        <div className="workstation-brand">
+          <div className="workstation-brand-mark">
+            <CouncilMark size={36} />
           </div>
-          <h1 className="elegant-title">Socratic Council</h1>
-          <p className="elegant-subtitle">of Seven</p>
-          <p className="text-[1.05rem] text-ink-500 max-w-lg mx-auto mt-5 leading-relaxed">
-            Seven AI agents. One topic. No holds barred.
-          </p>
+          <div>
+            <div className="workstation-brand-label">Socratic Council</div>
+            <div className="workstation-brand-subtitle">Local Workstation</div>
+          </div>
         </div>
 
-        {/* Agent Cards Row */}
-        <div className="agent-cards-row mb-10 scale-in w-full">
-          {AGENT_CARDS.map((agent) => {
-            const isConfigured = configuredProviders.includes(agent.provider);
-            const modelId = config.models[agent.provider];
-            const modelLabel = modelId ? (MODEL_DISPLAY[modelId] ?? modelId) : "—";
+        <div className="workstation-sidebar-actions">
+          <button
+            type="button"
+            onClick={() => setShowSettings(true)}
+            className="workstation-sidebar-button"
+          >
+            <GearIcon size={16} />
+            <span>Settings</span>
+          </button>
+          <div className="workstation-sidebar-pill">
+            <ArchiveIcon size={14} />
+            <span>{sessions.length} saved locally</span>
+          </div>
+        </div>
 
-            return (
-              <div key={agent.provider} className="agent-card" style={{ "--agent-color": agent.color } as React.CSSProperties}>
-                <ProviderIcon provider={agent.provider} size={36} />
-                <span className="agent-card-name" style={{ color: agent.color }}>{agent.name}</span>
-                <span className="agent-card-provider">{PROVIDER_INFO[agent.provider].name}</span>
-                <span className="agent-card-model">{modelLabel}</span>
-                <span className={`agent-card-status ${isConfigured ? "configured" : ""}`}>
-                  {isConfigured ? (
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-                      <polyline points="20 6 9 17 4 12" />
-                    </svg>
-                  ) : (
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-                      <line x1="18" y1="6" x2="6" y2="18" />
-                      <line x1="6" y1="6" x2="18" y2="18" />
-                    </svg>
-                  )}
-                </span>
+        <div className="workstation-sidebar-section">
+          <div className="workstation-sidebar-heading">Recent Sessions</div>
+          <div className="workstation-thread-list">
+            {recentSessions.length > 0 ? (
+              recentSessions.map((session) => (
+                <button
+                  key={session.id}
+                  type="button"
+                  onClick={() => onOpenSession(session.id)}
+                  className={`workstation-thread ${activeSessionId === session.id ? "is-active" : ""}`}
+                >
+                  <div className="workstation-thread-meta">
+                    <span className={`session-status session-status-${session.status}`}>
+                      {STATUS_LABELS[session.status]}
+                    </span>
+                    <span>{formatRelativeTime(session.updatedAt)}</span>
+                  </div>
+                  <div className="workstation-thread-title">{session.title}</div>
+                  <div className="workstation-thread-preview">
+                    {session.preview || "No messages saved yet."}
+                  </div>
+                  <div className="workstation-thread-foot">
+                    <span>{session.currentTurn} turns</span>
+                    <span>{session.messageCount} messages</span>
+                  </div>
+                </button>
+              ))
+            ) : (
+              <div className="workstation-empty-state">
+                Your council archive will appear here after the first run.
               </div>
-            );
-          })}
-        </div>
-
-        {/* Topic Input Section */}
-        <div className="w-full max-w-2xl mb-8 scale-in panel-card p-6">
-          <label className="block text-ink-700 font-medium mb-3 text-lg">
-            What should the council discuss?
-          </label>
-          <div className="relative">
-            <input
-              type="text"
-              value={topic}
-              onChange={(e) => setTopic(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && handleStart()}
-              placeholder="Enter a thought-provoking topic..."
-              className="elegant-input"
-            />
-            {topic && (
-              <button
-                onClick={() => setTopic("")}
-                className="absolute right-4 top-1/2 -translate-y-1/2 text-ink-500 hover:text-ink-900
-                  w-8 h-8 flex items-center justify-center rounded-full hover:bg-white/70 transition-colors"
-              >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                  <line x1="18" y1="6" x2="6" y2="18" />
-                  <line x1="6" y1="6" x2="18" y2="18" />
-                </svg>
-              </button>
             )}
           </div>
+        </div>
+      </aside>
 
-          {/* Sample Topics */}
-          <div className="mt-4">
-            <p className="text-ink-500 text-sm mb-2">Try:</p>
-            <div className="flex flex-wrap gap-2">
-              {sampleTopics.map((sample) => (
-                <button
-                  key={sample}
-                  onClick={() => setTopic(sample)}
-                  className="button-secondary text-sm px-3 py-1.5"
-                >
-                  {sample}
-                </button>
-              ))}
+      <main className="workstation-main">
+        <div className="workstation-toolbar">
+          <div className="workstation-toolbar-copy">
+            <span className="workstation-kicker">Session Workstation</span>
+            <h1 className="workstation-home-title">Open a new inquiry or resume a saved thread.</h1>
+          </div>
+          <div className="workstation-toolbar-badges">
+            <div className="workstation-metric">
+              <span className="workstation-metric-label">Providers ready</span>
+              <span className="workstation-metric-value">
+                {configuredProviders.length}/{AGENT_CARDS.length}
+              </span>
+            </div>
+            <div className="workstation-metric">
+              <span className="workstation-metric-label">Autosave</span>
+              <span className="workstation-metric-value">Local-first</span>
             </div>
           </div>
         </div>
 
-        {/* Start Button */}
-        <div className="scale-in">
-          <button
-            onClick={handleStart}
-            disabled={!topic.trim()}
-            className="start-button flex items-center gap-3"
-          >
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-              <line x1="5" y1="12" x2="19" y2="12" />
-              <polyline points="12 5 19 12 12 19" />
-            </svg>
-            <span>Begin Discussion</span>
-          </button>
-        </div>
-
-        {/* API Key Warning */}
-        {showApiWarning && !hasAnyApiKey() && (
-          <div className="mt-6 api-warning-banner pulsing rounded-xl p-4 max-w-lg scale-in">
-            <div className="flex items-start gap-3">
-              <span className="text-ink-700 flex-shrink-0 mt-0.5">
-                <AlertIcon size={22} />
-              </span>
-              <div>
-                <h4 className="text-ink-900 font-semibold">No API Keys Configured</h4>
-                <p className="text-ink-700 text-sm mt-1 mb-3">
-                  Please configure at least one API key before starting a discussion.
-                  The council needs AI providers to function.
-                </p>
-                <button
-                  onClick={() => {
-                    setShowApiWarning(false);
-                    setShowSettings(true);
-                  }}
-                  className="button-secondary text-sm"
-                >
-                  Configure API Keys
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ display: "inline-block", marginLeft: 4, verticalAlign: "middle" }}>
-                    <line x1="5" y1="12" x2="19" y2="12" />
-                    <polyline points="12 5 19 12 12 19" />
-                  </svg>
-                </button>
+        <div className="workstation-stage">
+          <section className="workstation-composer-card">
+            <div className="workstation-composer-header">
+              <div className="workstation-hero">
+                <div className="workstation-hero-mark">
+                  <CouncilMark size={84} />
+                </div>
+                <div>
+                  <div className="workstation-hero-kicker">Council Chamber</div>
+                  <h2 className="elegant-title workstation-display-title">Let the council work.</h2>
+                  <p className="workstation-subtitle">
+                    Every thread is autosaved locally, resumable, and indexed like a real workstation.
+                  </p>
+                </div>
               </div>
             </div>
-          </div>
-        )}
-      </div>
 
-      {/* Settings Modal */}
+            <div className="workstation-composer-body">
+              <label htmlFor="topic-input" className="workstation-input-label">
+                Start a new line of inquiry
+              </label>
+              <div className="workstation-input-shell">
+                <input
+                  id="topic-input"
+                  type="text"
+                  value={topic}
+                  onChange={(event) => setTopic(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      handleStart();
+                    }
+                  }}
+                  placeholder="What should the council pressure-test next?"
+                  className="elegant-input workstation-input"
+                />
+                <button
+                  type="button"
+                  onClick={handleStart}
+                  disabled={!topic.trim()}
+                  className="workstation-launch-button"
+                >
+                  <span>Open Session</span>
+                  <ArrowIcon size={18} />
+                </button>
+              </div>
+
+              <div className="workstation-suggestion-row">
+                {sampleTopics.map((sample) => (
+                  <button
+                    key={sample}
+                    type="button"
+                    onClick={() => setTopic(sample)}
+                    className="workstation-suggestion-chip"
+                  >
+                    {sample}
+                  </button>
+                ))}
+              </div>
+
+              {showApiWarning && !hasAnyApiKey() && (
+                <div className="workstation-warning">
+                  <AlertIcon size={18} />
+                  <div>
+                    Configure at least one provider before opening a new council session.
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowSettings(true)}
+                    className="workstation-inline-link"
+                  >
+                    Open settings
+                  </button>
+                </div>
+              )}
+            </div>
+          </section>
+
+          <aside className="workstation-inspector">
+            <div className="workstation-panel">
+              <div className="workstation-panel-heading">Council Rack</div>
+              <div className="workstation-agent-grid">
+                {AGENT_CARDS.map((agent) => {
+                  const configured = configuredProviders.includes(agent.provider);
+                  return (
+                    <div key={agent.provider} className={`workstation-agent-card ${configured ? "is-ready" : ""}`}>
+                      <ProviderIcon provider={agent.provider} size={28} />
+                      <div>
+                        <div className="workstation-agent-name" style={{ color: agent.color }}>
+                          {agent.name}
+                        </div>
+                        <div className="workstation-agent-provider">
+                          {PROVIDER_INFO[agent.provider].name}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </aside>
+        </div>
+      </main>
+
       <ConfigModal
         isOpen={showSettings}
         onClose={() => setShowSettings(false)}

@@ -1,12 +1,12 @@
-@import url("https://fonts.googleapis.com/css2?family=Fraunces:wght@400;600;700&family=Sora:wght@300;400;500;600;700&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600;700&family=Manrope:wght@300;400;500;600;700;800&display=swap");
 
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 :root {
-  --font-display: "Fraunces", "Times New Roman", serif;
-  --font-body: "Sora", "Helvetica Neue", sans-serif;
+  --font-display: "Cormorant Garamond", "Times New Roman", serif;
+  --font-body: "Manrope", "Helvetica Neue", sans-serif;
 
   --paper-100: #0b0f14;
   --paper-200: #0f172a;
@@ -1523,5 +1523,572 @@ body {
   }
   50% {
     opacity: 1;
+  }
+}
+
+/* =========================================================================== */
+/* WORKSTATION LAYOUT                                                          */
+/* =========================================================================== */
+
+.workstation-shell {
+  display: grid;
+  grid-template-columns: 300px minmax(0, 1fr);
+}
+
+.workstation-sidebar {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  padding: 1.25rem;
+  border-right: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(7, 11, 19, 0.48);
+  backdrop-filter: blur(24px);
+}
+
+.workstation-brand {
+  display: flex;
+  align-items: center;
+  gap: 0.875rem;
+  padding: 0.25rem 0.125rem;
+}
+
+.workstation-brand-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 3rem;
+  height: 3rem;
+  border-radius: 1rem;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.workstation-brand-label {
+  font-family: var(--font-display);
+  font-size: 1.6rem;
+  line-height: 1;
+  color: var(--ink-900);
+}
+
+.workstation-brand-subtitle,
+.workstation-sidebar-heading,
+.workstation-hero-kicker,
+.workstation-kicker,
+.workstation-panel-heading,
+.workstation-metric-label,
+.workstation-input-label {
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  font-size: 0.7rem;
+  color: var(--ink-500);
+}
+.workstation-thread:hover,
+.workstation-suggestion-chip:hover,
+.workstation-sidebar-button:hover,
+.session-control-button:hover {
+  transform: translateY(-1px);
+}
+
+.workstation-sidebar-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.625rem;
+}
+
+.workstation-sidebar-button,
+.workstation-sidebar-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.55rem 0.75rem;
+  border-radius: 999px;
+  font-size: 0.82rem;
+  color: var(--ink-700);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.workstation-sidebar-button {
+  transition: border-color 0.2s ease, background 0.2s ease, transform 0.2s ease;
+}
+
+.workstation-sidebar-section {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+
+.workstation-thread-list {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+  gap: 0.65rem;
+  overflow-y: auto;
+  padding-right: 0.125rem;
+}
+
+.workstation-thread {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  width: 100%;
+  padding: 0.95rem 1rem;
+  text-align: left;
+  border-radius: 1rem;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  color: var(--ink-900);
+  transition: transform 0.2s ease, border-color 0.2s ease, background 0.2s ease;
+}
+
+.workstation-thread.is-active,
+.workstation-thread:hover {
+  background: rgba(255, 255, 255, 0.07);
+  border-color: rgba(20, 184, 166, 0.24);
+}
+
+.workstation-thread-meta,
+.workstation-thread-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  font-size: 0.72rem;
+  color: var(--ink-500);
+}
+
+.workstation-thread-title {
+  font-size: 0.96rem;
+  font-weight: 600;
+  color: var(--ink-900);
+}
+
+.workstation-thread-preview,
+.workstation-empty-state,
+.workstation-subtitle,
+.chat-session-topic {
+  color: var(--ink-700);
+  line-height: 1.6;
+}
+
+.workstation-empty-state {
+  padding: 1rem;
+  border-radius: 1rem;
+  border: 1px dashed rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.workstation-main {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  padding: 1.5rem;
+  gap: 1.25rem;
+}
+
+.workstation-toolbar,
+.chat-workstation-header {
+  padding: 1.25rem 1.4rem;
+  border-radius: 1.5rem;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.03)),
+    rgba(8, 12, 19, 0.6);
+  box-shadow: 0 20px 45px rgba(5, 8, 14, 0.26);
+  backdrop-filter: blur(22px);
+}
+
+.workstation-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.workstation-home-title {
+  font-family: var(--font-body);
+  font-size: clamp(1.8rem, 3vw, 2.55rem);
+  line-height: 1;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  color: var(--ink-900);
+}
+
+.chat-session-title {
+  font-family: var(--font-display);
+  font-size: clamp(1.8rem, 3vw, 2.55rem);
+  line-height: 1;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  color: var(--ink-900);
+}
+
+.workstation-toolbar-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.8rem;
+}
+
+.workstation-metric {
+  min-width: 9rem;
+  padding: 0.75rem 0.95rem;
+  border-radius: 1rem;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.workstation-metric-value {
+  display: block;
+  margin-top: 0.25rem;
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--ink-900);
+}
+
+.workstation-stage {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: 1.25rem;
+  min-height: 0;
+}
+
+.workstation-composer-card,
+.workstation-panel {
+  border-radius: 1.6rem;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.03)),
+    rgba(8, 12, 19, 0.58);
+  box-shadow: 0 20px 44px rgba(5, 8, 14, 0.26);
+  backdrop-filter: blur(24px);
+}
+
+.workstation-composer-card {
+  display: flex;
+  flex-direction: column;
+  padding: 1.6rem;
+  min-height: 0;
+}
+
+.workstation-composer-header {
+  padding-bottom: 1.5rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.workstation-hero {
+  display: flex;
+  gap: 1.25rem;
+  align-items: center;
+}
+
+.workstation-hero-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 6rem;
+  min-height: 6rem;
+  border-radius: 1.5rem;
+  background: radial-gradient(circle at 30% 30%, rgba(255,255,255,0.12), transparent 65%);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.workstation-display-title {
+  margin-top: 0.2rem;
+  margin-bottom: 0.4rem;
+  font-family: var(--font-body);
+  font-weight: 800;
+}
+
+.workstation-composer-body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 1rem;
+  padding-top: 1.4rem;
+}
+
+.workstation-input-shell {
+  display: flex;
+  gap: 0.85rem;
+  align-items: stretch;
+}
+
+.workstation-input {
+  flex: 1;
+  min-width: 0;
+}
+
+.workstation-launch-button,
+.session-control-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.6rem;
+  padding: 0.9rem 1.2rem;
+  border-radius: 1rem;
+  font-weight: 700;
+  color: #f7fff9;
+  background: linear-gradient(135deg, #0f766e, #1f9d78, #f59e0b);
+  box-shadow: 0 16px 34px rgba(15, 118, 110, 0.28);
+  transition: transform 0.2s ease, box-shadow 0.2s ease, filter 0.2s ease;
+}
+
+.workstation-launch-button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+.workstation-launch-button:not(:disabled):hover,
+.session-control-button:hover {
+  box-shadow: 0 18px 38px rgba(15, 118, 110, 0.35);
+  filter: brightness(1.04);
+}
+
+.workstation-suggestion-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+}
+
+.workstation-suggestion-chip {
+  padding: 0.6rem 0.8rem;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--ink-700);
+  font-size: 0.82rem;
+  transition: transform 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+}
+
+.workstation-suggestion-chip:hover {
+  border-color: rgba(20, 184, 166, 0.28);
+  color: var(--ink-900);
+}
+
+.workstation-warning {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.9rem 1rem;
+  border-radius: 1rem;
+  color: #fde68a;
+  border: 1px solid rgba(245, 158, 11, 0.26);
+  background: rgba(245, 158, 11, 0.08);
+}
+
+.workstation-inline-link {
+  margin-left: auto;
+  font-weight: 700;
+  color: #fcd34d;
+}
+
+.workstation-inspector {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.workstation-panel {
+  padding: 1.15rem;
+}
+
+.workstation-agent-grid {
+  display: grid;
+  gap: 0.7rem;
+  margin-top: 0.9rem;
+}
+
+.workstation-agent-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.8rem;
+  padding: 0.8rem 0.9rem;
+  border-radius: 1rem;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.workstation-agent-name {
+  font-weight: 700;
+  color: var(--ink-900);
+}
+
+.workstation-agent-provider {
+  color: var(--ink-500);
+  font-size: 0.78rem;
+}
+
+.workstation-agent-card {
+  justify-content: flex-start;
+}
+
+.workstation-agent-card.is-ready {
+  border-color: rgba(20, 184, 166, 0.22);
+  background: rgba(20, 184, 166, 0.08);
+}
+
+.session-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.3rem 0.6rem;
+  border-radius: 999px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+}
+
+.session-status-draft {
+  color: #cbd5f5;
+  background: rgba(148, 163, 184, 0.12);
+}
+
+.session-status-running {
+  color: #bbf7d0;
+  background: rgba(34, 197, 94, 0.16);
+}
+
+.session-status-paused {
+  color: #fef3c7;
+  background: rgba(245, 158, 11, 0.16);
+}
+
+.session-status-completed {
+  color: #bfdbfe;
+  background: rgba(96, 165, 250, 0.16);
+}
+
+.chat-workstation-header {
+  margin: 1rem 1.5rem 0;
+}
+
+.chat-session-hero {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.chat-session-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 3rem;
+  height: 3rem;
+  border-radius: 1rem;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.chat-meta-stack {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.chat-kicker-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+  align-items: center;
+}
+
+.chat-autosave-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.3rem 0.7rem;
+  border-radius: 999px;
+  color: var(--ink-700);
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  font-size: 0.75rem;
+}
+
+.chat-session-topic {
+  max-width: 50rem;
+  margin: 0;
+}
+
+.session-control-button {
+  min-width: 11rem;
+}
+
+.session-control-button.is-resume {
+  color: var(--accent-emerald);
+  background: linear-gradient(135deg, rgba(255,255,255,0.96), rgba(236, 253, 245, 0.94));
+  box-shadow: 0 16px 36px rgba(255, 255, 255, 0.12);
+}
+
+.session-control-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.9rem;
+  height: 1.9rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.session-control-button.is-resume .session-control-icon {
+  background: rgba(20, 184, 166, 0.12);
+}
+
+@media (max-width: 1180px) {
+  .workstation-shell {
+    grid-template-columns: 1fr;
+  }
+
+  .workstation-sidebar {
+    border-right: none;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  }
+
+  .workstation-stage {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 900px) {
+  .workstation-main {
+    padding: 1rem;
+  }
+
+  .workstation-toolbar,
+  .chat-workstation-header {
+    padding: 1rem;
+  }
+
+  .workstation-hero {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .workstation-input-shell {
+    flex-direction: column;
+  }
+
+  .session-control-button,
+  .workstation-launch-button {
+    width: 100%;
+  }
+}
+
+@media (max-width: 720px) {
+  .chat-session-hero {
+    flex-wrap: wrap;
+  }
+
+  .workstation-sidebar {
+    padding: 1rem;
   }
 }
