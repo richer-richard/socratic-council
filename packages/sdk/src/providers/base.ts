@@ -5,9 +5,20 @@
 
 import type { AgentConfig, Message, Provider } from "@socratic-council/shared";
 
+export type ChatAttachmentKind = "image" | "pdf";
+
+export interface ChatAttachment {
+  id: string;
+  kind: ChatAttachmentKind;
+  name: string;
+  mimeType: string;
+  data: string;
+}
+
 export interface ChatMessage {
   role: "system" | "user" | "assistant";
   content: string;
+  attachments?: ChatAttachment[];
 }
 
 export interface CompletionOptions {

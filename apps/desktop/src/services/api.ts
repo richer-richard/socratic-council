@@ -7,7 +7,7 @@
 import { DEFAULT_AGENTS } from "@socratic-council/shared";
 import type { AgentConfig, AgentId, ModelId, ProviderCredentials } from "@socratic-council/shared";
 import { ProviderManager } from "@socratic-council/sdk";
-import type { CompletionOptions } from "@socratic-council/sdk";
+import type { ChatAttachment, CompletionOptions } from "@socratic-council/sdk";
 
 import type { Provider, ProxyConfig, ProviderCredential } from "../stores/config";
 import { createTauriTransport } from "./tauriTransport";
@@ -15,6 +15,7 @@ import { createTauriTransport } from "./tauriTransport";
 export interface ChatMessage {
   role: "system" | "user" | "assistant";
   content: string;
+  attachments?: ChatAttachment[];
 }
 
 export interface StreamChunk {

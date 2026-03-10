@@ -4,6 +4,10 @@ import type { Page } from "../App";
 import { useConfig, PROVIDER_INFO, type Provider } from "../stores/config";
 import { callProvider, apiLogger, type ChatMessage as APIChatMessage } from "../services/api";
 import {
+  getAttachmentTransportMode,
+  loadSessionAttachmentBlobs,
+} from "../services/attachments";
+import {
   type DiscussionSession,
   type ModeratorUsageSnapshot,
   type SessionMessage as PersistedSessionMessage,
@@ -43,6 +47,7 @@ interface ChatProps {
 }
 
 type ChatMessage = PersistedSessionMessage;
+type APIAttachment = NonNullable<APIChatMessage["attachments"]>[number];
 
 interface BiddingRound {
   scores: Record<CouncilAgentId, number>;
@@ -357,6 +362,18 @@ function normalizeMessageText(raw: string) {
     .trim();
 }
 
+async function blobToBase64(blob: Blob): Promise<string> {
+  const buffer = await blob.arrayBuffer();
+  let binary = "";
+  const bytes = new Uint8Array(buffer);
+  const chunkSize = 0x8000;
+  for (let index = 0; index < bytes.length; index += chunkSize) {
+    const chunk = bytes.subarray(index, index + chunkSize);
+    binary += String.fromCharCode(...chunk);
+  }
+  return btoa(binary);
+}
+
 function extractActions(raw: string) {
   const reactions: Array<{ targetId: string; emoji: ReactionId }> = [];
   const quoteTargets: string[] = [];
@@ -459,6 +476,8 @@ export function Chat({ session, onNavigate, onPersistSession }: ChatProps) {
   const [moderatorUsage, setModeratorUsage] = useState<ModeratorUsageSnapshot>(
     normalizedSession.moderatorUsage
   );
+  const [attachmentPayloads, setAttachmentPayloads] = useState<Map<string, APIAttachment>>(new Map());
+  const [attachmentsReady, setAttachmentsReady] = useState(normalizedSession.attachments.length === 0);
   const [conflictState, setConflictState] = useState<ConflictDetection | null>(null);
   const [allConflicts, setAllConflicts] = useState<PairwiseConflict[]>([]);
   const [duoLogue, setDuoLogue] = useState<DuoLogueState | null>(normalizedSession.duoLogue);
@@ -514,6 +533,50 @@ export function Chat({ session, onNavigate, onPersistSession }: ChatProps) {
   const configRef = useRef(config);
   configRef.current = config;
   const virtuosoComponents = useMemo(() => ({ List: DiscordVirtuosoList }), []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    if (normalizedSession.attachments.length === 0) {
+      setAttachmentPayloads(new Map());
+      setAttachmentsReady(true);
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    setAttachmentsReady(false);
+    void loadSessionAttachmentBlobs(normalizedSession.attachments)
+      .then(async (loaded) => {
+        const next = new Map<string, APIAttachment>();
+        for (const [attachmentId, record] of loaded.entries()) {
+          if (record.attachment.kind !== "image" && record.attachment.kind !== "pdf") {
+            continue;
+          }
+          next.set(attachmentId, {
+            id: record.attachment.id,
+            kind: record.attachment.kind,
+            name: record.attachment.name,
+            mimeType: record.attachment.mimeType,
+            data: await blobToBase64(record.blob),
+          });
+        }
+
+        if (cancelled) return;
+        setAttachmentPayloads(next);
+        setAttachmentsReady(true);
+      })
+      .catch((error) => {
+        apiLogger.log("warn", "attachments", "Failed to load session attachments", { error });
+        if (cancelled) return;
+        setAttachmentPayloads(new Map());
+        setAttachmentsReady(true);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [normalizedSession.attachments]);
 
   const messageIndexById = useMemo(() => {
     const map = new Map<string, number>();
@@ -839,10 +902,47 @@ export function Chat({ session, onNavigate, onPersistSession }: ChatProps) {
     return `Required replies: ${lines.join(" ")}`;
   }, []);
 
+  const buildAttachmentContext = useCallback((provider: Provider, model: string | undefined) => {
+    const rawAttachments: APIAttachment[] = [];
+    const fallbackBlocks: string[] = [];
+
+    for (const attachment of normalizedSession.attachments) {
+      const mode = model ? getAttachmentTransportMode(provider, model, attachment) : "fallback";
+      const payload = attachmentPayloads.get(attachment.id);
+
+      if (
+        mode === "raw" &&
+        payload &&
+        (attachment.kind === "image" || attachment.kind === "pdf")
+      ) {
+        rawAttachments.push(payload);
+        continue;
+      }
+
+      fallbackBlocks.push(attachment.fallbackText);
+    }
+
+    const notes: string[] = [];
+    if (rawAttachments.length > 0) {
+      const names = rawAttachments.map((attachment) => attachment.name).join(", ");
+      notes.push(`Attached source material: ${names}. Use the attached files directly when relevant.`);
+    }
+    if (fallbackBlocks.length > 0) {
+      notes.push(`Attachment notes:\n${fallbackBlocks.join("\n\n")}`);
+    }
+
+    return {
+      rawAttachments,
+      attachmentText: notes.join("\n\n").trim(),
+    };
+  }, [attachmentPayloads, normalizedSession.attachments]);
+
   // Build conversation history for API call
   const buildConversationHistory = useCallback(
     (agentId: CouncilAgentId, extraContext: APIChatMessage[] = []): APIChatMessage[] => {
       const agentConfig = AGENT_CONFIG[agentId];
+      const model = configRef.current.models[agentConfig.provider];
+      const { rawAttachments, attachmentText } = buildAttachmentContext(agentConfig.provider, model);
       const history: APIChatMessage[] = [
         {
           role: "system",
@@ -852,7 +952,13 @@ export function Chat({ session, onNavigate, onPersistSession }: ChatProps) {
 
       history.push({
         role: "user",
-        content: `Discussion topic: "${topic}"`,
+        content: [
+          `Discussion topic: "${topic}"`,
+          attachmentText,
+        ]
+          .filter(Boolean)
+          .join("\n\n"),
+        ...(rawAttachments.length > 0 ? { attachments: rawAttachments } : {}),
       });
 
       const { messages: contextMessages, engagementDebts } = getContextMessages(agentId);
@@ -905,12 +1011,14 @@ export function Chat({ session, onNavigate, onPersistSession }: ChatProps) {
 
       return history;
     },
-    [buildEngagementPrompt, getContextMessages, topic]
+    [buildAttachmentContext, buildEngagementPrompt, getContextMessages, topic]
   );
 
   const buildClosingConversationHistory = useCallback(
     (agentId: CouncilAgentId, turnsCompleted: number): APIChatMessage[] => {
       const agentConfig = AGENT_CONFIG[agentId];
+      const model = configRef.current.models[agentConfig.provider];
+      const { rawAttachments, attachmentText } = buildAttachmentContext(agentConfig.provider, model);
       const history: APIChatMessage[] = [
         {
           role: "system",
@@ -920,7 +1028,13 @@ export function Chat({ session, onNavigate, onPersistSession }: ChatProps) {
 
       history.push({
         role: "user",
-        content: `Discussion topic: "${topic}"`,
+        content: [
+          `Discussion topic: "${topic}"`,
+          attachmentText,
+        ]
+          .filter(Boolean)
+          .join("\n\n"),
+        ...(rawAttachments.length > 0 ? { attachments: rawAttachments } : {}),
       });
 
       const { messages: contextMessages } = getContextMessages(agentId);
@@ -949,7 +1063,7 @@ export function Chat({ session, onNavigate, onPersistSession }: ChatProps) {
 
       return history;
     },
-    [getContextMessages, topic]
+    [buildAttachmentContext, getContextMessages, topic]
   );
 
   const resolveQuoteTargets = useCallback(
@@ -1043,10 +1157,15 @@ export function Chat({ session, onNavigate, onPersistSession }: ChatProps) {
               .filter((m) => (isCouncilAgent(m.agentId) || isModeratorMessage(m)) && !m.isStreaming)
               .filter((m) => (m.content ?? "").trim().length > 0)
               .slice(-12);
+      const { rawAttachments, attachmentText } = buildAttachmentContext(provider, model);
 
       const history: APIChatMessage[] = [
         { role: "system", content: MODERATOR_SYSTEM_PROMPT },
-        { role: "user", content: `Discussion topic: "${topic}"` },
+        {
+          role: "user",
+          content: [`Discussion topic: "${topic}"`, attachmentText].filter(Boolean).join("\n\n"),
+          ...(rawAttachments.length > 0 ? { attachments: rawAttachments } : {}),
+        },
       ];
 
       for (const msg of recentForContext) {
@@ -1207,7 +1326,7 @@ Write a concise closure prompt that asks the council to:
       moderatorInFlightRef.current = false;
       moderatorAbortRef.current = null;
     }
-  }, [config.preferences.moderatorEnabled, getProxy, pickModeratorRuntime, topic]);
+  }, [buildAttachmentContext, config.preferences.moderatorEnabled, getProxy, pickModeratorRuntime, topic]);
 
   useEffect(() => {
     if (!isRunning) return;
@@ -1844,6 +1963,7 @@ Write a concise closure prompt that asks the council to:
 
   // Start discussion when providers become available
   useEffect(() => {
+    if (!attachmentsReady) return;
     if (hasStartedRef.current) return;
     if (configuredProviders.length > 0 && normalizedSession.status === "draft" && normalizedSession.messages.length === 0) {
       hasStartedRef.current = true;
@@ -1857,7 +1977,14 @@ Write a concise closure prompt that asks the council to:
         error: "No API keys configured",
       }]);
     }
-  }, [configuredProviders.length, messages.length, normalizedSession.messages.length, normalizedSession.status, runDiscussion]);
+  }, [
+    attachmentsReady,
+    configuredProviders.length,
+    messages.length,
+    normalizedSession.messages.length,
+    normalizedSession.status,
+    runDiscussion,
+  ]);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -1966,6 +2093,7 @@ Write a concise closure prompt that asks the council to:
       moderatorUsage,
       messages: persistedMessages,
       errors,
+      attachments: normalizedSession.attachments,
       duoLogue,
       runtime: {
         phase: phaseRef.current,
@@ -1992,6 +2120,7 @@ Write a concise closure prompt that asks the council to:
     moderatorUsage,
     normalizedSession.createdAt,
     normalizedSession.id,
+    normalizedSession.attachments,
     normalizedSession.lastOpenedAt,
     normalizedSession.title,
     normalizedSession.updatedAt,

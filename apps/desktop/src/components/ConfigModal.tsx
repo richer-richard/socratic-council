@@ -11,6 +11,7 @@ import {
 import { getModelsByProvider } from "@socratic-council/shared";
 import { ProviderIcon } from "./icons/ProviderIcons";
 import { testProviderConnection } from "../services/api";
+import { clearAllAttachmentBlobs, getProviderAttachmentSupport } from "../services/attachments";
 
 interface ConfigModalProps {
   isOpen: boolean;
@@ -22,7 +23,7 @@ interface ConfigModalProps {
   onUpdateModel: (provider: Provider, model: string) => void;
 }
 
-type TabType = "api-keys" | "models" | "proxy" | "preferences";
+type TabType = "api-keys" | "models" | "proxy" | "preferences" | "about";
 
 const PROVIDERS = Object.keys(PROVIDER_INFO) as Provider[];
 
@@ -63,6 +64,19 @@ const MODEL_OPTIONS: Record<Provider, { id: string; name: string; description?: 
     description: model.description,
   })),
 };
+
+const ABOUT_VERSION = "0.1.1";
+const ABOUT_IDENTIFIER = "com.socratic-council.desktop";
+const ABOUT_LICENSE = "Apache-2.0";
+const ABOUT_REPOSITORY = "https://github.com/richer-richard/socratic-council";
+const ABOUT_SHORTCUTS = [
+  { keys: "Cmd+O", description: "Attach files to a new session" },
+  { keys: "Shift+Cmd+O", description: "Choose photos from the Mac picker" },
+  { keys: "Shift+Cmd+C", description: "Open the camera capture sheet" },
+  { keys: "Cmd+,", description: "Open Settings" },
+  { keys: "Esc", description: "Close the current modal or attachment menu" },
+  { keys: "Delete", description: "Remove the focused attachment chip on the home screen" },
+];
 
 export function ConfigModal({
   isOpen,
@@ -182,6 +196,7 @@ export function ConfigModal({
               { id: "models" as TabType, label: "Models", icon: "🤖" },
               { id: "proxy" as TabType, label: "Proxy", icon: "🌐" },
               { id: "preferences" as TabType, label: "Preferences", icon: "⚡" },
+              { id: "about" as TabType, label: "About", icon: "ℹ️" },
             ].map((tab) => (
               <button
                 key={tab.id}
@@ -697,17 +712,132 @@ export function ConfigModal({
                     Import Settings
                   </button>
                   <button 
-                    onClick={() => {
-                      if (confirm("Are you sure you want to clear all data? This cannot be undone.")) {
-                        localStorage.removeItem("socratic-council-config");
-                        window.location.reload();
+                    onClick={async () => {
+                      if (!confirm("Are you sure you want to clear all local data? This cannot be undone.")) {
+                        return;
                       }
+
+                      const appKeys = Object.keys(localStorage).filter((key) =>
+                        key.startsWith("socratic-council-")
+                      );
+                      for (const key of appKeys) {
+                        localStorage.removeItem(key);
+                      }
+                      try {
+                        await clearAllAttachmentBlobs();
+                      } catch (error) {
+                        console.error("Failed to clear attachment database:", error);
+                      }
+                      window.location.reload();
                     }}
                     className="bg-red-500/10 hover:bg-red-500/20 text-red-400 px-4 py-2 rounded-lg
                       text-sm transition-colors"
                   >
                     Clear All Data
                   </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {activeTab === "about" && (
+            <div className="space-y-6 scale-in">
+              <div className="bg-gray-800/50 border border-gray-700 rounded-xl p-5">
+                <div className="flex items-start justify-between gap-4 flex-wrap">
+                  <div>
+                    <h3 className="font-medium text-white">Socratic Council Desktop</h3>
+                    <p className="text-sm text-gray-400 mt-2 max-w-2xl">
+                      Local-first multi-agent debate workstation for running, resuming, archiving,
+                      and now attaching source material to a new council session.
+                    </p>
+                  </div>
+                  <div className="badge badge-info">v{ABOUT_VERSION}</div>
+                </div>
+
+                <div className="grid md:grid-cols-2 gap-4 mt-5">
+                  <div className="bg-gray-900 border border-gray-600 rounded-lg p-4">
+                    <div className="text-xs text-gray-400 uppercase tracking-[0.18em]">Bundle Identifier</div>
+                    <div className="text-sm text-white mt-2">{ABOUT_IDENTIFIER}</div>
+                  </div>
+                  <div className="bg-gray-900 border border-gray-600 rounded-lg p-4">
+                    <div className="text-xs text-gray-400 uppercase tracking-[0.18em]">License</div>
+                    <div className="text-sm text-white mt-2">{ABOUT_LICENSE}</div>
+                  </div>
+                  <div className="bg-gray-900 border border-gray-600 rounded-lg p-4 md:col-span-2">
+                    <div className="text-xs text-gray-400 uppercase tracking-[0.18em]">Repository</div>
+                    <a
+                      href={ABOUT_REPOSITORY}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-sm text-blue-400 hover:text-blue-300 mt-2 inline-flex"
+                    >
+                      {ABOUT_REPOSITORY}
+                    </a>
+                  </div>
+                </div>
+              </div>
+
+              <div className="bg-gray-800/50 border border-gray-700 rounded-xl p-5">
+                <h3 className="font-medium text-white mb-4">Local Data and Attachments</h3>
+                <div className="space-y-3 text-sm text-gray-400">
+                  <p>Sessions, API settings, and attachment metadata stay on this machine.</p>
+                  <p>
+                    Image and PDF blobs are stored outside localStorage so recent sessions can keep
+                    attached source material without inflating the session index.
+                  </p>
+                  <p>
+                    Raw image/PDF upload is used only for the locked models that support it on this
+                    build. Other providers receive an extracted local note instead of the raw file.
+                  </p>
+                  <p>
+                    Camera capture relies on macOS camera permission. If access is denied, the home
+                    screen camera sheet will tell you before anything is attached.
+                  </p>
+                </div>
+              </div>
+
+              <div className="bg-gray-800/50 border border-gray-700 rounded-xl p-5">
+                <h3 className="font-medium text-white mb-4">Attachment Support Matrix</h3>
+                <div className="space-y-3">
+                  {PROVIDERS.map((provider) => {
+                    const support = getProviderAttachmentSupport(provider, LOCKED_MODELS[provider]);
+                    const info = PROVIDER_INFO[provider];
+                    return (
+                      <div
+                        key={provider}
+                        className="bg-gray-900 border border-gray-600 rounded-lg px-4 py-3 flex items-center justify-between gap-4 flex-wrap"
+                      >
+                        <div className="flex items-center gap-3 min-w-0">
+                          <ProviderIcon provider={provider} size={24} />
+                          <div className="min-w-0">
+                            <div className={`font-medium ${info.color}`}>{info.agent}</div>
+                            <div className="text-xs text-gray-400 truncate">{LOCKED_MODELS[provider]}</div>
+                          </div>
+                        </div>
+                        <div className="flex gap-2 flex-wrap">
+                          <span className="badge badge-info">
+                            Images: {support.images === "raw" ? "raw" : "fallback"}
+                          </span>
+                          <span className="badge badge-info">
+                            PDF: {support.pdf === "raw" ? "raw" : "fallback"}
+                          </span>
+                          <span className="badge badge-info">Text: extracted</span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="bg-gray-800/50 border border-gray-700 rounded-xl p-5">
+                <h3 className="font-medium text-white mb-4">Shortcuts</h3>
+                <div className="grid md:grid-cols-2 gap-3">
+                  {ABOUT_SHORTCUTS.map((shortcut) => (
+                    <div key={shortcut.keys} className="bg-gray-900 border border-gray-600 rounded-lg p-4">
+                      <div className="text-sm text-white font-medium">{shortcut.keys}</div>
+                      <div className="text-sm text-gray-400 mt-1">{shortcut.description}</div>
+                    </div>
+                  ))}
                 </div>
               </div>
             </div>

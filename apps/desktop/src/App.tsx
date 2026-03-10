@@ -2,10 +2,11 @@ import { useState, useCallback } from "react";
 import { Home } from "./pages/Home";
 import { Settings } from "./pages/Settings";
 import { Chat } from "./pages/Chat";
+import type { ComposerAttachment } from "./services/attachments";
 import {
   archiveDiscussionSession,
   createDiscussionSession,
-  deleteDiscussionSession,
+  deleteDiscussionSessionWithAttachments,
   listSessionSummaries,
   loadDiscussionSession,
   restoreDiscussionSession,
@@ -53,8 +54,8 @@ export default function App() {
     }));
   }, [state.currentSessionId]);
 
-  const handleCreateSession = useCallback((topic: string) => {
-    const session = createDiscussionSession(topic);
+  const handleCreateSession = useCallback(async (topic: string, attachments: ComposerAttachment[] = []) => {
+    const session = await createDiscussionSession(topic, attachments);
     setActiveSession(session);
     setSessions(listSessionSummaries());
     setState({
@@ -80,8 +81,8 @@ export default function App() {
     setSessions(listSessionSummaries());
   }, []);
 
-  const handleDeleteSession = useCallback((sessionId: string) => {
-    const deleted = deleteDiscussionSession(sessionId);
+  const handleDeleteSession = useCallback(async (sessionId: string) => {
+    const deleted = await deleteDiscussionSessionWithAttachments(sessionId);
     if (!deleted) return;
 
     setSessions(listSessionSummaries());

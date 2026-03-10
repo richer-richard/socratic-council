@@ -1,6 +1,13 @@
 import type { AgentId as CouncilAgentId, Message as SharedMessage } from "@socratic-council/shared";
 
 import type { Provider } from "../stores/config";
+import {
+  deleteSessionAttachmentBlobs,
+  persistSessionAttachments,
+  summarizeSessionAttachments,
+  type ComposerAttachment,
+  type SessionAttachment,
+} from "./attachments";
 
 const SESSION_INDEX_KEY = "socratic-council-session-index-v1";
 const SESSION_KEY_PREFIX = "socratic-council-session:";
@@ -65,6 +72,7 @@ export interface DiscussionSession {
   moderatorUsage: ModeratorUsageSnapshot;
   messages: SessionMessage[];
   errors: string[];
+  attachments: SessionAttachment[];
   duoLogue: DuoLogueSnapshot | null;
   runtime: SessionRuntimeSnapshot;
 }
@@ -80,6 +88,7 @@ export interface SessionSummary {
   status: SessionStatus;
   currentTurn: number;
   messageCount: number;
+  attachmentCount: number;
   preview: string;
 }
 
@@ -288,16 +297,48 @@ function normalizeRuntime(input: unknown, status: SessionStatus): SessionRuntime
   };
 }
 
-function buildPreview(messages: SessionMessage[], topic: string): string {
+function buildPreview(messages: SessionMessage[], topic: string, attachments: SessionAttachment[]): string {
   const source =
     [...messages]
       .reverse()
       .find((message) => {
         const text = (message.content || message.fullResponse || "").trim();
         return text.length > 0 && !message.error;
-      })?.content ?? topic;
+      })?.content ??
+      (summarizeSessionAttachments(attachments) || topic);
 
   return source.replace(/\s+/g, " ").trim().slice(0, 120);
+}
+
+function normalizeAttachment(input: unknown): SessionAttachment | null {
+  if (!input || typeof input !== "object") return null;
+
+  const record = input as Partial<SessionAttachment>;
+  const id = cleanText(record.id).trim();
+  const name = cleanText(record.name).trim();
+  if (!id || !name) return null;
+
+  const kind =
+    record.kind === "image" || record.kind === "pdf" || record.kind === "text" || record.kind === "binary"
+      ? record.kind
+      : "binary";
+  const source =
+    record.source === "file-picker" || record.source === "photo-picker" || record.source === "camera"
+      ? record.source
+      : "file-picker";
+
+  return {
+    id,
+    name,
+    mimeType: cleanText(record.mimeType, "application/octet-stream"),
+    size: clampNumber(record.size),
+    kind,
+    source,
+    addedAt: clampNumber(record.addedAt, Date.now()),
+    width: record.width == null ? null : clampNumber(record.width),
+    height: record.height == null ? null : clampNumber(record.height),
+    fallbackText: cleanText(record.fallbackText),
+  };
 }
 
 function buildTitle(topic: string): string {
@@ -316,7 +357,8 @@ function buildSummary(session: DiscussionSession): SessionSummary {
     status: session.status,
     currentTurn: session.currentTurn,
     messageCount: session.messages.length,
-    preview: buildPreview(session.messages, session.topic),
+    attachmentCount: session.attachments.length,
+    preview: buildPreview(session.messages, session.topic, session.attachments),
   };
 }
 
@@ -344,6 +386,7 @@ function readIndex(): SessionSummary[] {
         status: normalizeStatus(entry.status),
         currentTurn: clampNumber(entry.currentTurn),
         messageCount: clampNumber(entry.messageCount),
+        attachmentCount: clampNumber(entry.attachmentCount),
         preview: cleanText(entry.preview),
       }))
       .filter((entry) => entry.id.length > 0);
@@ -379,6 +422,11 @@ function normalizeDiscussionSession(input: unknown): DiscussionSession | null {
         .map((message) => normalizeMessage(message))
         .filter((message): message is SessionMessage => Boolean(message))
     : [];
+  const attachments = Array.isArray(record.attachments)
+    ? record.attachments
+        .map((attachment) => normalizeAttachment(attachment))
+        .filter((attachment): attachment is SessionAttachment => Boolean(attachment))
+    : [];
 
   const createdAt = clampNumber(record.createdAt, Date.now());
   const updatedAt = clampNumber(record.updatedAt, createdAt);
@@ -409,6 +457,7 @@ function normalizeDiscussionSession(input: unknown): DiscussionSession | null {
     errors: Array.isArray(record.errors)
       ? record.errors.filter((value): value is string => typeof value === "string" && value.length > 0)
       : [],
+    attachments,
     duoLogue:
       record.duoLogue &&
       isCouncilAgent(record.duoLogue.participants?.[0]) &&
@@ -453,6 +502,7 @@ export function saveDiscussionSession(session: DiscussionSession): DiscussionSes
   const safeSession: DiscussionSession = {
     ...normalized,
     messages: normalized.messages.filter((message) => !message.isStreaming),
+    attachments: [...normalized.attachments].sort((a, b) => a.addedAt - b.addedAt),
     runtime: {
       ...normalized.runtime,
       phase:
@@ -506,6 +556,19 @@ export function deleteDiscussionSession(id: string): boolean {
   }
 }
 
+export async function deleteDiscussionSessionWithAttachments(id: string): Promise<boolean> {
+  const deleted = deleteDiscussionSession(id);
+  if (!deleted) return false;
+
+  try {
+    await deleteSessionAttachmentBlobs(id);
+  } catch (error) {
+    console.error("Failed to delete attachment blobs:", error);
+  }
+
+  return true;
+}
+
 function updateArchivedState(id: string, archivedAt: number | null): DiscussionSession | null {
   const existing = loadDiscussionSession(id);
   if (!existing) return null;
@@ -536,11 +599,17 @@ export function touchDiscussionSession(id: string): DiscussionSession | null {
   });
 }
 
-export function createDiscussionSession(topic: string): DiscussionSession {
+export async function createDiscussionSession(
+  topic: string,
+  pendingAttachments: ComposerAttachment[] = []
+): Promise<DiscussionSession> {
   const trimmed = topic.trim();
   const now = Date.now();
+  const id = createSessionId();
+  const attachments =
+    pendingAttachments.length > 0 ? await persistSessionAttachments(id, pendingAttachments) : [];
   const session: DiscussionSession = {
-    id: createSessionId(),
+    id,
     topic: trimmed,
     title: buildTitle(trimmed),
     createdAt: now,
@@ -553,6 +622,7 @@ export function createDiscussionSession(topic: string): DiscussionSession {
     moderatorUsage: { ...EMPTY_MODERATOR_USAGE },
     messages: [],
     errors: [],
+    attachments,
     duoLogue: null,
     runtime: createEmptyRuntime(),
   };
