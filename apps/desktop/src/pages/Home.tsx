@@ -1,18 +1,25 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { CouncilMark } from "../components/CouncilMark";
 import { ConfigModal } from "../components/ConfigModal";
 import { Starfield } from "../components/Starfield";
 import { ProviderIcon } from "../components/icons/ProviderIcons";
+import {
+  buildAttachmentListLabel,
+  createComposerAttachments,
+  revokeComposerAttachmentPreviews,
+  revokeComposerAttachmentPreview,
+  type ComposerAttachment,
+} from "../services/attachments";
 import type { SessionSummary, SessionStatus } from "../services/sessions";
 import { useConfig, getShuffledTopics, PROVIDER_INFO, type Provider } from "../stores/config";
 
 interface HomeProps {
   sessions: SessionSummary[];
   activeSessionId: string | null;
-  onArchiveSession: (sessionId: string) => void;
-  onCreateSession: (topic: string) => void;
-  onDeleteSession: (sessionId: string) => void;
+  onArchiveSession: (sessionId: string) => void | Promise<void>;
+  onCreateSession: (topic: string, attachments: ComposerAttachment[]) => void | Promise<void>;
+  onDeleteSession: (sessionId: string) => void | Promise<void>;
   onOpenSession: (sessionId: string) => void;
   onRestoreSession: (sessionId: string) => void;
 }
@@ -174,6 +181,99 @@ function MoreIcon({ size = 16 }: { size?: number }) {
   );
 }
 
+function PlusIcon({ size = 16 }: { size?: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M12 5v14" />
+      <path d="M5 12h14" />
+    </svg>
+  );
+}
+
+function ImageIcon({ size = 16 }: { size?: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <rect x="3" y="3" width="18" height="18" rx="2" />
+      <circle cx="8.5" cy="8.5" r="1.5" />
+      <path d="m21 15-5-5L5 21" />
+    </svg>
+  );
+}
+
+function CameraIcon({ size = 16 }: { size?: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M14.5 4H9.5l-2 2H5a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-2.5l-2-2Z" />
+      <circle cx="12" cy="13" r="3.5" />
+    </svg>
+  );
+}
+
+function FileIcon({ size = 16 }: { size?: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z" />
+      <path d="M14 2v6h6" />
+      <path d="M9 15h6" />
+      <path d="M9 11h3" />
+    </svg>
+  );
+}
+
+function XIcon({ size = 14 }: { size?: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M18 6 6 18" />
+      <path d="m6 6 12 12" />
+    </svg>
+  );
+}
+
 function formatRelativeTime(timestamp: number): string {
   const diffMs = timestamp - Date.now();
   const absMs = Math.abs(diffMs);
@@ -203,9 +303,22 @@ export function Home({
   const [topic, setTopic] = useState("");
   const [showSettings, setShowSettings] = useState(false);
   const [showApiWarning, setShowApiWarning] = useState(false);
+  const [attachmentError, setAttachmentError] = useState<string | null>(null);
   const [showArchivedEmptyNotice, setShowArchivedEmptyNotice] = useState(false);
   const [sessionFolder, setSessionFolder] = useState<SessionFolder>("recent");
   const [pendingSessionAction, setPendingSessionAction] = useState<SessionSummary | null>(null);
+  const [composerAttachments, setComposerAttachments] = useState<ComposerAttachment[]>([]);
+  const [focusedAttachmentId, setFocusedAttachmentId] = useState<string | null>(null);
+  const [showAttachmentMenu, setShowAttachmentMenu] = useState(false);
+  const [showCameraCapture, setShowCameraCapture] = useState(false);
+  const [cameraError, setCameraError] = useState<string | null>(null);
+  const [isOpeningSession, setIsOpeningSession] = useState(false);
+  const uploadInputRef = useRef<HTMLInputElement | null>(null);
+  const imageInputRef = useRef<HTMLInputElement | null>(null);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const mediaStreamRef = useRef<MediaStream | null>(null);
+  const composerAttachmentsRef = useRef<ComposerAttachment[]>([]);
+  const attachShellRef = useRef<HTMLDivElement | null>(null);
   const {
     config,
     updateCredential,
@@ -232,14 +345,120 @@ export function Home({
   const visibleSessions = sessionFolder === "archived" ? archivedSessions : recentSessions;
   const isArchivedActionTarget = pendingSessionAction?.archivedAt != null;
 
-  const handleStart = () => {
-    if (!topic.trim()) return;
+  const clearComposerAttachments = () => {
+    revokeComposerAttachmentPreviews(composerAttachments);
+    setComposerAttachments([]);
+    setFocusedAttachmentId(null);
+  };
+
+  const stopCameraStream = () => {
+    const stream = mediaStreamRef.current;
+    if (!stream) return;
+    for (const track of stream.getTracks()) {
+      track.stop();
+    }
+    mediaStreamRef.current = null;
+    if (videoRef.current) {
+      videoRef.current.srcObject = null;
+    }
+  };
+
+  const appendAttachments = async (files: File[], source: "file-picker" | "photo-picker" | "camera") => {
+    if (files.length === 0) return;
+
+    try {
+      const next = await createComposerAttachments(files, source);
+      setComposerAttachments((current) => [...current, ...next]);
+      setAttachmentError(null);
+    } catch (error) {
+      console.error("Failed to load attachments:", error);
+      setAttachmentError(error instanceof Error ? error.message : "Failed to prepare attachments.");
+    }
+  };
+
+  const removeAttachment = (attachmentId: string) => {
+    setComposerAttachments((current) => {
+      const next = current.filter((attachment) => attachment.id !== attachmentId);
+      const removed = current.find((attachment) => attachment.id === attachmentId);
+      if (removed) {
+        revokeComposerAttachmentPreview(removed);
+      }
+      return next;
+    });
+    setFocusedAttachmentId((current) => (current === attachmentId ? null : current));
+  };
+
+  const openCameraCapture = async () => {
+    setCameraError(null);
+    setShowAttachmentMenu(false);
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: "user" },
+        audio: false,
+      });
+      mediaStreamRef.current = stream;
+      setShowCameraCapture(true);
+    } catch (error) {
+      console.error("Failed to open camera:", error);
+      setCameraError("Camera access was denied or is unavailable on this Mac.");
+      setShowCameraCapture(true);
+    }
+  };
+
+  const captureCameraPhoto = async () => {
+    const video = videoRef.current;
+    if (!video || !mediaStreamRef.current) return;
+
+    const width = video.videoWidth || 1280;
+    const height = video.videoHeight || 720;
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const context = canvas.getContext("2d");
+    if (!context) {
+      setCameraError("Camera capture is unavailable in this window.");
+      return;
+    }
+
+    context.drawImage(video, 0, 0, width, height);
+    const blob = await new Promise<Blob | null>((resolve) => {
+      canvas.toBlob(resolve, "image/jpeg", 0.92);
+    });
+
+    if (!blob) {
+      setCameraError("Could not capture the current camera frame.");
+      return;
+    }
+
+    const file = new File([blob], `camera-${new Date().toISOString().replace(/[:.]/g, "-")}.jpg`, {
+      type: "image/jpeg",
+      lastModified: Date.now(),
+    });
+
+    await appendAttachments([file], "camera");
+    stopCameraStream();
+    setShowCameraCapture(false);
+  };
+
+  const handleStart = async () => {
+    if (!topic.trim() || isOpeningSession) return;
     if (!hasAnyApiKey()) {
       setShowApiWarning(true);
       return;
     }
 
-    onCreateSession(topic.trim());
+    setIsOpeningSession(true);
+    try {
+      await onCreateSession(topic.trim(), composerAttachments);
+      clearComposerAttachments();
+      setAttachmentError(null);
+    } catch (error) {
+      console.error("Failed to open session:", error);
+      setAttachmentError(error instanceof Error ? error.message : "Failed to open session.");
+    } finally {
+      setIsOpeningSession(false);
+    }
   };
 
   const handleSelectSessionFolder = (folder: SessionFolder) => {
@@ -265,6 +484,102 @@ export function Home({
       setPendingSessionAction(null);
     }
   }, [pendingSessionAction, sessions]);
+
+  useEffect(() => {
+    if (!showCameraCapture || !videoRef.current || !mediaStreamRef.current) return;
+    videoRef.current.srcObject = mediaStreamRef.current;
+    void videoRef.current.play().catch(() => {
+      setCameraError("Camera preview could not start.");
+    });
+  }, [showCameraCapture]);
+
+  useEffect(() => {
+    if (!showAttachmentMenu) return;
+
+    const onPointerDown = (event: PointerEvent) => {
+      if (!attachShellRef.current?.contains(event.target as Node)) {
+        setShowAttachmentMenu(false);
+      }
+    };
+
+    window.addEventListener("pointerdown", onPointerDown);
+    return () => window.removeEventListener("pointerdown", onPointerDown);
+  }, [showAttachmentMenu]);
+
+  useEffect(() => {
+    const onWindowKeyDown = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key === ",") {
+        event.preventDefault();
+        setShowSettings(true);
+        return;
+      }
+
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "o") {
+        event.preventDefault();
+        if (event.shiftKey) {
+          imageInputRef.current?.click();
+        } else {
+          uploadInputRef.current?.click();
+        }
+        return;
+      }
+
+      if ((event.metaKey || event.ctrlKey) && event.shiftKey && event.key.toLowerCase() === "c") {
+        event.preventDefault();
+        void openCameraCapture();
+        return;
+      }
+
+      if (event.key === "Escape") {
+        if (showAttachmentMenu) {
+          setShowAttachmentMenu(false);
+        }
+        if (showCameraCapture) {
+          stopCameraStream();
+          setShowCameraCapture(false);
+        }
+        if (showArchivedEmptyNotice) {
+          setShowArchivedEmptyNotice(false);
+        }
+        if (pendingSessionAction) {
+          setPendingSessionAction(null);
+        }
+      }
+
+      if ((event.key === "Backspace" || event.key === "Delete") && focusedAttachmentId) {
+        const activeElement = document.activeElement;
+        if (
+          activeElement instanceof HTMLInputElement ||
+          activeElement instanceof HTMLTextAreaElement ||
+          activeElement?.getAttribute("contenteditable") === "true"
+        ) {
+          return;
+        }
+        event.preventDefault();
+        removeAttachment(focusedAttachmentId);
+      }
+    };
+
+    window.addEventListener("keydown", onWindowKeyDown);
+    return () => window.removeEventListener("keydown", onWindowKeyDown);
+  }, [
+    focusedAttachmentId,
+    pendingSessionAction,
+    showArchivedEmptyNotice,
+    showAttachmentMenu,
+    showCameraCapture,
+  ]);
+
+  useEffect(() => {
+    composerAttachmentsRef.current = composerAttachments;
+  }, [composerAttachments]);
+
+  useEffect(() => {
+    return () => {
+      stopCameraStream();
+      revokeComposerAttachmentPreviews(composerAttachmentsRef.current);
+    };
+  }, []);
 
   return (
     <div className="app-shell workstation-shell flex-1 overflow-hidden relative">
@@ -418,6 +733,56 @@ export function Home({
                 Start a new line of inquiry
               </label>
               <div className="workstation-input-shell">
+                <div ref={attachShellRef} className="workstation-attach-shell">
+                  <button
+                    type="button"
+                    className={`workstation-attach-button ${showAttachmentMenu ? "is-open" : ""}`}
+                    onClick={() => setShowAttachmentMenu((current) => !current)}
+                    aria-label="Add attachments"
+                    title="Add attachments"
+                  >
+                    <PlusIcon size={16} />
+                  </button>
+                  {showAttachmentMenu && (
+                    <div className="workstation-attach-menu">
+                      <button
+                        type="button"
+                        className="workstation-attach-menu-item"
+                        onClick={() => {
+                          setShowAttachmentMenu(false);
+                          uploadInputRef.current?.click();
+                        }}
+                      >
+                        <FileIcon size={16} />
+                        <span>Upload Files…</span>
+                        <span className="workstation-attach-shortcut">Cmd+O</span>
+                      </button>
+                      <button
+                        type="button"
+                        className="workstation-attach-menu-item"
+                        onClick={() => {
+                          setShowAttachmentMenu(false);
+                          imageInputRef.current?.click();
+                        }}
+                      >
+                        <ImageIcon size={16} />
+                        <span>Choose Photo…</span>
+                        <span className="workstation-attach-shortcut">Shift+Cmd+O</span>
+                      </button>
+                      <button
+                        type="button"
+                        className="workstation-attach-menu-item"
+                        onClick={() => {
+                          void openCameraCapture();
+                        }}
+                      >
+                        <CameraIcon size={16} />
+                        <span>Take Photo…</span>
+                        <span className="workstation-attach-shortcut">Shift+Cmd+C</span>
+                      </button>
+                    </div>
+                  )}
+                </div>
                 <input
                   id="topic-input"
                   type="text"
@@ -425,7 +790,7 @@ export function Home({
                   onChange={(event) => setTopic(event.target.value)}
                   onKeyDown={(event) => {
                     if (event.key === "Enter") {
-                      handleStart();
+                      void handleStart();
                     }
                   }}
                   placeholder="What should the council pressure-test next?"
@@ -433,14 +798,73 @@ export function Home({
                 />
                 <button
                   type="button"
-                  onClick={handleStart}
-                  disabled={!topic.trim()}
+                  onClick={() => {
+                    void handleStart();
+                  }}
+                  disabled={!topic.trim() || isOpeningSession}
                   className="workstation-launch-button"
                 >
-                  <span>Open Session</span>
+                  <span>{isOpeningSession ? "Opening…" : "Open Session"}</span>
                   <ArrowIcon size={18} />
                 </button>
               </div>
+
+              {composerAttachments.length > 0 && (
+                <div className="workstation-attachment-strip">
+                  <div className="workstation-attachment-strip-header">
+                    <span>{buildAttachmentListLabel(composerAttachments)}</span>
+                    <span>Delete or Backspace removes the focused card.</span>
+                  </div>
+                  <div className="workstation-attachment-list">
+                    {composerAttachments.map((attachment) => (
+                      <button
+                        key={attachment.id}
+                        type="button"
+                        className={`workstation-attachment-chip ${
+                          focusedAttachmentId === attachment.id ? "is-focused" : ""
+                        }`}
+                        onClick={() => setFocusedAttachmentId(attachment.id)}
+                        onFocus={() => setFocusedAttachmentId(attachment.id)}
+                      >
+                        {attachment.previewUrl ? (
+                          <img
+                            src={attachment.previewUrl}
+                            alt={attachment.name}
+                            className="workstation-attachment-thumb"
+                          />
+                        ) : (
+                          <div className="workstation-attachment-fallback-icon">
+                            {attachment.kind === "pdf" ? <FileIcon size={16} /> : <ImageIcon size={16} />}
+                          </div>
+                        )}
+                        <div className="workstation-attachment-copy">
+                          <span>{attachment.name}</span>
+                          <span>{attachment.kind.toUpperCase()}</span>
+                        </div>
+                        <span
+                          role="button"
+                          tabIndex={0}
+                          className="workstation-attachment-remove"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            removeAttachment(attachment.id);
+                          }}
+                          onKeyDown={(event) => {
+                            if (event.key === "Enter" || event.key === " ") {
+                              event.preventDefault();
+                              event.stopPropagation();
+                              removeAttachment(attachment.id);
+                            }
+                          }}
+                          aria-label={`Remove ${attachment.name}`}
+                        >
+                          <XIcon size={12} />
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               <div className="workstation-suggestion-row">
                 {sampleTopics.map((sample) => (
@@ -468,6 +892,13 @@ export function Home({
                   >
                     Open settings
                   </button>
+                </div>
+              )}
+
+              {attachmentError && (
+                <div className="workstation-warning">
+                  <AlertIcon size={18} />
+                  <div>{attachmentError}</div>
                 </div>
               )}
             </div>
@@ -507,6 +938,31 @@ export function Home({
         onUpdateProxy={updateProxy}
         onUpdatePreferences={updatePreferences}
         onUpdateModel={updateModel}
+      />
+
+      <input
+        ref={uploadInputRef}
+        type="file"
+        multiple
+        className="hidden"
+        onChange={(event) => {
+          const files = Array.from(event.target.files ?? []);
+          event.currentTarget.value = "";
+          void appendAttachments(files, "file-picker");
+        }}
+      />
+
+      <input
+        ref={imageInputRef}
+        type="file"
+        accept="image/*"
+        multiple
+        className="hidden"
+        onChange={(event) => {
+          const files = Array.from(event.target.files ?? []);
+          event.currentTarget.value = "";
+          void appendAttachments(files, "photo-picker");
+        }}
       />
 
       {pendingSessionAction && (
@@ -590,6 +1046,66 @@ export function Home({
                 onClick={() => setShowArchivedEmptyNotice(false)}
               >
                 Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showCameraCapture && (
+        <div
+          className="modal-overlay"
+          onClick={(event) => {
+            if (event.target === event.currentTarget) {
+              stopCameraStream();
+              setShowCameraCapture(false);
+            }
+          }}
+        >
+          <div className="modal-content camera-capture-modal">
+            <div className="session-action-eyebrow">Camera Capture</div>
+            <h2 className="session-action-title">Take a photo for this session</h2>
+            <p className="session-action-copy">
+              Capture a quick image and attach it to the opening prompt. Use Escape to cancel.
+            </p>
+            <div className="camera-capture-stage">
+              {cameraError ? (
+                <div className="camera-capture-empty">{cameraError}</div>
+              ) : (
+                <video ref={videoRef} autoPlay playsInline muted className="camera-capture-video" />
+              )}
+            </div>
+            <div className="session-action-buttons camera-capture-buttons">
+              <button
+                type="button"
+                className="session-action-button is-neutral"
+                onClick={() => {
+                  stopCameraStream();
+                  setShowCameraCapture(false);
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="session-action-button is-archive"
+                onClick={() => {
+                  stopCameraStream();
+                  setShowCameraCapture(false);
+                  void openCameraCapture();
+                }}
+              >
+                Retry
+              </button>
+              <button
+                type="button"
+                className="session-action-button is-delete"
+                onClick={() => {
+                  void captureCameraPhoto();
+                }}
+                disabled={Boolean(cameraError)}
+              >
+                Capture
               </button>
             </div>
           </div>

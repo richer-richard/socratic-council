@@ -173,10 +173,26 @@ export type GeminiConfig = z.infer<typeof GeminiConfigSchema>;
 export interface GeminiRequest {
   contents: Array<{
     role: "user" | "model";
-    parts: Array<{ text: string }>;
+    parts: Array<
+      | { text: string }
+      | {
+          inlineData: {
+            mimeType: string;
+            data: string;
+          };
+        }
+    >;
   }>;
   systemInstruction?: {
-    parts: Array<{ text: string }>;
+    parts: Array<
+      | { text: string }
+      | {
+          inlineData: {
+            mimeType: string;
+            data: string;
+          };
+        }
+    >;
   };
   generationConfig?: {
     temperature?: number;

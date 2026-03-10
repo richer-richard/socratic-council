@@ -60,12 +60,33 @@ export class GoogleProvider implements BaseProvider {
         const role = msg.role === "assistant" ? "model" : "user";
         contents.push({
           role,
-          parts: [{ text: msg.content }],
+          parts: this.buildParts(msg),
         });
       }
     }
 
     return { contents, systemInstruction };
+  }
+
+  private buildParts(message: ChatMessage): GeminiRequest["contents"][number]["parts"] {
+    const parts: GeminiRequest["contents"][number]["parts"] = [];
+
+    if (message.content.trim()) {
+      parts.push({ text: message.content });
+    }
+
+    if (message.role === "user" && message.attachments?.length) {
+      for (const attachment of message.attachments) {
+        parts.push({
+          inlineData: {
+            mimeType: attachment.mimeType,
+            data: attachment.data,
+          },
+        });
+      }
+    }
+
+    return parts.length > 0 ? parts : [{ text: "" }];
   }
 
   /**

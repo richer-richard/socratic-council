@@ -25,8 +25,28 @@ import { type Transport, createFetchTransport } from "../transport.js";
 
 interface AnthropicMessage {
   role: "user" | "assistant";
-  content: string | Array<{ type: "text"; text: string }>;
+  content: string | AnthropicContentBlock[];
 }
+
+type AnthropicContentBlock =
+  | { type: "text"; text: string }
+  | {
+      type: "image";
+      source: {
+        type: "base64";
+        media_type: string;
+        data: string;
+      };
+    }
+  | {
+      type: "document";
+      source: {
+        type: "base64";
+        media_type: string;
+        data: string;
+      };
+      title?: string;
+    };
 
 interface AnthropicRequest {
   model: string;
@@ -357,7 +377,7 @@ export class AnthropicProvider implements BaseProvider {
       .filter((m) => m.role !== "system")
       .map((m) => ({
         role: m.role as "user" | "assistant",
-        content: m.content,
+        content: this.buildMessageContent(m),
       }));
 
     const request: AnthropicRequest = {
@@ -382,5 +402,42 @@ export class AnthropicProvider implements BaseProvider {
     }
 
     return request;
+  }
+
+  private buildMessageContent(message: ChatMessage): string | AnthropicContentBlock[] {
+    if (message.role !== "user" || !message.attachments || message.attachments.length === 0) {
+      return message.content;
+    }
+
+    const content: AnthropicContentBlock[] = [];
+    if (message.content.trim()) {
+      content.push({ type: "text", text: message.content });
+    }
+
+    for (const attachment of message.attachments) {
+      if (attachment.kind === "image") {
+        content.push({
+          type: "image",
+          source: {
+            type: "base64",
+            media_type: attachment.mimeType,
+            data: attachment.data,
+          },
+        });
+        continue;
+      }
+
+      content.push({
+        type: "document",
+        source: {
+          type: "base64",
+          media_type: attachment.mimeType,
+          data: attachment.data,
+        },
+        title: attachment.name,
+      });
+    }
+
+    return content.length > 0 ? content : message.content;
   }
 }

@@ -869,6 +869,12 @@ body {
   transform: translateY(-1px);
 }
 
+.session-action-button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  transform: none;
+}
+
 .session-action-button.is-neutral {
   color: var(--ink-700);
   background: rgba(255, 255, 255, 0.04);
@@ -2000,6 +2006,82 @@ body {
   align-items: stretch;
 }
 
+.workstation-attach-shell {
+  position: relative;
+  flex: 0 0 auto;
+}
+
+.workstation-attach-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 3.2rem;
+  min-width: 3.2rem;
+  height: 3.2rem;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: var(--ink-700);
+  transition: transform 0.2s ease, border-color 0.2s ease, color 0.2s ease, background 0.2s ease;
+}
+
+.workstation-attach-button:hover,
+.workstation-attach-button.is-open {
+  color: #d1fae5;
+  border-color: rgba(20, 184, 166, 0.3);
+  background: rgba(15, 42, 42, 0.92);
+  transform: translateY(-1px);
+}
+
+.workstation-attach-button:focus-visible,
+.workstation-attachment-chip:focus-visible,
+.workstation-attachment-remove:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(20, 184, 166, 0.2);
+}
+
+.workstation-attach-menu {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 0.7rem);
+  z-index: 8;
+  display: flex;
+  min-width: 17.5rem;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding: 0.55rem;
+  border-radius: 1.1rem;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.03)),
+    rgba(8, 12, 19, 0.96);
+  box-shadow: 0 20px 44px rgba(5, 8, 14, 0.28);
+  backdrop-filter: blur(20px);
+}
+
+.workstation-attach-menu-item {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.7rem;
+  padding: 0.7rem 0.8rem;
+  border-radius: 0.9rem;
+  color: var(--ink-800);
+  text-align: left;
+  transition: background 0.2s ease, transform 0.2s ease, color 0.2s ease;
+}
+
+.workstation-attach-menu-item:hover {
+  background: rgba(20, 184, 166, 0.12);
+  color: #ecfeff;
+  transform: translateY(-1px);
+}
+
+.workstation-attach-shortcut {
+  color: var(--ink-500);
+  font-size: 0.72rem;
+}
+
 .workstation-input {
   flex: 1;
   min-width: 0;
@@ -2053,6 +2135,112 @@ body {
   color: var(--ink-900);
 }
 
+.workstation-attachment-strip {
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+}
+
+.workstation-attachment-strip-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  font-size: 0.74rem;
+  color: var(--ink-500);
+}
+
+.workstation-attachment-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.7rem;
+}
+
+.workstation-attachment-chip {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  min-width: 0;
+  max-width: min(100%, 18rem);
+  padding: 0.55rem 0.7rem;
+  border-radius: 1rem;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--ink-900);
+  text-align: left;
+  transition: border-color 0.2s ease, background 0.2s ease, transform 0.2s ease;
+}
+
+.workstation-attachment-chip:hover,
+.workstation-attachment-chip.is-focused {
+  border-color: rgba(20, 184, 166, 0.28);
+  background: rgba(20, 184, 166, 0.08);
+  transform: translateY(-1px);
+}
+
+.workstation-attachment-thumb,
+.workstation-attachment-fallback-icon {
+  width: 2.35rem;
+  height: 2.35rem;
+  flex: 0 0 auto;
+  border-radius: 0.8rem;
+}
+
+.workstation-attachment-thumb {
+  object-fit: cover;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.workstation-attachment-fallback-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--ink-700);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.workstation-attachment-copy {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+}
+
+.workstation-attachment-copy span:first-child {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--ink-900);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workstation-attachment-copy span:last-child {
+  margin-top: 0.12rem;
+  font-size: 0.68rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-500);
+}
+
+.workstation-attachment-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.65rem;
+  height: 1.65rem;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  color: var(--ink-500);
+  transition: background 0.2s ease, color 0.2s ease;
+}
+
+.workstation-attachment-remove:hover {
+  background: rgba(244, 63, 94, 0.14);
+  color: #ffe4e6;
+}
+
 .workstation-warning {
   display: flex;
   align-items: center;
@@ -2062,6 +2250,42 @@ body {
   color: #fde68a;
   border: 1px solid rgba(245, 158, 11, 0.26);
   background: rgba(245, 158, 11, 0.08);
+}
+
+.camera-capture-modal {
+  width: min(36rem, calc(100vw - 2rem));
+  padding: 1.25rem;
+}
+
+.camera-capture-stage {
+  margin-top: 1rem;
+  min-height: 16rem;
+  overflow: hidden;
+  border-radius: 1.2rem;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(4, 10, 20, 0.82);
+}
+
+.camera-capture-video,
+.camera-capture-empty {
+  display: block;
+  width: 100%;
+  min-height: 16rem;
+}
+
+.camera-capture-video {
+  object-fit: cover;
+  background: #020617;
+}
+
+.camera-capture-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+  color: var(--ink-700);
+  text-align: center;
+  line-height: 1.6;
 }
 
 .workstation-inline-link {
@@ -2262,6 +2486,28 @@ body {
 
   .workstation-input-shell {
     flex-direction: column;
+  }
+
+  .workstation-attach-shell {
+    width: 100%;
+  }
+
+  .workstation-attach-button {
+    width: 100%;
+    min-width: 0;
+    border-radius: 1rem;
+  }
+
+  .workstation-attach-menu {
+    right: 0;
+    left: 0;
+    bottom: calc(100% + 0.6rem);
+    min-width: 0;
+  }
+
+  .workstation-attachment-strip-header {
+    flex-direction: column;
+    align-items: flex-start;
   }
 
   .session-control-button,

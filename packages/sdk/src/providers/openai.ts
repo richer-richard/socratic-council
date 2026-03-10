@@ -51,7 +51,7 @@ const NO_TEMPERATURE_MODELS: OpenAIModel[] = [
 
 interface OpenAIResponsesRequest {
   model: string;
-  input: string | Array<{ role: string; content: string }>;
+  input: string | OpenAIInputMessage[];
   instructions?: string;
   temperature?: number;
   max_output_tokens?: number;
@@ -61,6 +61,27 @@ interface OpenAIResponsesRequest {
     summary?: "auto" | "concise" | "detailed";
   };
   stream?: boolean;
+}
+
+type OpenAIInputContent =
+  | {
+      type: "input_text";
+      text: string;
+    }
+  | {
+      type: "input_image";
+      image_url: string;
+      detail?: "auto";
+    }
+  | {
+      type: "input_file";
+      filename: string;
+      file_data: string;
+    };
+
+interface OpenAIInputMessage {
+  role: string;
+  content: string | OpenAIInputContent[];
 }
 
 interface OpenAIResponsesResponse {
@@ -98,6 +119,13 @@ interface OpenAIStreamEvent {
     text?: string;
   };
   response?: {
+    output?: Array<{
+      type?: string;
+      content?: Array<{
+        type?: string;
+        text?: string;
+      }>;
+    }>;
     usage?: {
       input_tokens?: number;
       output_tokens?: number;
@@ -116,11 +144,19 @@ interface OpenAIStreamEvent {
     reasoning_tokens?: number;
   };
   output?: Array<{
+    type?: string;
     content?: Array<{
       type?: string;
       text?: string;
     }>;
   }>;
+  item?: {
+    type?: string;
+    content?: Array<{
+      type?: string;
+      text?: string;
+    }>;
+  };
 }
 
 function extractOutputText(data: OpenAIResponsesResponse): string {
@@ -186,6 +222,10 @@ function extractReasoningChunk(event: OpenAIStreamEvent): string {
   }
 
   return "";
+}
+
+function toDataUrl(mimeType: string, data: string): string {
+  return `data:${mimeType};base64,${data}`;
 }
 
 export class OpenAIProvider implements BaseProvider {
@@ -292,6 +332,18 @@ export class OpenAIProvider implements BaseProvider {
           return;
         }
 
+        if (parsed.type === "response.output_item.done") {
+          const itemText =
+            parsed.item?.content
+              ?.filter((content) => content.type === "output_text" || content.type === "text")
+              .map((content) => content.text ?? "")
+              .join("") ?? "";
+
+          if (itemText && fullContent.length === 0) {
+            fullContent = itemText;
+          }
+        }
+
         const reasoningChunk = extractReasoningChunk(parsed);
         if (reasoningChunk) {
           fullThinking += reasoningChunk;
@@ -306,6 +358,17 @@ export class OpenAIProvider implements BaseProvider {
             parsed.response.usage.output_tokens_details?.reasoning_tokens ??
             parsed.response.usage.reasoning_tokens ??
             reasoningTokens;
+
+          const completedText =
+            parsed.response.output
+              ?.flatMap((item) => item.content ?? [])
+              .filter((content) => content.type === "output_text" || content.type === "text")
+              .map((content) => content.text ?? "")
+              .join("") ?? "";
+
+          if (completedText && completedText.length > fullContent.length) {
+            fullContent = completedText;
+          }
           return;
         }
 
@@ -406,14 +469,15 @@ export class OpenAIProvider implements BaseProvider {
     // Build input array in the format OpenAI expects
     const input = nonSystemMessages.map((m) => ({
       role: m.role,
-      content: m.content,
+      content: this.buildMessageContent(m),
     }));
 
     const request: OpenAIResponsesRequest = {
       model,
-      input: input.length === 1 && input[0]?.role === "user" 
-        ? input[0].content  // Single user message can be a string
-        : input,
+      input:
+        input.length === 1 && input[0]?.role === "user" && typeof input[0].content === "string"
+          ? input[0].content
+          : input,
       stream: options?.stream ?? true,
     };
 
@@ -438,5 +502,35 @@ export class OpenAIProvider implements BaseProvider {
     }
 
     return request;
+  }
+
+  private buildMessageContent(message: ChatMessage): string | OpenAIInputContent[] {
+    if (message.role !== "user" || !message.attachments || message.attachments.length === 0) {
+      return message.content;
+    }
+
+    const content: OpenAIInputContent[] = [];
+    if (message.content.trim()) {
+      content.push({ type: "input_text", text: message.content });
+    }
+
+    for (const attachment of message.attachments) {
+      if (attachment.kind === "image") {
+        content.push({
+          type: "input_image",
+          image_url: toDataUrl(attachment.mimeType, attachment.data),
+          detail: "auto",
+        });
+        continue;
+      }
+
+      content.push({
+        type: "input_file",
+        filename: attachment.name,
+        file_data: toDataUrl(attachment.mimeType, attachment.data),
+      });
+    }
+
+    return content.length > 0 ? content : message.content;
   }
 }
