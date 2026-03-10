@@ -58,6 +58,9 @@ interface MiniMaxStreamEvent {
   };
 }
 
+const THINK_OPEN_TAG = "<think>";
+const THINK_CLOSE_TAG = "</think>";
+
 function buildSafeThinking(maxTokens: number):
   | {
       type: "enabled";
@@ -86,6 +89,86 @@ function estimateReasoningTokensFromThinking(thinking: string): number | undefin
   const trimmed = thinking.trim();
   if (!trimmed) return undefined;
   return Math.max(1, Math.ceil(trimmed.length / 4));
+}
+
+function estimateMessageTokens(messages: ChatMessage[], system?: string): number {
+  const chars =
+    messages.reduce((sum, message) => sum + message.content.length + 16, 0) +
+    (system?.length ?? 0);
+  return Math.max(1, Math.ceil(chars / 4));
+}
+
+function estimateOutputTokens(content: string, thinking: string): number {
+  return Math.max(1, Math.ceil((content.length + Math.min(thinking.length, 8000)) / 4));
+}
+
+function partialTagSuffixLength(input: string): number {
+  const max = Math.min(input.length, THINK_CLOSE_TAG.length - 1);
+  for (let length = max; length > 0; length -= 1) {
+    const suffix = input.slice(-length);
+    if (THINK_OPEN_TAG.startsWith(suffix) || THINK_CLOSE_TAG.startsWith(suffix)) {
+      return length;
+    }
+  }
+  return 0;
+}
+
+function createThinkTagStreamParser() {
+  let insideThink = false;
+  let carry = "";
+
+  const parseChunk = (chunk: string) => {
+    let content = "";
+    let thinking = "";
+    let index = 0;
+
+    while (index < chunk.length) {
+      if (chunk.startsWith(THINK_OPEN_TAG, index)) {
+        insideThink = true;
+        index += THINK_OPEN_TAG.length;
+        continue;
+      }
+      if (chunk.startsWith(THINK_CLOSE_TAG, index)) {
+        insideThink = false;
+        index += THINK_CLOSE_TAG.length;
+        continue;
+      }
+
+      if (insideThink) {
+        thinking += chunk[index];
+      } else {
+        content += chunk[index];
+      }
+      index += 1;
+    }
+
+    return { content, thinking };
+  };
+
+  return {
+    push(chunk: string) {
+      const combined = carry + chunk;
+      const carryLength = partialTagSuffixLength(combined);
+      const processable = carryLength > 0 ? combined.slice(0, -carryLength) : combined;
+      carry = carryLength > 0 ? combined.slice(-carryLength) : "";
+      return parseChunk(processable);
+    },
+    flush() {
+      const trailing = carry;
+      carry = "";
+      return parseChunk(trailing);
+    },
+  };
+}
+
+function splitThinkTaggedText(input: string): { content: string; thinking: string } {
+  const parser = createThinkTagStreamParser();
+  const first = parser.push(input);
+  const final = parser.flush();
+  return {
+    content: `${first.content}${final.content}`,
+    thinking: `${first.thinking}${final.thinking}`,
+  };
 }
 
 export class MiniMaxProvider implements BaseProvider {
@@ -170,21 +253,27 @@ export class MiniMaxProvider implements BaseProvider {
     }
 
     const blocks = Array.isArray(data.content) ? data.content : [];
-    const content = blocks
+    const rawContent = blocks
       .filter((block) => block.type === "text")
       .map((block) => block.text ?? "")
       .join("");
-    const thinking = blocks
+    const explicitThinking = blocks
       .filter((block) => block.type === "thinking")
       .map((block) => block.thinking ?? block.text ?? "")
       .join("");
+    const tagged = splitThinkTaggedText(rawContent);
+    const content = tagged.content;
+    const thinking = `${explicitThinking}${tagged.thinking}`;
 
     return {
       content,
       thinking: thinking || undefined,
       tokens: {
-        input: data.usage?.input_tokens ?? 0,
-        output: data.usage?.output_tokens ?? data.usage?.completion_tokens ?? 0,
+        input: data.usage?.input_tokens ?? estimateMessageTokens(messages, body.system),
+        output:
+          data.usage?.output_tokens ??
+          data.usage?.completion_tokens ??
+          estimateOutputTokens(content, thinking),
         reasoning: extractReasoningTokens(data.usage) ?? estimateReasoningTokensFromThinking(thinking),
       },
       finishReason: this.mapFinishReason(data.stop_reason),
@@ -208,6 +297,7 @@ export class MiniMaxProvider implements BaseProvider {
     let reasoningTokens: number | undefined;
     let finishReason: "stop" | "length" | "error" = "stop";
     const blockTypes = new Map<number, string>();
+    const taggedTextParser = createThinkTagStreamParser();
 
     const parser = createSseParser((dataLine) => {
       const jsonStr = dataLine.trim();
@@ -236,8 +326,15 @@ export class MiniMaxProvider implements BaseProvider {
             fullThinking += deltaThinking;
             onChunk({ content: "", thinking: deltaThinking, done: false });
           } else if (deltaText) {
-            fullContent += deltaText;
-            onChunk({ content: deltaText, done: false });
+            const tagged = taggedTextParser.push(deltaText);
+            if (tagged.thinking) {
+              fullThinking += tagged.thinking;
+              onChunk({ content: "", thinking: tagged.thinking, done: false });
+            }
+            if (tagged.content) {
+              fullContent += tagged.content;
+              onChunk({ content: tagged.content, done: false });
+            }
           }
 
           if (event.delta?.stop_reason) {
@@ -291,14 +388,22 @@ export class MiniMaxProvider implements BaseProvider {
       );
     });
 
+    const taggedRemainder = taggedTextParser.flush();
+    if (taggedRemainder.thinking) {
+      fullThinking += taggedRemainder.thinking;
+    }
+    if (taggedRemainder.content) {
+      fullContent += taggedRemainder.content;
+    }
+
     onChunk({ content: "", done: true });
 
     return {
       content: fullContent,
       thinking: fullThinking || undefined,
       tokens: {
-        input: inputTokens,
-        output: outputTokens,
+        input: inputTokens || estimateMessageTokens(messages, body.system),
+        output: outputTokens || estimateOutputTokens(fullContent, fullThinking),
         reasoning: reasoningTokens ?? estimateReasoningTokensFromThinking(fullThinking),
       },
       finishReason,

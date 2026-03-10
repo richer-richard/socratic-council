@@ -1,12 +1,18 @@
 import type { Provider } from "../stores/config";
+import pdfWorkerUrl from "pdfjs-dist/legacy/build/pdf.worker.min.mjs?url";
 
 const ATTACHMENT_DB_NAME = "socratic-council-attachments-v1";
 const ATTACHMENT_DB_VERSION = 1;
 const ATTACHMENT_STORE = "session-attachments";
 const ATTACHMENT_BY_SESSION_INDEX = "by-session-id";
+
 const IMAGE_MAX_DIMENSION = 1600;
 const TEXT_FALLBACK_CHAR_LIMIT = 6000;
+const SEARCH_TEXT_CHAR_LIMIT = 120000;
+const SEARCH_ENTRY_CHAR_LIMIT = 3000;
 const IMAGE_OCR_CHAR_LIMIT = 2400;
+const PDF_OCR_PAGE_LIMIT = 6;
+const PDF_MIN_TEXT_CHARS_FOR_SKIP_OCR = 48;
 
 const TEXT_MIME_PREFIXES = [
   "text/",
@@ -14,38 +20,64 @@ const TEXT_MIME_PREFIXES = [
   "application/xml",
   "application/yaml",
   "application/x-yaml",
+  "application/javascript",
+  "application/x-javascript",
+  "application/typescript",
+  "application/x-sh",
 ];
 
+const DOCX_MIME_TYPES = new Set([
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+]);
+
 const TEXT_FILE_EXTENSIONS = new Set([
+  "astro",
+  "bash",
   "c",
   "cc",
+  "cfg",
+  "conf",
   "cpp",
   "cs",
   "css",
   "csv",
+  "env",
   "go",
   "h",
   "hpp",
   "html",
+  "ini",
   "java",
   "js",
   "json",
+  "jsonl",
   "jsx",
   "kt",
   "log",
   "lua",
   "md",
   "mjs",
+  "php",
+  "pl",
+  "properties",
+  "ps1",
   "py",
+  "r",
   "rb",
   "rs",
+  "scala",
   "sh",
+  "sol",
   "sql",
+  "svelte",
   "svg",
+  "swift",
+  "tex",
   "toml",
   "ts",
   "tsx",
   "txt",
+  "vue",
   "xml",
   "yaml",
   "yml",
@@ -59,13 +91,17 @@ const RAW_IMAGE_MODEL_SUPPORT: Partial<Record<Provider, string[]>> = {
 
 const RAW_PDF_MODEL_SUPPORT: Partial<Record<Provider, string[]>> = {
   openai: ["gpt-5.4"],
-  anthropic: ["claude-opus-4-6"],
   google: ["gemini-3.1-pro-preview", "gemini-3-pro-preview"],
 };
 
 export type AttachmentSource = "file-picker" | "photo-picker" | "camera";
 export type AttachmentKind = "image" | "pdf" | "text" | "binary";
 export type AttachmentTransportMode = "raw" | "fallback";
+
+export interface AttachmentSearchEntry {
+  label: string;
+  text: string;
+}
 
 export interface SessionAttachment {
   id: string;
@@ -78,22 +114,32 @@ export interface SessionAttachment {
   width: number | null;
   height: number | null;
   fallbackText: string;
+  searchable?: boolean;
+  extractedChars?: number;
 }
 
 export interface ComposerAttachment extends SessionAttachment {
   blob: Blob;
   previewUrl: string | null;
+  searchEntries: AttachmentSearchEntry[];
 }
 
 interface StoredAttachmentBlob {
   id: string;
   sessionId: string;
   blob: Blob;
+  searchEntries?: AttachmentSearchEntry[];
 }
 
 export interface LoadedAttachmentBlob {
   attachment: SessionAttachment;
   blob: Blob;
+  searchEntries: AttachmentSearchEntry[];
+}
+
+export interface LoadedAttachmentDocument {
+  attachment: SessionAttachment;
+  entries: AttachmentSearchEntry[];
 }
 
 export interface ProviderAttachmentSupport {
@@ -108,6 +154,8 @@ interface OcrWorker {
 }
 
 let ocrWorkerPromise: Promise<OcrWorker> | null = null;
+let pdfJsPromise: Promise<unknown> | null = null;
+let mammothPromise: Promise<unknown> | null = null;
 
 function createAttachmentId(): string {
   return `att_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
@@ -124,10 +172,20 @@ function fileExtension(name: string): string {
   return parts.length > 1 ? parts[parts.length - 1] ?? "" : "";
 }
 
+function isDocxLike(mimeType: string, name: string): boolean {
+  return DOCX_MIME_TYPES.has(mimeType) || fileExtension(name) === "docx";
+}
+
 function isTextLike(mimeType: string, name: string): boolean {
   if (TEXT_MIME_PREFIXES.some((prefix) => mimeType.startsWith(prefix))) {
     return true;
   }
+
+  const lowerName = name.toLowerCase();
+  if (lowerName === "dockerfile" || lowerName === "makefile" || lowerName.endsWith(".gitignore")) {
+    return true;
+  }
+
   return TEXT_FILE_EXTENSIONS.has(fileExtension(name));
 }
 
@@ -140,21 +198,33 @@ function detectAttachmentKind(file: Blob, name: string): AttachmentKind {
 }
 
 function normalizeWhitespace(input: string): string {
-  return input.replace(/\r\n/g, "\n").replace(/[ \t]+\n/g, "\n").trim();
+  return input.replace(/\r\n/g, "\n").replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
 }
 
-async function readTextFallback(file: Blob, name: string): Promise<string> {
-  try {
-    const text = normalizeWhitespace(await file.text());
-    if (!text) {
-      return `Text attachment "${name}" is empty.`;
+function normalizeSearchText(input: string): string {
+  return input.replace(/\r\n/g, "\n").replace(/[^\S\n]+/g, " ").replace(/\n{3,}/g, "\n\n").trim();
+}
+
+function countPrintableCharacters(input: string): number {
+  let printable = 0;
+  for (const char of input) {
+    const code = char.charCodeAt(0);
+    if (char === "\n" || char === "\t" || (code >= 32 && code <= 126) || code >= 160) {
+      printable += 1;
     }
-    const excerpt = text.slice(0, TEXT_FALLBACK_CHAR_LIMIT);
-    const suffix = text.length > excerpt.length ? "\n\n[Excerpt truncated for context length.]" : "";
-    return `Text attachment "${name}":\n${excerpt}${suffix}`;
-  } catch {
-    return `Text attachment "${name}" could not be read locally.`;
   }
+  return printable;
+}
+
+function looksReadableText(input: string): boolean {
+  if (!input.trim()) return false;
+  const printable = countPrintableCharacters(input);
+  return printable / Math.max(input.length, 1) > 0.86;
+}
+
+function trimToCharLimit(input: string, limit: number): string {
+  if (input.length <= limit) return input;
+  return input.slice(0, limit);
 }
 
 function buildManifestFallback(
@@ -165,11 +235,116 @@ function buildManifestFallback(
   width: number | null,
   height: number | null
 ): string {
-  const dimensions =
-    kind === "image" && width && height ? `, ${width}x${height}px` : "";
+  const dimensions = kind === "image" && width && height ? `, ${width}x${height}px` : "";
   const label = kind === "pdf" ? "PDF" : kind === "image" ? "Image" : "File";
   const mime = mimeType || "unknown type";
   return `${label} attachment "${name}" (${mime}${dimensions}, ${formatBytes(size)}).`;
+}
+
+function estimateTokensFromText(text: string): number {
+  return Math.max(1, Math.ceil(text.length / 4));
+}
+
+function buildSnippetSegments(text: string, budget: number): string {
+  if (text.length <= budget) {
+    return text;
+  }
+
+  const segment = Math.max(240, Math.floor((budget - 80) / 3));
+  const start = text.slice(0, segment).trim();
+  const middleStart = Math.max(0, Math.floor((text.length - segment) / 2));
+  const middle = text.slice(middleStart, middleStart + segment).trim();
+  const end = text.slice(Math.max(0, text.length - segment)).trim();
+
+  return [
+    "[Start]",
+    start,
+    "",
+    "[Middle]",
+    middle,
+    "",
+    "[End]",
+    end,
+    "",
+    `[Compressed from ${text.length.toLocaleString()} chars.]`,
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+function chunkLongText(text: string, label: string, limit = SEARCH_ENTRY_CHAR_LIMIT): AttachmentSearchEntry[] {
+  const normalized = normalizeSearchText(text);
+  if (!normalized) return [];
+
+  if (normalized.length <= limit) {
+    return [{ label, text: normalized }];
+  }
+
+  const chunks: AttachmentSearchEntry[] = [];
+  let offset = 0;
+  let part = 1;
+
+  while (offset < normalized.length && chunks.length < 64) {
+    let end = Math.min(normalized.length, offset + limit);
+    if (end < normalized.length) {
+      const newlineIndex = normalized.lastIndexOf("\n", end);
+      const spaceIndex = normalized.lastIndexOf(" ", end);
+      const cut = Math.max(newlineIndex, spaceIndex);
+      if (cut > offset + 400) {
+        end = cut;
+      }
+    }
+
+    const slice = normalized.slice(offset, end).trim();
+    if (slice) {
+      chunks.push({
+        label: `${label} (part ${part})`,
+        text: slice,
+      });
+      part += 1;
+    }
+    offset = end;
+  }
+
+  return chunks;
+}
+
+function buildFallbackText(
+  attachment: Pick<SessionAttachment, "name" | "kind" | "mimeType" | "size" | "width" | "height">,
+  searchEntries: AttachmentSearchEntry[]
+): string {
+  const manifest = buildManifestFallback(
+    attachment.name,
+    attachment.kind,
+    attachment.mimeType,
+    attachment.size,
+    attachment.width,
+    attachment.height
+  );
+
+  if (searchEntries.length === 0) {
+    if (attachment.kind === "image") {
+      return `${manifest}\n\nNo readable text was detected in the image.`;
+    }
+    return `${manifest}\n\nNo searchable text could be extracted locally.`;
+  }
+
+  const selected: AttachmentSearchEntry[] = [];
+  const first = searchEntries[0];
+  const middle = searchEntries[Math.floor(searchEntries.length / 2)];
+  const last = searchEntries[searchEntries.length - 1];
+
+  if (first) selected.push(first);
+  if (middle && middle !== first && middle !== last) selected.push(middle);
+  if (last && last !== first) selected.push(last);
+
+  const label = attachment.kind === "image" ? "OCR notes" : "Extracted notes";
+  const perSectionBudget = Math.max(700, Math.floor((TEXT_FALLBACK_CHAR_LIMIT - manifest.length - 120) / selected.length));
+  const body = selected
+    .map((entry) => `${entry.label}:\n${buildSnippetSegments(entry.text, perSectionBudget)}`)
+    .join("\n\n");
+
+  return `${manifest}\n\n${label} from "${attachment.name}":\n${body}`;
 }
 
 async function getOcrWorker(): Promise<OcrWorker> {
@@ -179,36 +354,272 @@ async function getOcrWorker(): Promise<OcrWorker> {
   return ocrWorkerPromise;
 }
 
-async function readImageFallback(
-  file: Blob,
-  name: string,
-  mimeType: string,
-  size: number,
-  width: number | null,
-  height: number | null
-): Promise<string> {
-  const manifest = buildManifestFallback(name, "image", mimeType, size, width, height);
+async function recognizeImageText(file: Blob): Promise<string> {
+  const worker = await getOcrWorker();
+  const result = await worker.recognize(file);
+  return normalizeWhitespace(result.data.text ?? "");
+}
 
-  if (!mimeType.startsWith("image/")) {
-    return manifest;
+async function getPdfJs() {
+  if (!pdfJsPromise) {
+    pdfJsPromise = import("pdfjs-dist/legacy/build/pdf.mjs").then((module) => {
+      const workerConfig = module as {
+        GlobalWorkerOptions?: {
+          workerSrc?: string;
+        };
+      };
+
+      if (workerConfig.GlobalWorkerOptions) {
+        workerConfig.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
+      }
+
+      return module;
+    });
   }
+  return pdfJsPromise as Promise<{
+    GlobalWorkerOptions?: {
+      workerSrc?: string;
+    };
+    getDocument: (options: Record<string, unknown>) => {
+      promise: Promise<{
+        numPages: number;
+        getPage: (pageNumber: number) => Promise<{
+          getTextContent: () => Promise<{ items: Array<{ str?: string }> }>;
+          getViewport: (options: { scale: number }) => { width: number; height: number };
+          render: (options: { canvasContext: CanvasRenderingContext2D; viewport: { width: number; height: number } }) => {
+            promise: Promise<void>;
+          };
+        }>;
+        destroy?: () => Promise<void>;
+      }>;
+      destroy?: () => Promise<void>;
+    };
+  }>;
+}
 
+async function getMammoth() {
+  if (!mammothPromise) {
+    mammothPromise = import("mammoth");
+  }
+  return mammothPromise as Promise<{
+    extractRawText: (input: { arrayBuffer: ArrayBuffer }) => Promise<{ value: string }>;
+  }>;
+}
+
+async function extractTextSearchEntries(file: Blob): Promise<AttachmentSearchEntry[]> {
   try {
-    const worker = await getOcrWorker();
-    const result = await worker.recognize(file);
-    const text = normalizeWhitespace(result.data.text ?? "");
-
-    if (!text) {
-      return `${manifest}\n\nNo readable text was detected in the image.`;
+    const raw = await file.text();
+    if (!looksReadableText(raw)) {
+      return [];
     }
 
-    const excerpt = text.slice(0, IMAGE_OCR_CHAR_LIMIT);
-    const suffix = text.length > excerpt.length ? "\n\n[OCR text truncated for context length.]" : "";
-    return `${manifest}\n\nOCR text from "${name}":\n${excerpt}${suffix}`;
+    const lines = raw.replace(/\r\n/g, "\n").split("\n");
+    const entries: AttachmentSearchEntry[] = [];
+    let buffer: string[] = [];
+    let lineStart = 1;
+    let currentLength = 0;
+    let totalChars = 0;
+
+    for (let index = 0; index < lines.length; index += 1) {
+      const line = lines[index] ?? "";
+      if (totalChars >= SEARCH_TEXT_CHAR_LIMIT) break;
+
+      buffer.push(line);
+      currentLength += line.length + 1;
+      totalChars += line.length + 1;
+
+      const isBoundary = currentLength >= 1800 || buffer.length >= 80 || index === lines.length - 1;
+      if (!isBoundary) continue;
+
+      const text = normalizeSearchText(buffer.join("\n"));
+      if (text) {
+        entries.push({
+          label: `Lines ${lineStart}-${index + 1}`,
+          text: trimToCharLimit(text, SEARCH_ENTRY_CHAR_LIMIT),
+        });
+      }
+
+      buffer = [];
+      lineStart = index + 2;
+      currentLength = 0;
+    }
+
+    return entries;
+  } catch {
+    return [];
+  }
+}
+
+async function extractDocxSearchEntries(file: Blob): Promise<AttachmentSearchEntry[]> {
+  try {
+    const mammoth = await getMammoth();
+    const result = await mammoth.extractRawText({ arrayBuffer: await file.arrayBuffer() });
+    const paragraphs = normalizeSearchText(result.value ?? "").split("\n").filter(Boolean);
+    if (paragraphs.length === 0) {
+      return [];
+    }
+
+    const entries: AttachmentSearchEntry[] = [];
+    let buffer: string[] = [];
+    let paragraphStart = 1;
+    let currentLength = 0;
+    let totalChars = 0;
+
+    for (let index = 0; index < paragraphs.length; index += 1) {
+      const paragraph = paragraphs[index] ?? "";
+      if (totalChars >= SEARCH_TEXT_CHAR_LIMIT) break;
+
+      buffer.push(paragraph);
+      currentLength += paragraph.length + 1;
+      totalChars += paragraph.length + 1;
+
+      const isBoundary = currentLength >= 2200 || buffer.length >= 12 || index === paragraphs.length - 1;
+      if (!isBoundary) continue;
+
+      entries.push({
+        label: `Paragraphs ${paragraphStart}-${index + 1}`,
+        text: trimToCharLimit(buffer.join("\n\n"), SEARCH_ENTRY_CHAR_LIMIT),
+      });
+      buffer = [];
+      paragraphStart = index + 2;
+      currentLength = 0;
+    }
+
+    return entries;
+  } catch {
+    return [];
+  }
+}
+
+async function renderPdfPageToBlob(
+  page: {
+    getViewport: (options: { scale: number }) => { width: number; height: number };
+    render: (options: { canvasContext: CanvasRenderingContext2D; viewport: { width: number; height: number } }) => {
+      promise: Promise<void>;
+    };
+  }
+): Promise<Blob | null> {
+  const viewport = page.getViewport({ scale: 1.25 });
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.ceil(viewport.width));
+  canvas.height = Math.max(1, Math.ceil(viewport.height));
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return null;
+
+  await page.render({ canvasContext: ctx, viewport }).promise;
+  return new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/png"));
+}
+
+async function extractPdfSearchEntries(file: Blob): Promise<AttachmentSearchEntry[]> {
+  const pdfjs = await getPdfJs();
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  const loadingTask = pdfjs.getDocument({
+    data: bytes,
+    disableRange: true,
+    disableStream: true,
+    disableAutoFetch: true,
+  });
+
+  try {
+    const pdf = await loadingTask.promise;
+    const entries: AttachmentSearchEntry[] = [];
+    let totalChars = 0;
+    let ocrPages = 0;
+
+    for (let pageNumber = 1; pageNumber <= pdf.numPages && totalChars < SEARCH_TEXT_CHAR_LIMIT; pageNumber += 1) {
+      const page = await pdf.getPage(pageNumber);
+      const textContent = await page.getTextContent();
+      const rawText = textContent.items.map((item) => item.str ?? "").join(" ");
+      let text = normalizeSearchText(rawText);
+
+      if (text.length < PDF_MIN_TEXT_CHARS_FOR_SKIP_OCR && ocrPages < PDF_OCR_PAGE_LIMIT) {
+        try {
+          const pageBlob = await renderPdfPageToBlob(page);
+          if (pageBlob) {
+            const ocrText = await recognizeImageText(pageBlob);
+            if (ocrText.length > text.length) {
+              text = normalizeSearchText(ocrText);
+            }
+            if (ocrText) {
+              ocrPages += 1;
+            }
+          }
+        } catch {
+          // Ignore page OCR failures; page text fallback is still usable.
+        }
+      }
+
+      if (!text) continue;
+      const pageEntries = chunkLongText(text, `Page ${pageNumber}`);
+      for (const entry of pageEntries) {
+        if (totalChars >= SEARCH_TEXT_CHAR_LIMIT) break;
+        entries.push({
+          label: entry.label,
+          text: trimToCharLimit(entry.text, SEARCH_ENTRY_CHAR_LIMIT),
+        });
+        totalChars += entry.text.length;
+      }
+    }
+
+    return entries;
+  } finally {
+    await loadingTask.destroy?.().catch(() => undefined);
+  }
+}
+
+async function extractImageSearchEntries(file: Blob): Promise<AttachmentSearchEntry[]> {
+  try {
+    const text = await recognizeImageText(file);
+    if (!text) {
+      return [];
+    }
+    return [
+      {
+        label: "Image OCR",
+        text: trimToCharLimit(text, IMAGE_OCR_CHAR_LIMIT),
+      },
+    ];
   } catch (error) {
     console.warn("Image OCR failed; falling back to manifest only.", error);
-    return manifest;
+    return [];
   }
+}
+
+async function extractBinaryTextHeuristically(file: Blob): Promise<AttachmentSearchEntry[]> {
+  try {
+    const text = await file.text();
+    if (!looksReadableText(text)) {
+      return [];
+    }
+    return chunkLongText(text, "Extracted text");
+  } catch {
+    return [];
+  }
+}
+
+async function extractSearchEntries(
+  file: Blob,
+  name: string,
+  kind: AttachmentKind,
+  mimeType: string
+): Promise<AttachmentSearchEntry[]> {
+  if (kind === "image") {
+    return extractImageSearchEntries(file);
+  }
+
+  if (kind === "pdf") {
+    return extractPdfSearchEntries(file);
+  }
+
+  if (kind === "text") {
+    return extractTextSearchEntries(file);
+  }
+
+  if (isDocxLike(mimeType, name)) {
+    return extractDocxSearchEntries(file);
+  }
+
+  return extractBinaryTextHeuristically(file);
 }
 
 async function getImageSize(file: Blob): Promise<{ width: number | null; height: number | null }> {
@@ -256,6 +667,7 @@ async function downscaleImage(
     if (!ctx) {
       return { blob: file, width: bitmap.width, height: bitmap.height };
     }
+
     ctx.drawImage(bitmap, 0, 0, width, height);
     const outputType = mimeType === "image/png" || mimeType === "image/webp" ? mimeType : "image/jpeg";
     const blob = await new Promise<Blob | null>((resolve) => {
@@ -288,26 +700,36 @@ async function buildComposerAttachment(
     height = normalized.height;
   }
 
-  const fallbackText =
-    kind === "text"
-      ? await readTextFallback(blob, file.name)
-      : kind === "image"
-        ? await readImageFallback(blob, file.name, blob.type || file.type, blob.size, width, height)
-        : buildManifestFallback(file.name, kind, blob.type || file.type, blob.size, width, height);
+  const mimeType = blob.type || file.type || "application/octet-stream";
+  const searchEntries = await extractSearchEntries(blob, file.name, kind, mimeType);
+  const extractedChars = searchEntries.reduce((sum, entry) => sum + entry.text.length, 0);
 
   return {
     id,
     name: file.name,
-    mimeType: blob.type || file.type || "application/octet-stream",
+    mimeType,
     size: blob.size,
     kind,
     source,
     addedAt,
     width,
     height,
-    fallbackText,
+    fallbackText: buildFallbackText(
+      {
+        name: file.name,
+        kind,
+        mimeType,
+        size: blob.size,
+        width,
+        height,
+      },
+      searchEntries
+    ),
+    searchable: searchEntries.length > 0,
+    extractedChars,
     blob,
     previewUrl: kind === "image" ? URL.createObjectURL(blob) : null,
+    searchEntries,
   };
 }
 
@@ -373,6 +795,22 @@ function requestToPromise<T>(request: IDBRequest<T>): Promise<T> {
   });
 }
 
+function sanitizeSearchEntries(entries: unknown): AttachmentSearchEntry[] {
+  if (!Array.isArray(entries)) return [];
+  return entries
+    .map((entry) => {
+      if (!entry || typeof entry !== "object") return null;
+      const label = typeof (entry as AttachmentSearchEntry).label === "string" ? (entry as AttachmentSearchEntry).label.trim() : "";
+      const text = typeof (entry as AttachmentSearchEntry).text === "string" ? normalizeSearchText((entry as AttachmentSearchEntry).text) : "";
+      if (!label || !text) return null;
+      return {
+        label,
+        text: trimToCharLimit(text, SEARCH_ENTRY_CHAR_LIMIT),
+      };
+    })
+    .filter((entry): entry is AttachmentSearchEntry => Boolean(entry));
+}
+
 export function revokeComposerAttachmentPreview(attachment: { previewUrl: string | null }): void {
   if (attachment.previewUrl) {
     URL.revokeObjectURL(attachment.previewUrl);
@@ -408,11 +846,12 @@ export async function persistSessionAttachments(
         id: attachment.id,
         sessionId,
         blob: attachment.blob,
+        searchEntries: attachment.searchEntries,
       } satisfies StoredAttachmentBlob);
     }
   });
 
-  return attachments.map(({ blob: _blob, previewUrl: _previewUrl, ...metadata }) => metadata);
+  return attachments.map(({ blob: _blob, previewUrl: _previewUrl, searchEntries: _searchEntries, ...metadata }) => metadata);
 }
 
 export async function loadSessionAttachmentBlobs(
@@ -424,14 +863,51 @@ export async function loadSessionAttachmentBlobs(
     const loaded = new Map<string, LoadedAttachmentBlob>();
     for (const attachment of attachments) {
       const record = await requestToPromise(store.get(attachment.id) as IDBRequest<StoredAttachmentBlob | undefined>);
-      if (record?.blob) {
-        loaded.set(attachment.id, {
-          attachment,
-          blob: record.blob,
-        });
-      }
+      if (!record?.blob) continue;
+
+      const searchEntries =
+        sanitizeSearchEntries(record.searchEntries).length > 0
+          ? sanitizeSearchEntries(record.searchEntries)
+          : await extractSearchEntries(record.blob, attachment.name, attachment.kind, attachment.mimeType);
+
+      loaded.set(attachment.id, {
+        attachment,
+        blob: record.blob,
+        searchEntries,
+      });
     }
     return loaded;
+  });
+}
+
+export async function loadSessionAttachmentDocuments(
+  attachments: SessionAttachment[]
+): Promise<LoadedAttachmentDocument[]> {
+  if (attachments.length === 0) return [];
+
+  return withStore("readwrite", async (store) => {
+    const documents: LoadedAttachmentDocument[] = [];
+
+    for (const attachment of attachments) {
+      const record = await requestToPromise(store.get(attachment.id) as IDBRequest<StoredAttachmentBlob | undefined>);
+      if (!record?.blob) continue;
+
+      let searchEntries = sanitizeSearchEntries(record.searchEntries);
+      if (searchEntries.length === 0) {
+        searchEntries = await extractSearchEntries(record.blob, attachment.name, attachment.kind, attachment.mimeType);
+        store.put({
+          ...record,
+          searchEntries,
+        } satisfies StoredAttachmentBlob);
+      }
+
+      documents.push({
+        attachment,
+        entries: searchEntries,
+      });
+    }
+
+    return documents;
   });
 }
 
@@ -491,4 +967,8 @@ export function summarizeSessionAttachments(attachments: SessionAttachment[]): s
 export function buildAttachmentListLabel(attachments: SessionAttachment[]): string {
   if (attachments.length === 0) return "No attachments";
   return `${attachments.length} ${attachments.length === 1 ? "attachment" : "attachments"}`;
+}
+
+export function estimateAttachmentPromptTokens(attachments: SessionAttachment[]): number {
+  return attachments.reduce((sum, attachment) => sum + estimateTokensFromText(attachment.fallbackText), 0);
 }
