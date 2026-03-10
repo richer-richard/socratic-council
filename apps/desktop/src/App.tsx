@@ -3,10 +3,12 @@ import { Home } from "./pages/Home";
 import { Settings } from "./pages/Settings";
 import { Chat } from "./pages/Chat";
 import {
+  archiveDiscussionSession,
   createDiscussionSession,
   deleteDiscussionSession,
   listSessionSummaries,
   loadDiscussionSession,
+  restoreDiscussionSession,
   saveDiscussionSession,
   stabilizeStoredSessions,
   touchDiscussionSession,
@@ -96,15 +98,36 @@ export default function App() {
     });
   }, []);
 
+  const handleArchiveSession = useCallback((sessionId: string) => {
+    const archived = archiveDiscussionSession(sessionId);
+    if (!archived) return;
+
+    setSessions(listSessionSummaries());
+    setActiveSession((current) => (current?.id === sessionId ? null : current));
+    setState((current) => ({
+      ...current,
+      currentSessionId: current.currentSessionId === sessionId ? null : current.currentSessionId,
+    }));
+  }, []);
+
+  const handleRestoreSession = useCallback((sessionId: string) => {
+    const restored = restoreDiscussionSession(sessionId);
+    if (!restored) return;
+
+    setSessions(listSessionSummaries());
+  }, []);
+
   return (
     <div className="h-screen flex flex-col bg-gray-900">
       {state.currentPage === "home" && (
         <Home
           sessions={sessions}
           activeSessionId={state.currentSessionId}
+          onArchiveSession={handleArchiveSession}
           onCreateSession={handleCreateSession}
           onDeleteSession={handleDeleteSession}
           onOpenSession={handleOpenSession}
+          onRestoreSession={handleRestoreSession}
         />
       )}
       {state.currentPage === "settings" && <Settings onNavigate={navigate} />}

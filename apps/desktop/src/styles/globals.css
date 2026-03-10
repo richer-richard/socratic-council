@@ -811,6 +811,82 @@ body {
   color: var(--ink-900) !important;
 }
 
+.session-action-modal {
+  width: min(28rem, calc(100vw - 2rem));
+  padding: 1.25rem;
+}
+
+.session-empty-modal {
+  width: min(22rem, calc(100vw - 2rem));
+}
+
+.session-action-eyebrow {
+  margin-bottom: 0.55rem;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  font-size: 0.68rem;
+  color: var(--ink-500);
+}
+
+.session-action-title {
+  margin: 0;
+  font-size: 1.15rem;
+  line-height: 1.2;
+  color: var(--ink-900);
+}
+
+.session-action-copy {
+  margin: 0.75rem 0 0;
+  color: var(--ink-700);
+  line-height: 1.55;
+}
+
+.session-action-buttons {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.75rem;
+  margin-top: 1.25rem;
+}
+
+.session-action-buttons.is-single {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.session-action-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  width: 100%;
+  min-width: 0;
+  padding: 0.7rem 0.95rem;
+  border-radius: 0.95rem;
+  font-weight: 700;
+  transition: transform 0.2s ease, background 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+}
+
+.session-action-button:hover {
+  transform: translateY(-1px);
+}
+
+.session-action-button.is-neutral {
+  color: var(--ink-700);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.session-action-button.is-archive {
+  color: #d1fae5;
+  background: rgba(20, 184, 166, 0.16);
+  border: 1px solid rgba(20, 184, 166, 0.3);
+}
+
+.session-action-button.is-delete {
+  color: #ffe4e6;
+  background: rgba(244, 63, 94, 0.16);
+  border: 1px solid rgba(244, 63, 94, 0.3);
+}
+
 /* =========================================================================== */
 /* PROGRESS ANIMATIONS                                                         */
 /* =========================================================================== */
@@ -1626,6 +1702,44 @@ body {
   gap: 0.85rem;
 }
 
+.workstation-sidebar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.workstation-session-view {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.2rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.workstation-session-view-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.36rem 0.65rem;
+  border-radius: 999px;
+  font-size: 0.74rem;
+  color: var(--ink-500);
+  transition: background 0.2s ease, color 0.2s ease, transform 0.2s ease;
+}
+
+.workstation-session-view-button:hover {
+  transform: translateY(-1px);
+  color: var(--ink-900);
+}
+
+.workstation-session-view-button.is-active {
+  color: var(--ink-900);
+  background: rgba(20, 184, 166, 0.14);
+}
+
 .workstation-thread-list {
   display: flex;
   flex: 1;
@@ -1671,13 +1785,13 @@ body {
 }
 
 .workstation-thread-open:focus-visible,
-.workstation-thread-delete:focus-visible {
+.workstation-thread-action:focus-visible {
   outline: none;
   box-shadow: 0 0 0 3px rgba(20, 184, 166, 0.22);
   border-radius: 0.75rem;
 }
 
-.workstation-thread-delete {
+.workstation-thread-action {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1692,10 +1806,10 @@ body {
   transition: background 0.2s ease, border-color 0.2s ease, color 0.2s ease;
 }
 
-.workstation-thread-delete:hover {
-  background: rgba(244, 63, 94, 0.12);
-  border-color: rgba(244, 63, 94, 0.3);
-  color: #fda4af;
+.workstation-thread-action:hover {
+  background: rgba(20, 184, 166, 0.12);
+  border-color: rgba(20, 184, 166, 0.24);
+  color: #99f6e4;
 }
 
 .workstation-thread.is-active,
@@ -2163,5 +2277,11 @@ body {
 
   .workstation-sidebar {
     padding: 1rem;
+  }
+}
+
+@media (max-width: 560px) {
+  .session-action-buttons {
+    grid-template-columns: minmax(0, 1fr);
   }
 }

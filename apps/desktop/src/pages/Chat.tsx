@@ -1959,6 +1959,7 @@ Write a concise closure prompt that asks the council to:
       createdAt: normalizedSession.createdAt,
       updatedAt: nextUpdatedAt,
       lastOpenedAt: Math.max(normalizedSession.lastOpenedAt, normalizedSession.updatedAt),
+      archivedAt: normalizedSession.archivedAt,
       status: nextStatus,
       currentTurn: currentTurnRef.current,
       totalTokens,

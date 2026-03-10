@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { CouncilMark } from "../components/CouncilMark";
 import { ConfigModal } from "../components/ConfigModal";
@@ -10,10 +10,14 @@ import { useConfig, getShuffledTopics, PROVIDER_INFO, type Provider } from "../s
 interface HomeProps {
   sessions: SessionSummary[];
   activeSessionId: string | null;
+  onArchiveSession: (sessionId: string) => void;
   onCreateSession: (topic: string) => void;
   onDeleteSession: (sessionId: string) => void;
   onOpenSession: (sessionId: string) => void;
+  onRestoreSession: (sessionId: string) => void;
 }
+
+type SessionFolder = "recent" | "archived";
 
 const AGENT_CARDS: Array<{
   provider: Provider;
@@ -132,6 +136,44 @@ function TrashIcon({ size = 16 }: { size?: number }) {
   );
 }
 
+function RestoreIcon({ size = 16 }: { size?: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M3 7v6h6" />
+      <path d="M21 17a8 8 0 0 1-14-5.2V7" />
+      <path d="M7 7a8 8 0 0 1 13.65 2.35" />
+    </svg>
+  );
+}
+
+function MoreIcon({ size = 16 }: { size?: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <circle cx="5" cy="12" r="1.5" />
+      <circle cx="12" cy="12" r="1.5" />
+      <circle cx="19" cy="12" r="1.5" />
+    </svg>
+  );
+}
+
 function formatRelativeTime(timestamp: number): string {
   const diffMs = timestamp - Date.now();
   const absMs = Math.abs(diffMs);
@@ -152,13 +194,18 @@ function formatRelativeTime(timestamp: number): string {
 export function Home({
   sessions,
   activeSessionId,
+  onArchiveSession,
   onCreateSession,
   onDeleteSession,
   onOpenSession,
+  onRestoreSession,
 }: HomeProps) {
   const [topic, setTopic] = useState("");
   const [showSettings, setShowSettings] = useState(false);
   const [showApiWarning, setShowApiWarning] = useState(false);
+  const [showArchivedEmptyNotice, setShowArchivedEmptyNotice] = useState(false);
+  const [sessionFolder, setSessionFolder] = useState<SessionFolder>("recent");
+  const [pendingSessionAction, setPendingSessionAction] = useState<SessionSummary | null>(null);
   const {
     config,
     updateCredential,
@@ -171,7 +218,19 @@ export function Home({
 
   const configuredProviders = getConfiguredProviders();
   const sampleTopics = useMemo(() => getShuffledTopics(5), []);
-  const recentSessions = useMemo(() => sessions.slice(0, 8), [sessions]);
+  const recentSessions = useMemo(
+    () => sessions.filter((session) => session.archivedAt == null),
+    [sessions]
+  );
+  const archivedSessions = useMemo(
+    () =>
+      [...sessions]
+        .filter((session) => session.archivedAt != null)
+        .sort((a, b) => (b.archivedAt ?? 0) - (a.archivedAt ?? 0)),
+    [sessions]
+  );
+  const visibleSessions = sessionFolder === "archived" ? archivedSessions : recentSessions;
+  const isArchivedActionTarget = pendingSessionAction?.archivedAt != null;
 
   const handleStart = () => {
     if (!topic.trim()) return;
@@ -182,6 +241,30 @@ export function Home({
 
     onCreateSession(topic.trim());
   };
+
+  const handleSelectSessionFolder = (folder: SessionFolder) => {
+    if (folder === "archived" && archivedSessions.length === 0) {
+      setShowArchivedEmptyNotice(true);
+      return;
+    }
+
+    setSessionFolder(folder);
+  };
+
+  useEffect(() => {
+    if (sessionFolder === "archived" && archivedSessions.length === 0) {
+      setSessionFolder("recent");
+    }
+  }, [archivedSessions.length, sessionFolder]);
+
+  useEffect(() => {
+    if (!pendingSessionAction) return;
+
+    const stillExists = sessions.some((session) => session.id === pendingSessionAction.id);
+    if (!stillExists) {
+      setPendingSessionAction(null);
+    }
+  }, [pendingSessionAction, sessions]);
 
   return (
     <div className="app-shell workstation-shell flex-1 overflow-hidden relative">
@@ -215,10 +298,36 @@ export function Home({
         </div>
 
         <div className="workstation-sidebar-section">
-          <div className="workstation-sidebar-heading">Recent Sessions</div>
+          <div className="workstation-sidebar-header">
+            <div className="workstation-sidebar-heading">
+              {sessionFolder === "recent" ? "Recent Sessions" : "Archived Sessions"}
+            </div>
+            <div className="workstation-session-view" role="tablist" aria-label="Session folders">
+              <button
+                type="button"
+                role="tab"
+                aria-selected={sessionFolder === "recent"}
+                className={`workstation-session-view-button ${sessionFolder === "recent" ? "is-active" : ""}`}
+                onClick={() => handleSelectSessionFolder("recent")}
+              >
+                <span>Recent</span>
+                <span>{recentSessions.length}</span>
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={sessionFolder === "archived"}
+                className={`workstation-session-view-button ${sessionFolder === "archived" ? "is-active" : ""}`}
+                onClick={() => handleSelectSessionFolder("archived")}
+              >
+                <span>Archived</span>
+                <span>{archivedSessions.length}</span>
+              </button>
+            </div>
+          </div>
           <div className="workstation-thread-list">
-            {recentSessions.length > 0 ? (
-              recentSessions.map((session) => (
+            {visibleSessions.length > 0 ? (
+              visibleSessions.map((session) => (
                 <div
                   key={session.id}
                   className={`workstation-thread ${activeSessionId === session.id ? "is-active" : ""}`}
@@ -246,28 +355,21 @@ export function Home({
                     </button>
                     <button
                       type="button"
-                      className="workstation-thread-delete"
-                      aria-label={`Delete ${session.title}`}
-                      title="Delete session"
-                      onClick={(event) => {
-                        event.stopPropagation();
-
-                        const confirmed = window.confirm(
-                          `Delete "${session.title}"? This removes the saved local session.`
-                        );
-                        if (!confirmed) return;
-
-                        onDeleteSession(session.id);
-                      }}
+                      className="workstation-thread-action"
+                      aria-label={`Manage ${session.title}`}
+                      title={session.archivedAt == null ? "Archive or delete session" : "Restore or delete session"}
+                      onClick={() => setPendingSessionAction(session)}
                     >
-                      <TrashIcon size={14} />
+                      <MoreIcon size={14} />
                     </button>
                   </div>
                 </div>
               ))
             ) : (
               <div className="workstation-empty-state">
-                Your council archive will appear here after the first run.
+                {sessionFolder === "recent"
+                  ? "Your active council sessions will appear here after the first run."
+                  : "Archived sessions stay here until you restore them."}
               </div>
             )}
           </div>
@@ -406,6 +508,93 @@ export function Home({
         onUpdatePreferences={updatePreferences}
         onUpdateModel={updateModel}
       />
+
+      {pendingSessionAction && (
+        <div
+          className="modal-overlay"
+          onClick={(event) => {
+            if (event.target === event.currentTarget) {
+              setPendingSessionAction(null);
+            }
+          }}
+        >
+          <div className="modal-content session-action-modal">
+            <div className="session-action-eyebrow">
+              {isArchivedActionTarget ? "Archived Session" : "Session Actions"}
+            </div>
+            <h2 className="session-action-title">{pendingSessionAction.title}</h2>
+            <p className="session-action-copy">
+              {isArchivedActionTarget
+                ? "Restore returns this session to Recent. Delete removes it permanently from local storage."
+                : "Archive keeps this session saved but removes it from Recent. Delete removes it permanently from local storage."}
+            </p>
+            <div className="session-action-buttons">
+              <button
+                type="button"
+                className="session-action-button is-neutral"
+                onClick={() => setPendingSessionAction(null)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="session-action-button is-archive"
+                onClick={() => {
+                  if (isArchivedActionTarget) {
+                    onRestoreSession(pendingSessionAction.id);
+                  } else {
+                    onArchiveSession(pendingSessionAction.id);
+                  }
+                  setPendingSessionAction(null);
+                }}
+              >
+                {isArchivedActionTarget ? <RestoreIcon size={15} /> : <ArchiveIcon size={15} />}
+                <span>{isArchivedActionTarget ? "Restore" : "Archive"}</span>
+              </button>
+              <button
+                type="button"
+                className="session-action-button is-delete"
+                onClick={() => {
+                  onDeleteSession(pendingSessionAction.id);
+                  setPendingSessionAction(null);
+                }}
+              >
+                <TrashIcon size={15} />
+                <span>Delete</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showArchivedEmptyNotice && (
+        <div
+          className="modal-overlay"
+          onClick={(event) => {
+            if (event.target === event.currentTarget) {
+              setShowArchivedEmptyNotice(false);
+            }
+          }}
+        >
+          <div className="modal-content session-action-modal session-empty-modal">
+            <div className="session-action-eyebrow">Archive</div>
+            <h2 className="session-action-title">No archived sessions yet</h2>
+            <p className="session-action-copy">
+              Archive a recent session to move it out of Recent without deleting it. Archived sessions
+              will appear here when they exist.
+            </p>
+            <div className="session-action-buttons is-single">
+              <button
+                type="button"
+                className="session-action-button is-neutral"
+                onClick={() => setShowArchivedEmptyNotice(false)}
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
