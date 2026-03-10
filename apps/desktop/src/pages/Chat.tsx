@@ -6,6 +6,7 @@ import { callProvider, apiLogger, type ChatMessage as APIChatMessage } from "../
 import {
   getAttachmentTransportMode,
   loadSessionAttachmentBlobs,
+  summarizeSessionAttachments,
 } from "../services/attachments";
 import {
   type DiscussionSession,
@@ -362,6 +363,45 @@ function normalizeMessageText(raw: string) {
     .trim();
 }
 
+function getToolDisplayName(toolName: ToolCall["name"]): string {
+  switch (toolName) {
+    case "oracle.file_search":
+      return "File Search";
+    case "oracle.web_search":
+    case "oracle.search":
+      return "Web Search";
+    case "oracle.verify":
+      return "Verify";
+    case "oracle.cite":
+      return "Citations";
+    default:
+      return toolName;
+  }
+}
+
+function buildToolMessageContent(
+  callerName: string,
+  toolName: ToolCall["name"],
+  args: Record<string, unknown>,
+  output: string,
+  error?: string
+) {
+  const serializedArgs = JSON.stringify(args);
+  const lines = [
+    `${callerName} called ${toolName}.`,
+    `Arguments: ${serializedArgs}`,
+    "",
+    error ? `Error:\n${error}` : `Result:\n${output}`,
+  ];
+  return lines.join("\n");
+}
+
+function buildDiscussionOpeningMessage(topic: string, attachmentSummary: string): string {
+  return [topic.trim(), attachmentSummary ? `Attached: ${attachmentSummary.replace(/^Attachments:\s*/i, "")}` : ""]
+    .filter(Boolean)
+    .join("\n\n");
+}
+
 async function blobToBase64(blob: Blob): Promise<string> {
   const buffer = await blob.arrayBuffer();
   let binary = "";
@@ -385,7 +425,13 @@ function extractActions(raw: string) {
     const toolName = String(name).trim();
     try {
       const parsed = JSON.parse(String(argsText));
-      if (toolName === "oracle.search" || toolName === "oracle.verify" || toolName === "oracle.cite") {
+      if (
+        toolName === "oracle.search" ||
+        toolName === "oracle.web_search" ||
+        toolName === "oracle.file_search" ||
+        toolName === "oracle.verify" ||
+        toolName === "oracle.cite"
+      ) {
         toolCalls.push({
           name: toolName as ToolCall["name"],
           args: typeof parsed === "object" && parsed ? parsed : {},
@@ -923,6 +969,11 @@ export function Chat({ session, onNavigate, onPersistSession }: ChatProps) {
     }
 
     const notes: string[] = [];
+    if (normalizedSession.attachments.length > 0) {
+      notes.push(
+        "If you need exact wording, page references, or code from attached files, call @tool(oracle.file_search, {\"query\":\"...\"})."
+      );
+    }
     if (rawAttachments.length > 0) {
       const names = rawAttachments.map((attachment) => attachment.name).join(", ");
       notes.push(`Attached source material: ${names}. Use the attached files directly when relevant.`);
@@ -1543,14 +1594,22 @@ Write a concise closure prompt that asks the council to:
         );
 
         const calls = toolCalls.slice(0, 3);
-        const results = await Promise.all(calls.map((call) => runToolCall(call)));
+        const results = await Promise.all(
+          calls.map((call) => runToolCall(call, { attachments: normalizedSession.attachments }))
+        );
 
-        const toolMessages: ChatMessage[] = results.map((toolResult) => ({
+        const toolMessages: ChatMessage[] = results.map((toolResult, index) => ({
           id: `tool_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
           agentId: "tool",
-          content: `Tool result (${toolResult.name}): ${
-            toolResult.error ? `Error: ${toolResult.error}` : toolResult.output
-          }`,
+          displayName: `${agentConfig.name} -> ${getToolDisplayName(toolResult.name)}`,
+          displayProvider: agentConfig.provider,
+          content: buildToolMessageContent(
+            agentConfig.name,
+            toolResult.name,
+            calls[index]?.args ?? {},
+            toolResult.output,
+            toolResult.error
+          ),
           timestamp: Date.now(),
         }));
 
@@ -1635,7 +1694,7 @@ Write a concise closure prompt that asks the council to:
       activeRequestsRef.current.delete(agentId);
       setTypingAgents((prev) => prev.filter((id) => id !== agentId));
     }
-  }, [buildConversationHistory, buildToolContextMessages, getProxy, resolveQuoteTargets]);
+  }, [buildConversationHistory, buildToolContextMessages, getProxy, normalizedSession.attachments, resolveQuoteTargets]);
 
   const generateClosingResponse = useCallback(
     async (agentId: CouncilAgentId, turnsCompleted: number): Promise<ChatMessage | null> => {
@@ -1757,7 +1816,7 @@ Write a concise closure prompt that asks the council to:
       const topicMessage: ChatMessage = {
         id: `msg_${Date.now()}`,
         agentId: "system",
-        content: `Discussion Topic: "${topic}"`,
+        content: buildDiscussionOpeningMessage(topic, summarizeSessionAttachments(normalizedSession.attachments)),
         timestamp: Date.now(),
       };
 
@@ -1958,6 +2017,7 @@ Write a concise closure prompt that asks the council to:
     generateClosingResponse,
     configuredAgentIds,
     configuredProviders,
+    normalizedSession.attachments,
     resetRuntimeState,
   ]);
 

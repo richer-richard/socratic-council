@@ -338,6 +338,8 @@ function normalizeAttachment(input: unknown): SessionAttachment | null {
     width: record.width == null ? null : clampNumber(record.width),
     height: record.height == null ? null : clampNumber(record.height),
     fallbackText: cleanText(record.fallbackText),
+    ...(record.searchable != null ? { searchable: Boolean(record.searchable) } : {}),
+    ...(record.extractedChars != null ? { extractedChars: clampNumber(record.extractedChars) } : {}),
   };
 }
 
