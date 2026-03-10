@@ -4,6 +4,7 @@ import { Settings } from "./pages/Settings";
 import { Chat } from "./pages/Chat";
 import {
   createDiscussionSession,
+  deleteDiscussionSession,
   listSessionSummaries,
   loadDiscussionSession,
   saveDiscussionSession,
@@ -77,6 +78,24 @@ export default function App() {
     setSessions(listSessionSummaries());
   }, []);
 
+  const handleDeleteSession = useCallback((sessionId: string) => {
+    const deleted = deleteDiscussionSession(sessionId);
+    if (!deleted) return;
+
+    setSessions(listSessionSummaries());
+    setActiveSession((current) => (current?.id === sessionId ? null : current));
+    setState((current) => {
+      if (current.currentSessionId !== sessionId) {
+        return current;
+      }
+
+      return {
+        currentPage: current.currentPage === "chat" ? "home" : current.currentPage,
+        currentSessionId: null,
+      };
+    });
+  }, []);
+
   return (
     <div className="h-screen flex flex-col bg-gray-900">
       {state.currentPage === "home" && (
@@ -84,6 +103,7 @@ export default function App() {
           sessions={sessions}
           activeSessionId={state.currentSessionId}
           onCreateSession={handleCreateSession}
+          onDeleteSession={handleDeleteSession}
           onOpenSession={handleOpenSession}
         />
       )}

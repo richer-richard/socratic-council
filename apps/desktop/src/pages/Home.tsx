@@ -11,6 +11,7 @@ interface HomeProps {
   sessions: SessionSummary[];
   activeSessionId: string | null;
   onCreateSession: (topic: string) => void;
+  onDeleteSession: (sessionId: string) => void;
   onOpenSession: (sessionId: string) => void;
 }
 
@@ -110,6 +111,27 @@ function AlertIcon({ size = 18 }: { size?: number }) {
   );
 }
 
+function TrashIcon({ size = 16 }: { size?: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M3 6h18" />
+      <path d="M8 6V4h8v2" />
+      <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+      <path d="M10 11v6" />
+      <path d="M14 11v6" />
+    </svg>
+  );
+}
+
 function formatRelativeTime(timestamp: number): string {
   const diffMs = timestamp - Date.now();
   const absMs = Math.abs(diffMs);
@@ -131,6 +153,7 @@ export function Home({
   sessions,
   activeSessionId,
   onCreateSession,
+  onDeleteSession,
   onOpenSession,
 }: HomeProps) {
   const [topic, setTopic] = useState("");
@@ -196,27 +219,51 @@ export function Home({
           <div className="workstation-thread-list">
             {recentSessions.length > 0 ? (
               recentSessions.map((session) => (
-                <button
+                <div
                   key={session.id}
-                  type="button"
-                  onClick={() => onOpenSession(session.id)}
                   className={`workstation-thread ${activeSessionId === session.id ? "is-active" : ""}`}
                 >
-                  <div className="workstation-thread-meta">
-                    <span className={`session-status session-status-${session.status}`}>
-                      {STATUS_LABELS[session.status]}
-                    </span>
-                    <span>{formatRelativeTime(session.updatedAt)}</span>
+                  <div className="workstation-thread-header">
+                    <button
+                      type="button"
+                      onClick={() => onOpenSession(session.id)}
+                      className="workstation-thread-open"
+                    >
+                      <div className="workstation-thread-meta">
+                        <span className={`session-status session-status-${session.status}`}>
+                          {STATUS_LABELS[session.status]}
+                        </span>
+                        <span>{formatRelativeTime(session.updatedAt)}</span>
+                      </div>
+                      <div className="workstation-thread-title">{session.title}</div>
+                      <div className="workstation-thread-preview">
+                        {session.preview || "No messages saved yet."}
+                      </div>
+                      <div className="workstation-thread-foot">
+                        <span>{session.currentTurn} turns</span>
+                        <span>{session.messageCount} messages</span>
+                      </div>
+                    </button>
+                    <button
+                      type="button"
+                      className="workstation-thread-delete"
+                      aria-label={`Delete ${session.title}`}
+                      title="Delete session"
+                      onClick={(event) => {
+                        event.stopPropagation();
+
+                        const confirmed = window.confirm(
+                          `Delete "${session.title}"? This removes the saved local session.`
+                        );
+                        if (!confirmed) return;
+
+                        onDeleteSession(session.id);
+                      }}
+                    >
+                      <TrashIcon size={14} />
+                    </button>
                   </div>
-                  <div className="workstation-thread-title">{session.title}</div>
-                  <div className="workstation-thread-preview">
-                    {session.preview || "No messages saved yet."}
-                  </div>
-                  <div className="workstation-thread-foot">
-                    <span>{session.currentTurn} turns</span>
-                    <span>{session.messageCount} messages</span>
-                  </div>
-                </button>
+                </div>
               ))
             ) : (
               <div className="workstation-empty-state">
@@ -231,7 +278,7 @@ export function Home({
         <div className="workstation-toolbar">
           <div className="workstation-toolbar-copy">
             <span className="workstation-kicker">Session Workstation</span>
-            <h1 className="workstation-home-title">Open a new inquiry or resume a saved thread.</h1>
+            <h1 className="workstation-home-title">Start a new session or pick up a saved one.</h1>
           </div>
           <div className="workstation-toolbar-badges">
             <div className="workstation-metric">
