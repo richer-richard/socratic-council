@@ -55,6 +55,7 @@ export interface DiscussionSession {
   createdAt: number;
   updatedAt: number;
   lastOpenedAt: number;
+  archivedAt: number | null;
   status: SessionStatus;
   currentTurn: number;
   totalTokens: {
@@ -75,6 +76,7 @@ export interface SessionSummary {
   createdAt: number;
   updatedAt: number;
   lastOpenedAt: number;
+  archivedAt: number | null;
   status: SessionStatus;
   currentTurn: number;
   messageCount: number;
@@ -310,6 +312,7 @@ function buildSummary(session: DiscussionSession): SessionSummary {
     createdAt: session.createdAt,
     updatedAt: session.updatedAt,
     lastOpenedAt: session.lastOpenedAt,
+    archivedAt: session.archivedAt,
     status: session.status,
     currentTurn: session.currentTurn,
     messageCount: session.messages.length,
@@ -337,6 +340,7 @@ function readIndex(): SessionSummary[] {
         createdAt: clampNumber(entry.createdAt),
         updatedAt: clampNumber(entry.updatedAt),
         lastOpenedAt: clampNumber(entry.lastOpenedAt),
+        archivedAt: entry.archivedAt == null ? null : clampNumber(entry.archivedAt),
         status: normalizeStatus(entry.status),
         currentTurn: clampNumber(entry.currentTurn),
         messageCount: clampNumber(entry.messageCount),
@@ -387,6 +391,7 @@ function normalizeDiscussionSession(input: unknown): DiscussionSession | null {
     createdAt,
     updatedAt,
     lastOpenedAt,
+    archivedAt: record.archivedAt == null ? null : clampNumber(record.archivedAt),
     status,
     currentTurn: clampNumber(record.currentTurn),
     totalTokens: {
@@ -501,12 +506,32 @@ export function deleteDiscussionSession(id: string): boolean {
   }
 }
 
+function updateArchivedState(id: string, archivedAt: number | null): DiscussionSession | null {
+  const existing = loadDiscussionSession(id);
+  if (!existing) return null;
+
+  return saveDiscussionSession({
+    ...existing,
+    archivedAt,
+    ...(archivedAt == null ? { lastOpenedAt: Date.now() } : {}),
+  });
+}
+
+export function archiveDiscussionSession(id: string): DiscussionSession | null {
+  return updateArchivedState(id, Date.now());
+}
+
+export function restoreDiscussionSession(id: string): DiscussionSession | null {
+  return updateArchivedState(id, null);
+}
+
 export function touchDiscussionSession(id: string): DiscussionSession | null {
   const existing = loadDiscussionSession(id);
   if (!existing) return null;
 
   return saveDiscussionSession({
     ...existing,
+    archivedAt: null,
     lastOpenedAt: Date.now(),
   });
 }
@@ -521,6 +546,7 @@ export function createDiscussionSession(topic: string): DiscussionSession {
     createdAt: now,
     updatedAt: now,
     lastOpenedAt: now,
+    archivedAt: null,
     status: "draft",
     currentTurn: 0,
     totalTokens: { input: 0, output: 0 },
