@@ -487,6 +487,20 @@ export function loadDiscussionSession(id: string): DiscussionSession | null {
   }
 }
 
+export function deleteDiscussionSession(id: string): boolean {
+  const storage = getStorage();
+  if (!storage) return false;
+
+  try {
+    storage.removeItem(createSessionStorageKey(id));
+    writeIndex(readIndex().filter((entry) => entry.id !== id));
+    return true;
+  } catch (error) {
+    console.error("Failed to delete session:", error);
+    return false;
+  }
+}
+
 export function touchDiscussionSession(id: string): DiscussionSession | null {
   const existing = loadDiscussionSession(id);
   if (!existing) return null;

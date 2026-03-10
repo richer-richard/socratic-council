@@ -1533,14 +1533,18 @@ body {
 .workstation-shell {
   display: grid;
   grid-template-columns: 300px minmax(0, 1fr);
+  height: 100%;
+  min-height: 0;
 }
 
 .workstation-sidebar {
   position: relative;
   z-index: 1;
   display: flex;
+  min-height: 0;
   flex-direction: column;
   gap: 1rem;
+  overflow: hidden;
   padding: 1.25rem;
   border-right: 1px solid rgba(255, 255, 255, 0.08);
   background: rgba(7, 11, 19, 0.48);
@@ -1647,6 +1651,53 @@ body {
   transition: transform 0.2s ease, border-color 0.2s ease, background 0.2s ease;
 }
 
+.workstation-thread-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+}
+
+.workstation-thread-open {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+  gap: 0.55rem;
+  text-align: left;
+  color: inherit;
+  background: transparent;
+  border: 0;
+  padding: 0;
+}
+
+.workstation-thread-open:focus-visible,
+.workstation-thread-delete:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(20, 184, 166, 0.22);
+  border-radius: 0.75rem;
+}
+
+.workstation-thread-delete {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 2rem;
+  height: 2rem;
+  margin-top: -0.2rem;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--ink-500);
+  transition: background 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+}
+
+.workstation-thread-delete:hover {
+  background: rgba(244, 63, 94, 0.12);
+  border-color: rgba(244, 63, 94, 0.3);
+  color: #fda4af;
+}
+
 .workstation-thread.is-active,
 .workstation-thread:hover {
   background: rgba(255, 255, 255, 0.07);
@@ -1695,8 +1746,11 @@ body {
   position: relative;
   z-index: 1;
   display: flex;
+  flex: 1;
   min-width: 0;
+  min-height: 0;
   flex-direction: column;
+  overflow: hidden;
   padding: 1.5rem;
   gap: 1.25rem;
 }
@@ -1722,8 +1776,8 @@ body {
 
 .workstation-home-title {
   font-family: var(--font-body);
-  font-size: clamp(1.8rem, 3vw, 2.55rem);
-  line-height: 1;
+  font-size: clamp(1.4rem, 2.15vw, 2rem);
+  line-height: 1.08;
   font-weight: 700;
   letter-spacing: -0.03em;
   color: var(--ink-900);
@@ -1761,10 +1815,12 @@ body {
 }
 
 .workstation-stage {
+  flex: 1;
   display: grid;
   grid-template-columns: minmax(0, 1fr) 320px;
   gap: 1.25rem;
   min-height: 0;
+  align-items: stretch;
 }
 
 .workstation-composer-card,
@@ -1783,6 +1839,7 @@ body {
   flex-direction: column;
   padding: 1.6rem;
   min-height: 0;
+  height: 100%;
 }
 
 .workstation-composer-header {
@@ -1818,8 +1875,9 @@ body {
   display: flex;
   flex: 1;
   flex-direction: column;
+  justify-content: flex-end;
   gap: 1rem;
-  padding-top: 1.4rem;
+  padding-top: clamp(2rem, 8vh, 4.75rem);
 }
 
 .workstation-input-shell {
@@ -1902,9 +1960,11 @@ body {
   display: flex;
   flex-direction: column;
   gap: 1rem;
+  min-height: 0;
 }
 
 .workstation-panel {
+  height: 100%;
   padding: 1.15rem;
 }
 
@@ -2079,6 +2139,11 @@ body {
   .workstation-hero {
     flex-direction: column;
     align-items: flex-start;
+  }
+
+  .workstation-composer-body {
+    justify-content: flex-start;
+    padding-top: 1.4rem;
   }
 
   .workstation-input-shell {
