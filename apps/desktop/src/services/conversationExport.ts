@@ -294,6 +294,507 @@ function formatUsd(value: number) {
   return `$${value.toFixed(4)}`;
 }
 
+const PDF_UNICODE_FONT_STACK = [
+  "\"PingFang SC\"",
+  "\"Hiragino Sans GB\"",
+  "\"Microsoft YaHei\"",
+  "\"Noto Sans CJK SC\"",
+  "\"Source Han Sans SC\"",
+  "\"Yu Gothic\"",
+  "Meiryo",
+  "\"Apple SD Gothic Neo\"",
+  "system-ui",
+  "sans-serif",
+].join(", ");
+
+function containsUnsupportedPdfGlyphs(value: string) {
+  for (const char of value) {
+    const codePoint = char.codePointAt(0) ?? 0;
+    if (codePoint === 9 || codePoint === 10 || codePoint === 13) continue;
+    if (codePoint > 255) return true;
+  }
+  return false;
+}
+
+function shouldUseUnicodeSafePdf(options: {
+  topic: string;
+  messages: ConversationExportMessage[];
+}) {
+  if (containsUnsupportedPdfGlyphs(options.topic)) return true;
+  return options.messages.some((message) =>
+    [
+      message.speaker,
+      message.model ?? "",
+      getCombinedExportBody(message),
+    ].some((value) => containsUnsupportedPdfGlyphs(value))
+  );
+}
+
+function createPdfHtmlElement<K extends keyof HTMLElementTagNameMap>(
+  tagName: K,
+  styles: Record<string, string>,
+  text?: string
+) {
+  const element = document.createElement(tagName);
+  Object.assign(element.style, styles);
+  if (text != null) {
+    element.textContent = text;
+  }
+  return element;
+}
+
+function appendPdfHtmlBody(
+  parent: HTMLElement,
+  text: string,
+  messageMap: Map<string, ConversationExportMessage>
+) {
+  const segments = splitIntoInlineQuoteSegments(text);
+  let appended = false;
+
+  for (const segment of segments) {
+    if (segment.type === "quote") {
+      const quotedMessage = messageMap.get(segment.id);
+      if (!quotedMessage) continue;
+      const quote = createPdfHtmlElement("div", {
+        marginTop: appended ? "10px" : "0",
+        padding: "10px 12px",
+        borderLeft: "3px solid #94A3B8",
+        borderRadius: "12px",
+        background: "#EEF2F7",
+      });
+      quote.appendChild(
+        createPdfHtmlElement(
+          "div",
+          {
+            fontSize: "10px",
+            fontWeight: "700",
+            letterSpacing: "0.08em",
+            textTransform: "uppercase",
+            color: "#475569",
+            marginBottom: "6px",
+          },
+          `${quotedMessage.speaker} · ${formatTime(quotedMessage.timestamp)}`
+        )
+      );
+      const quoteText = stripQuoteTokens(getResponseContent(quotedMessage) || quotedMessage.content);
+      quote.appendChild(
+        createPdfHtmlElement(
+          "div",
+          {
+            whiteSpace: "pre-wrap",
+            fontSize: "13px",
+            lineHeight: "1.55",
+            color: "#0F172A",
+          },
+          quoteText.length > 360 ? `${quoteText.slice(0, 360)}…` : quoteText
+        )
+      );
+      parent.appendChild(quote);
+      appended = true;
+      continue;
+    }
+
+    if (!segment.text.trim()) continue;
+    parent.appendChild(
+      createPdfHtmlElement(
+        "div",
+        {
+          whiteSpace: "pre-wrap",
+          fontSize: "13px",
+          lineHeight: "1.65",
+          color: "#0F172A",
+          marginTop: appended ? "10px" : "0",
+        },
+        segment.text.trim()
+      )
+    );
+    appended = true;
+  }
+
+  if (!appended) {
+    parent.appendChild(
+      createPdfHtmlElement(
+        "div",
+        {
+          whiteSpace: "pre-wrap",
+          fontSize: "13px",
+          lineHeight: "1.65",
+          color: "#475569",
+        },
+        "[No response recorded]"
+      )
+    );
+  }
+}
+
+async function buildUnicodeSafePdfBytes(options: {
+  topic: string;
+  messages: ConversationExportMessage[];
+  includeTokens: boolean;
+  includeCosts: boolean;
+}): Promise<Uint8Array> {
+  const { jsPDF } = await import("jspdf");
+  const doc = new jsPDF({ unit: "pt", format: "letter" });
+  const exportedAt = new Date();
+  const stats = computeStats(options.messages);
+  const safeTopic = options.topic?.trim() || "Untitled Topic";
+  const iconDataUrl = await tryFetchDataUrl(APP_ICON_URL);
+  const messageMap = new Map(options.messages.map((message) => [message.id, message] as const));
+
+  const root = createPdfHtmlElement("div", {
+    position: "fixed",
+    left: "-20000px",
+    top: "0",
+    width: "720px",
+    background: "#FFFFFF",
+    color: "#0F172A",
+    fontFamily: PDF_UNICODE_FONT_STACK,
+    padding: "0",
+    boxSizing: "border-box",
+    zIndex: "-1",
+  });
+
+  const cover = createPdfHtmlElement("section", {
+    background: "#0B0F14",
+    color: "#F8FAFC",
+    padding: "36px 40px 30px",
+    borderRadius: "24px 24px 0 0",
+  });
+
+  if (iconDataUrl) {
+    const icon = createPdfHtmlElement("img", {
+      width: "42px",
+      height: "42px",
+      marginBottom: "16px",
+      borderRadius: "12px",
+    }) as HTMLImageElement;
+    icon.src = iconDataUrl;
+    icon.alt = "";
+    cover.appendChild(icon);
+  }
+
+  cover.appendChild(
+    createPdfHtmlElement(
+      "div",
+      {
+        fontSize: "13px",
+        letterSpacing: "0.24em",
+        textTransform: "uppercase",
+        color: "#94A3B8",
+        marginBottom: "10px",
+        fontWeight: "700",
+      },
+      "Socratic Council"
+    )
+  );
+  cover.appendChild(
+    createPdfHtmlElement(
+      "h1",
+      {
+        fontSize: "30px",
+        lineHeight: "1.15",
+        margin: "0 0 10px",
+        fontWeight: "800",
+      },
+      "Seminar Transcript"
+    )
+  );
+  cover.appendChild(
+    createPdfHtmlElement(
+      "div",
+      {
+        fontSize: "16px",
+        lineHeight: "1.55",
+        color: "#E2E8F0",
+        whiteSpace: "pre-wrap",
+      },
+      `Topic: ${safeTopic}\nExported: ${formatUtcTimestamp(exportedAt)}`
+    )
+  );
+  root.appendChild(cover);
+
+  const main = createPdfHtmlElement("section", {
+    padding: "24px 40px 40px",
+    background: "#FFFFFF",
+    border: "1px solid #E2E8F0",
+    borderTop: "0",
+    borderRadius: "0 0 24px 24px",
+  });
+
+  const cards = [
+    { label: "Messages", value: formatCompactNumber(stats.messageCount) },
+    { label: "Speakers", value: formatCompactNumber(stats.speakerCount) },
+    {
+      label: options.includeTokens ? "Tokens (in/out/r)" : "Export",
+      value: options.includeTokens
+        ? `${formatCompactNumber(stats.totalTokensIn)}/${formatCompactNumber(stats.totalTokensOut)}/${formatCompactNumber(stats.totalTokensReasoning)}`
+        : "Transcript",
+    },
+    {
+      label: options.includeCosts ? "Estimated Cost" : "Format",
+      value: options.includeCosts ? formatUsd(stats.totalCostUSD) : "PDF",
+    },
+  ];
+
+  const cardGrid = createPdfHtmlElement("div", {
+    display: "grid",
+    gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+    gap: "12px",
+    marginBottom: "18px",
+  });
+  for (const card of cards) {
+    const cardEl = createPdfHtmlElement("div", {
+      border: "1px solid #E2E8F0",
+      borderRadius: "16px",
+      background: "#F8FAFC",
+      padding: "14px 16px",
+    });
+    cardEl.appendChild(
+      createPdfHtmlElement(
+        "div",
+        {
+          fontSize: "11px",
+          color: "#64748B",
+          textTransform: "uppercase",
+          letterSpacing: "0.08em",
+          marginBottom: "6px",
+          fontWeight: "700",
+        },
+        card.label
+      )
+    );
+    cardEl.appendChild(
+      createPdfHtmlElement(
+        "div",
+        {
+          fontSize: "22px",
+          color: "#0F172A",
+          fontWeight: "800",
+          lineHeight: "1.2",
+        },
+        card.value
+      )
+    );
+    cardGrid.appendChild(cardEl);
+  }
+  main.appendChild(cardGrid);
+
+  const speakerPanel = createPdfHtmlElement("div", {
+    border: "1px solid #E2E8F0",
+    borderRadius: "16px",
+    background: "#FFFFFF",
+    padding: "14px 16px",
+    marginBottom: "24px",
+  });
+  speakerPanel.appendChild(
+    createPdfHtmlElement(
+      "div",
+      {
+        fontSize: "11px",
+        color: "#64748B",
+        textTransform: "uppercase",
+        letterSpacing: "0.08em",
+        marginBottom: "10px",
+        fontWeight: "700",
+      },
+      "Messages by Speaker"
+    )
+  );
+  for (const speaker of stats.speakers.slice(0, 8)) {
+    const row = createPdfHtmlElement("div", {
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "space-between",
+      gap: "12px",
+      padding: "6px 0",
+      borderTop: "1px solid #F1F5F9",
+    });
+    row.appendChild(
+      createPdfHtmlElement(
+        "div",
+        {
+          fontSize: "13px",
+          color: "#0F172A",
+          fontWeight: "600",
+        },
+        speaker.speaker
+      )
+    );
+    row.appendChild(
+      createPdfHtmlElement(
+        "div",
+        {
+          fontSize: "12px",
+          color: "#64748B",
+          fontVariantNumeric: "tabular-nums",
+        },
+        `${formatInteger(speaker.messageCount)} messages`
+      )
+    );
+    speakerPanel.appendChild(row);
+  }
+  main.appendChild(speakerPanel);
+
+  main.appendChild(
+    createPdfHtmlElement(
+      "h2",
+      {
+        fontSize: "20px",
+        lineHeight: "1.2",
+        margin: "0 0 14px",
+        color: "#0F172A",
+        fontWeight: "800",
+      },
+      "Transcript"
+    )
+  );
+
+  for (const message of options.messages) {
+    const card = createPdfHtmlElement("section", {
+      border: "1px solid #E2E8F0",
+      borderLeft: `4px solid #${colorForSpeaker(message.speaker)}`,
+      borderRadius: "18px",
+      background: "#FFFFFF",
+      padding: "18px 18px 16px",
+      marginBottom: "16px",
+      boxShadow: "0 10px 24px rgba(15, 23, 42, 0.06)",
+      breakInside: "avoid-page",
+    });
+
+    card.appendChild(
+      createPdfHtmlElement(
+        "div",
+        {
+          fontSize: "18px",
+          lineHeight: "1.2",
+          color: "#0F172A",
+          fontWeight: "800",
+          marginBottom: "6px",
+        },
+        message.speaker
+      )
+    );
+
+    const metaParts = [
+      message.model ?? "",
+      formatTime(message.timestamp),
+      formatLatencyMs(message.latencyMs) ?? "",
+      options.includeTokens && message.tokens
+        ? `${message.tokens.input}/${message.tokens.output}${
+            message.tokens.reasoning && message.tokens.reasoning > 0 ? ` · r:${message.tokens.reasoning}` : ""
+          } tokens`
+        : "",
+      options.includeCosts && message.costUSD != null ? formatUsd(message.costUSD) : "",
+    ].filter(Boolean);
+
+    if (metaParts.length > 0) {
+      card.appendChild(
+        createPdfHtmlElement(
+          "div",
+          {
+            fontSize: "11px",
+            color: "#64748B",
+            marginBottom: "14px",
+          },
+          metaParts.join(" · ")
+        )
+      );
+    }
+
+    const responseSection = createPdfHtmlElement("div", {
+      marginBottom: getThinkingContent(message) ? "16px" : "0",
+    });
+    responseSection.appendChild(
+      createPdfHtmlElement(
+        "div",
+        {
+          fontSize: "11px",
+          color: "#64748B",
+          textTransform: "uppercase",
+          letterSpacing: "0.08em",
+          marginBottom: "8px",
+          fontWeight: "700",
+        },
+        "Response"
+      )
+    );
+    appendPdfHtmlBody(responseSection, getResponseContent(message) || message.content, messageMap);
+    card.appendChild(responseSection);
+
+    const thinking = getThinkingContent(message);
+    if (thinking) {
+      const thinkingSection = createPdfHtmlElement("div", {
+        borderTop: "1px solid #E2E8F0",
+        paddingTop: "14px",
+      });
+      thinkingSection.appendChild(
+        createPdfHtmlElement(
+          "div",
+          {
+            fontSize: "11px",
+            color: "#64748B",
+            textTransform: "uppercase",
+            letterSpacing: "0.08em",
+            marginBottom: "8px",
+            fontWeight: "700",
+          },
+          "Thought Summary"
+        )
+      );
+      thinkingSection.appendChild(
+        createPdfHtmlElement(
+          "div",
+          {
+            whiteSpace: "pre-wrap",
+            fontSize: "13px",
+            lineHeight: "1.65",
+            color: "#334155",
+          },
+          thinking
+        )
+      );
+      card.appendChild(thinkingSection);
+    }
+
+    main.appendChild(card);
+  }
+
+  root.appendChild(main);
+  document.body.appendChild(root);
+
+  try {
+    await new Promise<void>((resolve) => {
+      window.requestAnimationFrame(() => resolve());
+    });
+
+    await new Promise<void>((resolve, reject) => {
+      try {
+        (doc as unknown as {
+          html: (source: HTMLElement, options: Record<string, unknown>) => void;
+        }).html(root, {
+          x: 36,
+          y: 36,
+          width: 540,
+          windowWidth: 720,
+          autoPaging: "text",
+          html2canvas: {
+            backgroundColor: "#FFFFFF",
+            scale: 1,
+            useCORS: true,
+          },
+          callback: () => resolve(),
+        });
+      } catch (error) {
+        reject(error);
+      }
+    });
+  } finally {
+    root.remove();
+  }
+
+  return new Uint8Array(doc.output("arraybuffer"));
+}
+
 type PdfRectDoc = {
   roundedRect?: (
     x: number,
@@ -329,6 +830,10 @@ async function buildPdfBytes(options: {
   includeTokens: boolean;
   includeCosts: boolean;
 }): Promise<Uint8Array> {
+  if (typeof document !== "undefined" && shouldUseUnicodeSafePdf(options)) {
+    return buildUnicodeSafePdfBytes(options);
+  }
+
   const { jsPDF } = await import("jspdf");
   const doc = new jsPDF({ unit: "pt", format: "letter" });
 

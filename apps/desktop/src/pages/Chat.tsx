@@ -14,6 +14,7 @@ import {
   type SessionMessage as PersistedSessionMessage,
   type SessionPhase,
   type SessionStatus,
+  type SessionToolEvent,
 } from "../services/sessions";
 import { getToolPrompt, runToolCall, type ToolCall } from "../services/tools";
 import { CouncilMark } from "../components/CouncilMark";
@@ -118,6 +119,9 @@ Rules:
 - Directly address a specific point from someone else by name.
 - Add exactly one new claim, example, or counterpoint; don’t restate your thesis.
 - Include one concrete test, falsifiable criterion, or counterexample when possible.
+- If your answer depends on exact wording from attached files or current facts, research first before answering.
+- If a retrieved passage looks incomplete, do one more targeted search until you have enough surrounding context.
+- After using tools, come back with a normal answer in the same turn. Do not end with tool calls only.
 - End with one concrete question to the group.
 - If the Moderator gives an instruction, follow it.
 
@@ -379,21 +383,44 @@ function getToolDisplayName(toolName: ToolCall["name"]): string {
   }
 }
 
-function buildToolMessageContent(
-  callerName: string,
+function summarizeToolCall(
+  toolName: ToolCall["name"],
+  args: Record<string, unknown>
+) {
+  const json = JSON.stringify(args);
+  const query = typeof args.query === "string" ? args.query.trim() : "";
+  const claim = typeof args.claim === "string" ? args.claim.trim() : "";
+  const topic = typeof args.topic === "string" ? args.topic.trim() : "";
+
+  switch (toolName) {
+    case "oracle.file_search":
+      return `Searched attached files for "${query || json}"`;
+    case "oracle.search":
+    case "oracle.web_search":
+      return `Searched the web for "${query || json}"`;
+    case "oracle.verify":
+      return `Verified claim: "${claim || json}"`;
+    case "oracle.cite":
+      return `Collected citations for "${topic || json}"`;
+    default:
+      return `${getToolDisplayName(toolName)} ${json}`;
+  }
+}
+
+function createToolEvent(
   toolName: ToolCall["name"],
   args: Record<string, unknown>,
   output: string,
   error?: string
-) {
-  const serializedArgs = JSON.stringify(args);
-  const lines = [
-    `${callerName} called ${toolName}.`,
-    `Arguments: ${serializedArgs}`,
-    "",
-    error ? `Error:\n${error}` : `Result:\n${output}`,
-  ];
-  return lines.join("\n");
+): SessionToolEvent {
+  return {
+    id: `tool_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`,
+    name: toolName,
+    summary: summarizeToolCall(toolName, args),
+    output,
+    ...(error ? { error } : {}),
+    timestamp: Date.now(),
+  };
 }
 
 function buildDiscussionOpeningMessage(topic: string, attachmentSummary: string): string {
@@ -1058,7 +1085,7 @@ export function Chat({ session, onNavigate, onPersistSession }: ChatProps) {
       history.push({
         role: "user",
         content:
-          "Your turn. Respond directly to one specific message above and add one new point.",
+          "Your turn. Get enough context first; if exact wording or evidence is uncertain, use tools before answering. Then respond directly to one specific message above and add one new point.",
       });
 
       return history;
@@ -1134,7 +1161,8 @@ export function Chat({ session, onNavigate, onPersistSession }: ChatProps) {
     if (messages.length > 0) {
       messages.push({
         role: "user",
-        content: "Use the tool results above. Only call another tool if strictly necessary.",
+        content:
+          "Use the tool results above to answer directly. Only call another tool if a critical passage is still incomplete or the evidence is still missing.",
       });
     }
     return messages;
@@ -1494,6 +1522,7 @@ Write a concise closure prompt that asks the council to:
 
     let streamingContent = "";
     let streamingThinking = "";
+    let toolEvents: SessionToolEvent[] = [];
     let lastStreamFlushAt = 0;
     let streamFlushTimer: ReturnType<typeof setTimeout> | null = null;
     const clearStreamFlushTimer = () => {
@@ -1510,7 +1539,12 @@ Write a concise closure prompt that asks the council to:
       setMessages((prev) =>
         prev.map((m) =>
           m.id === newMessage.id
-            ? { ...m, content: streamingContent, thinking: streamingThinking || undefined }
+            ? {
+                ...m,
+                content: streamingContent,
+                thinking: streamingThinking || undefined,
+                toolEvents: toolEvents.length > 0 ? toolEvents : undefined,
+              }
             : m
         )
       );
@@ -1527,6 +1561,15 @@ Write a concise closure prompt that asks the council to:
       let modelUsed = model;
       let toolIteration = 0;
 
+      const appendToolEvents = (events: SessionToolEvent[]) => {
+        toolEvents = [...toolEvents, ...events];
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === newMessage.id ? { ...m, toolEvents } : m
+          )
+        );
+      };
+
       const runCompletion = async (history: APIChatMessage[], currentModel: string) => {
         streamingContent = "";
         streamingThinking = "";
@@ -1534,7 +1577,9 @@ Write a concise closure prompt that asks the council to:
         clearStreamFlushTimer();
         setMessages((prev) =>
           prev.map((m) =>
-            m.id === newMessage.id ? { ...m, content: "", thinking: undefined } : m
+            m.id === newMessage.id
+              ? { ...m, content: "", thinking: undefined, toolEvents }
+              : m
           )
         );
 
@@ -1591,37 +1636,46 @@ Write a concise closure prompt that asks the council to:
         const { cleaned, toolCalls } = extractActions(result.content || "");
         if (toolCalls.length === 0) break;
 
-        const interim = cleaned || "Checking sources…";
+        const interim = cleaned || (toolIteration === 0 ? "Researching sources..." : "Gathering more context...");
         setMessages((prev) =>
-          prev.map((m) => (m.id === newMessage.id ? { ...m, content: interim } : m))
+          prev.map((m) =>
+            m.id === newMessage.id ? { ...m, content: interim, toolEvents } : m
+          )
         );
 
         const calls = toolCalls.slice(0, 3);
         const results = await Promise.all(
           calls.map((call) => runToolCall(call, { attachments: normalizedSession.attachments }))
         );
-
-        const toolMessages: ChatMessage[] = results.map((toolResult, index) => ({
-          id: `tool_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-          agentId: "tool",
-          displayName: `${agentConfig.name} -> ${getToolDisplayName(toolResult.name)}`,
-          displayProvider: agentConfig.provider,
-          content: buildToolMessageContent(
-            agentConfig.name,
-            toolResult.name,
-            calls[index]?.args ?? {},
-            toolResult.output,
-            toolResult.error
-          ),
-          timestamp: Date.now(),
-        }));
-
-        setMessages((prev) => [...prev, ...toolMessages]);
+        appendToolEvents(
+          results.map((toolResult, index) =>
+            createToolEvent(toolResult.name, calls[index]?.args ?? {}, toolResult.output, toolResult.error)
+          )
+        );
 
         const extraContext = buildToolContextMessages(results);
         history = buildConversationHistory(agentId, extraContext);
         result = await runCompletion(history, modelUsed);
         toolIteration += 1;
+      }
+
+      let parsed = extractActions(result.content || "");
+      if (
+        result.success &&
+        toolEvents.length > 0 &&
+        !parsed.cleaned &&
+        (parsed.toolCalls.length > 0 || !(result.content || streamingContent).trim())
+      ) {
+        history = [
+          ...history,
+          {
+            role: "user",
+            content:
+              "You already have enough research context. Write the final answer now using the evidence above. Do not call another tool in this reply.",
+          },
+        ];
+        result = await runCompletion(history, modelUsed);
+        parsed = extractActions(result.content || "");
       }
 
       // Check if aborted after request
@@ -1631,14 +1685,16 @@ Write a concise closure prompt that asks the council to:
         return null;
       }
 
-      const { cleaned, quoteTargets, reactions } = extractActions(result.content || "");
-      const resolvedQuotes = resolveQuoteTargets(agentId, quoteTargets);
+      const resolvedQuotes = resolveQuoteTargets(agentId, parsed.quoteTargets);
       const resolvedReactions =
-        reactions.length === 0 && resolvedQuotes.length > 0
+        parsed.reactions.length === 0 && resolvedQuotes.length > 0
           ? [{ targetId: resolvedQuotes[0]!, emoji: DEFAULT_REACTION }]
-          : reactions;
+          : parsed.reactions;
       const displayContent =
-        cleaned || (result.content ? "No responses recorded" : "[No response received]");
+        parsed.cleaned ||
+        (toolEvents.length > 0
+          ? "Research completed, but no final answer was generated."
+          : "[No response received]");
 
       // Update message with final data
       const finalMessage: ChatMessage = {
@@ -1650,6 +1706,7 @@ Write a concise closure prompt that asks the council to:
         tokens: result.tokens,
         latencyMs: result.latencyMs,
         error: result.error,
+        toolEvents: toolEvents.length > 0 ? toolEvents : undefined,
         quotedMessageIds: resolvedQuotes.length > 0 ? resolvedQuotes : undefined,
         metadata: {
           model: modelUsed as ModelId,
@@ -2572,6 +2629,28 @@ Write a concise closure prompt that asks the council to:
                           );
                         })
                       )}
+                      {message.toolEvents?.length ? (
+                        <div className="message-tool-list">
+                          {message.toolEvents.map((event) => (
+                            <details
+                              key={event.id}
+                              className={`message-tool-call${event.error ? " has-error" : ""}`}
+                            >
+                              <summary className="message-tool-summary">
+                                <span>{event.summary}</span>
+                              </summary>
+                              <div className="message-tool-body">
+                                <div className="message-tool-meta">
+                                  {getToolDisplayName(event.name as ToolCall["name"])} · {formatTime(event.timestamp)}
+                                </div>
+                                <div className="message-tool-output">
+                                  {event.error ? `Error: ${event.error}\n\n${event.output}` : event.output}
+                                </div>
+                              </div>
+                            </details>
+                          ))}
+                        </div>
+                      ) : null}
                       {message.isStreaming && (
                         <span className="typing-indicator">
                           <span className="typing-dot" />

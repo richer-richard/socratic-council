@@ -20,11 +20,21 @@ export interface SessionMessage extends SharedMessage {
   latencyMs?: number;
   error?: string;
   quotedMessageIds?: string[];
+  toolEvents?: SessionToolEvent[];
   thinking?: string;
   fullResponse?: string;
   reactions?: Partial<Record<string, { count: number; by: string[] }>>;
   displayName?: string;
   displayProvider?: Provider;
+}
+
+export interface SessionToolEvent {
+  id: string;
+  name: string;
+  summary: string;
+  output: string;
+  error?: string;
+  timestamp: number;
 }
 
 export interface ModeratorUsageSnapshot {
@@ -203,6 +213,27 @@ function normalizeReactions(value: unknown): SessionMessage["reactions"] | undef
   return Object.keys(result).length > 0 ? result : undefined;
 }
 
+function normalizeToolEvent(input: unknown): SessionToolEvent | null {
+  if (!input || typeof input !== "object") return null;
+
+  const record = input as Partial<SessionToolEvent>;
+  const id = cleanText(record.id);
+  const name = cleanText(record.name);
+  const summary = cleanText(record.summary);
+  const output = cleanText(record.output);
+
+  if (!id || !name || !summary) return null;
+
+  return {
+    id,
+    name,
+    summary,
+    output,
+    ...(record.error ? { error: cleanText(record.error) } : {}),
+    timestamp: clampNumber(record.timestamp, Date.now()),
+  };
+}
+
 function normalizeMessage(input: unknown): SessionMessage | null {
   if (!input || typeof input !== "object") return null;
 
@@ -249,6 +280,13 @@ function normalizeMessage(input: unknown): SessionMessage | null {
           quotedMessageIds: record.quotedMessageIds.filter(
             (value): value is string => typeof value === "string" && value.length > 0
           ),
+        }
+      : {}),
+    ...(Array.isArray(record.toolEvents)
+      ? {
+          toolEvents: record.toolEvents
+            .map((entry) => normalizeToolEvent(entry))
+            .filter((entry): entry is SessionToolEvent => Boolean(entry)),
         }
       : {}),
     ...(record.thinking ? { thinking: cleanText(record.thinking) } : {}),
