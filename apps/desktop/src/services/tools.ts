@@ -68,9 +68,11 @@ export function getToolPrompt(): string {
   const lines = [
     "Tool calling (optional): use @tool(name, {args}) on its own line.",
     "Research first, then answer.",
-    "Use oracle.file_search before guessing about attached PDFs, DOCX files, or code.",
+    "Use oracle.file_search proactively before guessing about attached PDFs, DOCX files, or code.",
+    "Use oracle.web_search proactively before leaning on current events, current prices, or recent claims.",
     "If a quote looks truncated or incomplete, run a more targeted search before making the claim.",
     "After tool results arrive, write a normal answer in the same turn. Do not stop at tool calls unless another search is strictly necessary.",
+    "Never emit tool_use, tool_call, function_call, XML tags, or provider-specific tool syntax.",
     "Available tools:",
     ...TOOL_DEFINITIONS.map((tool) => `- ${tool.name}: ${tool.description} args=${tool.args}`),
   ];

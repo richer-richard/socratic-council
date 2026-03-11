@@ -29,6 +29,7 @@ export interface CompletionOptions {
   timeoutMs?: number;
   idleTimeoutMs?: number;
   signal?: AbortSignal;
+  disableThinking?: boolean;
 }
 
 export interface CompletionResult {

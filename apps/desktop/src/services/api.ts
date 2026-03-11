@@ -192,6 +192,7 @@ export async function callProvider(
     idleTimeoutMs?: number;
     requestTimeoutMs?: number;
     signal?: AbortSignal;
+    disableThinking?: boolean;
   }
 ): Promise<CompletionResult> {
   const startTime = Date.now();
@@ -227,6 +228,7 @@ export async function callProvider(
     timeoutMs: options?.requestTimeoutMs,
     idleTimeoutMs: options?.idleTimeoutMs,
     signal: options?.signal,
+    disableThinking: options?.disableThinking,
   };
 
   try {

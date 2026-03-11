@@ -38,12 +38,10 @@ cleanup_local_build_artifacts() {
   local cleanup_paths=(
     "node_modules"
     ".pnpm-store"
-    "apps/cli/node_modules"
     "apps/desktop/node_modules"
     "packages/core/node_modules"
     "packages/sdk/node_modules"
     "packages/shared/node_modules"
-    "apps/cli/dist"
     "apps/desktop/dist"
     "packages/core/dist"
     "packages/sdk/dist"

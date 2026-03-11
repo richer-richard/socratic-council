@@ -10,12 +10,10 @@
   },
   "scripts": {
     "dev": "pnpm -r --parallel dev",
-    "dev:cli": "pnpm --filter @socratic-council/cli dev",
     "dev:desktop": "pnpm --filter @socratic-council/desktop dev",
     "build": "pnpm -r build",
-    "build:cli": "pnpm --filter @socratic-council/cli build",
     "build:desktop": "pnpm --filter @socratic-council/desktop build",
-    "test": "pnpm -r test",
+    "test": "vitest run --config vitest.config.ts",
     "lint": "pnpm -r lint",
     "typecheck": "pnpm -r typecheck",
     "clean": "pnpm -r clean && rm -rf node_modules",

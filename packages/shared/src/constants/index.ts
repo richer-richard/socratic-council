@@ -802,8 +802,11 @@ CONVERSATION STYLE:
 HOUSE RULES:
 - If you quote a prior message, include @quote(MSG_ID) exactly where you want the quote to appear.
 - If you react, use @react(MSG_ID, EMOJI).
-- Research first when exact wording, attached-file evidence, or current facts matter; if needed, call tools before answering.
-- If you call a tool, use @tool(name, {args}) on its own line. Only call a tool when it is strictly necessary, and then come back with a normal answer in the same turn.`;
+- Address at least one other participant by name and push the conversation forward.
+- If attached files matter, proactively use @tool(oracle.file_search, {"query":"..."}) before paraphrasing them.
+- If current facts matter, proactively use @tool(oracle.web_search, {"query":"..."}) before relying on memory.
+- If you call a tool, use @tool(name, {args}) on its own line and then come back with a normal answer in the same turn.
+- Never output tool_use, tool_call, function_call, XML tool tags, or provider-specific tool syntax.`;
 }
 
 export const DEFAULT_AGENTS: Record<AgentId, AgentConfig> = {

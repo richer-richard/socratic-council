@@ -1,8 +1,9 @@
 {
   "compilerOptions": {
-    "target": "ES2022",
+    "baseUrl": "../..",
+    "target": "ES2023",
     "useDefineForClassFields": true,
-    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
     "module": "ESNext",
     "skipLibCheck": true,
     "moduleResolution": "bundler",
@@ -12,6 +13,14 @@
     "noEmit": true,
     "jsx": "react-jsx",
     "strict": true,
+    "paths": {
+      "@socratic-council/shared": ["packages/shared/src/index.ts"],
+      "@socratic-council/shared/*": ["packages/shared/src/*"],
+      "@socratic-council/sdk": ["packages/sdk/src/index.ts"],
+      "@socratic-council/sdk/*": ["packages/sdk/src/*"],
+      "@socratic-council/core": ["packages/core/src/index.ts"],
+      "@socratic-council/core/*": ["packages/core/src/*"]
+    },
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true

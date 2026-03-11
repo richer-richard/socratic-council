@@ -58,6 +58,25 @@ interface MiniMaxStreamEvent {
   };
 }
 
+function isThinkingBlock(block: MiniMaxContentBlock | undefined): boolean {
+  if (!block) return false;
+  if (block.type === "thinking") return true;
+  return Boolean(block.thinking && !block.text);
+}
+
+function extractThinkingText(block: MiniMaxContentBlock | undefined): string {
+  if (!block) return "";
+  if (typeof block.thinking === "string" && block.thinking.length > 0) {
+    return block.thinking;
+  }
+  return block.type === "thinking" ? block.text ?? "" : "";
+}
+
+function extractContentText(block: MiniMaxContentBlock | undefined): string {
+  if (!block || isThinkingBlock(block)) return "";
+  return block.text ?? "";
+}
+
 const THINK_OPEN_TAG = "<think>";
 const THINK_CLOSE_TAG = "</think>";
 
@@ -253,14 +272,8 @@ export class MiniMaxProvider implements BaseProvider {
     }
 
     const blocks = Array.isArray(data.content) ? data.content : [];
-    const rawContent = blocks
-      .filter((block) => block.type === "text")
-      .map((block) => block.text ?? "")
-      .join("");
-    const explicitThinking = blocks
-      .filter((block) => block.type === "thinking")
-      .map((block) => block.thinking ?? block.text ?? "")
-      .join("");
+    const rawContent = blocks.map((block) => extractContentText(block)).join("");
+    const explicitThinking = blocks.map((block) => extractThinkingText(block)).join("");
     const tagged = splitThinkTaggedText(rawContent);
     const content = tagged.content;
     const thinking = `${explicitThinking}${tagged.thinking}`;
@@ -309,6 +322,25 @@ export class MiniMaxProvider implements BaseProvider {
           const idx = typeof event.index === "number" ? event.index : -1;
           if (idx >= 0) {
             blockTypes.set(idx, event.content_block?.type ?? "text");
+          }
+
+          const startingThinking = extractThinkingText(event.content_block);
+          if (startingThinking) {
+            fullThinking += startingThinking;
+            onChunk({ content: "", thinking: startingThinking, done: false });
+          }
+
+          const startingContent = extractContentText(event.content_block);
+          if (startingContent) {
+            const tagged = taggedTextParser.push(startingContent);
+            if (tagged.thinking) {
+              fullThinking += tagged.thinking;
+              onChunk({ content: "", thinking: tagged.thinking, done: false });
+            }
+            if (tagged.content) {
+              fullContent += tagged.content;
+              onChunk({ content: tagged.content, done: false });
+            }
           }
         }
 

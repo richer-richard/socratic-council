@@ -11,8 +11,9 @@
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build",
+    "typecheck": "tsc --noEmit",
     "lint": "eslint \"src/**/*.{ts,tsx}\"",
-    "test": "vitest run --config ../../vitest.config.ts",
+    "test": "vitest run --root ../.. --config vitest.config.ts",
     "clean": "rm -rf dist"
   },
   "dependencies": {
