@@ -55,6 +55,8 @@ interface OpenAIResponsesRequest {
   instructions?: string;
   temperature?: number;
   max_output_tokens?: number;
+  prompt_cache_key?: string;
+  prompt_cache_retention?: "in_memory" | "24h";
   top_p?: number;
   reasoning?: {
     effort?: "minimal" | "low" | "medium" | "high" | "xhigh";
@@ -226,6 +228,15 @@ function extractReasoningChunk(event: OpenAIStreamEvent): string {
 
 function toDataUrl(mimeType: string, data: string): string {
   return `data:${mimeType};base64,${data}`;
+}
+
+function stableHash(value: string): string {
+  let hash = 2166136261;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(36);
 }
 
 export class OpenAIProvider implements BaseProvider {
@@ -501,7 +512,33 @@ export class OpenAIProvider implements BaseProvider {
       request.reasoning = { effort: reasoningEffortForModel(model), summary: "auto" };
     }
 
+    const promptCacheKey = this.buildPromptCacheKey(messages);
+    if (promptCacheKey) {
+      request.prompt_cache_key = promptCacheKey;
+      request.prompt_cache_retention = "in_memory";
+    }
+
     return request;
+  }
+
+  private buildPromptCacheKey(messages: ChatMessage[]): string | undefined {
+    const boundary = messages.findLastIndex((message) => message.cacheControl === "ephemeral");
+    if (boundary < 0) {
+      return undefined;
+    }
+
+    const prefix = messages
+      .slice(0, boundary + 1)
+      .map((message) => [
+        message.role,
+        message.content,
+        message.attachments
+          ?.map((attachment) => `${attachment.id}:${attachment.kind}:${attachment.name}:${attachment.data.length}`)
+          .join("|") ?? "",
+      ].join("::"))
+      .join("\n---\n");
+
+    return `sc-prefix-${stableHash(prefix)}`;
   }
 
   private buildMessageContent(message: ChatMessage): string | OpenAIInputContent[] {

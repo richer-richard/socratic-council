@@ -21,6 +21,9 @@ When docs and existing behavior conflict, docs win.
 - Parameter compatibility:
   - GPT-5 family reasoning uses `reasoning.effort`
   - GPT-5.x rejects `temperature`/`top_p` when reasoning is active (except `none`-style cases)
+- Prompt caching:
+  - `prompt_cache_key` can be set on repeated prefixes to improve cache hit rate
+  - `prompt_cache_retention` defaults to in-memory retention for supported models
 - Reasoning summary:
   - `reasoning.summary = "auto"` to request best available summary depth.
 
@@ -43,6 +46,8 @@ Sources:
   - Must satisfy `max_tokens > thinking.budget_tokens`
   - Thinking mode is not compatible with `temperature` / `top_k` overrides
   - Adaptive thinking is supported for newer models (used for Opus 4.6 path)
+- Prompt caching:
+  - Stable prompt prefixes can be marked with `cache_control: { type: "ephemeral" }` on cacheable content blocks
 
 Sources:
 - https://docs.anthropic.com/en/docs/build-with-claude/extended-thinking

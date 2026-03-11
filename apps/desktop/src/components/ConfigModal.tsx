@@ -786,8 +786,9 @@ export function ConfigModal({
                     attached source material without inflating the session index.
                   </p>
                   <p>
-                    Raw image/PDF upload is used only for the locked models that support it on this
-                    build. Other providers receive an extracted local note instead of the raw file.
+                    Images are optimized locally before upload. PDFs are converted into compact
+                    searchable notes by default so large documents do not flood model context on
+                    every turn.
                   </p>
                   <p>
                     Camera capture relies on macOS camera permission. If access is denied, the home

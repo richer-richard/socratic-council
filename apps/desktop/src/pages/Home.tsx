@@ -47,6 +47,19 @@ const STATUS_LABELS: Record<SessionStatus, string> = {
   completed: "Complete",
 };
 
+function describeAttachment(attachment: ComposerAttachment): string {
+  switch (attachment.kind) {
+    case "pdf":
+      return "PDF - compact note";
+    case "image":
+      return "IMAGE - optimized";
+    case "text":
+      return "TEXT - extracted";
+    default:
+      return "FILE - extracted";
+  }
+}
+
 function GearIcon({ size = 20 }: { size?: number }) {
   return (
     <svg
@@ -834,12 +847,12 @@ export function Home({
                           />
                         ) : (
                           <div className="workstation-attachment-fallback-icon">
-                            {attachment.kind === "pdf" ? <FileIcon size={16} /> : <ImageIcon size={16} />}
+                            {attachment.kind === "image" ? <ImageIcon size={16} /> : <FileIcon size={16} />}
                           </div>
                         )}
                         <div className="workstation-attachment-copy">
                           <span>{attachment.name}</span>
-                          <span>{attachment.kind.toUpperCase()}</span>
+                          <span>{describeAttachment(attachment)}</span>
                         </div>
                         <span
                           role="button"

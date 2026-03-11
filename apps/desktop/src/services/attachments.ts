@@ -6,8 +6,10 @@ const ATTACHMENT_DB_VERSION = 1;
 const ATTACHMENT_STORE = "session-attachments";
 const ATTACHMENT_BY_SESSION_INDEX = "by-session-id";
 
-const IMAGE_MAX_DIMENSION = 1600;
-const TEXT_FALLBACK_CHAR_LIMIT = 6000;
+const IMAGE_MAX_DIMENSION = 1440;
+const IMAGE_TARGET_BYTES = 1_800_000;
+const IMAGE_JPEG_QUALITIES = [0.88, 0.8, 0.72, 0.64] as const;
+const TEXT_FALLBACK_CHAR_LIMIT = 8000;
 const SEARCH_TEXT_CHAR_LIMIT = 120000;
 const SEARCH_ENTRY_CHAR_LIMIT = 3000;
 const IMAGE_OCR_CHAR_LIMIT = 2400;
@@ -90,8 +92,8 @@ const RAW_IMAGE_MODEL_SUPPORT: Partial<Record<Provider, string[]>> = {
 };
 
 const RAW_PDF_MODEL_SUPPORT: Partial<Record<Provider, string[]>> = {
-  openai: ["gpt-5.4"],
-  google: ["gemini-3.1-pro-preview", "gemini-3-pro-preview"],
+  openai: [],
+  google: [],
 };
 
 export type AttachmentSource = "file-picker" | "photo-picker" | "camera";
@@ -641,6 +643,75 @@ async function getImageSize(file: Blob): Promise<{ width: number | null; height:
   }
 }
 
+async function renderCanvasBlob(
+  bitmap: ImageBitmap,
+  width: number,
+  height: number,
+  type: string,
+  quality?: number
+): Promise<Blob | null> {
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return null;
+
+  if (type === "image/jpeg") {
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, width, height);
+  }
+
+  ctx.drawImage(bitmap, 0, 0, width, height);
+
+  return new Promise<Blob | null>((resolve) => {
+    canvas.toBlob(resolve, type, quality);
+  });
+}
+
+async function encodeCompressedImage(
+  bitmap: ImageBitmap,
+  width: number,
+  height: number,
+  sourceType: string,
+  originalSize: number
+): Promise<Blob | null> {
+  const variants: Array<{ type: string; quality?: number }> = [];
+
+  if (sourceType === "image/png") {
+    variants.push({ type: "image/png" });
+  }
+
+  if (sourceType === "image/webp") {
+    for (const quality of IMAGE_JPEG_QUALITIES) {
+      variants.push({ type: "image/webp", quality });
+    }
+  }
+
+  for (const quality of IMAGE_JPEG_QUALITIES) {
+    variants.push({ type: "image/jpeg", quality });
+  }
+
+  let smallest: Blob | null = null;
+  for (const variant of variants) {
+    const candidate = await renderCanvasBlob(bitmap, width, height, variant.type, variant.quality);
+    if (!candidate) continue;
+
+    if (!smallest || candidate.size < smallest.size) {
+      smallest = candidate;
+    }
+
+    if (candidate.size <= IMAGE_TARGET_BYTES) {
+      return candidate;
+    }
+  }
+
+  if (!smallest) {
+    return null;
+  }
+
+  return smallest.size < originalSize ? smallest : null;
+}
+
 async function downscaleImage(
   file: File
 ): Promise<{ blob: Blob; width: number | null; height: number | null }> {
@@ -652,29 +723,28 @@ async function downscaleImage(
 
   try {
     const bitmap = await createImageBitmap(file);
-    const longestSide = Math.max(bitmap.width, bitmap.height);
-    if (longestSide <= IMAGE_MAX_DIMENSION) {
+    try {
+      const longestSide = Math.max(bitmap.width, bitmap.height);
+      const shouldResize = longestSide > IMAGE_MAX_DIMENSION;
+      const shouldReencode = shouldResize || file.size > IMAGE_TARGET_BYTES;
+
+      if (!shouldReencode) {
+        return { blob: file, width: bitmap.width, height: bitmap.height };
+      }
+
+      const scale = shouldResize ? IMAGE_MAX_DIMENSION / longestSide : 1;
+      const width = Math.max(1, Math.round(bitmap.width * scale));
+      const height = Math.max(1, Math.round(bitmap.height * scale));
+      const blob = await encodeCompressedImage(bitmap, width, height, mimeType, file.size);
+
+      if (blob) {
+        return { blob, width, height };
+      }
+
       return { blob: file, width: bitmap.width, height: bitmap.height };
+    } finally {
+      bitmap.close();
     }
-
-    const scale = IMAGE_MAX_DIMENSION / longestSide;
-    const width = Math.max(1, Math.round(bitmap.width * scale));
-    const height = Math.max(1, Math.round(bitmap.height * scale));
-    const canvas = document.createElement("canvas");
-    canvas.width = width;
-    canvas.height = height;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) {
-      return { blob: file, width: bitmap.width, height: bitmap.height };
-    }
-
-    ctx.drawImage(bitmap, 0, 0, width, height);
-    const outputType = mimeType === "image/png" || mimeType === "image/webp" ? mimeType : "image/jpeg";
-    const blob = await new Promise<Blob | null>((resolve) => {
-      canvas.toBlob(resolve, outputType, outputType === "image/jpeg" ? 0.86 : undefined);
-    });
-
-    return { blob: blob ?? file, width, height };
   } catch {
     const dimensions = await getImageSize(file);
     return { blob: file, ...dimensions };
