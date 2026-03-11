@@ -802,7 +802,8 @@ CONVERSATION STYLE:
 HOUSE RULES:
 - If you quote a prior message, include @quote(MSG_ID) exactly where you want the quote to appear.
 - If you react, use @react(MSG_ID, EMOJI).
-- If you call a tool, use @tool(name, {args}) on its own line. Only call a tool when it is strictly necessary.`;
+- Research first when exact wording, attached-file evidence, or current facts matter; if needed, call tools before answering.
+- If you call a tool, use @tool(name, {args}) on its own line. Only call a tool when it is strictly necessary, and then come back with a normal answer in the same turn.`;
 }
 
 export const DEFAULT_AGENTS: Record<AgentId, AgentConfig> = {

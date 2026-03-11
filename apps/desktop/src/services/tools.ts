@@ -29,6 +29,8 @@ export interface ToolResult {
 
 const TOOL_TIMEOUT_MS = 15000;
 const MAX_RESULTS = 5;
+const FILE_SEARCH_SNIPPET_TARGET = 1100;
+const FILE_SEARCH_SNIPPET_LEAD = 260;
 
 const TOOL_DEFINITIONS: Array<{
   name: ToolName;
@@ -65,7 +67,10 @@ const TOOL_DEFINITIONS: Array<{
 export function getToolPrompt(): string {
   const lines = [
     "Tool calling (optional): use @tool(name, {args}) on its own line.",
+    "Research first, then answer.",
     "Use oracle.file_search before guessing about attached PDFs, DOCX files, or code.",
+    "If a quote looks truncated or incomplete, run a more targeted search before making the claim.",
+    "After tool results arrive, write a normal answer in the same turn. Do not stop at tool calls unless another search is strictly necessary.",
     "Available tools:",
     ...TOOL_DEFINITIONS.map((tool) => `- ${tool.name}: ${tool.description} args=${tool.args}`),
   ];
@@ -135,11 +140,37 @@ function extractQueryTerms(query: string): string[] {
   );
 }
 
+function extendToBoundary(text: string, index: number, direction: "backward" | "forward"): number {
+  const slice =
+    direction === "backward" ? text.slice(Math.max(0, index - 120), index) : text.slice(index, index + 160);
+  const boundaries = [". ", "? ", "! ", "\n", "; ", ": "];
+
+  if (direction === "backward") {
+    let best = -1;
+    for (const boundary of boundaries) {
+      const next = slice.lastIndexOf(boundary);
+      if (next > best) {
+        best = next;
+      }
+    }
+    return best >= 0 ? Math.max(0, index - slice.length + best + 1) : index;
+  }
+
+  let best = Number.POSITIVE_INFINITY;
+  for (const boundary of boundaries) {
+    const next = slice.indexOf(boundary);
+    if (next >= 0 && next < best) {
+      best = next;
+    }
+  }
+  return Number.isFinite(best) ? Math.min(text.length, index + best + 1) : index;
+}
+
 function buildSnippet(text: string, terms: string[]): string {
-  const normalized = text.replace(/\s+/g, " ").trim();
+  const normalized = text.replace(/\r\n/g, "\n").replace(/[^\S\n]+/g, " ").trim();
   if (!normalized) return "";
   if (terms.length === 0) {
-    return normalized.slice(0, 280);
+    return normalized.slice(0, FILE_SEARCH_SNIPPET_TARGET);
   }
 
   let bestIndex = 0;
@@ -155,8 +186,10 @@ function buildSnippet(text: string, terms: string[]): string {
     }
   }
 
-  const start = Math.max(0, bestIndex - 110);
-  const end = Math.min(normalized.length, bestIndex + 170);
+  let start = Math.max(0, bestIndex - FILE_SEARCH_SNIPPET_LEAD);
+  let end = Math.min(normalized.length, start + FILE_SEARCH_SNIPPET_TARGET);
+  start = extendToBoundary(normalized, start, "backward");
+  end = extendToBoundary(normalized, end, "forward");
   const snippet = normalized.slice(start, end).trim();
   return `${start > 0 ? "..." : ""}${snippet}${end < normalized.length ? "..." : ""}`;
 }
