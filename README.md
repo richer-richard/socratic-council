@@ -30,9 +30,7 @@ This repo ships **source only** (no installer downloads). Follow this guide to b
 
 ## Experience Map
 
-<p align="center">
-  <img src="docs/assets/experience-map.svg" alt="Experience map diagram" />
-</p>
+![Experience map diagram](docs/assets/experience-map.svg)
 
 ## Council Lineup
 
@@ -54,17 +52,13 @@ This repo ships **source only** (no installer downloads). Follow this guide to b
 | Quick install via [`install.sh`](install.sh) | macOS | Fastest way to get the app installed locally | Builds the app, copies it to `/Applications`, and launches it |
 | Manual install via the guide below | macOS / Windows / Linux | Full control over prerequisites and build steps | Sets up a reusable local development/build environment |
 
-<p align="center">
-  <img src="docs/assets/installation-paths.svg" alt="Installation paths diagram" />
-</p>
+![Installation paths diagram](docs/assets/installation-paths.svg)
 
 ### First build profile
 
 Illustrative first-run shape for a fresh machine:
 
-<p align="center">
-  <img src="docs/assets/first-build-profile.svg" alt="First build profile chart" />
-</p>
+![First build profile chart](docs/assets/first-build-profile.svg)
 
 ---
 
@@ -145,9 +139,7 @@ For the current manual installation guide, see [Build from source (manual instal
 
 This is the current manual installation guide for the repo. If you do not want to use `install.sh`, or if you are on Windows or Linux, follow this section from top to bottom.
 
-<p align="center">
-  <img src="docs/assets/manual-install-flow.svg" alt="Manual install flow diagram" />
-</p>
+![Manual install flow diagram](docs/assets/manual-install-flow.svg)
 
 ### Requirements summary
 
@@ -553,25 +545,19 @@ If any of these fail, revisit the corresponding step above.
 
 Socratic Council is a pnpm monorepo with a desktop app and shared TypeScript packages.
 
-<p align="center">
-  <img src="docs/assets/architecture-diagram.svg" alt="Architecture diagram" />
-</p>
+![Architecture diagram](docs/assets/architecture-diagram.svg)
 
 ### Conversation loop
 
 At runtime the app repeatedly selects a speaker, streams their response, applies structured "actions" in the text, then updates the UI and analytics.
 
-<p align="center">
-  <img src="docs/assets/conversation-loop.svg" alt="Conversation loop diagram" />
-</p>
+![Conversation loop diagram](docs/assets/conversation-loop.svg)
 
 ### Export pipeline
 
 Exports are generated locally from the transcript plus computed statistics (speaker counts, tokens, costs, conflict graph).
 
-<p align="center">
-  <img src="docs/assets/export-pipeline.svg" alt="Export pipeline diagram" />
-</p>
+![Export pipeline diagram](docs/assets/export-pipeline.svg)
 
 ---
 
