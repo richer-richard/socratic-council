@@ -1,0 +1,73 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 360" role="img" aria-labelledby="title desc">
+  <title id="title">First build profile</title>
+  <desc id="desc">A timeline-style chart showing the sequence of prerequisites, dependencies, TypeScript and Vite build, Rust and Tauri bundle, then install and launch.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#07111f"/>
+      <stop offset="100%" stop-color="#0f172a"/>
+    </linearGradient>
+    <style>
+      text { font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+      .title { font-size: 24px; font-weight: 700; fill: #f8fafc; }
+      .subtitle { font-size: 14px; fill: #94a3b8; }
+      .axis { stroke: #334155; stroke-width: 1.5; }
+      .grid { stroke: #1e293b; stroke-width: 1; stroke-dasharray: 4 8; }
+      .row { font-size: 15px; fill: #cbd5e1; }
+      .tick { font-size: 12px; fill: #94a3b8; text-anchor: middle; }
+      .chip { fill: #0f172a; stroke: #334155; stroke-width: 1.5; }
+      .chip-text { font-size: 12px; font-weight: 700; fill: #e2e8f0; text-anchor: middle; }
+      .bar-text { font-size: 13px; font-weight: 700; fill: #f8fafc; }
+    </style>
+  </defs>
+
+  <rect width="1200" height="360" rx="28" fill="url(#bg)"/>
+  <text x="56" y="44" class="title">First Build Profile</text>
+  <text x="56" y="68" class="subtitle">Illustrative first-run shape on a fresh machine. Rust and Tauri bundling usually dominates the timeline.</text>
+
+  <rect x="56" y="82" width="82" height="28" rx="14" class="chip"/>
+  <text x="97" y="100" class="chip-text">Setup</text>
+  <rect x="150" y="82" width="78" height="28" rx="14" class="chip"/>
+  <text x="189" y="100" class="chip-text">Build</text>
+  <rect x="240" y="82" width="84" height="28" rx="14" class="chip"/>
+  <text x="282" y="100" class="chip-text">Finish</text>
+
+  <line x1="220" y1="130" x2="1060" y2="130" class="axis"/>
+  <line x1="220" y1="310" x2="1060" y2="310" class="axis"/>
+
+  <line x1="220" y1="130" x2="220" y2="310" class="axis"/>
+  <line x1="360" y1="130" x2="360" y2="310" class="grid"/>
+  <line x1="500" y1="130" x2="500" y2="310" class="grid"/>
+  <line x1="640" y1="130" x2="640" y2="310" class="grid"/>
+  <line x1="780" y1="130" x2="780" y2="310" class="grid"/>
+  <line x1="920" y1="130" x2="920" y2="310" class="grid"/>
+  <line x1="1060" y1="130" x2="1060" y2="310" class="axis"/>
+
+  <text x="220" y="326" class="tick">0</text>
+  <text x="360" y="326" class="tick">1</text>
+  <text x="500" y="326" class="tick">2</text>
+  <text x="640" y="326" class="tick">3</text>
+  <text x="780" y="326" class="tick">4</text>
+  <text x="920" y="326" class="tick">5</text>
+  <text x="1060" y="326" class="tick">6</text>
+
+  <text x="56" y="162" class="row">Prerequisites</text>
+  <text x="56" y="202" class="row">Dependencies</text>
+  <text x="56" y="242" class="row">TypeScript + Vite</text>
+  <text x="56" y="282" class="row">Rust + Tauri bundle</text>
+  <text x="56" y="322" class="row">Install + launch</text>
+
+  <rect x="220" y="144" width="140" height="24" rx="12" fill="#0f766e"/>
+  <text x="234" y="160" class="bar-text">Setup</text>
+
+  <rect x="360" y="184" width="140" height="24" rx="12" fill="#15803d"/>
+  <text x="374" y="200" class="bar-text">Dependencies</text>
+
+  <rect x="500" y="224" width="140" height="24" rx="12" fill="#2563eb"/>
+  <text x="514" y="240" class="bar-text">Frontend build</text>
+
+  <rect x="640" y="264" width="280" height="24" rx="12" fill="#c2410c"/>
+  <text x="654" y="280" class="bar-text">Native bundle</text>
+
+  <rect x="920" y="304" width="140" height="24" rx="12" fill="#ca8a04"/>
+  <text x="934" y="320" class="bar-text">Install</text>
+</svg>
