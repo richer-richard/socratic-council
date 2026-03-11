@@ -394,7 +394,7 @@ export class AnthropicProvider implements BaseProvider {
       request.system = systemMessage.content;
     }
 
-    const thinking = buildThinkingConfig(model, request.max_tokens);
+    const thinking = options?.disableThinking ? undefined : buildThinkingConfig(model, request.max_tokens);
     if (thinking) {
       request.thinking = thinking;
     } else {

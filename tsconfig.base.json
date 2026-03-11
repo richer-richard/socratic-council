@@ -1,10 +1,19 @@
 {
   "$schema": "https://json.schemastore.org/tsconfig",
   "compilerOptions": {
-    "target": "ES2024",
+    "baseUrl": ".",
+    "target": "ES2023",
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
-    "lib": ["ES2024", "DOM", "DOM.Iterable"],
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "paths": {
+      "@socratic-council/shared": ["packages/shared/src/index.ts"],
+      "@socratic-council/shared/*": ["packages/shared/src/*"],
+      "@socratic-council/sdk": ["packages/sdk/src/index.ts"],
+      "@socratic-council/sdk/*": ["packages/sdk/src/*"],
+      "@socratic-council/core": ["packages/core/src/index.ts"],
+      "@socratic-council/core/*": ["packages/core/src/*"]
+    },
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,

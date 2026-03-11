@@ -355,7 +355,6 @@ This runs pnpm's workspace resolution and installs dependencies for all packages
 | `@socratic-council/sdk` | `packages/sdk` | Provider SDK (OpenAI, Anthropic, Google, DeepSeek, Kimi, Qwen, MiniMax), transport layer |
 | `@socratic-council/core` | `packages/core` | Council orchestration logic (bidding, conflict, cost, memory) |
 | `@socratic-council/desktop` | `apps/desktop` | Tauri v2 + React frontend, Tauri CLI (`@tauri-apps/cli`) |
-| `@socratic-council/cli` | `apps/cli` | CLI app (work in progress) |
 
 Verify installation succeeded:
 
@@ -461,7 +460,7 @@ pnpm --filter @socratic-council/desktop tauri --version
 
 # 7. Workspace packages resolved
 pnpm ls -r --depth 0 2>/dev/null | head -20
-# ✓ should list @socratic-council/shared, sdk, core, desktop, cli
+# ✓ should list @socratic-council/shared, sdk, core, desktop
 
 # 8. System libraries (Linux only)
 pkg-config --modversion webkitgtk-4.1
@@ -482,7 +481,6 @@ Socratic Council is a pnpm monorepo with a desktop app and shared TypeScript pac
 flowchart TB
   subgraph Apps["Apps"]
     Desktop["Desktop app\napps/desktop\nTauri v2 + React"] --> Core
-    CLI["CLI app (WIP)\napps/cli\nNode + TypeScript"] --> Core
   end
 
   Core["@socratic-council/core\nbidding • cost • conflict • memory"] --> SDK["@socratic-council/sdk\nproviders • transport • streaming"]
@@ -778,14 +776,6 @@ pnpm build
 
 This builds all workspace packages (`shared` → `sdk` → `core` → apps).
 
-### CLI (work in progress)
-
-```bash
-pnpm --filter @socratic-council/cli dev     # watch mode
-pnpm --filter @socratic-council/cli build   # one-shot build
-pnpm --filter @socratic-council/cli start   # run built CLI
-```
-
 ### Tests
 
 ```bash
@@ -830,9 +820,6 @@ socratic-council/
 │   │   │   └── tauri.conf.json  # Tauri configuration
 │   │   ├── vite.config.ts       # Vite bundler config
 │   │   └── package.json
-│   └── cli/                     # CLI app (work in progress)
-│       ├── src/index.ts
-│       └── package.json
 ├── packages/
 │   ├── shared/                  # Types, constants, model registry
 │   ├── sdk/                     # Provider SDK (transport, streaming, SSE)

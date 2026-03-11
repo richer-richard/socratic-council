@@ -285,7 +285,11 @@ export class Council {
         agent,
         messages,
         streamCallback,
-        { temperature: agent.temperature, maxTokens: agent.maxTokens }
+        {
+          temperature: agent.temperature,
+          maxTokens: agent.maxTokens,
+          signal: this.abortController?.signal,
+        }
       );
 
       const message: Message = {
@@ -424,6 +428,9 @@ export class Council {
    * Complete the council session
    */
   private completeCouncil(): void {
+    if (this.state.status === "completed") {
+      return;
+    }
     this.state.status = "completed";
     this.state.completedAt = Date.now();
     this.isRunning = false;

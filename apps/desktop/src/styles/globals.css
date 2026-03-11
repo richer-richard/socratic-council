@@ -1205,6 +1205,7 @@ body {
 .markdown-content {
   color: inherit;
   font: inherit;
+  min-width: 0;
 }
 
 .markdown-content > :first-child {
@@ -1217,6 +1218,8 @@ body {
 
 .markdown-content p {
   margin: 0.25rem 0 0.75rem;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .markdown-content a {
@@ -1301,6 +1304,23 @@ body {
 
 .markdown-content li {
   margin: 0.2rem 0;
+}
+
+.markdown-content .katex-display {
+  max-width: 100%;
+  margin: 0.8rem 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-bottom: 0.25rem;
+}
+
+.markdown-content .katex {
+  max-width: 100%;
+}
+
+.markdown-content .katex-display > .katex,
+.markdown-content .katex {
+  white-space: nowrap;
 }
 
 .message-quote {

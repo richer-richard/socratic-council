@@ -161,14 +161,27 @@ interface OpenAIStreamEvent {
   };
 }
 
-function extractOutputText(data: OpenAIResponsesResponse): string {
-  const outputText =
-    data.output
-      ?.flatMap((item) => item.content ?? [])
-      .filter((content) => content.type === "output_text" || content.type === "text")
-      .map((content) => content.text)
+function isOutputTextType(type: string | undefined): boolean {
+  return type === "output_text" || type === "text";
+}
+
+function collectContentText(
+  content: Array<{
+    type?: string;
+    text?: string;
+  }> | undefined
+): string {
+  return (
+    content
+      ?.filter((part) => isOutputTextType(part.type))
+      .map((part) => part.text ?? "")
       .filter(Boolean)
-      .join("") ?? "";
+      .join("") ?? ""
+  );
+}
+
+function extractOutputText(data: OpenAIResponsesResponse): string {
+  const outputText = data.output?.map((item) => collectContentText(item.content)).join("") ?? "";
 
   if (outputText) return outputText;
 
@@ -224,6 +237,30 @@ function extractReasoningChunk(event: OpenAIStreamEvent): string {
   }
 
   return "";
+}
+
+function mergeFallbackOutput(current: string, next: string): { content: string; delta: string } {
+  if (!next) {
+    return { content: current, delta: "" };
+  }
+
+  if (!current) {
+    return { content: next, delta: next };
+  }
+
+  if (next === current) {
+    return { content: current, delta: "" };
+  }
+
+  if (next.startsWith(current)) {
+    return { content: next, delta: next.slice(current.length) };
+  }
+
+  if (current.endsWith(next) || current.includes(next)) {
+    return { content: current, delta: "" };
+  }
+
+  return { content: `${current}${next}`, delta: next };
 }
 
 function toDataUrl(mimeType: string, data: string): string {
@@ -325,6 +362,15 @@ export class OpenAIProvider implements BaseProvider {
     let fullThinking = "";
     let sawDelta = false;
 
+    const appendFallbackText = (text: string) => {
+      if (!text || sawDelta) return;
+      const merged = mergeFallbackOutput(fullContent, text);
+      fullContent = merged.content;
+      if (merged.delta) {
+        onChunk({ content: merged.delta, done: false });
+      }
+    };
+
     const parser = createSseParser((data) => {
       if (!data || data === "[DONE]") return;
       try {
@@ -338,21 +384,22 @@ export class OpenAIProvider implements BaseProvider {
         }
 
         if (parsed.type === "response.output_text.done" && parsed.text && !sawDelta) {
-          fullContent += parsed.text;
-          onChunk({ content: parsed.text, done: false });
+          appendFallbackText(parsed.text);
           return;
         }
 
         if (parsed.type === "response.output_item.done") {
-          const itemText =
-            parsed.item?.content
-              ?.filter((content) => content.type === "output_text" || content.type === "text")
-              .map((content) => content.text ?? "")
-              .join("") ?? "";
+          appendFallbackText(collectContentText(parsed.item?.content));
+          return;
+        }
 
-          if (itemText && fullContent.length === 0) {
-            fullContent = itemText;
-          }
+        if (
+          parsed.type === "response.content_part.done" &&
+          isOutputTextType(parsed.part?.type) &&
+          parsed.part?.text
+        ) {
+          appendFallbackText(parsed.part.text);
+          return;
         }
 
         const reasoningChunk = extractReasoningChunk(parsed);
@@ -362,24 +409,18 @@ export class OpenAIProvider implements BaseProvider {
           return;
         }
 
-        if (parsed.type === "response.completed" && parsed.response?.usage) {
-          inputTokens = parsed.response.usage.input_tokens ?? inputTokens;
-          outputTokens = parsed.response.usage.output_tokens ?? outputTokens;
-          reasoningTokens =
-            parsed.response.usage.output_tokens_details?.reasoning_tokens ??
-            parsed.response.usage.reasoning_tokens ??
-            reasoningTokens;
-
-          const completedText =
-            parsed.response.output
-              ?.flatMap((item) => item.content ?? [])
-              .filter((content) => content.type === "output_text" || content.type === "text")
-              .map((content) => content.text ?? "")
-              .join("") ?? "";
-
-          if (completedText && completedText.length > fullContent.length) {
-            fullContent = completedText;
+        if (parsed.type === "response.completed") {
+          if (parsed.response?.usage) {
+            inputTokens = parsed.response.usage.input_tokens ?? inputTokens;
+            outputTokens = parsed.response.usage.output_tokens ?? outputTokens;
+            reasoningTokens =
+              parsed.response.usage.output_tokens_details?.reasoning_tokens ??
+              parsed.response.usage.reasoning_tokens ??
+              reasoningTokens;
           }
+
+          const completedText = parsed.response?.output?.map((item) => collectContentText(item.content)).join("") ?? "";
+          appendFallbackText(completedText);
           return;
         }
 

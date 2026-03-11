@@ -120,10 +120,12 @@ Rules:
 - Add exactly one new claim, example, or counterpoint; don’t restate your thesis.
 - Include one concrete test, falsifiable criterion, or counterexample when possible.
 - If your answer depends on exact wording from attached files or current facts, research first before answering.
+- Proactively call oracle.file_search for attached-file evidence and oracle.web_search for current external facts when that would materially improve the answer.
 - If a retrieved passage looks incomplete, do one more targeted search until you have enough surrounding context.
 - After using tools, come back with a normal answer in the same turn. Do not end with tool calls only.
 - End with one concrete question to the group.
 - If the Moderator gives an instruction, follow it.
+- Never emit tool_use, tool_call, function_call, XML tool tags, or provider-specific tool syntax. Use only the literal @tool(name, {args}) format.
 
 Markdown:
 - Markdown is supported (GFM tables, links, **bold**, \`code\`, fenced code blocks, and LaTeX math via $...$ / $$...$$).
@@ -358,6 +360,8 @@ const ACTION_PATTERNS = {
   react: /@react\(([^,]+),\s*([^)]+)\)/g,
   tool: /@tool\(([^,]+),\s*([\s\S]*?)\)/g,
 };
+
+const TOOL_SYNTAX_LEAK_PATTERN = /\b(?:tool_use|tool_call|function_call|minimax:tool_call)\b/i;
 
 function normalizeMessageText(raw: string) {
   return raw
@@ -1570,7 +1574,11 @@ Write a concise closure prompt that asks the council to:
         );
       };
 
-      const runCompletion = async (history: APIChatMessage[], currentModel: string) => {
+      const runCompletion = async (
+        history: APIChatMessage[],
+        currentModel: string,
+        requestOptions?: { disableThinking?: boolean }
+      ) => {
         streamingContent = "";
         streamingThinking = "";
         lastStreamFlushAt = 0;
@@ -1612,6 +1620,7 @@ Write a concise closure prompt that asks the council to:
             idleTimeoutMs,
             requestTimeoutMs,
             signal: controller.signal,
+            disableThinking: requestOptions?.disableThinking,
           }
         );
       };
@@ -1660,6 +1669,42 @@ Write a concise closure prompt that asks the council to:
       }
 
       let parsed = extractActions(result.content || "");
+      const visibleContent = normalizeMessageText(result.content || streamingContent || "");
+
+      if (result.success && TOOL_SYNTAX_LEAK_PATTERN.test(visibleContent) && parsed.toolCalls.length === 0) {
+        history = [
+          ...history,
+          {
+            role: "user",
+            content:
+              "Do not output tool_use, tool_call, function_call, XML, or provider-specific tool syntax. If you need a tool, use exactly @tool(name, {\"query\":\"...\"}) on its own line. Otherwise answer directly now.",
+          },
+        ];
+        result = await runCompletion(history, modelUsed, {
+          disableThinking: agentConfig.provider === "anthropic",
+        });
+        parsed = extractActions(result.content || "");
+      }
+
+      if (
+        result.success &&
+        !normalizeMessageText(result.content || streamingContent || "") &&
+        normalizeMessageText(result.thinking || streamingThinking || "")
+      ) {
+        history = [
+          ...history,
+          {
+            role: "user",
+            content:
+              "You produced internal reasoning but no visible answer. Reply with the final answer now. Do not repeat the hidden reasoning, and do not stop at tool syntax.",
+          },
+        ];
+        result = await runCompletion(history, modelUsed, {
+          disableThinking: agentConfig.provider === "anthropic",
+        });
+        parsed = extractActions(result.content || "");
+      }
+
       if (
         result.success &&
         toolEvents.length > 0 &&
@@ -1674,7 +1719,9 @@ Write a concise closure prompt that asks the council to:
               "You already have enough research context. Write the final answer now using the evidence above. Do not call another tool in this reply.",
           },
         ];
-        result = await runCompletion(history, modelUsed);
+        result = await runCompletion(history, modelUsed, {
+          disableThinking: agentConfig.provider === "anthropic",
+        });
         parsed = extractActions(result.content || "");
       }
 

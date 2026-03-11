@@ -59,6 +59,27 @@ describe("provider request safety", () => {
     expect(request.temperature).toBeUndefined();
   });
 
+  it("can disable Anthropic thinking for forced final-answer retries", () => {
+    const provider = new AnthropicProvider("test-key");
+    const request = (provider as unknown as {
+      buildRequestBody: (...args: unknown[]) => Record<string, unknown>;
+    }).buildRequestBody(
+      createAgent({
+        id: "cathy",
+        name: "Cathy",
+        provider: "anthropic",
+        model: "claude-opus-4-6",
+        maxTokens: 8192,
+      }),
+      messages,
+      "claude-opus-4-6",
+      { stream: false, disableThinking: true }
+    );
+
+    expect(request.thinking).toBeUndefined();
+    expect(request.temperature).toBe(1);
+  });
+
   it("keeps Anthropic budget_tokens strictly below max_tokens", () => {
     const provider = new AnthropicProvider("test-key");
     const request = (provider as unknown as {
