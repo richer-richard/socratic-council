@@ -1,22 +1,78 @@
-![Socratic Council App Icon](apps/desktop/src-tauri/app-icon.png)
+<p align="center">
+  <img src="docs/assets/readme-app-icon-rounded.png" alt="Socratic Council App Icon" width="220" />
+</p>
 
 # Socratic Council
 
-Socratic Council is a local-first desktop app that runs a seven-agent "seminar" on any topic. You provide one or more AI provider API keys, type a topic, and watch seven agents discuss it in a turn-taking group chat. The app includes search, quoting, export, conflict visualization, and token/cost tracking.
+Socratic Council is a local-first desktop app that runs a seven-agent seminar on any topic. You bring provider API keys, type a topic, optionally attach files, and watch seven agents debate in a turn-taking group chat with search, quoting, export, conflict visualization, and token/cost tracking built in.
 
 This repo ships **source only** (no installer downloads). Follow this guide to build it from source.
 
-At a glance:
-- **Local-first** — runs entirely on your machine
-- **Bring-your-own-keys** — uses real provider APIs (OpenAI, Anthropic, Google Gemini, DeepSeek, Kimi, Qwen, MiniMax)
-- **Multi-agent** — seven speakers + optional moderator
-- **Built-in tools** — quoting, reactions, search, export, conflict graph, cost ledger
+> Use `install.sh` as the **quick install script** on macOS, or follow the **manual installation guide in this README** for the current step-by-step setup on macOS, Windows, or Linux.
+
+## Snapshot
+
+| Dimension | Details |
+|---|---|
+| Product | Local-first Tauri desktop app |
+| Stack | React + TypeScript frontend, Rust backend, pnpm monorepo |
+| Discussion model | Seven council members plus an optional moderator |
+| Providers | OpenAI, Anthropic, Google Gemini, DeepSeek, Kimi, Qwen, MiniMax |
+| Research tools | File search, web search, verification, citations |
+| Outputs | Searchable transcript, logs, conflict graph, structured exports |
+
+| Workflow Surface | Included |
+|---|---|
+| Live discussion | Turn-taking responses, quotes, reactions, moderator nudges |
+| Evidence gathering | Attachments, tool results, source-aware follow-up |
+| Observability | Latency, tokens, cost tracking, logs |
+| Review and sharing | Search, export, conflict graph, transcript summaries |
+
+## Experience Map
+
+<p align="center">
+  <img src="docs/assets/experience-map.svg" alt="Experience map diagram" />
+</p>
+
+## Council Lineup
+
+| Agent | Default provider | Default model |
+|---|---|---|
+| George | OpenAI | GPT-5.4 |
+| Cathy | Anthropic | Claude Opus 4.6 |
+| Grace | Google | Gemini 3.1 Pro |
+| Douglas | DeepSeek | DeepSeek Reasoner |
+| Kate | Kimi | Kimi K2.5 |
+| Quinn | Qwen | Qwen 3.5 Plus |
+| Mary | MiniMax | MiniMax M2.5 |
+| Moderator | OpenAI | GPT-5.3 Instant |
+
+## Installation Paths
+
+| Path | Platform | Best for | Result |
+|---|---|---|---|
+| Quick install via [`install.sh`](install.sh) | macOS | Fastest way to get the app installed locally | Builds the app, copies it to `/Applications`, and launches it |
+| Manual install via the guide below | macOS / Windows / Linux | Full control over prerequisites and build steps | Sets up a reusable local development/build environment |
+
+<p align="center">
+  <img src="docs/assets/installation-paths.svg" alt="Installation paths diagram" />
+</p>
+
+### First build profile
+
+Illustrative first-run shape for a fresh machine:
+
+<p align="center">
+  <img src="docs/assets/first-build-profile.svg" alt="First build profile chart" />
+</p>
 
 ---
 
 ## Quick install (macOS)
 
-If you just want to build and install the app in one shot:
+`install.sh` is the repo's **quick install script**. It is the fastest path on macOS, but the manual installation guide below remains the current source-of-truth walkthrough if you want to inspect or customize every step.
+
+If you want to build and install the app in one shot:
 
 ```bash
 git clone https://github.com/richer-richard/socratic-council.git
@@ -26,16 +82,27 @@ cd socratic-council
 
 The script automatically checks for (and installs if missing) Xcode CLT, Homebrew, Node.js 22+, pnpm, and Rust — then builds the production `.app` bundle, copies `Socratic Council.app` to `/Applications`, and opens the app.
 
-> **Already have everything installed?** The script detects existing tools and skips them (it will upgrade if needed but never downgrade).
+| Quick install behavior | What happens |
+|---|---|
+| Prerequisites | Checks Xcode CLT, Homebrew, Node.js, pnpm, and Rust |
+| Build | Runs the full production desktop build |
+| Install | Copies `Socratic Council.app` into `/Applications` |
+| Launch | Opens the installed app automatically |
 
-For a manual step-by-step walkthrough, see [Build from source](#build-from-source) below.
+> Already have everything installed? The script detects existing tools and skips what it can.
+
+For the current manual installation guide, see [Build from source (manual install guide)](#build-from-source-manual-install-guide) below.
 
 ---
 
 ## Table of contents
 
+- [Snapshot](#snapshot)
+- [Experience Map](#experience-map)
+- [Council Lineup](#council-lineup)
+- [Installation Paths](#installation-paths)
 - [Quick install (macOS)](#quick-install-macos)
-- [Build from source](#build-from-source)
+- [Build from source (manual install guide)](#build-from-source-manual-install-guide)
   - [Requirements summary](#requirements-summary)
   - [Step 1 — Install system prerequisites](#step-1--install-system-prerequisites)
     - [macOS](#macos)
@@ -74,11 +141,20 @@ For a manual step-by-step walkthrough, see [Build from source](#build-from-sourc
 
 ---
 
-## Build from source
+## Build from source (manual install guide)
 
-This section walks you through every dependency and build step from a clean machine to a running app. Read it top to bottom; each step depends on the previous one.
+This is the current manual installation guide for the repo. If you do not want to use `install.sh`, or if you are on Windows or Linux, follow this section from top to bottom.
+
+<p align="center">
+  <img src="docs/assets/manual-install-flow.svg" alt="Manual install flow diagram" />
+</p>
 
 ### Requirements summary
+
+| Track | Use this when | Entry point |
+|---|---|---|
+| Quick install | You want the macOS app installed as fast as possible | `./install.sh` |
+| Manual install | You want explicit control over dependencies and build commands | Steps 1-7 below |
 
 | Dependency | Minimum version | Why |
 |---|---|---|
@@ -477,50 +553,25 @@ If any of these fail, revisit the corresponding step above.
 
 Socratic Council is a pnpm monorepo with a desktop app and shared TypeScript packages.
 
-```mermaid
-flowchart TB
-  subgraph Apps["Apps"]
-    Desktop["Desktop app\napps/desktop\nTauri v2 + React"] --> Core
-  end
-
-  Core["@socratic-council/core\nbidding • cost • conflict • memory"] --> SDK["@socratic-council/sdk\nproviders • transport • streaming"]
-  Core --> Shared["@socratic-council/shared\ntypes • constants • model registry"]
-  SDK --> Providers["Provider APIs\n(OpenAI / Anthropic / Google / DeepSeek / Kimi)"]
-```
+<p align="center">
+  <img src="docs/assets/architecture-diagram.svg" alt="Architecture diagram" />
+</p>
 
 ### Conversation loop
 
 At runtime the app repeatedly selects a speaker, streams their response, applies structured "actions" in the text, then updates the UI and analytics.
 
-```mermaid
-flowchart LR
-  U["You\n(topic / prompt)"] --> UI["Chat UI"]
-  UI --> Ctx["Build context\n(sliding window + memory)"]
-  Ctx --> Bid["Bidding round\n(select next speaker)"]
-  Bid --> Gen["Provider streaming\n(agent response)"]
-  Gen --> Parse["Parse actions\n@quote / @react / @tool"]
-  Parse --> Msg["Finalize message\n(store + render)"]
-  Parse -->|Tool call| Oracle["Oracle tool\nsearch / verify / cite"]
-  Oracle --> ToolRes["Insert tool result message\nTool result (oracle.*): ..."]
-  Msg --> Cost["Cost tracker\n(tokens + USD estimate)"]
-  Msg --> Conf["Conflict detector\npairwise tension"]
-  Cost --> UI
-  Conf --> UI
-  ToolRes --> UI
-```
+<p align="center">
+  <img src="docs/assets/conversation-loop.svg" alt="Conversation loop diagram" />
+</p>
 
 ### Export pipeline
 
 Exports are generated locally from the transcript plus computed statistics (speaker counts, tokens, costs, conflict graph).
 
-```mermaid
-flowchart TB
-  T["Transcript\n(messages + metadata)"] --> S["Stats\n(messages by speaker • cost ledger)"]
-  T --> C["Conflict graph\n(pairwise scores)"]
-  S --> E["Export renderer\nMarkdown / JSON / PDF / DOCX / PPTX"]
-  C --> E
-  E --> F["File on disk"]
-```
+<p align="center">
+  <img src="docs/assets/export-pipeline.svg" alt="Export pipeline diagram" />
+</p>
 
 ---
 
