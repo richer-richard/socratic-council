@@ -1009,6 +1009,7 @@ export function Chat({ session, onNavigate, onPersistSession }: ChatProps) {
         ]
           .filter(Boolean)
           .join("\n\n"),
+        ...(attachmentText ? { cacheControl: "ephemeral" as const } : {}),
         ...(rawAttachments.length > 0 ? { attachments: rawAttachments } : {}),
       });
 
@@ -1085,6 +1086,7 @@ export function Chat({ session, onNavigate, onPersistSession }: ChatProps) {
         ]
           .filter(Boolean)
           .join("\n\n"),
+        ...(attachmentText ? { cacheControl: "ephemeral" as const } : {}),
         ...(rawAttachments.length > 0 ? { attachments: rawAttachments } : {}),
       });
 
@@ -1215,6 +1217,7 @@ export function Chat({ session, onNavigate, onPersistSession }: ChatProps) {
         {
           role: "user",
           content: [`Discussion topic: "${topic}"`, attachmentText].filter(Boolean).join("\n\n"),
+          ...(attachmentText ? { cacheControl: "ephemeral" as const } : {}),
           ...(rawAttachments.length > 0 ? { attachments: rawAttachments } : {}),
         },
       ];

@@ -29,7 +29,7 @@ interface AnthropicMessage {
 }
 
 type AnthropicContentBlock =
-  | { type: "text"; text: string }
+  | { type: "text"; text: string; cache_control?: { type: "ephemeral" } }
   | {
       type: "image";
       source: {
@@ -37,6 +37,7 @@ type AnthropicContentBlock =
         media_type: string;
         data: string;
       };
+      cache_control?: { type: "ephemeral" };
     }
   | {
       type: "document";
@@ -46,6 +47,7 @@ type AnthropicContentBlock =
         data: string;
       };
       title?: string;
+      cache_control?: { type: "ephemeral" };
     };
 
 interface AnthropicRequest {
@@ -405,37 +407,54 @@ export class AnthropicProvider implements BaseProvider {
   }
 
   private buildMessageContent(message: ChatMessage): string | AnthropicContentBlock[] {
-    if (message.role !== "user" || !message.attachments || message.attachments.length === 0) {
+    const shouldCache = message.cacheControl === "ephemeral";
+    if (message.role !== "user") {
       return message.content;
     }
 
     const content: AnthropicContentBlock[] = [];
-    if (message.content.trim()) {
-      content.push({ type: "text", text: message.content });
-    }
 
-    for (const attachment of message.attachments) {
-      if (attachment.kind === "image") {
+    const pushText = (cache = false) => {
+      if (!message.content.trim()) return;
+      content.push({
+        type: "text",
+        text: message.content,
+        ...(cache ? { cache_control: { type: "ephemeral" as const } } : {}),
+      });
+    };
+
+    const pushAttachments = () => {
+      for (const attachment of message.attachments ?? []) {
+        if (attachment.kind === "image") {
+          content.push({
+            type: "image",
+            source: {
+              type: "base64",
+              media_type: attachment.mimeType,
+              data: attachment.data,
+            },
+          });
+          continue;
+        }
+
         content.push({
-          type: "image",
+          type: "document",
           source: {
             type: "base64",
             media_type: attachment.mimeType,
             data: attachment.data,
           },
+          title: attachment.name,
         });
-        continue;
       }
+    };
 
-      content.push({
-        type: "document",
-        source: {
-          type: "base64",
-          media_type: attachment.mimeType,
-          data: attachment.data,
-        },
-        title: attachment.name,
-      });
+    if (shouldCache && (message.attachments?.length ?? 0) > 0) {
+      pushAttachments();
+      pushText(true);
+    } else {
+      pushText(shouldCache);
+      pushAttachments();
     }
 
     return content.length > 0 ? content : message.content;

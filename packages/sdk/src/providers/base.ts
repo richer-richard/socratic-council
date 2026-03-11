@@ -19,6 +19,7 @@ export interface ChatMessage {
   role: "system" | "user" | "assistant";
   content: string;
   attachments?: ChatAttachment[];
+  cacheControl?: "ephemeral";
 }
 
 export interface CompletionOptions {
