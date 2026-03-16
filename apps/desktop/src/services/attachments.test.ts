@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { getAttachmentTransportMode, getProviderAttachmentSupport, type SessionAttachment } from "./attachments";
+import {
+  createComposerAttachments,
+  getAttachmentTransportMode,
+  getProviderAttachmentSupport,
+  type SessionAttachment,
+} from "./attachments";
 
 function createAttachment(kind: SessionAttachment["kind"]): SessionAttachment {
   return {
@@ -31,5 +36,19 @@ describe("attachment transport support", () => {
   it("forces PDF attachments onto fallback mode for Gemini pro", () => {
     const mode = getAttachmentTransportMode("google", "gemini-3.1-pro-preview", createAttachment("pdf"));
     expect(mode).toBe("fallback");
+  });
+
+  it("compacts oversized text uploads into a smaller local blob", async () => {
+    const originalText = `${"Large attachment body.\n".repeat(160000)}Final line.`;
+    const file = new File([originalText], "notes.txt", { type: "text/plain" });
+
+    const [attachment] = await createComposerAttachments([file], "file-picker");
+
+    expect(attachment).toBeDefined();
+    expect(attachment.kind).toBe("text");
+    expect(attachment.size).toBe(file.size);
+    expect(attachment.blob.size).toBeLessThan(file.size);
+    expect(attachment.searchable).toBe(true);
+    expect(attachment.fallbackText).toContain('Extracted notes from "notes.txt"');
   });
 });

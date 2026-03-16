@@ -6,7 +6,7 @@ import { callProvider, apiLogger, type ChatMessage as APIChatMessage } from "../
 import {
   getAttachmentTransportMode,
   loadSessionAttachmentBlobs,
-  summarizeSessionAttachments,
+  type SessionAttachment,
 } from "../services/attachments";
 import {
   type DiscussionSession,
@@ -131,6 +131,7 @@ Rules:
 - If your answer depends on exact wording from attached files or current facts, research first before answering.
 - Proactively call oracle.file_search for attached-file evidence and oracle.web_search for current external facts when that would materially improve the answer.
 - If you know you need a tool, emit only the @tool(name, {args}) line and stop. The app will execute it and return control to you.
+- If the room has clearly converged and more debate would be repetitive, append @end() on its own line after your visible closing message to request the closing round.
 - If a retrieved passage looks incomplete, do one more targeted search until you have enough surrounding context.
 - Call tools early instead of burning time in hidden reasoning before the search starts.
 - Ask at most one concrete question, and only if it materially helps the group decide. Do not force a question every turn.
@@ -181,11 +182,11 @@ Rules:
   5) drift correction back to topic,
   6) contradiction spotlighting with a clarifying question,
   7) near-end transition into resolution with clear decision criteria,
-  8) final outcome publication after the resolution round.
+  8) final outcome publication after the closing round, with a score/10 and explanation.
 - Keep interventions sparse and high-signal to avoid unnecessary cost.
 - You may suggest who should respond next by name.
-- At the end, publish the official closing result instead of leaving the room with another open question.
-- Do NOT include @quote(...), @react(...), or @tool(...).
+- At the end, publish the official closing result with a score/10 and explanation instead of leaving the room with another open question.
+- Do NOT include @quote(...), @react(...), @tool(...), or @end().
 - Do NOT impersonate any agent.`;
 
 const AGENT_CONFIG: Record<
@@ -369,6 +370,39 @@ function LiveStopwatch({
   return <span className={`discord-stopwatch${isStreaming ? " is-ticking" : ""}`}>{seconds}s</span>;
 }
 
+function MessageAttachmentIcon({ size = 16 }: { size?: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z" />
+      <path d="M14 2v6h6" />
+      <path d="M9 15h6" />
+      <path d="M9 11h3" />
+    </svg>
+  );
+}
+
+function getAttachmentKindLabel(attachment: SessionAttachment) {
+  switch (attachment.kind) {
+    case "image":
+      return "Image";
+    case "pdf":
+      return "PDF";
+    case "text":
+      return "Text";
+    default:
+      return "File";
+  }
+}
+
 const DiscordVirtuosoList = forwardRef<HTMLDivElement, HTMLAttributes<HTMLDivElement>>(
   function DiscordVirtuosoList({ className, ...props }, ref) {
     return <div {...props} ref={ref} className={`discord-messages ${className ?? ""}`} />;
@@ -438,13 +472,8 @@ function createToolEvent(
   };
 }
 
-function buildDiscussionOpeningMessage(topic: string, attachmentSummary: string): string {
-  return [
-    topic.trim(),
-    attachmentSummary ? `Attached: ${attachmentSummary.replace(/^Attachments:\s*/i, "")}` : "",
-  ]
-    .filter(Boolean)
-    .join("\n\n");
+function buildDiscussionOpeningMessage(topic: string): string {
+  return topic.trim();
 }
 
 async function blobToBase64(blob: Blob): Promise<string> {
@@ -524,6 +553,7 @@ export function Chat({ session, onNavigate, onPersistSession }: ChatProps) {
   const [highlightedMessageId, setHighlightedMessageId] = useState<string | null>(null);
   const [isTopicExpanded, setIsTopicExpanded] = useState(false);
   const [topicOverflowing, setTopicOverflowing] = useState(false);
+  const [isGracefullyEnding, setIsGracefullyEnding] = useState(false);
 
   const virtuosoRef = useRef<VirtuosoHandle>(null);
   const topicBodyRef = useRef<HTMLDivElement | null>(null);
@@ -576,6 +606,10 @@ export function Chat({ session, onNavigate, onPersistSession }: ChatProps) {
   const { config, getMaxTurns, getConfiguredProviders } = useConfig();
   const maxTurns = getMaxTurns();
   const configuredProviders = getConfiguredProviders();
+  const attachmentsById = useMemo(
+    () => new Map(normalizedSession.attachments.map((attachment) => [attachment.id, attachment])),
+    [normalizedSession.attachments],
+  );
   const configuredAgentIds = useMemo(
     () => AGENT_IDS.filter((id) => configuredProviders.includes(AGENT_CONFIG[id].provider)),
     [configuredProviders],
@@ -643,6 +677,14 @@ export function Chat({ session, onNavigate, onPersistSession }: ChatProps) {
     }
     return map;
   }, [messages]);
+
+  const getMessageAttachments = useCallback(
+    (message: ChatMessage) =>
+      (message.attachmentIds ?? [])
+        .map((attachmentId) => attachmentsById.get(attachmentId))
+        .filter((attachment): attachment is SessionAttachment => Boolean(attachment)),
+    [attachmentsById],
+  );
 
   useEffect(() => {
     messagesRef.current = messages;
@@ -1169,16 +1211,13 @@ export function Chat({ session, onNavigate, onPersistSession }: ChatProps) {
 
       history.push({
         role: "user",
-        content: `The discussion phase has ended after ${turnsCompleted} turns. You are now in the resolution round.
+        content: `The discussion phase has ended after ${turnsCompleted} turns. You are now in the closing round.
 - Write 2–4 sentences total.
-- Help the council land one closing result instead of continuing open-ended debate.
-- State the single recommendation or outcome you think the council should adopt.
-- Give the strongest supporting reason in one clause.
-- Give one explicit condition that would change your mind.
-- If you disagree with the leading option, name the best alternative in one short clause.
+- Briefly summarize the conclusion or recommendation you stand by.
+- Give the strongest supporting reason in one short clause.
+- End with a short goodbye or sign-off line to the group.
 - Do NOT ask any questions.
-- Do NOT say goodbye.
-- Do NOT include @quote(...), @react(...), or @tool(...).
+- Do NOT include @quote(...), @react(...), @tool(...), or @end().
 - Do NOT introduce a brand-new topic.`,
       });
 
@@ -1306,7 +1345,9 @@ export function Chat({ session, onNavigate, onPersistSession }: ChatProps) {
       remainingTurns?: number;
     }): Promise<ChatMessage | null> => {
       if (abortRef.current) return null;
-      if (options.kind !== "final_summary" && !config.preferences.moderatorEnabled) return null;
+      if (options.kind !== "final_summary" && !config.preferences.moderatorEnabled) {
+        return null;
+      }
       if (moderatorInFlightRef.current) return null;
 
       const runtime =
@@ -1412,19 +1453,20 @@ Write a brief intervention that:
           history.push({
             role: "user",
             content: `The discussion is near the end (remaining turns: ${options.remainingTurns ?? "few"}).
-Write a concise moderator note that moves the council into resolution:
-- tell them the next step is to converge on one closing result,
-- instruct each agent to state their preferred recommendation and one condition that would change their mind,
+Write a concise moderator note that moves the council into the closing round:
+- tell them the next step is to wrap up instead of extending the debate,
+- instruct each agent to summarize their conclusion in a few sentences and end with a short goodbye,
 - do not leave the room with another open-ended question.`,
           });
-        } else {
+        } else if (options.kind === "final_summary") {
           history.push({
             role: "user",
-            content: `The resolution round is complete after ${options.turn ?? "the discussion"} turns.
-Write the official closing summary in 3–4 short sentences:
+            content: `The closing round is complete after ${options.turn ?? "the discussion"} turns.
+Write the official moderator wrap-up in 4 short sentences:
 - The first sentence must start with exactly one of these labels: Consensus:, Majority with dissent:, or Unresolved:.
 - State the council's final recommendation or the blocking issue in plain language.
-- Name the main dissent or uncertainty in one short clause.
+- The second sentence must be exactly: Score: X/10. Replace X with an integer from 0 to 10.
+- The third sentence must explain in plain language why the discussion earned that score, including the main dissent or uncertainty.
 - End with the next action, test, or evidence that matters most.
 - Do NOT ask a question.`,
           });
@@ -1931,6 +1973,7 @@ Write the official closing summary in 3–4 short sentences:
         const displayContent =
           finalVisibleContent ||
           parsed.cleaned ||
+          (parsed.endRequested ? "I think we're ready to wrap this up." : "") ||
           (toolEvents.length > 0
             ? "Research completed, but no final answer was generated."
             : "[No response received]");
@@ -1945,6 +1988,7 @@ Write the official closing summary in 3–4 short sentences:
           latencyMs: result.latencyMs,
           error: result.error,
           toolEvents: toolEvents.length > 0 ? toolEvents : undefined,
+          requestedEnd: parsed.endRequested || undefined,
           quotedMessageIds: resolvedQuotes.length > 0 ? resolvedQuotes : undefined,
           metadata: {
             model: modelUsed as ModelId,
@@ -2116,6 +2160,33 @@ Write the official closing summary in 3–4 short sentences:
     [buildResolutionConversationHistory, config, getProxy],
   );
 
+  const beginClosingRound = useCallback(
+    (notice: string) => {
+      phaseRef.current = "resolution";
+      pausedRef.current = false;
+      setIsPaused(false);
+      setDuoLogue(null);
+      duoLogueRef.current = null;
+      setConflictState(null);
+      resolutionQueueRef.current = [...configuredAgentIds];
+      moderatorResolutionPromptPostedRef.current = true;
+
+      if (!resolutionNoticePostedRef.current) {
+        resolutionNoticePostedRef.current = true;
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: `msg_${Date.now()}_resolution_notice`,
+            agentId: "system",
+            content: notice,
+            timestamp: Date.now(),
+          },
+        ]);
+      }
+    },
+    [configuredAgentIds],
+  );
+
   // Main discussion loop
   const runDiscussion = useCallback(
     async (mode: "fresh" | "resume" = "resume") => {
@@ -2125,10 +2196,11 @@ Write the official closing summary in 3–4 short sentences:
         const topicMessage: ChatMessage = {
           id: `msg_${Date.now()}`,
           agentId: "system",
-          content: buildDiscussionOpeningMessage(
-            topic,
-            summarizeSessionAttachments(normalizedSession.attachments),
-          ),
+          content: buildDiscussionOpeningMessage(topic),
+          attachmentIds:
+            normalizedSession.attachments.length > 0
+              ? normalizedSession.attachments.map((attachment) => attachment.id)
+              : undefined,
           timestamp: Date.now(),
         };
 
@@ -2159,6 +2231,8 @@ Write the official closing summary in 3–4 short sentences:
       if (mode === "fresh" && config.preferences.moderatorEnabled && !abortRef.current) {
         await generateModeratorMessage({ kind: "opening" });
       }
+
+      let closureRequestedBy: CouncilAgentId | null = null;
 
       while (
         !abortRef.current &&
@@ -2219,6 +2293,10 @@ Write the official closing summary in 3–4 short sentences:
         currentTurnRef.current += 1;
         setCurrentTurn(currentTurnRef.current);
 
+        if (actualSpeaker && response?.requestedEnd) {
+          closureRequestedBy = actualSpeaker;
+        }
+
         if (duoLogueRef.current) {
           const remaining = duoLogueRef.current.remainingTurns - 1;
           if (remaining <= 0) {
@@ -2230,6 +2308,10 @@ Write the official closing summary in 3–4 short sentences:
             duoLogueRef.current = nextDuo;
             setDuoLogue(nextDuo);
           }
+        }
+
+        if (closureRequestedBy) {
+          break;
         }
 
         if (config.preferences.moderatorEnabled && !abortRef.current) {
@@ -2269,24 +2351,10 @@ Write the official closing summary in 3–4 short sentences:
       }
 
       if (!abortRef.current && phaseRef.current === "discussion" && currentTurnRef.current > 0) {
-        phaseRef.current = "resolution";
-        duoLogueRef.current = null;
-        setDuoLogue(null);
-
-        if (!resolutionNoticePostedRef.current) {
-          const resolutionNotice: ChatMessage = {
-            id: `msg_${Date.now()}_resolution_notice`,
-            agentId: "system",
-            content: `Discussion phase ended after ${currentTurnRef.current} turns. Resolution round: each agent states a final position, then the Moderator publishes the official result.`,
-            timestamp: Date.now(),
-          };
-          resolutionNoticePostedRef.current = true;
-          setMessages((prev) => [...prev, resolutionNotice]);
-        }
-
-        if (resolutionQueueRef.current.length === 0) {
-          resolutionQueueRef.current = [...configuredAgentIds];
-        }
+        const closureNotice = closureRequestedBy
+          ? `${AGENT_CONFIG[closureRequestedBy].name} requested to wrap up. Closing round: each agent gives a short summary and goodbye, then the Moderator publishes the final summary, score, and explanation.`
+          : `Discussion phase ended after ${currentTurnRef.current} turns. Closing round: each agent gives a short summary and goodbye, then the Moderator publishes the final summary, score, and explanation.`;
+        beginClosingRound(closureNotice);
       }
 
       while (
@@ -2322,7 +2390,7 @@ Write the official closing summary in 3–4 short sentences:
               agentId: "system",
               displayName: "Moderator",
               content:
-                "Moderator summary unavailable because no summary provider is configured. Review the resolution round above for the final positions.",
+                "Moderator summary unavailable because no summary provider is configured. Review the closing round above for the final agent summaries and goodbyes.",
               timestamp: Date.now(),
             };
             moderatorFinalSummaryPostedRef.current = true;
@@ -2349,6 +2417,7 @@ Write the official closing summary in 3–4 short sentences:
       generateAgentResponse,
       generateModeratorMessage,
       generateResolutionResponse,
+      beginClosingRound,
       configuredAgentIds,
       configuredProviders,
       normalizedSession.attachments,
@@ -2400,9 +2469,8 @@ Write the official closing summary in 3–4 short sentences:
     };
   }, []);
 
-  const handlePause = () => {
+  const stopActiveGeneration = useCallback(() => {
     abortRef.current = true;
-    pausedRef.current = true;
     for (const controller of activeRequestsRef.current.values()) {
       controller.abort();
     }
@@ -2413,9 +2481,14 @@ Write the official closing summary in 3–4 short sentences:
     setTypingAgents([]);
     setCurrentBidding(null);
     setShowBidding(false);
+    setMessages((prev) => prev.filter((message) => !message.isStreaming));
+  }, []);
+
+  const handlePause = () => {
+    stopActiveGeneration();
+    pausedRef.current = true;
     setIsPaused(true);
     setSessionStatus("paused");
-    setMessages((prev) => prev.filter((message) => !message.isStreaming));
   };
 
   const handlePauseResume = () => {
@@ -2433,6 +2506,39 @@ Write the official closing summary in 3–4 short sentences:
     }
     onNavigate("home", normalizedSession.id);
   };
+
+  const handleGracefulEnd = useCallback(async () => {
+    if (
+      phaseRef.current === "completed" ||
+      currentTurnRef.current === 0 ||
+      isGracefullyEnding ||
+      !isPaused
+    ) {
+      return;
+    }
+
+    stopActiveGeneration();
+    setIsGracefullyEnding(true);
+    beginClosingRound(
+      "Graceful end requested. Closing round: each agent gives a short summary and goodbye, then the Moderator publishes the final summary, score, and explanation.",
+    );
+    scrollToBottom();
+
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+    try {
+      hasStartedRef.current = true;
+      await runDiscussion("resume");
+    } finally {
+      setIsGracefullyEnding(false);
+    }
+  }, [
+    beginClosingRound,
+    isGracefullyEnding,
+    isPaused,
+    runDiscussion,
+    scrollToBottom,
+    stopActiveGeneration,
+  ]);
 
   const persistSessionSnapshot = useCallback(() => {
     const nextUpdatedAt = Date.now();
@@ -2667,6 +2773,34 @@ Write the official closing summary in 3–4 short sentences:
               </div>
             )}
 
+            {sessionStatus !== "completed" && isPaused && currentTurn > 0 && (
+              <button
+                onClick={() => {
+                  void handleGracefulEnd();
+                }}
+                disabled={isGracefullyEnding}
+                className="session-control-button is-graceful-end"
+                title="Skip to the closing summary"
+              >
+                <span className="session-control-icon">
+                  <svg
+                    width="18"
+                    height="18"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2.25"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <path d="M5 5v14" />
+                    <path d="m9 7 10 5-10 5V7Z" fill="currentColor" stroke="none" />
+                  </svg>
+                </span>
+                <span>{isGracefullyEnding ? "Closing…" : "Gracefully End"}</span>
+              </button>
+            )}
+
             <button
               onClick={() => setSidePanelView((prev) => (prev === "logs" ? "default" : "logs"))}
               className="button-secondary text-sm"
@@ -2692,8 +2826,9 @@ Write the official closing summary in 3–4 short sentences:
               (isRunning || isPaused || sessionStatus === "paused" || currentTurn > 0) && (
                 <button
                   onClick={handlePauseResume}
+                  disabled={isGracefullyEnding}
                   className={`session-control-button ${isPaused ? "is-resume" : ""}`}
-                  title={isPaused ? "Resume session" : "Pause and save session"}
+                  title={isPaused ? "Resume" : "Pause"}
                 >
                   <span className="session-control-icon">
                     {isPaused ? (
@@ -2725,7 +2860,7 @@ Write the official closing summary in 3–4 short sentences:
                       </svg>
                     )}
                   </span>
-                  <span>{isPaused ? "Resume Session" : "Pause & Save"}</span>
+                  <span>{isPaused ? "Resume" : "Pause"}</span>
                 </button>
               )}
           </div>
@@ -2783,6 +2918,7 @@ Write the official closing summary in 3–4 short sentences:
                     ][]
                   ).filter(([, reaction]) => reaction?.count)
                 : [];
+              const messageAttachments = getMessageAttachments(message);
 
               // Determine message status classes
               const isSuccess =
@@ -2953,6 +3089,37 @@ Write the official closing summary in 3–4 short sentences:
                             />
                           );
                         })
+                      )}
+                      {messageAttachments.length > 0 && (
+                        <div className="message-attachment-list">
+                          {messageAttachments.map((attachment) => {
+                            const payload = attachmentPayloads.get(attachment.id);
+                            const previewSrc =
+                              attachment.kind === "image" && payload
+                                ? `data:${attachment.mimeType};base64,${payload.data}`
+                                : null;
+
+                            return (
+                              <div key={attachment.id} className="message-attachment-chip">
+                                {previewSrc ? (
+                                  <img
+                                    src={previewSrc}
+                                    alt={attachment.name}
+                                    className="message-attachment-thumb"
+                                  />
+                                ) : (
+                                  <div className="message-attachment-fallback-icon">
+                                    <MessageAttachmentIcon size={16} />
+                                  </div>
+                                )}
+                                <div className="message-attachment-copy">
+                                  <span>{attachment.name}</span>
+                                  <span>{getAttachmentKindLabel(attachment)}</span>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
                       )}
                       {message.toolEvents?.length ? (
                         <div className="message-tool-list">

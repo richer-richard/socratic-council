@@ -7,6 +7,7 @@ describe("toolActions", () => {
       [
         "Here is the claim.",
         '@tool(oracle.web_search, {"query":"violent repression protests economic costs"})',
+        "@end()",
         "@quote(msg_1)",
         "@react(msg_1, 👍)",
       ].join("\n"),
@@ -22,6 +23,7 @@ describe("toolActions", () => {
     ]);
     expect(parsed.reactions).toEqual([{ targetId: "msg_1", emoji: "👍" }]);
     expect(parsed.quoteTargets).toEqual(["msg_1"]);
+    expect(parsed.endRequested).toBe(true);
   });
 
   it("detects a streamed tool call without exposing the command text", () => {
@@ -58,5 +60,15 @@ describe("toolActions", () => {
       },
     ]);
     expect(state.visibleText).toBe("");
+  });
+
+  it("hides a streamed end directive from visible content", () => {
+    const detector = createStreamingToolCallDetector();
+
+    const state = detector.push("We can stop here.\n@end()");
+
+    expect(state.toolCalls).toEqual([]);
+    expect(state.visibleText).toBe("We can stop here.\n");
+    expect(detector.finish()).toBe("We can stop here.");
   });
 });

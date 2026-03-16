@@ -19,6 +19,7 @@ export interface SessionMessage extends SharedMessage {
   isStreaming?: boolean;
   latencyMs?: number;
   error?: string;
+  attachmentIds?: string[];
   quotedMessageIds?: string[];
   toolEvents?: SessionToolEvent[];
   thinking?: string;
@@ -26,6 +27,7 @@ export interface SessionMessage extends SharedMessage {
   reactions?: Partial<Record<string, { count: number; by: string[] }>>;
   displayName?: string;
   displayProvider?: Provider;
+  requestedEnd?: boolean;
 }
 
 export interface SessionToolEvent {
@@ -279,6 +281,13 @@ function normalizeMessage(input: unknown): SessionMessage | null {
       : {}),
     ...(record.latencyMs != null ? { latencyMs: clampNumber(record.latencyMs) } : {}),
     ...(record.error ? { error: cleanText(record.error) } : {}),
+    ...(Array.isArray(record.attachmentIds)
+      ? {
+          attachmentIds: record.attachmentIds.filter(
+            (value): value is string => typeof value === "string" && value.length > 0,
+          ),
+        }
+      : {}),
     ...(Array.isArray(record.quotedMessageIds)
       ? {
           quotedMessageIds: record.quotedMessageIds.filter(
@@ -297,6 +306,7 @@ function normalizeMessage(input: unknown): SessionMessage | null {
     ...(record.fullResponse ? { fullResponse: cleanText(record.fullResponse) } : {}),
     ...(record.displayName ? { displayName: cleanText(record.displayName) } : {}),
     ...(record.displayProvider ? { displayProvider: record.displayProvider } : {}),
+    ...(record.requestedEnd ? { requestedEnd: Boolean(record.requestedEnd) } : {}),
     ...(normalizeReactions(record.reactions)
       ? { reactions: normalizeReactions(record.reactions) }
       : {}),

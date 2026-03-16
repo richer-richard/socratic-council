@@ -1,6 +1,7 @@
 import type { ToolCall } from "../services/tools";
 
 const TOOL_PREFIX = "@tool(";
+const END_DIRECTIVE = "@end()";
 const VALID_TOOL_NAMES = new Set<ToolCall["name"]>([
   "oracle.search",
   "oracle.web_search",
@@ -14,6 +15,7 @@ export interface ExtractedActions {
   quoteTargets: string[];
   reactions: Array<{ targetId: string; emoji: string }>;
   toolCalls: ToolCall[];
+  endRequested: boolean;
 }
 
 interface ParsedToolDirective {
@@ -197,12 +199,26 @@ function parseStandaloneToolLine(line: string) {
   return after.length === 0 ? directive : null;
 }
 
+function stripEndDirective(raw: string) {
+  let endRequested = false;
+  const cleaned = raw.replace(
+    /(^|\n)[ \t]*@end\(\)[ \t]*(\n|$)/g,
+    (match, prefix: string, suffix: string) => {
+      endRequested = true;
+      return prefix && suffix && match.includes(END_DIRECTIVE) ? "\n" : "";
+    },
+  );
+
+  return { cleaned, endRequested };
+}
+
 export function extractActions(raw: string, allowedReactions: readonly string[]): ExtractedActions {
   const reactions: Array<{ targetId: string; emoji: string }> = [];
   const quoteTargets: string[] = [];
   const { cleaned: withoutTools, toolCalls } = extractToolCalls(raw);
+  const { cleaned: withoutEndDirective, endRequested } = stripEndDirective(withoutTools);
 
-  let cleaned = withoutTools.replace(/@quote\(([^)]+)\)/g, (_, target) => {
+  let cleaned = withoutEndDirective.replace(/@quote\(([^)]+)\)/g, (_, target) => {
     const targetId = String(target).trim();
     if (!quoteTargets.includes(targetId)) {
       quoteTargets.push(targetId);
@@ -223,6 +239,7 @@ export function extractActions(raw: string, allowedReactions: readonly string[])
     quoteTargets,
     reactions,
     toolCalls,
+    endRequested,
   };
 }
 
@@ -232,15 +249,19 @@ export function createStreamingToolCallDetector() {
 
   const drainCompleteLines = () => {
     const toolCalls: ToolCall[] = [];
+    let endRequested = false;
     let newlineIndex = pendingLine.indexOf("\n");
 
     while (newlineIndex >= 0) {
       const line = pendingLine.slice(0, newlineIndex + 1);
       pendingLine = pendingLine.slice(newlineIndex + 1);
+      const trimmedLine = line.trim();
       const directive = parseStandaloneToolLine(line);
 
       if (directive?.call) {
         toolCalls.push(directive.call);
+      } else if (trimmedLine === END_DIRECTIVE) {
+        endRequested = true;
       } else {
         committedVisible += line;
       }
@@ -248,16 +269,19 @@ export function createStreamingToolCallDetector() {
       newlineIndex = pendingLine.indexOf("\n");
     }
 
-    return toolCalls;
+    return { toolCalls, endRequested };
   };
 
   return {
     push(chunk: string) {
       pendingLine += chunk;
-      const toolCalls = drainCompleteLines();
+      const drained = drainCompleteLines();
+      const toolCalls = drained.toolCalls;
       const terminalDirective = parseStandaloneToolLine(pendingLine);
       if (terminalDirective?.call) {
         toolCalls.push(terminalDirective.call);
+        pendingLine = "";
+      } else if (pendingLine.trim() === END_DIRECTIVE) {
         pendingLine = "";
       }
 
@@ -269,6 +293,8 @@ export function createStreamingToolCallDetector() {
     finish() {
       const terminalDirective = parseStandaloneToolLine(pendingLine);
       if (terminalDirective?.call) {
+        pendingLine = "";
+      } else if (pendingLine.trim() === END_DIRECTIVE) {
         pendingLine = "";
       } else {
         committedVisible += pendingLine;

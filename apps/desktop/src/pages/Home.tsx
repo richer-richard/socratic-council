@@ -381,6 +381,10 @@ export function Home({
 
     try {
       const next = await createComposerAttachments(files, source);
+      if (next.length === 0) {
+        setAttachmentError("No selected files could be prepared for the session.");
+        return;
+      }
       setComposerAttachments((current) => [...current, ...next]);
       setAttachmentError(null);
     } catch (error) {
@@ -728,16 +732,14 @@ export function Home({
           <section className="workstation-composer-card">
             <div className="workstation-composer-header">
               <div className="workstation-hero">
+                <div className="workstation-hero-kicker">Council Chamber</div>
                 <div className="workstation-hero-mark">
                   <CouncilMark size={84} />
                 </div>
-                <div>
-                  <div className="workstation-hero-kicker">Council Chamber</div>
-                  <h2 className="elegant-title workstation-display-title">Let the council work.</h2>
-                  <p className="workstation-subtitle">
-                    Every thread is autosaved locally, resumable, and indexed like a real workstation.
-                  </p>
-                </div>
+                <h2 className="elegant-title workstation-display-title">Let the council work.</h2>
+                <p className="workstation-subtitle">
+                  Every thread is autosaved locally, resumable, and indexed like a real workstation.
+                </p>
               </div>
             </div>
 
@@ -820,6 +822,10 @@ export function Home({
                   <span>{isOpeningSession ? "Opening…" : "Open Session"}</span>
                   <ArrowIcon size={18} />
                 </button>
+              </div>
+              <div className="workstation-input-help">
+                Upload images, PDFs, DOCX, code, text, and other files. Large non-image files are
+                compacted locally.
               </div>
 
               {composerAttachments.length > 0 && (
@@ -956,6 +962,7 @@ export function Home({
       <input
         ref={uploadInputRef}
         type="file"
+        accept="*/*"
         multiple
         className="hidden"
         onChange={(event) => {
