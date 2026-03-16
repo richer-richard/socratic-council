@@ -3,6 +3,7 @@ import type { Citation, SearchResult, VerificationResult } from "@socratic-counc
 import { type SessionAttachment, loadSessionAttachmentDocuments } from "./attachments";
 import { apiLogger, makeHttpRequest } from "./api";
 import { loadConfig } from "../stores/config";
+import { filterAndRankSearchResults, normalizeSearchQuery } from "../utils/searchRanking";
 
 export type ToolName =
   | "oracle.search"
@@ -18,6 +19,8 @@ export interface ToolCall {
 
 export interface ToolContext {
   attachments?: SessionAttachment[];
+  sessionTopic?: string;
+  recentContext?: string;
 }
 
 export interface ToolResult {
@@ -39,39 +42,41 @@ const TOOL_DEFINITIONS: Array<{
 }> = [
   {
     name: "oracle.file_search",
-    description: "Search the currently attached files for exact wording, page references, code, or passages.",
-    args: "{\"query\":\"...\"}",
+    description:
+      "Search the currently attached files for exact wording, page references, code, or passages.",
+    args: '{"query":"..."}',
   },
   {
     name: "oracle.web_search",
     description: "Search the public web for sources and context.",
-    args: "{\"query\":\"...\"}",
+    args: '{"query":"..."}',
   },
   {
     name: "oracle.search",
     description: "Alias for oracle.web_search.",
-    args: "{\"query\":\"...\"}",
+    args: '{"query":"..."}',
   },
   {
     name: "oracle.verify",
     description: "Check a factual claim against current web results.",
-    args: "{\"claim\":\"...\"}",
+    args: '{"claim":"..."}',
   },
   {
     name: "oracle.cite",
     description: "Get citations for a topic from current web results.",
-    args: "{\"topic\":\"...\"}",
+    args: '{"topic":"..."}',
   },
 ];
 
 export function getToolPrompt(): string {
   const lines = [
     "Tool calling (optional): use @tool(name, {args}) on its own line.",
-    "Research first, then answer.",
+    "If you know you need outside evidence, emit only the tool line first. The app will run it and return control to you.",
     "Use oracle.file_search proactively before guessing about attached PDFs, DOCX files, or code.",
     "Use oracle.web_search proactively before leaning on current events, current prices, or recent claims.",
+    "Call tools early instead of spending multiple paragraphs thinking before the search starts.",
     "If a quote looks truncated or incomplete, run a more targeted search before making the claim.",
-    "After tool results arrive, write a normal answer in the same turn. Do not stop at tool calls unless another search is strictly necessary.",
+    "After tool results arrive, continue with a normal answer. Do not stop at tool calls unless another search is strictly necessary.",
     "Never emit tool_use, tool_call, function_call, XML tags, or provider-specific tool syntax.",
     "Available tools:",
     ...TOOL_DEFINITIONS.map((tool) => `- ${tool.name}: ${tool.description} args=${tool.args}`),
@@ -106,6 +111,14 @@ function decodeXmlEntities(input: string): string {
   return doc.body.textContent ?? input;
 }
 
+function getResultHost(url: string) {
+  try {
+    return new URL(url).hostname.replace(/^www\./i, "");
+  } catch {
+    return "";
+  }
+}
+
 function formatSearchResults(results: SearchResult[]): string {
   if (!results.length) return "No results found.";
   return results
@@ -118,7 +131,9 @@ function formatCitations(citations: Citation[]): string {
   if (!citations.length) return "No citations found.";
   return citations
     .slice(0, MAX_RESULTS)
-    .map((citation, index) => `${index + 1}. ${citation.title} - ${citation.url}\n${citation.snippet}`)
+    .map(
+      (citation, index) => `${index + 1}. ${citation.title} - ${citation.url}\n${citation.snippet}`,
+    )
     .join("\n\n");
 }
 
@@ -137,14 +152,16 @@ function extractQueryTerms(query: string): string[] {
         .toLowerCase()
         .split(/[^a-z0-9]+/i)
         .map((term) => term.trim())
-        .filter((term) => term.length >= 2)
-    )
+        .filter((term) => term.length >= 2),
+    ),
   );
 }
 
 function extendToBoundary(text: string, index: number, direction: "backward" | "forward"): number {
   const slice =
-    direction === "backward" ? text.slice(Math.max(0, index - 120), index) : text.slice(index, index + 160);
+    direction === "backward"
+      ? text.slice(Math.max(0, index - 120), index)
+      : text.slice(index, index + 160);
   const boundaries = [". ", "? ", "! ", "\n", "; ", ": "];
 
   if (direction === "backward") {
@@ -169,7 +186,10 @@ function extendToBoundary(text: string, index: number, direction: "backward" | "
 }
 
 function buildSnippet(text: string, terms: string[]): string {
-  const normalized = text.replace(/\r\n/g, "\n").replace(/[^\S\n]+/g, " ").trim();
+  const normalized = text
+    .replace(/\r\n/g, "\n")
+    .replace(/[^\S\n]+/g, " ")
+    .trim();
   if (!normalized) return "";
   if (terms.length === 0) {
     return normalized.slice(0, FILE_SEARCH_SNIPPET_TARGET);
@@ -196,32 +216,99 @@ function buildSnippet(text: string, terms: string[]): string {
   return `${start > 0 ? "..." : ""}${snippet}${end < normalized.length ? "..." : ""}`;
 }
 
-async function searchWeb(query: string): Promise<SearchResult[]> {
-  const config = loadConfig();
-  const { status, body } = await makeHttpRequest(
-    `https://www.bing.com/search?format=rss&q=${encodeURIComponent(query)}`,
-    "GET",
-    {
-      Accept: "application/rss+xml, application/xml, text/xml",
-    },
-    undefined,
-    config.proxy.type === "none" ? undefined : config.proxy,
-    20000
-  );
-
-  if (status < 200 || status >= 300) {
-    throw new Error(`Web search failed: HTTP ${status}`);
-  }
-
+function parseBingRssResults(body: string): SearchResult[] {
   const doc = new DOMParser().parseFromString(body, "application/xml");
   const items = Array.from(doc.querySelectorAll("channel > item"));
 
-  return items.slice(0, MAX_RESULTS).map((item) => ({
-    title: decodeXmlEntities(item.querySelector("title")?.textContent?.trim() ?? "Untitled result"),
-    url: item.querySelector("link")?.textContent?.trim() ?? "",
-    snippet: decodeXmlEntities(item.querySelector("description")?.textContent?.trim() ?? ""),
-    source: "Bing",
-  })).filter((result) => result.url);
+  return items
+    .map((item) => {
+      const url = item.querySelector("link")?.textContent?.trim() ?? "";
+      return {
+        title: decodeXmlEntities(
+          item.querySelector("title")?.textContent?.trim() ?? "Untitled result",
+        ),
+        url,
+        snippet: decodeXmlEntities(item.querySelector("description")?.textContent?.trim() ?? ""),
+        source: getResultHost(url) || "Bing",
+      };
+    })
+    .filter((result) => result.url);
+}
+
+function parseDuckDuckGoResults(body: string): SearchResult[] {
+  const doc = new DOMParser().parseFromString(body, "text/html");
+  const nodes = Array.from(doc.querySelectorAll(".result"));
+
+  return nodes
+    .map((node) => {
+      const titleLink =
+        (node.querySelector("a.result__a") as HTMLAnchorElement | null) ??
+        (node.querySelector(".result__title a") as HTMLAnchorElement | null);
+      const url = titleLink?.getAttribute("href")?.trim() ?? "";
+      const title = decodeXmlEntities(titleLink?.textContent?.trim() ?? "Untitled result");
+      const snippet = decodeXmlEntities(
+        node.querySelector(".result__snippet")?.textContent?.trim() ??
+          node.querySelector(".result__extras__url")?.textContent?.trim() ??
+          "",
+      );
+
+      return {
+        title,
+        url,
+        snippet,
+        source: getResultHost(url) || "DuckDuckGo",
+      };
+    })
+    .filter((result) => result.url);
+}
+
+async function searchWeb(query: string, context?: ToolContext): Promise<SearchResult[]> {
+  const config = loadConfig();
+  const normalizedQuery = normalizeSearchQuery(query);
+  const proxy = config.proxy.type === "none" ? undefined : config.proxy;
+  const attempts = [
+    {
+      url: `https://html.duckduckgo.com/html/?q=${encodeURIComponent(normalizedQuery)}`,
+      accept: "text/html,application/xhtml+xml",
+      parser: parseDuckDuckGoResults,
+    },
+    {
+      url: `https://www.bing.com/search?format=rss&q=${encodeURIComponent(normalizedQuery)}`,
+      accept: "application/rss+xml, application/xml, text/xml",
+      parser: parseBingRssResults,
+    },
+  ];
+
+  let lastError: Error | null = null;
+  for (const attempt of attempts) {
+    try {
+      const { status, body } = await makeHttpRequest(
+        attempt.url,
+        "GET",
+        { Accept: attempt.accept },
+        undefined,
+        proxy,
+        20000,
+      );
+
+      if (status < 200 || status >= 300) {
+        throw new Error(`Web search failed: HTTP ${status}`);
+      }
+
+      const ranked = filterAndRankSearchResults(attempt.parser(body), normalizedQuery, context);
+      if (ranked.length > 0) {
+        return ranked.slice(0, MAX_RESULTS);
+      }
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+    }
+  }
+
+  if (lastError) {
+    throw lastError;
+  }
+
+  return [];
 }
 
 type FileSearchMatch = {
@@ -231,7 +318,10 @@ type FileSearchMatch = {
   snippet: string;
 };
 
-async function searchFiles(query: string, attachments: SessionAttachment[]): Promise<FileSearchMatch[]> {
+async function searchFiles(
+  query: string,
+  attachments: SessionAttachment[],
+): Promise<FileSearchMatch[]> {
   if (attachments.length === 0) {
     return [];
   }
@@ -273,12 +363,14 @@ function formatFileSearchResults(matches: FileSearchMatch[]): string {
   }
 
   return matches
-    .map((match, index) => `${index + 1}. ${match.attachmentName} - ${match.label}\n${match.snippet}`)
+    .map(
+      (match, index) => `${index + 1}. ${match.attachmentName} - ${match.label}\n${match.snippet}`,
+    )
     .join("\n\n");
 }
 
-async function verifyClaim(claim: string): Promise<VerificationResult> {
-  const evidence = await searchWeb(claim);
+async function verifyClaim(claim: string, context?: ToolContext): Promise<VerificationResult> {
+  const evidence = await searchWeb(claim, context);
   const confidence = evidence.length > 0 ? Math.min(0.8, 0.25 + evidence.length * 0.1) : 0.1;
 
   return {
@@ -289,8 +381,8 @@ async function verifyClaim(claim: string): Promise<VerificationResult> {
   };
 }
 
-async function citeTopic(topic: string): Promise<Citation[]> {
-  const results = await searchWeb(topic);
+async function citeTopic(topic: string, context?: ToolContext): Promise<Citation[]> {
+  const results = await searchWeb(topic, context);
   return results.map((result) => ({
     title: result.title,
     url: result.url,
@@ -307,7 +399,7 @@ export async function runToolCall(call: ToolCall, context: ToolContext = {}): Pr
         if (!query) {
           return { name: call.name, output: "", error: "Missing or invalid 'query'." };
         }
-        const results = await withTimeout(searchWeb(query), TOOL_TIMEOUT_MS);
+        const results = await withTimeout(searchWeb(query, context), TOOL_TIMEOUT_MS);
         return { name: call.name, output: formatSearchResults(results), raw: results };
       }
       case "oracle.file_search": {
@@ -317,7 +409,11 @@ export async function runToolCall(call: ToolCall, context: ToolContext = {}): Pr
         }
         const attachments = context.attachments ?? [];
         if (attachments.length === 0) {
-          return { name: call.name, output: "", error: "No attached files are available in this session." };
+          return {
+            name: call.name,
+            output: "",
+            error: "No attached files are available in this session.",
+          };
         }
 
         const matches = await withTimeout(searchFiles(query, attachments), TOOL_TIMEOUT_MS);
@@ -328,7 +424,7 @@ export async function runToolCall(call: ToolCall, context: ToolContext = {}): Pr
         if (!claim) {
           return { name: call.name, output: "", error: "Missing or invalid 'claim'." };
         }
-        const result = await withTimeout(verifyClaim(claim), TOOL_TIMEOUT_MS);
+        const result = await withTimeout(verifyClaim(claim, context), TOOL_TIMEOUT_MS);
         return { name: call.name, output: formatVerification(result), raw: result };
       }
       case "oracle.cite": {
@@ -336,7 +432,7 @@ export async function runToolCall(call: ToolCall, context: ToolContext = {}): Pr
         if (!topic) {
           return { name: call.name, output: "", error: "Missing or invalid 'topic'." };
         }
-        const result = await withTimeout(citeTopic(topic), TOOL_TIMEOUT_MS);
+        const result = await withTimeout(citeTopic(topic, context), TOOL_TIMEOUT_MS);
         return { name: call.name, output: formatCitations(result), raw: result };
       }
       default:
