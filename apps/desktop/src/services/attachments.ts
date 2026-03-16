@@ -9,6 +9,7 @@ const ATTACHMENT_BY_SESSION_INDEX = "by-session-id";
 const IMAGE_MAX_DIMENSION = 1440;
 const IMAGE_TARGET_BYTES = 1_800_000;
 const IMAGE_JPEG_QUALITIES = [0.88, 0.8, 0.72, 0.64] as const;
+const COMPACT_ATTACHMENT_SOURCE_BYTES = 2_500_000;
 const TEXT_FALLBACK_CHAR_LIMIT = 8000;
 const SEARCH_TEXT_CHAR_LIMIT = 120000;
 const SEARCH_ENTRY_CHAR_LIMIT = 3000;
@@ -347,6 +348,36 @@ function buildFallbackText(
     .join("\n\n");
 
   return `${manifest}\n\n${label} from "${attachment.name}":\n${body}`;
+}
+
+function shouldCompactAttachmentBlob(kind: AttachmentKind, size: number): boolean {
+  return kind !== "image" && kind !== "pdf" && size > COMPACT_ATTACHMENT_SOURCE_BYTES;
+}
+
+function buildCompactedAttachmentBlob(
+  attachment: Pick<SessionAttachment, "name" | "kind" | "mimeType" | "size" | "width" | "height">,
+  searchEntries: AttachmentSearchEntry[]
+): Blob {
+  const sections = [
+    "[Compacted local copy]",
+    `Original file: ${attachment.name}`,
+    `Original type: ${attachment.mimeType || "application/octet-stream"}`,
+    `Original size: ${formatBytes(attachment.size)}`,
+    "",
+    buildFallbackText(attachment, searchEntries),
+  ];
+
+  if (searchEntries.length > 0) {
+    sections.push(
+      "",
+      "[Indexed extract]",
+      ...searchEntries.flatMap((entry) => [entry.label, entry.text, ""]),
+    );
+  }
+
+  return new Blob([trimToCharLimit(sections.join("\n"), SEARCH_TEXT_CHAR_LIMIT + 4000)], {
+    type: "text/plain",
+  });
 }
 
 async function getOcrWorker(): Promise<OcrWorker> {
@@ -758,6 +789,7 @@ async function buildComposerAttachment(
   const addedAt = Date.now();
   const kind = detectAttachmentKind(file, file.name);
   const id = createAttachmentId();
+  const originalSize = file.size;
 
   let blob: Blob = file;
   let width: number | null = null;
@@ -773,28 +805,33 @@ async function buildComposerAttachment(
   const mimeType = blob.type || file.type || "application/octet-stream";
   const searchEntries = await extractSearchEntries(blob, file.name, kind, mimeType);
   const extractedChars = searchEntries.reduce((sum, entry) => sum + entry.text.length, 0);
+  const attachmentDescriptor = {
+    name: file.name,
+    kind,
+    mimeType,
+    size: kind === "image" ? blob.size : originalSize,
+    width,
+    height,
+  } satisfies Pick<
+    SessionAttachment,
+    "name" | "kind" | "mimeType" | "size" | "width" | "height"
+  >;
+
+  if (shouldCompactAttachmentBlob(kind, blob.size)) {
+    blob = buildCompactedAttachmentBlob(attachmentDescriptor, searchEntries);
+  }
 
   return {
     id,
     name: file.name,
     mimeType,
-    size: blob.size,
+    size: attachmentDescriptor.size,
     kind,
     source,
     addedAt,
     width,
     height,
-    fallbackText: buildFallbackText(
-      {
-        name: file.name,
-        kind,
-        mimeType,
-        size: blob.size,
-        width,
-        height,
-      },
-      searchEntries
-    ),
+    fallbackText: buildFallbackText(attachmentDescriptor, searchEntries),
     searchable: searchEntries.length > 0,
     extractedChars,
     blob,
@@ -898,9 +935,22 @@ export async function createComposerAttachments(
   source: AttachmentSource
 ): Promise<ComposerAttachment[]> {
   const attachments: ComposerAttachment[] = [];
+  const failures: string[] = [];
+
   for (const file of files) {
-    attachments.push(await buildComposerAttachment(file, source));
+    try {
+      attachments.push(await buildComposerAttachment(file, source));
+    } catch (error) {
+      failures.push(
+        `${file.name}: ${error instanceof Error ? error.message : "Failed to prepare attachment."}`,
+      );
+    }
   }
+
+  if (attachments.length === 0 && failures.length > 0) {
+    throw new Error(failures.join("\n"));
+  }
+
   return attachments;
 }
 
