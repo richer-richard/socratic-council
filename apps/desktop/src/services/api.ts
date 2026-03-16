@@ -58,7 +58,7 @@ export const apiLogger = {
     level: "debug" | "info" | "warn" | "error",
     provider: string,
     message: string,
-    details?: unknown
+    details?: unknown,
   ) {
     const entry: LogEntry = {
       timestamp: Date.now(),
@@ -80,7 +80,10 @@ export const apiLogger = {
       error: console.error,
     }[level];
     const timestamp = new Date().toISOString().slice(11, 23);
-    consoleMethod(`[${timestamp}] [${level.toUpperCase()}] [${provider}] ${message}`, details ?? "");
+    consoleMethod(
+      `[${timestamp}] [${level.toUpperCase()}] [${provider}] ${message}`,
+      details ?? "",
+    );
   },
 
   getLogs() {
@@ -147,7 +150,7 @@ export async function makeHttpRequest(
   headers: Record<string, string>,
   body: string | undefined,
   proxy?: ProxyConfig,
-  timeoutMs = 120000
+  timeoutMs = 120000,
 ): Promise<{ status: number; body: string }> {
   const transport = createTauriTransport({
     proxy,
@@ -168,7 +171,7 @@ export async function makeHttpRequest(
 export async function testProviderConnection(
   provider: Provider,
   credential: ProviderCredential,
-  proxy?: ProxyConfig
+  proxy?: ProxyConfig,
 ): Promise<boolean> {
   const transport = createTauriTransport({
     proxy,
@@ -193,7 +196,7 @@ export async function callProvider(
     requestTimeoutMs?: number;
     signal?: AbortSignal;
     disableThinking?: boolean;
-  }
+  },
 ): Promise<CompletionResult> {
   const startTime = Date.now();
   const agent = buildAgentConfig(provider, model);
@@ -244,7 +247,7 @@ export async function callProvider(
         }
         onChunk(chunk);
       },
-      streamOptions
+      streamOptions,
     );
 
     return {
@@ -260,6 +263,26 @@ export async function callProvider(
     const aborted = isAbortError(message);
 
     apiLogger.log("error", provider, "Request failed", { error: message });
+
+    if (provider === "minimax" && !aborted) {
+      apiLogger.log("warn", provider, "Retrying with non-stream completion after stream failure", {
+        model,
+        error: message,
+      });
+
+      try {
+        const retry = await instance.complete(agent, messages, streamOptions);
+        return {
+          content: retry.content,
+          thinking: retry.thinking,
+          tokens: retry.tokens,
+          latencyMs: Date.now() - startTime,
+          success: true,
+        };
+      } catch (retryError) {
+        apiLogger.log("error", provider, "MiniMax non-stream retry failed", { retryError });
+      }
+    }
 
     return {
       content: fullContent,

@@ -16,7 +16,7 @@ import {
   type SessionStatus,
   type SessionToolEvent,
 } from "../services/sessions";
-import { getToolPrompt, runToolCall, type ToolCall } from "../services/tools";
+import { getToolPrompt, runToolCall, type ToolCall, type ToolContext } from "../services/tools";
 import { CouncilMark } from "../components/CouncilMark";
 import { ProviderIcon, SystemIcon, UserIcon } from "../components/icons/ProviderIcons";
 import {
@@ -29,8 +29,15 @@ import { Markdown } from "../components/Markdown";
 import { ConversationSearch } from "../components/ConversationSearch";
 import { ConversationExport } from "../components/ConversationExport";
 import { ConflictGraph } from "../components/ConflictGraph";
-import { ConflictDetector, CostTrackerEngine, ConversationMemoryManager, createMemoryManager, FairnessManager } from "@socratic-council/core";
+import {
+  ConflictDetector,
+  CostTrackerEngine,
+  ConversationMemoryManager,
+  createMemoryManager,
+  FairnessManager,
+} from "@socratic-council/core";
 import { calculateMessageCost } from "../utils/cost";
+import { createStreamingToolCallDetector, extractActions } from "../utils/toolActions";
 import { splitIntoInlineQuoteSegments, stripQuoteTokens } from "../utils/inlineQuotes";
 import { Virtuoso, type VirtuosoHandle } from "react-virtuoso";
 import type {
@@ -72,7 +79,7 @@ const MODEL_DISPLAY_NAMES: Record<string, string> = {
   "gpt-5.2-pro": "GPT-5.2 Pro",
   "gpt-5.2": "GPT-5.2",
   "gpt-5-mini": "GPT-5 Mini",
-  "o3": "o3",
+  o3: "o3",
   "o4-mini": "o4-mini",
   "gpt-4o": "GPT-4o",
   // Anthropic - Full dated IDs (recommended for production)
@@ -110,21 +117,24 @@ const MODEL_DISPLAY_NAMES: Record<string, string> = {
 };
 
 const GROUP_CHAT_GUIDELINES = `
-You are in a real-time group chat. Keep responses short and engaging.
+You are in a real-time group chat. Keep responses short, pointed, and decision-oriented.
 
 Rules:
 - 1–2 short paragraphs (max ~140 words).
 - Be assertive: challenge weak claims directly and name the specific assumption you reject.
 - Avoid headings and long bullet lists (keep it chatty). Use them only if plain text is clearly insufficient.
 - Directly address a specific point from someone else by name.
-- Add exactly one new claim, example, or counterpoint; don’t restate your thesis.
+- Push the discussion forward by doing one primary thing: add one new claim/example/counterpoint, or narrow the group toward a recommendation using evidence or decision criteria.
+- Do not reopen settled points unless you have new evidence or a better standard.
+- If the discussion is mature, prefer synthesis and choice over novelty.
 - Include one concrete test, falsifiable criterion, or counterexample when possible.
 - If your answer depends on exact wording from attached files or current facts, research first before answering.
 - Proactively call oracle.file_search for attached-file evidence and oracle.web_search for current external facts when that would materially improve the answer.
+- If you know you need a tool, emit only the @tool(name, {args}) line and stop. The app will execute it and return control to you.
 - If a retrieved passage looks incomplete, do one more targeted search until you have enough surrounding context.
-- After using tools, come back with a normal answer in the same turn. Do not end with tool calls only.
-- End with one concrete question to the group.
-- If the Moderator gives an instruction, follow it.
+- Call tools early instead of burning time in hidden reasoning before the search starts.
+- Ask at most one concrete question, and only if it materially helps the group decide. Do not force a question every turn.
+- If the Moderator shifts the room toward resolution, stop broadening the debate and help land a final result.
 - Never emit tool_use, tool_call, function_call, XML tool tags, or provider-specific tool syntax. Use only the literal @tool(name, {args}) format.
 
 Markdown:
@@ -139,15 +149,19 @@ Quoting/Reactions:
 ${getToolPrompt()}
 `;
 
-const BASE_SYSTEM_PROMPT = (name: string) => `You are ${name} in a group chat with George, Cathy, Grace, Douglas, Kate, Quinn, and Mary.
+const BASE_SYSTEM_PROMPT = (
+  name: string,
+) => `You are ${name} in a group chat with George, Cathy, Grace, Douglas, Kate, Quinn, and Mary.
 
 Do NOT adopt a persona or specialty. Speak as yourself, and keep the tone natural.
 
 Proactive behavior requirements:
 - If someone is vague, force precision by asking for a measurable claim.
 - If someone makes a strong claim, pressure-test it with one concrete challenge.
-- If the room is converging too quickly, introduce one serious dissenting angle.
+- If the room is converging too quickly without enough evidence, introduce one serious dissenting angle.
+- Once the evidence is good enough, help the group converge on a defensible recommendation instead of reopening settled points.
 - If someone has been quiet recently, invite them by name into the exact point of dispute.
+- The goal is not endless debate. Surface the real disagreement early, then help the group reach a clear closing result.
 
 ${GROUP_CHAT_GUIDELINES}`;
 
@@ -156,7 +170,7 @@ const MODERATOR_SYSTEM_PROMPT = `You are the Moderator in a group chat with Geor
 Your job: keep the discussion focused, fair, rigorous, and productive.
 
 Rules:
-- Speak briefly (1–3 sentences, max ~90 words).
+- Speak briefly (1–4 sentences, max ~120 words).
 - Prefer plain text. Use Markdown only if plain text is clearly insufficient.
 - Ask at most ONE question.
 - You may do any of the following when useful:
@@ -166,21 +180,25 @@ Rules:
   4) evidence-quality checks (claim vs evidence),
   5) drift correction back to topic,
   6) contradiction spotlighting with a clarifying question,
-  7) near-end closure prompt with decision criteria.
+  7) near-end transition into resolution with clear decision criteria,
+  8) final outcome publication after the resolution round.
 - Keep interventions sparse and high-signal to avoid unnecessary cost.
 - You may suggest who should respond next by name.
+- At the end, publish the official closing result instead of leaving the room with another open question.
 - Do NOT include @quote(...), @react(...), or @tool(...).
 - Do NOT impersonate any agent.`;
 
-
-const AGENT_CONFIG: Record<AgentId, {
-  name: string;
-  color: string;
-  bgColor: string;
-  borderColor: string;
-  provider: Provider;
-  systemPrompt: string;
-}> = {
+const AGENT_CONFIG: Record<
+  AgentId,
+  {
+    name: string;
+    color: string;
+    bgColor: string;
+    borderColor: string;
+    provider: Provider;
+    systemPrompt: string;
+  }
+> = {
   george: {
     name: "George",
     color: "text-george",
@@ -243,7 +261,7 @@ const AGENT_CONFIG: Record<AgentId, {
     bgColor: "bg-white/60",
     borderColor: "border-line-soft",
     provider: "openai",
-    systemPrompt: ""
+    systemPrompt: "",
   },
   tool: {
     name: "Tool",
@@ -251,7 +269,7 @@ const AGENT_CONFIG: Record<AgentId, {
     bgColor: "bg-white/60",
     borderColor: "border-line-soft",
     provider: "openai",
-    systemPrompt: ""
+    systemPrompt: "",
   },
   user: {
     name: "You",
@@ -259,11 +277,19 @@ const AGENT_CONFIG: Record<AgentId, {
     bgColor: "bg-white/80",
     borderColor: "border-line-soft",
     provider: "openai",
-    systemPrompt: ""
+    systemPrompt: "",
   },
 };
 
-const AGENT_IDS: CouncilAgentId[] = ["george", "cathy", "grace", "douglas", "kate", "quinn", "mary"];
+const AGENT_IDS: CouncilAgentId[] = [
+  "george",
+  "cathy",
+  "grace",
+  "douglas",
+  "kate",
+  "quinn",
+  "mary",
+];
 
 const isCouncilAgent = (id: unknown): id is CouncilAgentId =>
   AGENT_IDS.includes(id as CouncilAgentId);
@@ -315,7 +341,11 @@ function normalizeSessionForChat(session: DiscussionSession): DiscussionSession 
 }
 
 /** Live stopwatch displayed while an AI agent is streaming a response. */
-function LiveStopwatch({ startTime, isStreaming, finalMs }: {
+function LiveStopwatch({
+  startTime,
+  isStreaming,
+  finalMs,
+}: {
   startTime: number;
   isStreaming: boolean;
   finalMs?: number;
@@ -336,30 +366,14 @@ function LiveStopwatch({ startTime, isStreaming, finalMs }: {
   const ms = isStreaming ? elapsed : (finalMs ?? 0);
   const seconds = (ms / 1000).toFixed(3);
 
-  return (
-    <span className={`discord-stopwatch${isStreaming ? " is-ticking" : ""}`}>
-      {seconds}s
-    </span>
-  );
+  return <span className={`discord-stopwatch${isStreaming ? " is-ticking" : ""}`}>{seconds}s</span>;
 }
 
 const DiscordVirtuosoList = forwardRef<HTMLDivElement, HTMLAttributes<HTMLDivElement>>(
   function DiscordVirtuosoList({ className, ...props }, ref) {
-    return (
-      <div
-        {...props}
-        ref={ref}
-        className={`discord-messages ${className ?? ""}`}
-      />
-    );
-  }
+    return <div {...props} ref={ref} className={`discord-messages ${className ?? ""}`} />;
+  },
 );
-
-const ACTION_PATTERNS = {
-  quote: /@quote\(([^)]+)\)/g,
-  react: /@react\(([^,]+),\s*([^)]+)\)/g,
-  tool: /@tool\(([^,]+),\s*([\s\S]*?)\)/g,
-};
 
 const TOOL_SYNTAX_LEAK_PATTERN = /\b(?:tool_use|tool_call|function_call|minimax:tool_call)\b/i;
 
@@ -387,10 +401,7 @@ function getToolDisplayName(toolName: ToolCall["name"]): string {
   }
 }
 
-function summarizeToolCall(
-  toolName: ToolCall["name"],
-  args: Record<string, unknown>
-) {
+function summarizeToolCall(toolName: ToolCall["name"], args: Record<string, unknown>) {
   const json = JSON.stringify(args);
   const query = typeof args.query === "string" ? args.query.trim() : "";
   const claim = typeof args.claim === "string" ? args.claim.trim() : "";
@@ -415,7 +426,7 @@ function createToolEvent(
   toolName: ToolCall["name"],
   args: Record<string, unknown>,
   output: string,
-  error?: string
+  error?: string,
 ): SessionToolEvent {
   return {
     id: `tool_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`,
@@ -428,7 +439,10 @@ function createToolEvent(
 }
 
 function buildDiscussionOpeningMessage(topic: string, attachmentSummary: string): string {
-  return [topic.trim(), attachmentSummary ? `Attached: ${attachmentSummary.replace(/^Attachments:\s*/i, "")}` : ""]
+  return [
+    topic.trim(),
+    attachmentSummary ? `Attached: ${attachmentSummary.replace(/^Attachments:\s*/i, "")}` : "",
+  ]
     .filter(Boolean)
     .join("\n\n");
 }
@@ -445,67 +459,10 @@ async function blobToBase64(blob: Blob): Promise<string> {
   return btoa(binary);
 }
 
-function extractActions(raw: string) {
-  const reactions: Array<{ targetId: string; emoji: ReactionId }> = [];
-  const quoteTargets: string[] = [];
-  const toolCalls: ToolCall[] = [];
-
-  let cleaned = raw;
-
-  cleaned = cleaned.replace(ACTION_PATTERNS.tool, (_, name, argsText) => {
-    const toolName = String(name).trim();
-    try {
-      const parsed = JSON.parse(String(argsText));
-      if (
-        toolName === "oracle.search" ||
-        toolName === "oracle.web_search" ||
-        toolName === "oracle.file_search" ||
-        toolName === "oracle.verify" ||
-        toolName === "oracle.cite"
-      ) {
-        toolCalls.push({
-          name: toolName as ToolCall["name"],
-          args: typeof parsed === "object" && parsed ? parsed : {},
-        });
-      }
-    } catch (error) {
-      apiLogger.log("warn", "tools", "Failed to parse tool call", {
-        toolName,
-        argsText,
-        error,
-      });
-    }
-    return "";
-  });
-
-  cleaned = cleaned.replace(ACTION_PATTERNS.quote, (_, target) => {
-    const targetId = String(target).trim();
-    if (!quoteTargets.includes(targetId)) {
-      quoteTargets.push(targetId);
-    }
-    return `@quote(${targetId})`;
-  });
-
-  cleaned = cleaned.replace(ACTION_PATTERNS.react, (_, target, emoji) => {
-    const reaction = String(emoji).trim() as ReactionId;
-    if (REACTION_IDS.includes(reaction)) {
-      reactions.push({ targetId: String(target).trim(), emoji: reaction });
-    }
-    return "";
-  });
-
-  return {
-    cleaned: normalizeMessageText(cleaned),
-    quoteTargets,
-    reactions,
-    toolCalls,
-  };
-}
-
 function applyReactions(
   items: ChatMessage[],
   reactions: Array<{ targetId: string; emoji: ReactionId }>,
-  actorId: CouncilAgentId
+  actorId: CouncilAgentId,
 ) {
   if (reactions.length === 0) return items;
 
@@ -551,18 +508,25 @@ export function Chat({ session, onNavigate, onPersistSession }: ChatProps) {
   const [sidePanelView, setSidePanelView] = useState<SidePanelView>("default");
   const [costState, setCostState] = useState<CostTracker | null>(null);
   const [moderatorUsage, setModeratorUsage] = useState<ModeratorUsageSnapshot>(
-    normalizedSession.moderatorUsage
+    normalizedSession.moderatorUsage,
   );
-  const [attachmentPayloads, setAttachmentPayloads] = useState<Map<string, APIAttachment>>(new Map());
-  const [attachmentsReady, setAttachmentsReady] = useState(normalizedSession.attachments.length === 0);
+  const [attachmentPayloads, setAttachmentPayloads] = useState<Map<string, APIAttachment>>(
+    new Map(),
+  );
+  const [attachmentsReady, setAttachmentsReady] = useState(
+    normalizedSession.attachments.length === 0,
+  );
   const [conflictState, setConflictState] = useState<ConflictDetection | null>(null);
   const [allConflicts, setAllConflicts] = useState<PairwiseConflict[]>([]);
   const [duoLogue, setDuoLogue] = useState<DuoLogueState | null>(normalizedSession.duoLogue);
   const [reactionPickerTarget, setReactionPickerTarget] = useState<string | null>(null);
   const [recentlyCopiedQuote, setRecentlyCopiedQuote] = useState<string | null>(null);
   const [highlightedMessageId, setHighlightedMessageId] = useState<string | null>(null);
+  const [isTopicExpanded, setIsTopicExpanded] = useState(false);
+  const [topicOverflowing, setTopicOverflowing] = useState(false);
 
   const virtuosoRef = useRef<VirtuosoHandle>(null);
+  const topicBodyRef = useRef<HTMLDivElement | null>(null);
   const isAtBottomRef = useRef(true);
   const [showScrollButton, setShowScrollButton] = useState(false);
   const abortRef = useRef(false);
@@ -574,7 +538,7 @@ export function Chat({ session, onNavigate, onPersistSession }: ChatProps) {
   const hasStartedRef = useRef(
     normalizedSession.status !== "draft" ||
       normalizedSession.messages.length > 0 ||
-      normalizedSession.currentTurn > 0
+      normalizedSession.currentTurn > 0,
   );
   const fairnessManagerRef = useRef(new FairnessManager());
   const whisperBonusesRef = useRef<Record<CouncilAgentId, number>>({
@@ -586,18 +550,27 @@ export function Chat({ session, onNavigate, onPersistSession }: ChatProps) {
   const lastWhisperKeyRef = useRef<string | null>(normalizedSession.runtime.lastWhisperKey);
   const lastModeratorKeyRef = useRef<string | null>(normalizedSession.runtime.lastModeratorKey);
   const lastModeratorBalanceKeyRef = useRef<string | null>(
-    normalizedSession.runtime.lastModeratorBalanceKey
+    normalizedSession.runtime.lastModeratorBalanceKey,
   );
-  const lastModeratorSynthesisTurnRef = useRef(normalizedSession.runtime.lastModeratorSynthesisTurn);
-  const moderatorClosurePostedRef = useRef(normalizedSession.runtime.moderatorClosurePosted);
+  const lastModeratorSynthesisTurnRef = useRef(
+    normalizedSession.runtime.lastModeratorSynthesisTurn,
+  );
+  const moderatorResolutionPromptPostedRef = useRef(
+    normalizedSession.runtime.moderatorResolutionPromptPosted,
+  );
+  const moderatorFinalSummaryPostedRef = useRef(
+    normalizedSession.runtime.moderatorFinalSummaryPosted,
+  );
   const moderatorInFlightRef = useRef(false);
   const duoLogueRef = useRef<DuoLogueState | null>(normalizedSession.duoLogue);
   const messagesRef = useRef<ChatMessage[]>(normalizedSession.messages);
   const currentTurnRef = useRef(normalizedSession.currentTurn);
-  const previousSpeakerRef = useRef<CouncilAgentId | null>(normalizedSession.runtime.previousSpeaker);
+  const previousSpeakerRef = useRef<CouncilAgentId | null>(
+    normalizedSession.runtime.previousSpeaker,
+  );
   const phaseRef = useRef<SessionPhase>(normalizedSession.runtime.phase);
-  const closingQueueRef = useRef<CouncilAgentId[]>(normalizedSession.runtime.closingQueue);
-  const closingNoticePostedRef = useRef(normalizedSession.runtime.closingNoticePosted);
+  const resolutionQueueRef = useRef<CouncilAgentId[]>(normalizedSession.runtime.resolutionQueue);
+  const resolutionNoticePostedRef = useRef(normalizedSession.runtime.resolutionNoticePosted);
   const lastPersistSignatureRef = useRef("");
 
   const { config, getMaxTurns, getConfiguredProviders } = useConfig();
@@ -605,7 +578,7 @@ export function Chat({ session, onNavigate, onPersistSession }: ChatProps) {
   const configuredProviders = getConfiguredProviders();
   const configuredAgentIds = useMemo(
     () => AGENT_IDS.filter((id) => configuredProviders.includes(AGENT_CONFIG[id].provider)),
-    [configuredProviders]
+    [configuredProviders],
   );
   const configRef = useRef(config);
   configRef.current = config;
@@ -681,17 +654,48 @@ export function Chat({ session, onNavigate, onPersistSession }: ChatProps) {
     return () => window.clearTimeout(timer);
   }, [highlightedMessageId]);
 
+  useEffect(() => {
+    setIsTopicExpanded(false);
+  }, [topic]);
+
+  useEffect(() => {
+    const node = topicBodyRef.current;
+    if (!node) return;
+
+    const measure = () => {
+      const tolerance = 2;
+      setTopicOverflowing(node.scrollHeight > node.clientHeight + tolerance);
+    };
+
+    measure();
+    window.addEventListener("resize", measure);
+
+    let observer: ResizeObserver | null = null;
+    if (typeof ResizeObserver !== "undefined") {
+      observer = new ResizeObserver(() => measure());
+      observer.observe(node);
+    }
+
+    return () => {
+      window.removeEventListener("resize", measure);
+      observer?.disconnect();
+    };
+  }, [topic, isTopicExpanded]);
+
   const getAgentLabel = useCallback((agentId: string) => {
     const agent = (AGENT_CONFIG as Record<string, { name: string }>)[agentId];
     return agent?.name ?? agentId;
   }, []);
 
-  const jumpToMessage = useCallback((messageId: string) => {
-    const index = messageIndexById.get(messageId);
-    if (index === undefined) return;
-    virtuosoRef.current?.scrollToIndex({ index, align: "center", behavior: "smooth" });
-    setHighlightedMessageId(messageId);
-  }, [messageIndexById]);
+  const jumpToMessage = useCallback(
+    (messageId: string) => {
+      const index = messageIndexById.get(messageId);
+      if (index === undefined) return;
+      virtuosoRef.current?.scrollToIndex({ index, align: "center", behavior: "smooth" });
+      setHighlightedMessageId(messageId);
+    },
+    [messageIndexById],
+  );
 
   useEffect(() => {
     duoLogueRef.current = duoLogue;
@@ -715,14 +719,15 @@ export function Chat({ session, onNavigate, onPersistSession }: ChatProps) {
     setTypingAgents([]);
     previousSpeakerRef.current = null;
     phaseRef.current = "discussion";
-    closingQueueRef.current = [];
-    closingNoticePostedRef.current = false;
+    resolutionQueueRef.current = [];
+    resolutionNoticePostedRef.current = false;
     duoLogueRef.current = null;
     lastWhisperKeyRef.current = null;
     lastModeratorKeyRef.current = null;
     lastModeratorBalanceKeyRef.current = null;
     lastModeratorSynthesisTurnRef.current = 0;
-    moderatorClosurePostedRef.current = false;
+    moderatorResolutionPromptPostedRef.current = false;
+    moderatorFinalSummaryPostedRef.current = false;
     fairnessManagerRef.current = new FairnessManager();
     whisperBonusesRef.current = createWhisperBonuses();
     cyclePendingRef.current = [];
@@ -738,9 +743,8 @@ export function Chat({ session, onNavigate, onPersistSession }: ChatProps) {
       source.runtime.recentSpeakers.length > 0
         ? source.runtime.recentSpeakers
         : source.messages
-            .filter(
-              (message): message is ChatMessage & { agentId: CouncilAgentId } =>
-                isCouncilAgent(message.agentId)
+            .filter((message): message is ChatMessage & { agentId: CouncilAgentId } =>
+              isCouncilAgent(message.agentId),
             )
             .map((message) => message.agentId)
             .slice(-fairnessManagerRef.current.getWindowSize());
@@ -757,7 +761,11 @@ export function Chat({ session, onNavigate, onPersistSession }: ChatProps) {
     for (const message of source.messages) {
       if (isCouncilAgent(message.agentId)) {
         if (message.tokens && message.metadata?.model) {
-          costTrackerRef.current.recordUsage(message.agentId, message.tokens, message.metadata.model);
+          costTrackerRef.current.recordUsage(
+            message.agentId,
+            message.tokens,
+            message.metadata.model,
+          );
         }
 
         memoryManagerRef.current.addMessage(message);
@@ -809,9 +817,7 @@ export function Chat({ session, onNavigate, onPersistSession }: ChatProps) {
   }, []);
 
   useEffect(() => {
-    const agentMessages = messages.filter(
-      (m) => isCouncilAgent(m.agentId) && !m.isStreaming
-    );
+    const agentMessages = messages.filter((m) => isCouncilAgent(m.agentId) && !m.isStreaming);
 
     if (agentMessages.length < 2) {
       setConflictState(null);
@@ -819,11 +825,14 @@ export function Chat({ session, onNavigate, onPersistSession }: ChatProps) {
       return;
     }
 
-    const { pairs, strongestPair: conflict } = conflictDetectorRef.current.evaluateAll(agentMessages, AGENT_IDS);
+    const { pairs, strongestPair: conflict } = conflictDetectorRef.current.evaluateAll(
+      agentMessages,
+      AGENT_IDS,
+    );
     setAllConflicts(pairs);
     setConflictState(conflict);
 
-    if (conflict && !duoLogueRef.current) {
+    if (phaseRef.current === "discussion" && conflict && !duoLogueRef.current) {
       const newDuo: DuoLogueState = {
         participants: conflict.agentPair,
         remainingTurns: 3,
@@ -834,6 +843,7 @@ export function Chat({ session, onNavigate, onPersistSession }: ChatProps) {
   }, [messages]);
 
   useEffect(() => {
+    if (phaseRef.current !== "discussion") return;
     if (!conflictState) return;
 
     const key = conflictState.agentPair.join("-");
@@ -855,176 +865,198 @@ export function Chat({ session, onNavigate, onPersistSession }: ChatProps) {
 
     whisperBonusesRef.current[to] = Math.min(
       20,
-      (whisperBonusesRef.current[to] ?? 0) + (whisper.payload.bidBonus ?? 0)
+      (whisperBonusesRef.current[to] ?? 0) + (whisper.payload.bidBonus ?? 0),
     );
   }, [conflictState]);
 
   // Generate bidding scores based on conversation context
-  const generateBiddingScores = useCallback((
-    excludeAgent?: CouncilAgentId,
-    eligibleAgents: CouncilAgentId[] = AGENT_IDS,
-    focusAgents?: CouncilAgentId[],
-    cyclePending: CouncilAgentId[] = []
-  ): BiddingRound => {
-    const scores = {
-      george: 0,
-      cathy: 0,
-      grace: 0,
-      douglas: 0,
-      kate: 0,
-      quinn: 0,
-      mary: 0,
-    } as Record<CouncilAgentId, number>;
-    let maxScore = -Infinity;
-    let winner: CouncilAgentId = eligibleAgents[0] ?? AGENT_IDS[0];
-    let hasWinner = false;
+  const generateBiddingScores = useCallback(
+    (
+      excludeAgent?: CouncilAgentId,
+      eligibleAgents: CouncilAgentId[] = AGENT_IDS,
+      focusAgents?: CouncilAgentId[],
+      cyclePending: CouncilAgentId[] = [],
+    ): BiddingRound => {
+      const scores = {
+        george: 0,
+        cathy: 0,
+        grace: 0,
+        douglas: 0,
+        kate: 0,
+        quinn: 0,
+        mary: 0,
+      } as Record<CouncilAgentId, number>;
+      let maxScore = -Infinity;
+      let winner: CouncilAgentId = eligibleAgents[0] ?? AGENT_IDS[0];
+      let hasWinner = false;
 
-    const fairnessAdjustments = fairnessManagerRef.current.calculateAdjustments(eligibleAgents);
-    const fairnessById = new Map(fairnessAdjustments.map((a) => [a.agentId, a]));
-    const pendingSet = new Set(cyclePending);
+      const fairnessAdjustments = fairnessManagerRef.current.calculateAdjustments(eligibleAgents);
+      const fairnessById = new Map(fairnessAdjustments.map((a) => [a.agentId, a]));
+      const pendingSet = new Set(cyclePending);
 
-    // Only include agents that have API keys configured
-    for (const agentId of eligibleAgents) {
-      if (agentId === excludeAgent) continue;
+      // Only include agents that have API keys configured
+      for (const agentId of eligibleAgents) {
+        if (agentId === excludeAgent) continue;
 
-      const agentConfig = AGENT_CONFIG[agentId];
-      const hasApiKey = configuredProviders.includes(agentConfig.provider);
+        const agentConfig = AGENT_CONFIG[agentId];
+        const hasApiKey = configuredProviders.includes(agentConfig.provider);
 
-      if (!hasApiKey) {
-        scores[agentId] = 0;
-        continue;
-      }
-
-      // Generate score based on various factors
-      const baseScore = 50 + Math.random() * 30;
-      const whisperBonus = whisperBonusesRef.current[agentId] ?? 0;
-
-      // Add engagement debt bonus (agents with pending debts get priority)
-      // Capped at 20 to prevent feedback loops
-      let engagementDebtBonus = 0;
-      if (memoryManagerRef.current) {
-        const debts = memoryManagerRef.current.getEngagementDebts(agentId);
-        for (const debt of debts.slice(0, 3)) {
-          engagementDebtBonus += Math.min(debt.priority * 0.2, 15);
+        if (!hasApiKey) {
+          scores[agentId] = 0;
+          continue;
         }
-        engagementDebtBonus = Math.min(engagementDebtBonus, 20);
+
+        // Generate score based on various factors
+        const baseScore = 50 + Math.random() * 30;
+        const whisperBonus = whisperBonusesRef.current[agentId] ?? 0;
+
+        // Add engagement debt bonus (agents with pending debts get priority)
+        // Capped at 20 to prevent feedback loops
+        let engagementDebtBonus = 0;
+        if (memoryManagerRef.current) {
+          const debts = memoryManagerRef.current.getEngagementDebts(agentId);
+          for (const debt of debts.slice(0, 3)) {
+            engagementDebtBonus += Math.min(debt.priority * 0.2, 15);
+          }
+          engagementDebtBonus = Math.min(engagementDebtBonus, 20);
+        }
+
+        // Fairness adjustment to ensure balanced turn-taking
+        const fairnessBonus = fairnessById.get(agentId)?.adjustment ?? 0;
+
+        // Conflict focus bonus nudges disagreeing pair to respond without locking out others
+        const conflictFocusBonus = focusAgents?.includes(agentId) ? 8 : 0;
+        // Round-robin cycle bonus enforces "everyone speaks once per cycle" while retaining bidding.
+        const cycleBonus = pendingSet.size === 0 ? 0 : pendingSet.has(agentId) ? 16 : -120;
+
+        const score =
+          baseScore +
+          whisperBonus +
+          engagementDebtBonus +
+          fairnessBonus +
+          conflictFocusBonus +
+          cycleBonus;
+
+        if (whisperBonus) {
+          whisperBonusesRef.current[agentId] = 0;
+        }
+
+        scores[agentId] = score;
+        if (score > maxScore) {
+          maxScore = score;
+          winner = agentId;
+          hasWinner = true;
+        }
       }
 
-      // Fairness adjustment to ensure balanced turn-taking
-      const fairnessBonus = fairnessById.get(agentId)?.adjustment ?? 0;
-
-      // Conflict focus bonus nudges disagreeing pair to respond without locking out others
-      const conflictFocusBonus = focusAgents?.includes(agentId) ? 8 : 0;
-      // Round-robin cycle bonus enforces "everyone speaks once per cycle" while retaining bidding.
-      const cycleBonus =
-        pendingSet.size === 0 ? 0 : pendingSet.has(agentId) ? 16 : -120;
-
-      const score = baseScore + whisperBonus + engagementDebtBonus + fairnessBonus + conflictFocusBonus + cycleBonus;
-
-      if (whisperBonus) {
-        whisperBonusesRef.current[agentId] = 0;
+      // If no winner found (no API keys), pick first available
+      if (!hasWinner) {
+        const available = eligibleAgents.filter(
+          (id) => id !== excludeAgent && configuredProviders.includes(AGENT_CONFIG[id].provider),
+        );
+        winner = available[0] || eligibleAgents[0] || AGENT_IDS[0];
       }
 
-      scores[agentId] = score;
-      if (score > maxScore) {
-        maxScore = score;
-        winner = agentId;
-        hasWinner = true;
+      return { scores, winner };
+    },
+    [configuredProviders],
+  );
+
+  const getContextMessages = useCallback(
+    (agentId: CouncilAgentId) => {
+      if (memoryManagerRef.current) {
+        const context = memoryManagerRef.current.buildContext(agentId);
+        const recent = context.recentMessages
+          .filter((m) => isCouncilAgent(m.agentId) || isModeratorMessage(m))
+          .slice(-MAX_CONTEXT_MESSAGES);
+        return { messages: recent, engagementDebts: context.engagementDebt };
       }
-    }
 
-    // If no winner found (no API keys), pick first available
-    if (!hasWinner) {
-      const available = eligibleAgents.filter(
-        (id) => id !== excludeAgent && configuredProviders.includes(AGENT_CONFIG[id].provider)
-      );
-      winner = available[0] || eligibleAgents[0] || AGENT_IDS[0];
-    }
-
-    return { scores, winner };
-  }, [configuredProviders]);
-
-  const getContextMessages = useCallback((agentId: CouncilAgentId) => {
-    if (memoryManagerRef.current) {
-      const context = memoryManagerRef.current.buildContext(agentId);
-      const recent = context.recentMessages
-        .filter((m) => isCouncilAgent(m.agentId) || isModeratorMessage(m))
+      const fallback = messages
+        .filter(
+          (m) =>
+            (isCouncilAgent(m.agentId) || isModeratorMessage(m)) &&
+            m.content &&
+            m.content.trim() !== "" &&
+            !m.content.includes("[No response received]") &&
+            !m.content.includes("No responses recorded") &&
+            !m.error &&
+            !m.isStreaming,
+        )
         .slice(-MAX_CONTEXT_MESSAGES);
-      return { messages: recent, engagementDebts: context.engagementDebt };
-    }
 
-    const fallback = messages
-      .filter(
-        (m) =>
-          (isCouncilAgent(m.agentId) || isModeratorMessage(m)) &&
-          m.content &&
-          m.content.trim() !== "" &&
-          !m.content.includes("[No response received]") &&
-          !m.content.includes("No responses recorded") &&
-          !m.error &&
-          !m.isStreaming
-      )
-      .slice(-MAX_CONTEXT_MESSAGES);
+      return { messages: fallback, engagementDebts: [] };
+    },
+    [messages],
+  );
 
-    return { messages: fallback, engagementDebts: [] };
-  }, [messages]);
+  const buildEngagementPrompt = useCallback(
+    (debts: Array<{ messageId: string; creditor: CouncilAgentId; reason: string }>) => {
+      if (debts.length === 0) return "";
+      const top = debts.slice(0, 2);
+      const lines = top.map((debt) => {
+        const name = AGENT_CONFIG[debt.creditor]?.name ?? debt.creditor;
+        return `Respond to ${name} (id: ${debt.messageId}) because they ${debt.reason.replace(/_/g, " ")}.`;
+      });
+      return `Required replies: ${lines.join(" ")}`;
+    },
+    [],
+  );
 
-  const buildEngagementPrompt = useCallback((debts: Array<{ messageId: string; creditor: CouncilAgentId; reason: string }>) => {
-    if (debts.length === 0) return "";
-    const top = debts.slice(0, 2);
-    const lines = top.map((debt) => {
-      const name = AGENT_CONFIG[debt.creditor]?.name ?? debt.creditor;
-      return `Respond to ${name} (id: ${debt.messageId}) because they ${debt.reason.replace(/_/g, " ")}.`;
-    });
-    return `Required replies: ${lines.join(" ")}`;
-  }, []);
+  const buildAttachmentContext = useCallback(
+    (provider: Provider, model: string | undefined) => {
+      const rawAttachments: APIAttachment[] = [];
+      const fallbackBlocks: string[] = [];
 
-  const buildAttachmentContext = useCallback((provider: Provider, model: string | undefined) => {
-    const rawAttachments: APIAttachment[] = [];
-    const fallbackBlocks: string[] = [];
+      for (const attachment of normalizedSession.attachments) {
+        const mode = model ? getAttachmentTransportMode(provider, model, attachment) : "fallback";
+        const payload = attachmentPayloads.get(attachment.id);
 
-    for (const attachment of normalizedSession.attachments) {
-      const mode = model ? getAttachmentTransportMode(provider, model, attachment) : "fallback";
-      const payload = attachmentPayloads.get(attachment.id);
+        if (
+          mode === "raw" &&
+          payload &&
+          (attachment.kind === "image" || attachment.kind === "pdf")
+        ) {
+          rawAttachments.push(payload);
+          continue;
+        }
 
-      if (
-        mode === "raw" &&
-        payload &&
-        (attachment.kind === "image" || attachment.kind === "pdf")
-      ) {
-        rawAttachments.push(payload);
-        continue;
+        fallbackBlocks.push(attachment.fallbackText);
       }
 
-      fallbackBlocks.push(attachment.fallbackText);
-    }
+      const notes: string[] = [];
+      if (normalizedSession.attachments.length > 0) {
+        notes.push(
+          'If you need exact wording, page references, or code from attached files, call @tool(oracle.file_search, {"query":"..."}).',
+        );
+      }
+      if (rawAttachments.length > 0) {
+        const names = rawAttachments.map((attachment) => attachment.name).join(", ");
+        notes.push(
+          `Attached source material: ${names}. Use the attached files directly when relevant.`,
+        );
+      }
+      if (fallbackBlocks.length > 0) {
+        notes.push(`Attachment notes:\n${fallbackBlocks.join("\n\n")}`);
+      }
 
-    const notes: string[] = [];
-    if (normalizedSession.attachments.length > 0) {
-      notes.push(
-        "If you need exact wording, page references, or code from attached files, call @tool(oracle.file_search, {\"query\":\"...\"})."
-      );
-    }
-    if (rawAttachments.length > 0) {
-      const names = rawAttachments.map((attachment) => attachment.name).join(", ");
-      notes.push(`Attached source material: ${names}. Use the attached files directly when relevant.`);
-    }
-    if (fallbackBlocks.length > 0) {
-      notes.push(`Attachment notes:\n${fallbackBlocks.join("\n\n")}`);
-    }
-
-    return {
-      rawAttachments,
-      attachmentText: notes.join("\n\n").trim(),
-    };
-  }, [attachmentPayloads, normalizedSession.attachments]);
+      return {
+        rawAttachments,
+        attachmentText: notes.join("\n\n").trim(),
+      };
+    },
+    [attachmentPayloads, normalizedSession.attachments],
+  );
 
   // Build conversation history for API call
   const buildConversationHistory = useCallback(
     (agentId: CouncilAgentId, extraContext: APIChatMessage[] = []): APIChatMessage[] => {
       const agentConfig = AGENT_CONFIG[agentId];
       const model = configRef.current.models[agentConfig.provider];
-      const { rawAttachments, attachmentText } = buildAttachmentContext(agentConfig.provider, model);
+      const { rawAttachments, attachmentText } = buildAttachmentContext(
+        agentConfig.provider,
+        model,
+      );
       const history: APIChatMessage[] = [
         {
           role: "system",
@@ -1034,12 +1066,7 @@ export function Chat({ session, onNavigate, onPersistSession }: ChatProps) {
 
       history.push({
         role: "user",
-        content: [
-          `Discussion topic: "${topic}"`,
-          attachmentText,
-        ]
-          .filter(Boolean)
-          .join("\n\n"),
+        content: [`Discussion topic: "${topic}"`, attachmentText].filter(Boolean).join("\n\n"),
         ...(attachmentText ? { cacheControl: "ephemeral" as const } : {}),
         ...(rawAttachments.length > 0 ? { attachments: rawAttachments } : {}),
       });
@@ -1050,7 +1077,7 @@ export function Chat({ session, onNavigate, onPersistSession }: ChatProps) {
         history.push({
           role: "user",
           content:
-            "You're the first to speak. State your position directly, then ask one concrete question. Include @quote(MSG_ID) only after there are messages to quote.",
+            "You're the first to speak. State your position directly. If you need outside evidence first, emit only the @tool(...) line and stop. Include @quote(MSG_ID) only after there are messages to quote.",
         });
         return history;
       }
@@ -1089,19 +1116,22 @@ export function Chat({ session, onNavigate, onPersistSession }: ChatProps) {
       history.push({
         role: "user",
         content:
-          "Your turn. Get enough context first; if exact wording or evidence is uncertain, use tools before answering. Then respond directly to one specific message above and add one new point.",
+          "Your turn. Get enough context first; if exact wording or evidence is uncertain, use tools before answering. If you need a tool, emit only the @tool(...) line and stop so the app can run it. Otherwise respond directly to one specific message above and either add one new point or narrow the group toward a decision.",
       });
 
       return history;
     },
-    [buildAttachmentContext, buildEngagementPrompt, getContextMessages, topic]
+    [buildAttachmentContext, buildEngagementPrompt, getContextMessages, topic],
   );
 
-  const buildClosingConversationHistory = useCallback(
+  const buildResolutionConversationHistory = useCallback(
     (agentId: CouncilAgentId, turnsCompleted: number): APIChatMessage[] => {
       const agentConfig = AGENT_CONFIG[agentId];
       const model = configRef.current.models[agentConfig.provider];
-      const { rawAttachments, attachmentText } = buildAttachmentContext(agentConfig.provider, model);
+      const { rawAttachments, attachmentText } = buildAttachmentContext(
+        agentConfig.provider,
+        model,
+      );
       const history: APIChatMessage[] = [
         {
           role: "system",
@@ -1111,73 +1141,116 @@ export function Chat({ session, onNavigate, onPersistSession }: ChatProps) {
 
       history.push({
         role: "user",
-        content: [
-          `Discussion topic: "${topic}"`,
-          attachmentText,
-        ]
-          .filter(Boolean)
-          .join("\n\n"),
+        content: [`Discussion topic: "${topic}"`, attachmentText].filter(Boolean).join("\n\n"),
         ...(attachmentText ? { cacheControl: "ephemeral" as const } : {}),
         ...(rawAttachments.length > 0 ? { attachments: rawAttachments } : {}),
       });
 
-      const { messages: contextMessages } = getContextMessages(agentId);
+      const contextMessages = messagesRef.current
+        .filter(
+          (message) =>
+            (isCouncilAgent(message.agentId) || isModeratorMessage(message)) &&
+            !message.isStreaming,
+        )
+        .filter((message) => (message.content ?? "").trim().length > 0)
+        .slice(-MAX_CONTEXT_MESSAGES);
+
       for (const msg of contextMessages) {
-        if (!isCouncilAgent(msg.agentId)) continue;
+        const speaker = isCouncilAgent(msg.agentId) ? AGENT_CONFIG[msg.agentId].name : "Moderator";
         if (msg.agentId === agentId) {
           history.push({ role: "assistant", content: msg.content });
         } else {
-          const speaker = AGENT_CONFIG[msg.agentId] ?? AGENT_CONFIG.system;
           history.push({
             role: "user",
-            content: `${speaker.name}: ${msg.content}`,
+            content: `${speaker}: ${msg.content}`,
           });
         }
       }
 
       history.push({
         role: "user",
-        content: `The discussion has ended after ${turnsCompleted} turns. Write a short closing note:
-- 2–3 sentences total.
-- Give one concrete piece of feedback to at least one other agent by name (appreciation or critique).
-- Then say goodbye.
+        content: `The discussion phase has ended after ${turnsCompleted} turns. You are now in the resolution round.
+- Write 2–4 sentences total.
+- Help the council land one closing result instead of continuing open-ended debate.
+- State the single recommendation or outcome you think the council should adopt.
+- Give the strongest supporting reason in one clause.
+- Give one explicit condition that would change your mind.
+- If you disagree with the leading option, name the best alternative in one short clause.
 - Do NOT ask any questions.
-- Do NOT include @quote(...), @react(...), or @tool(...).`,
+- Do NOT say goodbye.
+- Do NOT include @quote(...), @react(...), or @tool(...).
+- Do NOT introduce a brand-new topic.`,
       });
 
       return history;
     },
-    [buildAttachmentContext, getContextMessages, topic]
+    [buildAttachmentContext, topic],
   );
 
   const resolveQuoteTargets = useCallback(
     (_agentId: CouncilAgentId, explicit: string[]): string[] => {
       return explicit;
     },
-    []
+    [],
   );
 
-  const buildToolContextMessages = useCallback((results: Array<{ name: string; output: string; error?: string }>) => {
-    const messages = results.map((result) => ({
-      role: "user" as const,
-      content: `Tool result (${result.name}): ${result.error ? `Error: ${result.error}` : result.output}`,
-    }));
-    if (messages.length > 0) {
-      messages.push({
-        role: "user",
-        content:
-          "Use the tool results above to answer directly. Only call another tool if a critical passage is still incomplete or the evidence is still missing.",
-      });
-    }
-    return messages;
-  }, []);
+  const buildToolRuntimeContext = useCallback(
+    (agentId: CouncilAgentId, currentDraft = ""): ToolContext => {
+      const recentContext = messagesRef.current
+        .filter(
+          (message) =>
+            (isCouncilAgent(message.agentId) || isModeratorMessage(message)) &&
+            !message.isStreaming &&
+            (message.content ?? "").trim().length > 0,
+        )
+        .slice(-8)
+        .map((message) => {
+          const speaker = isCouncilAgent(message.agentId)
+            ? AGENT_CONFIG[message.agentId].name
+            : "Moderator";
+          return `${speaker}: ${message.content}`;
+        });
+
+      if (currentDraft.trim()) {
+        recentContext.push(`${AGENT_CONFIG[agentId].name} draft: ${currentDraft.trim()}`);
+      }
+
+      return {
+        attachments: normalizedSession.attachments,
+        sessionTopic: topic,
+        recentContext: recentContext.join("\n"),
+      };
+    },
+    [normalizedSession.attachments, topic],
+  );
+
+  const buildToolContextMessages = useCallback(
+    (results: Array<{ name: string; output: string; error?: string }>) => {
+      const messages = results.map((result) => ({
+        role: "user" as const,
+        content: `Tool result (${result.name}): ${result.error ? `Error: ${result.error}` : result.output}`,
+      }));
+      if (messages.length > 0) {
+        messages.push({
+          role: "user",
+          content:
+            "Use the tool results above to answer directly. Only call another tool if a critical passage is still incomplete or the evidence is still missing.",
+        });
+      }
+      return messages;
+    },
+    [],
+  );
 
   // Get model display name
-  const getModelDisplayName = useCallback((provider: Provider, overrideModel?: string): string => {
-    const modelId = overrideModel || config.models[provider];
-    if (!modelId) return "Unknown Model";
-    return MODEL_DISPLAY_NAMES[modelId] || modelId;
-  }, [config.models]);
+  const getModelDisplayName = useCallback(
+    (provider: Provider, overrideModel?: string): string => {
+      const modelId = overrideModel || config.models[provider];
+      if (!modelId) return "Unknown Model";
+      return MODEL_DISPLAY_NAMES[modelId] || modelId;
+    },
+    [config.models],
+  );
 
   /**
    * Get proxy configuration - unified for all providers
@@ -1198,224 +1271,281 @@ export function Chat({ session, onNavigate, onPersistSession }: ChatProps) {
     return { provider: "openai" as const, credential, model: "gpt-5.3-chat-latest" as const };
   }, [config.credentials.openai, config.preferences.moderatorEnabled]);
 
-  const generateModeratorMessage = useCallback(async (options: {
-    kind: "opening" | "tension" | "synthesis" | "balance" | "closure";
-    conflict?: ConflictDetection | null;
-    turn?: number;
-    remainingTurns?: number;
-  }): Promise<ChatMessage | null> => {
-    if (abortRef.current) return null;
-    if (!config.preferences.moderatorEnabled) return null;
-    if (moderatorInFlightRef.current) return null;
+  const pickFinalSummaryRuntime = useCallback(() => {
+    const openaiCredential = config.credentials.openai;
+    if (openaiCredential?.apiKey) {
+      return {
+        provider: "openai" as const,
+        credential: openaiCredential,
+        model: "gpt-5.3-chat-latest" as const,
+      };
+    }
 
-    const runtime = pickModeratorRuntime();
-    if (!runtime) return null;
+    for (const provider of [
+      "anthropic",
+      "google",
+      "deepseek",
+      "kimi",
+      "qwen",
+      "minimax",
+    ] as const) {
+      const credential = config.credentials[provider];
+      const model = config.models[provider];
+      if (!credential?.apiKey || !model) continue;
+      return { provider, credential, model };
+    }
 
-    const proxy = getProxy();
-    const controller = new AbortController();
-    moderatorAbortRef.current?.abort();
-    moderatorAbortRef.current = controller;
+    return null;
+  }, [config.credentials, config.models]);
 
-    moderatorInFlightRef.current = true;
+  const generateModeratorMessage = useCallback(
+    async (options: {
+      kind: "opening" | "tension" | "synthesis" | "balance" | "resolution_prompt" | "final_summary";
+      conflict?: ConflictDetection | null;
+      turn?: number;
+      remainingTurns?: number;
+    }): Promise<ChatMessage | null> => {
+      if (abortRef.current) return null;
+      if (options.kind !== "final_summary" && !config.preferences.moderatorEnabled) return null;
+      if (moderatorInFlightRef.current) return null;
 
-    const { provider, credential, model } = runtime;
-    const newMessage: ChatMessage = {
-      id: `msg_${Date.now()}_moderator_${Math.random().toString(36).slice(2, 7)}`,
-      agentId: "system",
-      displayName: "Moderator",
-      displayProvider: provider,
-      content: "",
-      timestamp: Date.now(),
-      isStreaming: true,
-      metadata: { model: model as ModelId, latencyMs: 0 },
-    };
+      const runtime =
+        options.kind === "final_summary" ? pickFinalSummaryRuntime() : pickModeratorRuntime();
+      if (!runtime) return null;
 
-    setMessages((prev) => [...prev, newMessage]);
+      const proxy = getProxy();
+      const controller = new AbortController();
+      moderatorAbortRef.current?.abort();
+      moderatorAbortRef.current = controller;
 
-    let streamingContent = "";
-    let streamingThinking = "";
-    try {
-      const recentForContext =
-        options.kind === "opening"
-          ? []
-          : messagesRef.current
-              .filter((m) => (isCouncilAgent(m.agentId) || isModeratorMessage(m)) && !m.isStreaming)
-              .filter((m) => (m.content ?? "").trim().length > 0)
-              .slice(-12);
-      const { rawAttachments, attachmentText } = buildAttachmentContext(provider, model);
+      moderatorInFlightRef.current = true;
 
-      const history: APIChatMessage[] = [
-        { role: "system", content: MODERATOR_SYSTEM_PROMPT },
-        {
-          role: "user",
-          content: [`Discussion topic: "${topic}"`, attachmentText].filter(Boolean).join("\n\n"),
-          ...(attachmentText ? { cacheControl: "ephemeral" as const } : {}),
-          ...(rawAttachments.length > 0 ? { attachments: rawAttachments } : {}),
-        },
-      ];
+      const { provider, credential, model } = runtime;
+      const newMessage: ChatMessage = {
+        id: `msg_${Date.now()}_moderator_${Math.random().toString(36).slice(2, 7)}`,
+        agentId: "system",
+        displayName: "Moderator",
+        displayProvider: provider,
+        content: "",
+        timestamp: Date.now(),
+        isStreaming: true,
+        metadata: { model: model as ModelId, latencyMs: 0 },
+      };
 
-      for (const msg of recentForContext) {
-        const speaker = isCouncilAgent(msg.agentId)
-          ? AGENT_CONFIG[msg.agentId].name
-          : "Moderator";
-        history.push({
-          role: "user",
-          content: `${speaker} (id: ${msg.id}): ${msg.content}`,
-        });
-      }
+      setMessages((prev) => [...prev, newMessage]);
 
-      if (options.kind === "opening") {
-        history.push({
-          role: "user",
-          content:
-            "Write the opening moderator message (1–2 sentences). Re-state the topic in plain language, set one measurable objective, and ask one concrete kickoff question.",
-        });
-      } else if (options.kind === "tension") {
-        const conflict = options.conflict;
-        const a = conflict?.agentPair?.[0];
-        const b = conflict?.agentPair?.[1];
-        const pct = conflict ? Math.round((conflict.conflictScore / 100) * 100) : null;
-        const pairText =
-          a && b
-            ? `${AGENT_CONFIG[a]?.name ?? a} ↔ ${AGENT_CONFIG[b]?.name ?? b}${pct != null ? ` (${pct}%)` : ""}`
-            : "a pair of agents";
-        history.push({
-          role: "user",
-          content: `Tension detected between ${pairText}. Write a short moderator note (1–2 sentences):
+      let streamingContent = "";
+      let streamingThinking = "";
+      try {
+        const recentForContext =
+          options.kind === "opening"
+            ? []
+            : messagesRef.current
+                .filter(
+                  (m) => (isCouncilAgent(m.agentId) || isModeratorMessage(m)) && !m.isStreaming,
+                )
+                .filter((m) => (m.content ?? "").trim().length > 0)
+                .slice(-12);
+        const { rawAttachments, attachmentText } = buildAttachmentContext(provider, model);
+
+        const history: APIChatMessage[] = [
+          { role: "system", content: MODERATOR_SYSTEM_PROMPT },
+          {
+            role: "user",
+            content: [`Discussion topic: "${topic}"`, attachmentText].filter(Boolean).join("\n\n"),
+            ...(attachmentText ? { cacheControl: "ephemeral" as const } : {}),
+            ...(rawAttachments.length > 0 ? { attachments: rawAttachments } : {}),
+          },
+        ];
+
+        for (const msg of recentForContext) {
+          const speaker = isCouncilAgent(msg.agentId)
+            ? AGENT_CONFIG[msg.agentId].name
+            : "Moderator";
+          history.push({
+            role: "user",
+            content: `${speaker} (id: ${msg.id}): ${msg.content}`,
+          });
+        }
+
+        if (options.kind === "opening") {
+          history.push({
+            role: "user",
+            content:
+              "Write the opening moderator message (1–2 sentences). Re-state the topic in plain language, set one measurable objective, and ask one concrete kickoff question.",
+          });
+        } else if (options.kind === "tension") {
+          const conflict = options.conflict;
+          const a = conflict?.agentPair?.[0];
+          const b = conflict?.agentPair?.[1];
+          const pct = conflict ? Math.round((conflict.conflictScore / 100) * 100) : null;
+          const pairText =
+            a && b
+              ? `${AGENT_CONFIG[a]?.name ?? a} ↔ ${AGENT_CONFIG[b]?.name ?? b}${pct != null ? ` (${pct}%)` : ""}`
+              : "a pair of agents";
+          history.push({
+            role: "user",
+            content: `Tension detected between ${pairText}. Write a short moderator note (1–2 sentences):
 - Name the core disagreement in one clause.
 - Ask ONE clarifying question aimed at the pair.
 - Optionally invite a quieter agent by name to weigh in with ONE sentence.
 - Keep it calm and concrete.`,
-        });
-      } else if (options.kind === "synthesis") {
-        history.push({
-          role: "user",
-          content: `Provide a short synthesis for turn ${options.turn ?? "current"}:
+          });
+        } else if (options.kind === "synthesis") {
+          history.push({
+            role: "user",
+            content: `Provide a short synthesis for turn ${options.turn ?? "current"}:
 - One clause: what the group currently agrees on.
 - One clause: the sharpest unresolved disagreement.
 - Ask exactly one question that can move the discussion toward evidence or decision criteria.`,
-        });
-      } else if (options.kind === "balance") {
-        history.push({
-          role: "user",
-          content: `Participation seems concentrated in a few voices.
+          });
+        } else if (options.kind === "balance") {
+          history.push({
+            role: "user",
+            content: `Participation seems concentrated in a few voices.
 Write a brief intervention that:
 - names this pattern neutrally,
 - invites one quieter agent by name,
 - asks one concrete question that advances the topic.`,
-        });
-      } else {
-        history.push({
-          role: "user",
-          content: `The discussion is near the end (remaining turns: ${options.remainingTurns ?? "few"}).
-Write a concise closure prompt that asks the council to:
-- state their strongest surviving claim in one line, and
-- give one explicit condition that would change their mind.`,
-        });
-      }
-
-      const result = await callProvider(
-        provider,
-        credential,
-        model,
-        history,
-        (chunk) => {
-          if (abortRef.current) return;
-          if (chunk.content) {
-            streamingContent += chunk.content;
-          }
-          if (chunk.thinking) {
-            streamingThinking += chunk.thinking;
-          }
-          if (chunk.content || chunk.thinking) {
-            setMessages((prev) =>
-              prev.map((m) =>
-                m.id === newMessage.id
-                  ? { ...m, content: streamingContent, thinking: streamingThinking }
-                  : m
-              )
-            );
-          }
-        },
-        proxy,
-        {
-          signal: controller.signal,
-          idleTimeoutMs: 60000,
-          requestTimeoutMs: 90000,
+          });
+        } else if (options.kind === "resolution_prompt") {
+          history.push({
+            role: "user",
+            content: `The discussion is near the end (remaining turns: ${options.remainingTurns ?? "few"}).
+Write a concise moderator note that moves the council into resolution:
+- tell them the next step is to converge on one closing result,
+- instruct each agent to state their preferred recommendation and one condition that would change their mind,
+- do not leave the room with another open-ended question.`,
+          });
+        } else {
+          history.push({
+            role: "user",
+            content: `The resolution round is complete after ${options.turn ?? "the discussion"} turns.
+Write the official closing summary in 3–4 short sentences:
+- The first sentence must start with exactly one of these labels: Consensus:, Majority with dissent:, or Unresolved:.
+- State the council's final recommendation or the blocking issue in plain language.
+- Name the main dissent or uncertainty in one short clause.
+- End with the next action, test, or evidence that matters most.
+- Do NOT ask a question.`,
+          });
         }
-      );
 
-      if (abortRef.current) {
-        setMessages((prev) => prev.filter((m) => m.id !== newMessage.id));
-        return null;
-      }
+        const result = await callProvider(
+          provider,
+          credential,
+          model,
+          history,
+          (chunk) => {
+            if (abortRef.current) return;
+            if (chunk.content) {
+              streamingContent += chunk.content;
+            }
+            if (chunk.thinking) {
+              streamingThinking += chunk.thinking;
+            }
+            if (chunk.content || chunk.thinking) {
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === newMessage.id
+                    ? { ...m, content: streamingContent, thinking: streamingThinking }
+                    : m,
+                ),
+              );
+            }
+          },
+          proxy,
+          {
+            signal: controller.signal,
+            idleTimeoutMs: 60000,
+            requestTimeoutMs: 90000,
+          },
+        );
 
-      const { cleaned } = extractActions(result.content || "");
-      const displayContent = cleaned || normalizeMessageText(result.content || streamingContent || "");
+        if (abortRef.current) {
+          setMessages((prev) => prev.filter((m) => m.id !== newMessage.id));
+          return null;
+        }
 
-      const finalMessage: ChatMessage = {
-        ...newMessage,
-        content: displayContent || "[No response received]",
-        isStreaming: false,
-        tokens: result.tokens,
-        latencyMs: result.latencyMs,
-        error: result.error,
-        thinking: result.thinking || streamingThinking || undefined,
-        fullResponse: result.content || streamingContent || undefined,
-        metadata: {
-          model: model as ModelId,
+        const { cleaned } = extractActions(result.content || "", REACTION_IDS);
+        const displayContent =
+          cleaned || normalizeMessageText(result.content || streamingContent || "");
+
+        const finalMessage: ChatMessage = {
+          ...newMessage,
+          content: displayContent || "[No response received]",
+          isStreaming: false,
+          tokens: result.tokens,
           latencyMs: result.latencyMs,
-        },
-      };
+          error: result.error,
+          thinking: result.thinking || streamingThinking || undefined,
+          fullResponse: displayContent || undefined,
+          metadata: {
+            model: model as ModelId,
+            latencyMs: result.latencyMs,
+          },
+        };
 
-      setMessages((prev) => prev.map((m) => (m.id === newMessage.id ? finalMessage : m)));
+        setMessages((prev) => prev.map((m) => (m.id === newMessage.id ? finalMessage : m)));
 
-      if (memoryManagerRef.current && result.success) {
-        memoryManagerRef.current.addMessage(finalMessage);
+        if (memoryManagerRef.current && result.success) {
+          memoryManagerRef.current.addMessage(finalMessage);
+        }
+
+        if (result.success) {
+          setTotalTokens((prev) => ({
+            input: prev.input + result.tokens.input,
+            output: prev.output + result.tokens.output,
+          }));
+
+          const moderatorCost = calculateMessageCost(model, result.tokens);
+          setModeratorUsage((prev) => ({
+            inputTokens: prev.inputTokens + result.tokens.input,
+            outputTokens: prev.outputTokens + result.tokens.output,
+            reasoningTokens: prev.reasoningTokens + (result.tokens.reasoning ?? 0),
+            estimatedUSD: prev.estimatedUSD + (moderatorCost ?? 0),
+            pricingAvailable: prev.pricingAvailable || moderatorCost != null,
+          }));
+        }
+
+        return finalMessage;
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === newMessage.id
+              ? {
+                  ...m,
+                  isStreaming: false,
+                  error: errorMessage,
+                  content: streamingContent || "[Moderator failed]",
+                  thinking: streamingThinking || undefined,
+                  metadata: {
+                    model: model as ModelId,
+                    latencyMs: Date.now() - newMessage.timestamp,
+                  },
+                }
+              : m,
+          ),
+        );
+        return null;
+      } finally {
+        moderatorInFlightRef.current = false;
+        moderatorAbortRef.current = null;
       }
-
-      if (result.success) {
-        setTotalTokens((prev) => ({
-          input: prev.input + result.tokens.input,
-          output: prev.output + result.tokens.output,
-        }));
-
-        const moderatorCost = calculateMessageCost(model, result.tokens);
-        setModeratorUsage((prev) => ({
-          inputTokens: prev.inputTokens + result.tokens.input,
-          outputTokens: prev.outputTokens + result.tokens.output,
-          reasoningTokens: prev.reasoningTokens + (result.tokens.reasoning ?? 0),
-          estimatedUSD: prev.estimatedUSD + (moderatorCost ?? 0),
-          pricingAvailable: prev.pricingAvailable || moderatorCost != null,
-        }));
-      }
-
-      return finalMessage;
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      setMessages((prev) =>
-        prev.map((m) =>
-          m.id === newMessage.id
-            ? {
-                ...m,
-                isStreaming: false,
-                error: errorMessage,
-                content: streamingContent || "[Moderator failed]",
-                thinking: streamingThinking || undefined,
-                metadata: { model: model as ModelId, latencyMs: Date.now() - newMessage.timestamp },
-              }
-            : m
-        )
-      );
-      return null;
-    } finally {
-      moderatorInFlightRef.current = false;
-      moderatorAbortRef.current = null;
-    }
-  }, [buildAttachmentContext, config.preferences.moderatorEnabled, getProxy, pickModeratorRuntime, topic]);
+    },
+    [
+      buildAttachmentContext,
+      config.preferences.moderatorEnabled,
+      getProxy,
+      pickFinalSummaryRuntime,
+      pickModeratorRuntime,
+      topic,
+    ],
+  );
 
   useEffect(() => {
     if (!isRunning) return;
+    if (phaseRef.current !== "discussion") return;
     if (!config.preferences.moderatorEnabled) return;
     if (!conflictState) return;
 
@@ -1452,7 +1582,7 @@ Write a concise closure prompt that asks the council to:
         }
 
         return { ...message, reactions: nextBar };
-      })
+      }),
     );
   }, []);
 
@@ -1462,348 +1592,414 @@ Write a concise closure prompt that asks the council to:
     try {
       await navigator.clipboard.writeText(token);
       setRecentlyCopiedQuote(messageId);
-      window.setTimeout(() => setRecentlyCopiedQuote((prev) => (prev === messageId ? null : prev)), 900);
+      window.setTimeout(
+        () => setRecentlyCopiedQuote((prev) => (prev === messageId ? null : prev)),
+        900,
+      );
     } catch (error) {
       apiLogger.log("warn", "ui", "Clipboard copy failed", { error });
     }
   }, []);
 
   // Generate agent response using real API
-  const generateAgentResponse = useCallback(async (agentId: CouncilAgentId): Promise<ChatMessage | null> => {
-    // Check if aborted before starting
-    if (abortRef.current) return null;
+  const generateAgentResponse = useCallback(
+    async (agentId: CouncilAgentId): Promise<ChatMessage | null> => {
+      if (abortRef.current) return null;
 
-    const currentConfig = configRef.current;
-    const agentConfig = AGENT_CONFIG[agentId];
-    const credential = currentConfig.credentials[agentConfig.provider];
-    const model = currentConfig.models[agentConfig.provider];
+      const currentConfig = configRef.current;
+      const agentConfig = AGENT_CONFIG[agentId];
+      const credential = currentConfig.credentials[agentConfig.provider];
+      const model = currentConfig.models[agentConfig.provider];
 
-    if (!credential?.apiKey) {
-      const providerName =
-        agentConfig.provider === "kimi" ? "Kimi" : PROVIDER_INFO[agentConfig.provider].name;
-      const errorMsg = `No API key configured for ${providerName}`;
-      apiLogger.log("error", agentConfig.provider, errorMsg);
-      setErrors(prev => [...prev, errorMsg]);
-      return null;
-    }
-
-    if (!model) {
-      const errorMsg = `No model configured for ${agentConfig.provider}`;
-      apiLogger.log("error", agentConfig.provider, errorMsg);
-      setErrors(prev => [...prev, errorMsg]);
-      return null;
-    }
-
-    setTypingAgents((prev) => (prev.includes(agentId) ? prev : [...prev, agentId]));
-
-    // Create new message with streaming flag
-    const newMessage: ChatMessage = {
-      id: `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-      agentId,
-      content: "",
-      timestamp: Date.now(),
-      isStreaming: true,
-      metadata: { model: model as ModelId, latencyMs: 0 },
-    };
-
-    setMessages(prev => [...prev, newMessage]);
-
-    // Create abort controller for this request
-    const controller = new AbortController();
-    activeRequestsRef.current.set(agentId, controller);
-
-    const idleTimeoutMs = 120000;
-    const requestTimeoutMs =
-      agentConfig.provider === "google" || agentConfig.provider === "openai" ? 240000 : 180000;
-    const proxy = getProxy();
-
-    apiLogger.log("info", agentConfig.provider, "Dispatching request", {
-      model,
-      proxy: proxy?.type ?? "none (direct)",
-      requestTimeoutMs,
-      idleTimeoutMs,
-    });
-
-    let streamingContent = "";
-    let streamingThinking = "";
-    let toolEvents: SessionToolEvent[] = [];
-    let lastStreamFlushAt = 0;
-    let streamFlushTimer: ReturnType<typeof setTimeout> | null = null;
-    const clearStreamFlushTimer = () => {
-      if (streamFlushTimer) {
-        clearTimeout(streamFlushTimer);
-        streamFlushTimer = null;
-      }
-    };
-    const flushStreamingMessage = (force = false) => {
-      if (abortRef.current) return;
-      const now = Date.now();
-      if (!force && now - lastStreamFlushAt < 50) return;
-      lastStreamFlushAt = now;
-      setMessages((prev) =>
-        prev.map((m) =>
-          m.id === newMessage.id
-            ? {
-                ...m,
-                content: streamingContent,
-                thinking: streamingThinking || undefined,
-                toolEvents: toolEvents.length > 0 ? toolEvents : undefined,
-              }
-            : m
-        )
-      );
-    };
-    const scheduleStreamFlush = () => {
-      if (streamFlushTimer) return;
-      streamFlushTimer = setTimeout(() => {
-        streamFlushTimer = null;
-        flushStreamingMessage(true);
-      }, 60);
-    };
-
-    try {
-      let modelUsed = model;
-      let toolIteration = 0;
-
-      const appendToolEvents = (events: SessionToolEvent[]) => {
-        toolEvents = [...toolEvents, ...events];
-        setMessages((prev) =>
-          prev.map((m) =>
-            m.id === newMessage.id ? { ...m, toolEvents } : m
-          )
-        );
-      };
-
-      const runCompletion = async (
-        history: APIChatMessage[],
-        currentModel: string,
-        requestOptions?: { disableThinking?: boolean }
-      ) => {
-        streamingContent = "";
-        streamingThinking = "";
-        lastStreamFlushAt = 0;
-        clearStreamFlushTimer();
-        setMessages((prev) =>
-          prev.map((m) =>
-            m.id === newMessage.id
-              ? { ...m, content: "", thinking: undefined, toolEvents }
-              : m
-          )
-        );
-
-        return callProvider(
-          agentConfig.provider,
-          credential,
-          currentModel,
-          history,
-          (chunk) => {
-            if (abortRef.current) return;
-            if (chunk.content) {
-              streamingContent += chunk.content;
-            }
-            if (chunk.thinking) {
-              streamingThinking += chunk.thinking;
-            }
-            if (chunk.done) {
-              clearStreamFlushTimer();
-              flushStreamingMessage(true);
-              return;
-            }
-            if (Date.now() - lastStreamFlushAt >= 50) {
-              flushStreamingMessage(true);
-            } else {
-              scheduleStreamFlush();
-            }
-          },
-          proxy,
-          {
-            idleTimeoutMs,
-            requestTimeoutMs,
-            signal: controller.signal,
-            disableThinking: requestOptions?.disableThinking,
-          }
-        );
-      };
-
-      let history = buildConversationHistory(agentId);
-      let result = await runCompletion(history, modelUsed);
-
-      if (!result.success && agentConfig.provider === "anthropic" && model.includes("opus")) {
-        // If the full dated model ID fails, try the alias as fallback
-        const fallbackModel = "claude-opus-4-6";
-        if (modelUsed !== fallbackModel) {
-          apiLogger.log("warn", "anthropic", "Primary model failed; retrying with fallback", {
-            primary: model,
-            fallback: fallbackModel,
-          });
-          modelUsed = fallbackModel;
-          result = await runCompletion(history, modelUsed);
-        }
-      }
-
-      while (result.success && toolIteration < MAX_TOOL_ITERATIONS) {
-        const { cleaned, toolCalls } = extractActions(result.content || "");
-        if (toolCalls.length === 0) break;
-
-        const interim = cleaned || (toolIteration === 0 ? "Researching sources..." : "Gathering more context...");
-        setMessages((prev) =>
-          prev.map((m) =>
-            m.id === newMessage.id ? { ...m, content: interim, toolEvents } : m
-          )
-        );
-
-        const calls = toolCalls.slice(0, 3);
-        const results = await Promise.all(
-          calls.map((call) => runToolCall(call, { attachments: normalizedSession.attachments }))
-        );
-        appendToolEvents(
-          results.map((toolResult, index) =>
-            createToolEvent(toolResult.name, calls[index]?.args ?? {}, toolResult.output, toolResult.error)
-          )
-        );
-
-        const extraContext = buildToolContextMessages(results);
-        history = buildConversationHistory(agentId, extraContext);
-        result = await runCompletion(history, modelUsed);
-        toolIteration += 1;
-      }
-
-      let parsed = extractActions(result.content || "");
-      const visibleContent = normalizeMessageText(result.content || streamingContent || "");
-
-      if (result.success && TOOL_SYNTAX_LEAK_PATTERN.test(visibleContent) && parsed.toolCalls.length === 0) {
-        history = [
-          ...history,
-          {
-            role: "user",
-            content:
-              "Do not output tool_use, tool_call, function_call, XML, or provider-specific tool syntax. If you need a tool, use exactly @tool(name, {\"query\":\"...\"}) on its own line. Otherwise answer directly now.",
-          },
-        ];
-        result = await runCompletion(history, modelUsed, {
-          disableThinking: agentConfig.provider === "anthropic",
-        });
-        parsed = extractActions(result.content || "");
-      }
-
-      if (
-        result.success &&
-        !normalizeMessageText(result.content || streamingContent || "") &&
-        normalizeMessageText(result.thinking || streamingThinking || "")
-      ) {
-        history = [
-          ...history,
-          {
-            role: "user",
-            content:
-              "You produced internal reasoning but no visible answer. Reply with the final answer now. Do not repeat the hidden reasoning, and do not stop at tool syntax.",
-          },
-        ];
-        result = await runCompletion(history, modelUsed, {
-          disableThinking: agentConfig.provider === "anthropic",
-        });
-        parsed = extractActions(result.content || "");
-      }
-
-      if (
-        result.success &&
-        toolEvents.length > 0 &&
-        !parsed.cleaned &&
-        (parsed.toolCalls.length > 0 || !(result.content || streamingContent).trim())
-      ) {
-        history = [
-          ...history,
-          {
-            role: "user",
-            content:
-              "You already have enough research context. Write the final answer now using the evidence above. Do not call another tool in this reply.",
-          },
-        ];
-        result = await runCompletion(history, modelUsed, {
-          disableThinking: agentConfig.provider === "anthropic",
-        });
-        parsed = extractActions(result.content || "");
-      }
-
-      // Check if aborted after request
-      if (abortRef.current) {
-        // Remove the incomplete message
-        setMessages(prev => prev.filter(m => m.id !== newMessage.id));
+      if (!credential?.apiKey) {
+        const providerName =
+          agentConfig.provider === "kimi" ? "Kimi" : PROVIDER_INFO[agentConfig.provider].name;
+        const errorMsg = `No API key configured for ${providerName}`;
+        apiLogger.log("error", agentConfig.provider, errorMsg);
+        setErrors((prev) => [...prev, errorMsg]);
         return null;
       }
 
-      const resolvedQuotes = resolveQuoteTargets(agentId, parsed.quoteTargets);
-      const resolvedReactions =
-        parsed.reactions.length === 0 && resolvedQuotes.length > 0
-          ? [{ targetId: resolvedQuotes[0]!, emoji: DEFAULT_REACTION }]
-          : parsed.reactions;
-      const displayContent =
-        parsed.cleaned ||
-        (toolEvents.length > 0
-          ? "Research completed, but no final answer was generated."
-          : "[No response received]");
+      if (!model) {
+        const errorMsg = `No model configured for ${agentConfig.provider}`;
+        apiLogger.log("error", agentConfig.provider, errorMsg);
+        setErrors((prev) => [...prev, errorMsg]);
+        return null;
+      }
 
-      // Update message with final data
-      const finalMessage: ChatMessage = {
-        ...newMessage,
-        content: displayContent,
-        thinking: result.thinking || streamingThinking || undefined,
-        fullResponse: result.content || streamingContent || undefined,
-        isStreaming: false,
-        tokens: result.tokens,
-        latencyMs: result.latencyMs,
-        error: result.error,
-        toolEvents: toolEvents.length > 0 ? toolEvents : undefined,
-        quotedMessageIds: resolvedQuotes.length > 0 ? resolvedQuotes : undefined,
-        metadata: {
-          model: modelUsed as ModelId,
-          latencyMs: result.latencyMs,
-        },
+      setTypingAgents((prev) => (prev.includes(agentId) ? prev : [...prev, agentId]));
+
+      // Create new message with streaming flag
+      const newMessage: ChatMessage = {
+        id: `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+        agentId,
+        content: "",
+        timestamp: Date.now(),
+        isStreaming: true,
+        metadata: { model: model as ModelId, latencyMs: 0 },
       };
 
-      setMessages(prev => {
-        const updated = prev.map(m => m.id === newMessage.id ? finalMessage : m);
-        return applyReactions(updated, resolvedReactions, agentId);
+      setMessages((prev) => [...prev, newMessage]);
+
+      const idleTimeoutMs = 120000;
+      const requestTimeoutMs =
+        agentConfig.provider === "google" || agentConfig.provider === "openai" ? 240000 : 180000;
+      const proxy = getProxy();
+
+      const setActiveController = (controller: AbortController | null) => {
+        if (controller) {
+          activeRequestsRef.current.set(agentId, controller);
+        } else {
+          activeRequestsRef.current.delete(agentId);
+        }
+      };
+
+      apiLogger.log("info", agentConfig.provider, "Dispatching request", {
+        model,
+        proxy: proxy?.type ?? "none (direct)",
+        requestTimeoutMs,
+        idleTimeoutMs,
       });
 
-      // Track message in memory manager for engagement tracking
-      if (memoryManagerRef.current && result.success) {
-        memoryManagerRef.current.addMessage(finalMessage);
+      let streamingContent = "";
+      let streamingThinking = "";
+      let toolEvents: SessionToolEvent[] = [];
+      let lastStreamFlushAt = 0;
+      let streamFlushTimer: ReturnType<typeof setTimeout> | null = null;
+      const clearStreamFlushTimer = () => {
+        if (streamFlushTimer) {
+          clearTimeout(streamFlushTimer);
+          streamFlushTimer = null;
+        }
+      };
+      const flushStreamingMessage = (force = false) => {
+        if (abortRef.current) return;
+        const now = Date.now();
+        if (!force && now - lastStreamFlushAt < 50) return;
+        lastStreamFlushAt = now;
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === newMessage.id
+              ? {
+                  ...m,
+                  content: streamingContent,
+                  thinking: streamingThinking || undefined,
+                  toolEvents: toolEvents.length > 0 ? toolEvents : undefined,
+                }
+              : m,
+          ),
+        );
+      };
+      const scheduleStreamFlush = () => {
+        if (streamFlushTimer) return;
+        streamFlushTimer = setTimeout(() => {
+          streamFlushTimer = null;
+          flushStreamingMessage(true);
+        }, 60);
+      };
 
-        // Record quotes if present
-        for (const quoteId of resolvedQuotes) {
-          memoryManagerRef.current.recordQuote(quoteId, agentId);
+      try {
+        let modelUsed = model;
+        let toolIteration = 0;
+
+        const appendToolEvents = (events: SessionToolEvent[]) => {
+          toolEvents = [...toolEvents, ...events];
+          setMessages((prev) =>
+            prev.map((m) => (m.id === newMessage.id ? { ...m, toolEvents } : m)),
+          );
+        };
+
+        const runCompletion = async (
+          history: APIChatMessage[],
+          currentModel: string,
+          requestOptions?: { disableThinking?: boolean },
+        ) => {
+          const requestController = new AbortController();
+          setActiveController(requestController);
+          const streamingToolDetector = createStreamingToolCallDetector();
+          const streamedToolCalls: ToolCall[] = [];
+          let interruptedForTools = false;
+
+          streamingContent = "";
+          streamingThinking = "";
+          lastStreamFlushAt = 0;
+          clearStreamFlushTimer();
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === newMessage.id ? { ...m, content: "", thinking: undefined, toolEvents } : m,
+            ),
+          );
+
+          const providerResult = await callProvider(
+            agentConfig.provider,
+            credential,
+            currentModel,
+            history,
+            (chunk) => {
+              if (abortRef.current) return;
+              if (chunk.content) {
+                const detection = streamingToolDetector.push(chunk.content);
+                streamingContent = detection.visibleText;
+                if (detection.toolCalls.length > 0) {
+                  streamedToolCalls.push(...detection.toolCalls);
+                  interruptedForTools = true;
+                  clearStreamFlushTimer();
+                  flushStreamingMessage(true);
+                  requestController.abort();
+                  return;
+                }
+              }
+              if (chunk.thinking) {
+                streamingThinking += chunk.thinking;
+              }
+              if (chunk.done) {
+                if (!interruptedForTools) {
+                  streamingContent = streamingToolDetector.finish();
+                }
+                clearStreamFlushTimer();
+                flushStreamingMessage(true);
+                return;
+              }
+              if (Date.now() - lastStreamFlushAt >= 50) {
+                flushStreamingMessage(true);
+              } else {
+                scheduleStreamFlush();
+              }
+            },
+            proxy,
+            {
+              idleTimeoutMs,
+              requestTimeoutMs,
+              signal: requestController.signal,
+              disableThinking: requestOptions?.disableThinking,
+            },
+          );
+
+          const parsedVisible = interruptedForTools
+            ? normalizeMessageText(streamingToolDetector.getVisibleText())
+            : extractActions(providerResult.content || "", REACTION_IDS).cleaned;
+          const visibleContent =
+            parsedVisible || streamingContent || normalizeMessageText(providerResult.content || "");
+
+          streamingContent = visibleContent;
+          clearStreamFlushTimer();
+          flushStreamingMessage(true);
+
+          return {
+            ...providerResult,
+            content: visibleContent,
+            rawContent: providerResult.content || "",
+            success: interruptedForTools ? true : providerResult.success,
+            error: interruptedForTools ? undefined : providerResult.error,
+            timedOut: interruptedForTools ? false : providerResult.timedOut,
+            streamedToolCalls,
+            interruptedForTools,
+          };
+        };
+
+        let history = buildConversationHistory(agentId);
+        let result = await runCompletion(history, modelUsed);
+
+        if (!result.success && agentConfig.provider === "anthropic" && model.includes("opus")) {
+          // If the full dated model ID fails, try the alias as fallback
+          const fallbackModel = "claude-opus-4-6";
+          if (modelUsed !== fallbackModel) {
+            apiLogger.log("warn", "anthropic", "Primary model failed; retrying with fallback", {
+              primary: model,
+              fallback: fallbackModel,
+            });
+            modelUsed = fallbackModel;
+            result = await runCompletion(history, modelUsed);
+          }
         }
 
-        // Record reactions
-        for (const reaction of resolvedReactions) {
-          memoryManagerRef.current.recordReaction(reaction.targetId, agentId, reaction.emoji);
-        }
-      }
+        while (result.success && toolIteration < MAX_TOOL_ITERATIONS) {
+          const parsedForTools = extractActions(
+            result.rawContent || result.content || "",
+            REACTION_IDS,
+          );
+          const toolCalls =
+            result.streamedToolCalls.length > 0
+              ? result.streamedToolCalls
+              : parsedForTools.toolCalls;
+          if (toolCalls.length === 0) break;
 
-      if (result.success) {
-        setTotalTokens(prev => ({
-          input: prev.input + result.tokens.input,
-          output: prev.output + result.tokens.output,
+          const interim =
+            result.content ||
+            parsedForTools.cleaned ||
+            (toolIteration === 0 ? "Researching sources..." : "Gathering more context...");
+          setMessages((prev) =>
+            prev.map((m) => (m.id === newMessage.id ? { ...m, content: interim, toolEvents } : m)),
+          );
+
+          const calls = toolCalls.slice(0, 3);
+          const results = await Promise.all(
+            calls.map((call) => runToolCall(call, buildToolRuntimeContext(agentId, interim))),
+          );
+          appendToolEvents(
+            results.map((toolResult, index) =>
+              createToolEvent(
+                toolResult.name,
+                calls[index]?.args ?? {},
+                toolResult.output,
+                toolResult.error,
+              ),
+            ),
+          );
+
+          const extraContext = buildToolContextMessages(results);
+          history = buildConversationHistory(agentId, extraContext);
+          result = await runCompletion(history, modelUsed);
+          toolIteration += 1;
+        }
+
+        let parsed = extractActions(result.rawContent || result.content || "", REACTION_IDS);
+
+        if (
+          result.success &&
+          TOOL_SYNTAX_LEAK_PATTERN.test(result.rawContent || "") &&
+          parsed.toolCalls.length === 0
+        ) {
+          history = [
+            ...history,
+            {
+              role: "user",
+              content:
+                'Do not output tool_use, tool_call, function_call, XML, or provider-specific tool syntax. If you need a tool, use exactly @tool(name, {"query":"..."}) on its own line. Otherwise answer directly now.',
+            },
+          ];
+          result = await runCompletion(history, modelUsed, {
+            disableThinking: agentConfig.provider === "anthropic",
+          });
+          parsed = extractActions(result.rawContent || result.content || "", REACTION_IDS);
+        }
+
+        if (
+          result.success &&
+          !normalizeMessageText(result.content || "") &&
+          normalizeMessageText(result.thinking || streamingThinking || "")
+        ) {
+          history = [
+            ...history,
+            {
+              role: "user",
+              content:
+                "You produced internal reasoning but no visible answer. Reply with the final answer now. Do not repeat the hidden reasoning, and do not stop at tool syntax.",
+            },
+          ];
+          result = await runCompletion(history, modelUsed, {
+            disableThinking: agentConfig.provider === "anthropic",
+          });
+          parsed = extractActions(result.rawContent || result.content || "", REACTION_IDS);
+        }
+
+        if (
+          result.success &&
+          toolEvents.length > 0 &&
+          !parsed.cleaned &&
+          (parsed.toolCalls.length > 0 || !(result.content || "").trim())
+        ) {
+          history = [
+            ...history,
+            {
+              role: "user",
+              content:
+                "You already have enough research context. Write the final answer now using the evidence above. Do not call another tool in this reply.",
+            },
+          ];
+          result = await runCompletion(history, modelUsed, {
+            disableThinking: agentConfig.provider === "anthropic",
+          });
+          parsed = extractActions(result.rawContent || result.content || "", REACTION_IDS);
+        }
+
+        if (abortRef.current) {
+          setMessages((prev) => prev.filter((m) => m.id !== newMessage.id));
+          return null;
+        }
+
+        const finalVisibleContent = normalizeMessageText(result.content || streamingContent || "");
+        const resolvedQuotes = resolveQuoteTargets(agentId, parsed.quoteTargets);
+        const parsedReactions = parsed.reactions.map((reaction) => ({
+          targetId: reaction.targetId,
+          emoji: reaction.emoji as ReactionId,
         }));
+        const resolvedReactions =
+          parsedReactions.length === 0 && resolvedQuotes.length > 0
+            ? [{ targetId: resolvedQuotes[0]!, emoji: DEFAULT_REACTION }]
+            : parsedReactions;
+        const displayContent =
+          finalVisibleContent ||
+          parsed.cleaned ||
+          (toolEvents.length > 0
+            ? "Research completed, but no final answer was generated."
+            : "[No response received]");
 
-        if (costTrackerRef.current) {
-          costTrackerRef.current.recordUsage(agentId, result.tokens, modelUsed);
-          setCostState(costTrackerRef.current.getState());
+        const finalMessage: ChatMessage = {
+          ...newMessage,
+          content: displayContent,
+          thinking: result.thinking || streamingThinking || undefined,
+          fullResponse: displayContent || undefined,
+          isStreaming: false,
+          tokens: result.tokens,
+          latencyMs: result.latencyMs,
+          error: result.error,
+          toolEvents: toolEvents.length > 0 ? toolEvents : undefined,
+          quotedMessageIds: resolvedQuotes.length > 0 ? resolvedQuotes : undefined,
+          metadata: {
+            model: modelUsed as ModelId,
+            latencyMs: result.latencyMs,
+          },
+        };
+
+        setMessages((prev) => {
+          const updated = prev.map((m) => (m.id === newMessage.id ? finalMessage : m));
+          return applyReactions(updated, resolvedReactions, agentId);
+        });
+
+        if (memoryManagerRef.current && result.success) {
+          memoryManagerRef.current.addMessage(finalMessage);
+
+          for (const quoteId of resolvedQuotes) {
+            memoryManagerRef.current.recordQuote(quoteId, agentId);
+          }
+
+          for (const reaction of resolvedReactions) {
+            memoryManagerRef.current.recordReaction(reaction.targetId, agentId, reaction.emoji);
+          }
         }
-      } else {
-        setErrors(prev => [...prev, result.error || "Unknown error"]);
+
+        if (result.success) {
+          setTotalTokens((prev) => ({
+            input: prev.input + result.tokens.input,
+            output: prev.output + result.tokens.output,
+          }));
+
+          if (costTrackerRef.current) {
+            costTrackerRef.current.recordUsage(agentId, result.tokens, modelUsed);
+            setCostState(costTrackerRef.current.getState());
+          }
+        } else {
+          setErrors((prev) => [...prev, result.error || "Unknown error"]);
+        }
+
+        return finalMessage;
+      } finally {
+        clearStreamFlushTimer();
+        setActiveController(null);
+        setTypingAgents((prev) => prev.filter((id) => id !== agentId));
       }
+    },
+    [
+      buildConversationHistory,
+      buildToolRuntimeContext,
+      buildToolContextMessages,
+      getProxy,
+      resolveQuoteTargets,
+    ],
+  );
 
-      return finalMessage;
-    } finally {
-      clearStreamFlushTimer();
-      activeRequestsRef.current.delete(agentId);
-      setTypingAgents((prev) => prev.filter((id) => id !== agentId));
-    }
-  }, [buildConversationHistory, buildToolContextMessages, getProxy, normalizedSession.attachments, resolveQuoteTargets]);
-
-  const generateClosingResponse = useCallback(
+  const generateResolutionResponse = useCallback(
     async (agentId: CouncilAgentId, turnsCompleted: number): Promise<ChatMessage | null> => {
       if (abortRef.current) return null;
 
@@ -1819,7 +2015,7 @@ Write a concise closure prompt that asks the council to:
       setTypingAgents((prev) => (prev.includes(agentId) ? prev : [...prev, agentId]));
 
       const newMessage: ChatMessage = {
-        id: `msg_${Date.now()}_${agentId}_closing`,
+        id: `msg_${Date.now()}_${agentId}_resolution`,
         agentId,
         content: "",
         timestamp: Date.now(),
@@ -1832,7 +2028,7 @@ Write a concise closure prompt that asks the council to:
       let streamingContent = "";
       let streamingThinking = "";
       try {
-        const history = buildClosingConversationHistory(agentId, turnsCompleted);
+        const history = buildResolutionConversationHistory(agentId, turnsCompleted);
         const result = await callProvider(
           agentConfig.provider,
           credential,
@@ -1855,18 +2051,18 @@ Write a concise closure prompt that asks the council to:
                         content: streamingContent,
                         thinking: streamingThinking || undefined,
                       }
-                    : m
-                )
+                    : m,
+                ),
               );
             }
           },
           proxy,
           {
             signal: controller.signal,
-            // Closing notes should be quick; keep timeouts tight.
+            // Resolution notes should be quick; keep timeouts tight.
             idleTimeoutMs: 60000,
             requestTimeoutMs: 90000,
-          }
+          },
         );
 
         if (abortRef.current) {
@@ -1874,14 +2070,15 @@ Write a concise closure prompt that asks the council to:
           return null;
         }
 
-        const { cleaned } = extractActions(result.content || "");
-        const displayContent = cleaned || normalizeMessageText(result.content || streamingContent || "");
+        const { cleaned } = extractActions(result.content || "", REACTION_IDS);
+        const displayContent =
+          cleaned || normalizeMessageText(result.content || streamingContent || "");
 
         const finalMessage: ChatMessage = {
           ...newMessage,
           content: displayContent || "[No response received]",
           thinking: result.thinking || streamingThinking || undefined,
-          fullResponse: result.content || streamingContent || undefined,
+          fullResponse: displayContent || undefined,
           isStreaming: false,
           tokens: result.tokens,
           latencyMs: result.latencyMs,
@@ -1895,6 +2092,10 @@ Write a concise closure prompt that asks the council to:
         setMessages((prev) => prev.map((m) => (m.id === newMessage.id ? finalMessage : m)));
 
         if (result.success) {
+          if (memoryManagerRef.current) {
+            memoryManagerRef.current.addMessage(finalMessage);
+          }
+
           setTotalTokens((prev) => ({
             input: prev.input + result.tokens.input,
             output: prev.output + result.tokens.output,
@@ -1912,237 +2113,270 @@ Write a concise closure prompt that asks the council to:
         setTypingAgents((prev) => prev.filter((id) => id !== agentId));
       }
     },
-    [buildClosingConversationHistory, config, getProxy]
+    [buildResolutionConversationHistory, config, getProxy],
   );
 
   // Main discussion loop
-  const runDiscussion = useCallback(async (mode: "fresh" | "resume" = "resume") => {
-    if (mode === "fresh") {
-      resetRuntimeState();
+  const runDiscussion = useCallback(
+    async (mode: "fresh" | "resume" = "resume") => {
+      if (mode === "fresh") {
+        resetRuntimeState();
 
-      const topicMessage: ChatMessage = {
-        id: `msg_${Date.now()}`,
-        agentId: "system",
-        content: buildDiscussionOpeningMessage(topic, summarizeSessionAttachments(normalizedSession.attachments)),
-        timestamp: Date.now(),
-      };
+        const topicMessage: ChatMessage = {
+          id: `msg_${Date.now()}`,
+          agentId: "system",
+          content: buildDiscussionOpeningMessage(
+            topic,
+            summarizeSessionAttachments(normalizedSession.attachments),
+          ),
+          timestamp: Date.now(),
+        };
 
-      setMessages([topicMessage]);
-      cyclePendingRef.current = [...configuredAgentIds];
-    } else {
-      if (phaseRef.current === "completed") {
-        return;
+        setMessages([topicMessage]);
+        cyclePendingRef.current = [...configuredAgentIds];
+      } else {
+        if (phaseRef.current === "completed") {
+          return;
+        }
+
+        if (phaseRef.current === "discussion") {
+          const pending = cyclePendingRef.current.filter((id) => configuredAgentIds.includes(id));
+          cyclePendingRef.current = pending.length > 0 ? pending : [...configuredAgentIds];
+        } else if (phaseRef.current === "resolution") {
+          resolutionQueueRef.current = resolutionQueueRef.current.filter((id) =>
+            configuredAgentIds.includes(id),
+          );
+        }
       }
 
-      if (phaseRef.current === "discussion") {
+      abortRef.current = false;
+      pausedRef.current = false;
+      setIsPaused(false);
+      setIsRunning(true);
+      setSessionStatus("running");
+      setTypingAgents([]);
+
+      if (mode === "fresh" && config.preferences.moderatorEnabled && !abortRef.current) {
+        await generateModeratorMessage({ kind: "opening" });
+      }
+
+      while (
+        !abortRef.current &&
+        phaseRef.current === "discussion" &&
+        (maxTurns === Infinity || currentTurnRef.current < maxTurns)
+      ) {
         const pending = cyclePendingRef.current.filter((id) => configuredAgentIds.includes(id));
         cyclePendingRef.current = pending.length > 0 ? pending : [...configuredAgentIds];
-      }
-    }
+        const pendingNow = cyclePendingRef.current;
 
-    abortRef.current = false;
-    pausedRef.current = false;
-    setIsPaused(false);
-    setIsRunning(true);
-    setSessionStatus("running");
-    setTypingAgents([]);
+        const focusAgents = duoLogueRef.current?.remainingTurns
+          ? duoLogueRef.current.participants
+          : undefined;
+        const excludeForRound =
+          pendingNow.length > 1 ? (previousSpeakerRef.current ?? undefined) : undefined;
+        const bidding = generateBiddingScores(excludeForRound, AGENT_IDS, focusAgents, pendingNow);
 
-    if (mode === "fresh" && config.preferences.moderatorEnabled && !abortRef.current) {
-      await generateModeratorMessage({ kind: "opening" });
-    }
-
-    while (
-      !abortRef.current &&
-      phaseRef.current === "discussion" &&
-      (maxTurns === Infinity || currentTurnRef.current < maxTurns)
-    ) {
-      const pending = cyclePendingRef.current.filter((id) => configuredAgentIds.includes(id));
-      cyclePendingRef.current = pending.length > 0 ? pending : [...configuredAgentIds];
-      const pendingNow = cyclePendingRef.current;
-
-      const focusAgents = duoLogueRef.current?.remainingTurns ? duoLogueRef.current.participants : undefined;
-      const excludeForRound =
-        pendingNow.length > 1 ? previousSpeakerRef.current ?? undefined : undefined;
-      const bidding = generateBiddingScores(
-        excludeForRound,
-        AGENT_IDS,
-        focusAgents,
-        pendingNow
-      );
-
-      if (config.preferences.showBiddingScores) {
-        setCurrentBidding(bidding);
-        setShowBidding(true);
-        await new Promise((resolve) => setTimeout(resolve, 1500));
-        setShowBidding(false);
-      }
-
-      if (abortRef.current) break;
-
-      const rankedAgents = (Object.entries(bidding.scores) as [CouncilAgentId, number][])
-        .filter(
-          ([agentId, score]) =>
-            score > 0 &&
-            configuredProviders.includes(AGENT_CONFIG[agentId].provider) &&
-            pendingNow.includes(agentId)
-        )
-        .sort((a, b) => b[1] - a[1])
-        .map(([agentId]) => agentId);
-
-      const selectedSpeaker = rankedAgents[0];
-      if (!selectedSpeaker) {
-        break;
-      }
-
-      let response = await generateAgentResponse(selectedSpeaker);
-      if ((!response || response.error) && !abortRef.current) {
-        response = await generateAgentResponse(selectedSpeaker);
-      }
-      if (abortRef.current) break;
-
-      const actualSpeaker: CouncilAgentId | null =
-        response && !response.error ? selectedSpeaker : null;
-
-      cyclePendingRef.current = cyclePendingRef.current.filter((id) => id !== selectedSpeaker);
-      if (actualSpeaker) {
-        previousSpeakerRef.current = actualSpeaker;
-        fairnessManagerRef.current.recordSpeaker(actualSpeaker);
-        recentSpeakersRef.current = [...recentSpeakersRef.current.slice(-5), actualSpeaker];
-      }
-
-      currentTurnRef.current += 1;
-      setCurrentTurn(currentTurnRef.current);
-
-      if (duoLogueRef.current) {
-        const remaining = duoLogueRef.current.remainingTurns - 1;
-        if (remaining <= 0) {
-          duoLogueRef.current = null;
-          setDuoLogue(null);
-          setConflictState(null);
-        } else {
-          const nextDuo = { ...duoLogueRef.current, remainingTurns: remaining };
-          duoLogueRef.current = nextDuo;
-          setDuoLogue(nextDuo);
-        }
-      }
-
-      if (config.preferences.moderatorEnabled && !abortRef.current) {
-        if (
-          currentTurnRef.current > 0 &&
-          currentTurnRef.current % 7 === 0 &&
-          lastModeratorSynthesisTurnRef.current !== currentTurnRef.current
-        ) {
-          lastModeratorSynthesisTurnRef.current = currentTurnRef.current;
-          await generateModeratorMessage({ kind: "synthesis", turn: currentTurnRef.current });
+        if (config.preferences.showBiddingScores) {
+          setCurrentBidding(bidding);
+          setShowBidding(true);
+          await new Promise((resolve) => setTimeout(resolve, 1500));
+          setShowBidding(false);
         }
 
-        const recentSpeakers = recentSpeakersRef.current.slice(-6);
-        const uniqueSpeakers = Array.from(new Set(recentSpeakers));
-        if (recentSpeakers.length >= 6 && uniqueSpeakers.length <= 2) {
-          const balanceKey = `${currentTurnRef.current}:${uniqueSpeakers.sort().join("-")}`;
-          if (lastModeratorBalanceKeyRef.current !== balanceKey) {
-            lastModeratorBalanceKeyRef.current = balanceKey;
-            await generateModeratorMessage({ kind: "balance", turn: currentTurnRef.current });
+        if (abortRef.current) break;
+
+        const rankedAgents = (Object.entries(bidding.scores) as [CouncilAgentId, number][])
+          .filter(
+            ([agentId, score]) =>
+              score > 0 &&
+              configuredProviders.includes(AGENT_CONFIG[agentId].provider) &&
+              pendingNow.includes(agentId),
+          )
+          .sort((a, b) => b[1] - a[1])
+          .map(([agentId]) => agentId);
+
+        const selectedSpeaker = rankedAgents[0];
+        if (!selectedSpeaker) {
+          break;
+        }
+
+        let response = await generateAgentResponse(selectedSpeaker);
+        if ((!response || response.error) && !abortRef.current) {
+          response = await generateAgentResponse(selectedSpeaker);
+        }
+        if (abortRef.current) break;
+
+        const actualSpeaker: CouncilAgentId | null =
+          response && !response.error ? selectedSpeaker : null;
+
+        cyclePendingRef.current = cyclePendingRef.current.filter((id) => id !== selectedSpeaker);
+        if (actualSpeaker) {
+          previousSpeakerRef.current = actualSpeaker;
+          fairnessManagerRef.current.recordSpeaker(actualSpeaker);
+          recentSpeakersRef.current = [...recentSpeakersRef.current.slice(-5), actualSpeaker];
+        }
+
+        currentTurnRef.current += 1;
+        setCurrentTurn(currentTurnRef.current);
+
+        if (duoLogueRef.current) {
+          const remaining = duoLogueRef.current.remainingTurns - 1;
+          if (remaining <= 0) {
+            duoLogueRef.current = null;
+            setDuoLogue(null);
+            setConflictState(null);
+          } else {
+            const nextDuo = { ...duoLogueRef.current, remainingTurns: remaining };
+            duoLogueRef.current = nextDuo;
+            setDuoLogue(nextDuo);
           }
         }
 
-        if (
-          maxTurns !== Infinity &&
-          !moderatorClosurePostedRef.current &&
-          maxTurns - currentTurnRef.current <= 3
-        ) {
-          moderatorClosurePostedRef.current = true;
-          await generateModeratorMessage({
-            kind: "closure",
-            remainingTurns: maxTurns - currentTurnRef.current,
-          });
+        if (config.preferences.moderatorEnabled && !abortRef.current) {
+          if (
+            currentTurnRef.current > 0 &&
+            currentTurnRef.current % 7 === 0 &&
+            lastModeratorSynthesisTurnRef.current !== currentTurnRef.current
+          ) {
+            lastModeratorSynthesisTurnRef.current = currentTurnRef.current;
+            await generateModeratorMessage({ kind: "synthesis", turn: currentTurnRef.current });
+          }
+
+          const recentSpeakers = recentSpeakersRef.current.slice(-6);
+          const uniqueSpeakers = Array.from(new Set(recentSpeakers));
+          if (recentSpeakers.length >= 6 && uniqueSpeakers.length <= 2) {
+            const balanceKey = `${currentTurnRef.current}:${uniqueSpeakers.sort().join("-")}`;
+            if (lastModeratorBalanceKeyRef.current !== balanceKey) {
+              lastModeratorBalanceKeyRef.current = balanceKey;
+              await generateModeratorMessage({ kind: "balance", turn: currentTurnRef.current });
+            }
+          }
+
+          if (
+            maxTurns !== Infinity &&
+            !moderatorResolutionPromptPostedRef.current &&
+            maxTurns - currentTurnRef.current <= 3
+          ) {
+            moderatorResolutionPromptPostedRef.current = true;
+            await generateModeratorMessage({
+              kind: "resolution_prompt",
+              remainingTurns: maxTurns - currentTurnRef.current,
+            });
+          }
+        }
+
+        await new Promise((resolve) => setTimeout(resolve, 500));
+      }
+
+      if (!abortRef.current && phaseRef.current === "discussion" && currentTurnRef.current > 0) {
+        phaseRef.current = "resolution";
+        duoLogueRef.current = null;
+        setDuoLogue(null);
+
+        if (!resolutionNoticePostedRef.current) {
+          const resolutionNotice: ChatMessage = {
+            id: `msg_${Date.now()}_resolution_notice`,
+            agentId: "system",
+            content: `Discussion phase ended after ${currentTurnRef.current} turns. Resolution round: each agent states a final position, then the Moderator publishes the official result.`,
+            timestamp: Date.now(),
+          };
+          resolutionNoticePostedRef.current = true;
+          setMessages((prev) => [...prev, resolutionNotice]);
+        }
+
+        if (resolutionQueueRef.current.length === 0) {
+          resolutionQueueRef.current = [...configuredAgentIds];
         }
       }
 
-      await new Promise((resolve) => setTimeout(resolve, 500));
-    }
+      while (
+        !abortRef.current &&
+        phaseRef.current === "resolution" &&
+        resolutionQueueRef.current.length > 0
+      ) {
+        const nextAgent = resolutionQueueRef.current[0];
+        if (!nextAgent) break;
 
-    if (
-      !abortRef.current &&
-      phaseRef.current === "discussion" &&
-      currentTurnRef.current > 0
-    ) {
-      phaseRef.current = "closing";
+        await generateResolutionResponse(nextAgent, currentTurnRef.current);
+        if (abortRef.current) break;
 
-      if (!closingNoticePostedRef.current) {
-        const closingNotice: ChatMessage = {
-          id: `msg_${Date.now()}_closing_notice`,
-          agentId: "system",
-          content:
-            `Discussion ended after ${currentTurnRef.current} turns. Closing round: quick goodbyes + feedback.`,
-          timestamp: Date.now(),
-        };
-        closingNoticePostedRef.current = true;
-        setMessages((prev) => [...prev, closingNotice]);
+        resolutionQueueRef.current = resolutionQueueRef.current.slice(1);
       }
 
-      if (closingQueueRef.current.length === 0) {
-        closingQueueRef.current = AGENT_IDS.filter((id) =>
-          configuredProviders.includes(AGENT_CONFIG[id].provider)
-        );
+      if (
+        !abortRef.current &&
+        phaseRef.current === "resolution" &&
+        resolutionQueueRef.current.length === 0
+      ) {
+        if (!moderatorFinalSummaryPostedRef.current) {
+          const summaryMessage = await generateModeratorMessage({
+            kind: "final_summary",
+            turn: currentTurnRef.current,
+          });
+
+          if (summaryMessage) {
+            moderatorFinalSummaryPostedRef.current = true;
+          } else {
+            const fallbackSummary: ChatMessage = {
+              id: `msg_${Date.now()}_moderator_fallback_summary`,
+              agentId: "system",
+              displayName: "Moderator",
+              content:
+                "Moderator summary unavailable because no summary provider is configured. Review the resolution round above for the final positions.",
+              timestamp: Date.now(),
+            };
+            moderatorFinalSummaryPostedRef.current = true;
+            setMessages((prev) => [...prev, fallbackSummary]);
+            if (memoryManagerRef.current) {
+              memoryManagerRef.current.addMessage(fallbackSummary);
+            }
+          }
+        }
+
+        phaseRef.current = "completed";
+        setSessionStatus("completed");
+        setIsPaused(false);
       }
-    }
 
-    while (
-      !abortRef.current &&
-      phaseRef.current === "closing" &&
-      closingQueueRef.current.length > 0
-    ) {
-      const nextAgent = closingQueueRef.current[0];
-      if (!nextAgent) break;
-
-      await generateClosingResponse(nextAgent, currentTurnRef.current);
-      if (abortRef.current) break;
-
-      closingQueueRef.current = closingQueueRef.current.slice(1);
-    }
-
-    if (
-      !abortRef.current &&
-      phaseRef.current === "closing" &&
-      closingQueueRef.current.length === 0
-    ) {
-      phaseRef.current = "completed";
-      setSessionStatus("completed");
-      setIsPaused(false);
-    }
-
-    setIsRunning(false);
-  }, [
-    topic,
-    maxTurns,
-    config.preferences.showBiddingScores,
-    config.preferences.moderatorEnabled,
-    generateBiddingScores,
-    generateAgentResponse,
-    generateModeratorMessage,
-    generateClosingResponse,
-    configuredAgentIds,
-    configuredProviders,
-    normalizedSession.attachments,
-    resetRuntimeState,
-  ]);
+      setIsRunning(false);
+    },
+    [
+      topic,
+      maxTurns,
+      config.preferences.showBiddingScores,
+      config.preferences.moderatorEnabled,
+      generateBiddingScores,
+      generateAgentResponse,
+      generateModeratorMessage,
+      generateResolutionResponse,
+      configuredAgentIds,
+      configuredProviders,
+      normalizedSession.attachments,
+      resetRuntimeState,
+    ],
+  );
 
   // Start discussion when providers become available
   useEffect(() => {
     if (!attachmentsReady) return;
     if (hasStartedRef.current) return;
-    if (configuredProviders.length > 0 && normalizedSession.status === "draft" && normalizedSession.messages.length === 0) {
+    if (
+      configuredProviders.length > 0 &&
+      normalizedSession.status === "draft" &&
+      normalizedSession.messages.length === 0
+    ) {
       hasStartedRef.current = true;
       void runDiscussion("fresh");
     } else if (messages.length === 0) {
-      setMessages([{
-        id: `msg_${Date.now()}`,
-        agentId: "system",
-        content: `No API keys configured. Please go to Settings and configure at least one provider to start the discussion.`,
-        timestamp: Date.now(),
-        error: "No API keys configured",
-      }]);
+      setMessages([
+        {
+          id: `msg_${Date.now()}`,
+          agentId: "system",
+          content: `No API keys configured. Please go to Settings and configure at least one provider to start the discussion.`,
+          timestamp: Date.now(),
+          error: "No API keys configured",
+        },
+      ]);
     }
   }, [
     attachmentsReady,
@@ -2214,7 +2448,7 @@ Write a concise closure prompt that asks the council to:
     const messageFingerprint = persistedMessages.reduce((hash, message) => {
       const reactionCount = Object.values(message.reactions ?? {}).reduce(
         (count, reaction) => count + (reaction?.count ?? 0),
-        0
+        0,
       );
 
       return (
@@ -2236,7 +2470,7 @@ Write a concise closure prompt that asks the council to:
       totalTokens.output,
       errors.join("|"),
       duoLogue?.remainingTurns ?? 0,
-      closingQueueRef.current.join(","),
+      resolutionQueueRef.current.join(","),
       messageFingerprint,
       persistedMessages.length,
     ].join("::");
@@ -2272,9 +2506,10 @@ Write a concise closure prompt that asks the council to:
         lastModeratorKey: lastModeratorKeyRef.current,
         lastModeratorBalanceKey: lastModeratorBalanceKeyRef.current,
         lastModeratorSynthesisTurn: lastModeratorSynthesisTurnRef.current,
-        moderatorClosurePosted: moderatorClosurePostedRef.current,
-        closingQueue: closingQueueRef.current,
-        closingNoticePosted: closingNoticePostedRef.current,
+        moderatorResolutionPromptPosted: moderatorResolutionPromptPostedRef.current,
+        moderatorFinalSummaryPosted: moderatorFinalSummaryPostedRef.current,
+        resolutionQueue: resolutionQueueRef.current,
+        resolutionNoticePosted: resolutionNoticePostedRef.current,
       },
     });
 
@@ -2320,7 +2555,7 @@ Write a concise closure prompt that asks the council to:
           !m.isStreaming &&
           ((m.content ?? "").trim().length > 0 ||
             (m.fullResponse ?? "").trim().length > 0 ||
-            (m.thinking ?? "").trim().length > 0)
+            (m.thinking ?? "").trim().length > 0),
       )
       .map((m) => {
         const agent = AGENT_CONFIG[m.agentId] ?? AGENT_CONFIG.system;
@@ -2347,8 +2582,9 @@ Write a concise closure prompt that asks the council to:
 
   const totalEstimatedCostUSD = (costState?.totalEstimatedUSD ?? 0) + moderatorUsage.estimatedUSD;
   const hasAnyPricing =
-    (costState ? Object.values(costState.agentCosts).some((agent) => agent.pricingAvailable) : false) ||
-    moderatorUsage.pricingAvailable;
+    (costState
+      ? Object.values(costState.agentCosts).some((agent) => agent.pricingAvailable)
+      : false) || moderatorUsage.pricingAvailable;
 
   return (
     <div className="app-shell flex flex-col h-screen">
@@ -2357,10 +2593,7 @@ Write a concise closure prompt that asks the council to:
       <div className="app-header px-6 py-4 relative z-10 chat-workstation-header">
         <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
           <div className="chat-session-hero">
-            <button
-              onClick={handleBackToWorkstation}
-              className="button-ghost"
-            >
+            <button onClick={handleBackToWorkstation} className="button-ghost">
               &larr; Workstation
             </button>
             <div className="divider-vertical"></div>
@@ -2370,12 +2603,38 @@ Write a concise closure prompt that asks the council to:
             <div className="chat-meta-stack">
               <div className="chat-kicker-row">
                 <span className={`session-status session-status-${sessionStatus}`}>
-                  {sessionStatus === "completed" ? "Completed" : isPaused ? "Paused" : isRunning ? "Running" : "Saved"}
+                  {sessionStatus === "completed"
+                    ? "Completed"
+                    : isPaused
+                      ? "Paused"
+                      : isRunning
+                        ? "Running"
+                        : "Saved"}
                 </span>
-                <span className="chat-autosave-pill">Autosaved locally at {formattedLastSavedAt}</span>
+                <span className="chat-autosave-pill">
+                  Autosaved locally at {formattedLastSavedAt}
+                </span>
               </div>
               <h1 className="chat-session-title">Socratic Council</h1>
-              <p className="chat-session-topic">{topic}</p>
+              <div className={`chat-session-topic-shell${isTopicExpanded ? " is-expanded" : ""}`}>
+                <div className={`chat-session-topic-body${isTopicExpanded ? " is-expanded" : ""}`}>
+                  <p
+                    ref={topicBodyRef}
+                    className={`chat-session-topic${isTopicExpanded ? " is-expanded" : ""}`}
+                  >
+                    {topic}
+                  </p>
+                </div>
+                {(topicOverflowing || isTopicExpanded) && (
+                  <button
+                    type="button"
+                    className="chat-session-topic-toggle"
+                    onClick={() => setIsTopicExpanded((prev) => !prev)}
+                  >
+                    {isTopicExpanded ? "Collapse" : "Show full message"}
+                  </button>
+                )}
+              </div>
             </div>
           </div>
 
@@ -2394,15 +2653,11 @@ Write a concise closure prompt that asks the council to:
               )}
             </div>
 
-            <div className="badge badge-info">
-              {totalTokens.input + totalTokens.output} tokens
-            </div>
+            <div className="badge badge-info">{totalTokens.input + totalTokens.output} tokens</div>
 
             {costState && (
               <div className="badge">
-                {hasAnyPricing
-                  ? `$${totalEstimatedCostUSD.toFixed(4)}`
-                  : "$N/A"}
+                {hasAnyPricing ? `$${totalEstimatedCostUSD.toFixed(4)}` : "$N/A"}
               </div>
             )}
 
@@ -2413,53 +2668,66 @@ Write a concise closure prompt that asks the council to:
             )}
 
             <button
-              onClick={() =>
-                setSidePanelView((prev) => (prev === "logs" ? "default" : "logs"))
-              }
+              onClick={() => setSidePanelView((prev) => (prev === "logs" ? "default" : "logs"))}
               className="button-secondary text-sm"
             >
               Logs {errors.length > 0 && `(${errors.length})`}
             </button>
 
             <button
-              onClick={() =>
-                setSidePanelView((prev) => (prev === "search" ? "default" : "search"))
-              }
+              onClick={() => setSidePanelView((prev) => (prev === "search" ? "default" : "search"))}
               className="button-secondary text-sm"
             >
               Search
             </button>
 
             <button
-              onClick={() =>
-                setSidePanelView((prev) => (prev === "export" ? "default" : "export"))
-              }
+              onClick={() => setSidePanelView((prev) => (prev === "export" ? "default" : "export"))}
               className="button-secondary text-sm"
             >
               Export
             </button>
 
-            {sessionStatus !== "completed" && (isRunning || isPaused || sessionStatus === "paused" || currentTurn > 0) && (
-              <button
-                onClick={handlePauseResume}
-                className={`session-control-button ${isPaused ? "is-resume" : ""}`}
-                title={isPaused ? "Resume session" : "Pause and save session"}
-              >
-                <span className="session-control-icon">
-                  {isPaused ? (
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.25" strokeLinecap="round" strokeLinejoin="round">
-                      <polygon points="8 6 18 12 8 18 8 6" fill="currentColor" stroke="none" />
-                    </svg>
-                  ) : (
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.25" strokeLinecap="round" strokeLinejoin="round">
-                      <line x1="10" y1="7" x2="10" y2="17" />
-                      <line x1="14" y1="7" x2="14" y2="17" />
-                    </svg>
-                  )}
-                </span>
-                <span>{isPaused ? "Resume Session" : "Pause & Save"}</span>
-              </button>
-            )}
+            {sessionStatus !== "completed" &&
+              (isRunning || isPaused || sessionStatus === "paused" || currentTurn > 0) && (
+                <button
+                  onClick={handlePauseResume}
+                  className={`session-control-button ${isPaused ? "is-resume" : ""}`}
+                  title={isPaused ? "Resume session" : "Pause and save session"}
+                >
+                  <span className="session-control-icon">
+                    {isPaused ? (
+                      <svg
+                        width="18"
+                        height="18"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2.25"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      >
+                        <polygon points="8 6 18 12 8 18 8 6" fill="currentColor" stroke="none" />
+                      </svg>
+                    ) : (
+                      <svg
+                        width="18"
+                        height="18"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2.25"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      >
+                        <line x1="10" y1="7" x2="10" y2="17" />
+                        <line x1="14" y1="7" x2="14" y2="17" />
+                      </svg>
+                    )}
+                  </span>
+                  <span>{isPaused ? "Resume Session" : "Pause & Save"}</span>
+                </button>
+              )}
           </div>
         </div>
       </div>
@@ -2508,19 +2776,23 @@ Write a concise closure prompt that asks the council to:
                       : `var(--color-${message.agentId})`;
               const accentStyle = { "--accent": accent } as CSSProperties;
               const reactionEntries = message.reactions
-                ? (Object.entries(message.reactions) as [ReactionId, { count: number; by: string[] }][]).filter(
-                    ([, reaction]) => reaction?.count
-                  )
+                ? (
+                    Object.entries(message.reactions) as [
+                      ReactionId,
+                      { count: number; by: string[] },
+                    ][]
+                  ).filter(([, reaction]) => reaction?.count)
                 : [];
 
               // Determine message status classes
-              const isSuccess = isAgent && !message.isStreaming && !message.error && message.content;
-              const messageStatusClass = message.error 
-                ? "has-error" 
-                : isSuccess 
-                  ? "message-success" 
-                  : message.isStreaming 
-                    ? "is-streaming" 
+              const isSuccess =
+                isAgent && !message.isStreaming && !message.error && message.content;
+              const messageStatusClass = message.error
+                ? "has-error"
+                : isSuccess
+                  ? "message-success"
+                  : message.isStreaming
+                    ? "is-streaming"
                     : "";
 
               const isHighlighted = highlightedMessageId === message.id;
@@ -2544,18 +2816,16 @@ Write a concise closure prompt that asks the council to:
                     ) : (
                       <ProviderIcon provider={agent.provider} size={40} />
                     )}
-                    {isCouncilAgent(message.agentId) && typingAgents.includes(message.agentId) && message.isStreaming && (
-                      <div className="avatar-speaking-indicator" />
-                    )}
+                    {isCouncilAgent(message.agentId) &&
+                      typingAgents.includes(message.agentId) &&
+                      message.isStreaming && <div className="avatar-speaking-indicator" />}
                   </div>
 
                   {/* Message content */}
                   <div className="discord-message-content">
                     {/* Header: Name (Model) + timestamp */}
                     <div className="discord-message-header">
-                      <span className={`discord-username ${nameClass}`}>
-                        {displayName}
-                      </span>
+                      <span className={`discord-username ${nameClass}`}>{displayName}</span>
                       {(isAgent || isModerator) && modelName && (
                         <span className="discord-model">({modelName})</span>
                       )}
@@ -2566,16 +2836,15 @@ Write a concise closure prompt that asks the council to:
                           {message.isStreaming ? "Thinking" : "Thought Summary"}
                         </span>
                       )}
-                      {(isAgent || isModerator) && (message.isStreaming || message.latencyMs != null) && (
-                        <LiveStopwatch
-                          startTime={message.timestamp}
-                          isStreaming={!!message.isStreaming}
-                          finalMs={message.latencyMs}
-                        />
-                      )}
-                      <span className="discord-timestamp">
-                        {formatTime(message.timestamp)}
-                      </span>
+                      {(isAgent || isModerator) &&
+                        (message.isStreaming || message.latencyMs != null) && (
+                          <LiveStopwatch
+                            startTime={message.timestamp}
+                            isStreaming={!!message.isStreaming}
+                            finalMs={message.latencyMs}
+                          />
+                        )}
+                      <span className="discord-timestamp">{formatTime(message.timestamp)}</span>
                       {message.tokens && (
                         <span className="discord-tokens">
                           {message.tokens.input}+{message.tokens.output}
@@ -2586,7 +2855,10 @@ Write a concise closure prompt that asks the council to:
                         </span>
                       )}
                       {(() => {
-                        const msgCost = calculateMessageCost(message.metadata?.model, message.tokens);
+                        const msgCost = calculateMessageCost(
+                          message.metadata?.model,
+                          message.tokens,
+                        );
                         return msgCost !== null ? (
                           <span className="discord-cost">${msgCost.toFixed(4)}</span>
                         ) : null;
@@ -2609,16 +2881,18 @@ Write a concise closure prompt that asks the council to:
                                   <div className="message-quote-header">
                                     Missing quote · @quote({segment.id})
                                   </div>
-                                  <div className="message-quote-body">
-                                    Message not found.
-                                  </div>
+                                  <div className="message-quote-body">Message not found.</div>
                                 </div>
                               );
                             }
 
                             const qReactions = qm.reactions
-                              ? (Object.entries(qm.reactions) as [ReactionId, { count: number; by: string[] }][])
-                                  .filter(([, r]) => r?.count)
+                              ? (
+                                  Object.entries(qm.reactions) as [
+                                    ReactionId,
+                                    { count: number; by: string[] },
+                                  ][]
+                                ).filter(([, r]) => r?.count)
                               : [];
 
                             const strippedContent = stripQuoteTokens(qm.content);
@@ -2632,13 +2906,17 @@ Write a concise closure prompt that asks the council to:
                                 onClick={() => jumpToMessage(segment.id)}
                                 role="button"
                                 tabIndex={0}
-                                onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") jumpToMessage(segment.id); }}
+                                onKeyDown={(e) => {
+                                  if (e.key === "Enter" || e.key === " ") jumpToMessage(segment.id);
+                                }}
                               >
                                 <div className="message-quote-header">
-                                  {(qm.displayName ?? AGENT_CONFIG[qm.agentId].name)} · {formatTime(qm.timestamp)}
+                                  {qm.displayName ?? AGENT_CONFIG[qm.agentId].name} ·{" "}
+                                  {formatTime(qm.timestamp)}
                                 </div>
                                 <div className="message-quote-body">
-                                  {truncated}{ellipsis}
+                                  {truncated}
+                                  {ellipsis}
                                 </div>
                                 {qReactions.length > 0 && (
                                   <div className="message-quote-reactions">
@@ -2688,10 +2966,13 @@ Write a concise closure prompt that asks the council to:
                               </summary>
                               <div className="message-tool-body">
                                 <div className="message-tool-meta">
-                                  {getToolDisplayName(event.name as ToolCall["name"])} · {formatTime(event.timestamp)}
+                                  {getToolDisplayName(event.name as ToolCall["name"])} ·{" "}
+                                  {formatTime(event.timestamp)}
                                 </div>
                                 <div className="message-tool-output">
-                                  {event.error ? `Error: ${event.error}\n\n${event.output}` : event.output}
+                                  {event.error
+                                    ? `Error: ${event.error}\n\n${event.output}`
+                                    : event.output}
                                 </div>
                               </div>
                             </details>
@@ -2728,7 +3009,9 @@ Write a concise closure prompt that asks the council to:
                         type="button"
                         className="message-action"
                         onClick={() =>
-                          setReactionPickerTarget((prev) => (prev === message.id ? null : message.id))
+                          setReactionPickerTarget((prev) =>
+                            prev === message.id ? null : message.id,
+                          )
                         }
                         title="Add a reaction"
                       >
@@ -2768,11 +3051,7 @@ Write a concise closure prompt that asks the council to:
                     )}
 
                     {/* Error message */}
-                    {message.error && (
-                      <div className="discord-error">
-                        {message.error}
-                      </div>
-                    )}
+                    {message.error && <div className="discord-error">{message.error}</div>}
                   </div>
                 </div>
               );
@@ -2787,7 +3066,16 @@ Write a concise closure prompt that asks the council to:
               title="Scroll to bottom"
               aria-label="Scroll to bottom"
             >
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <svg
+                width="20"
+                height="20"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
                 <polyline points="6 9 12 15 18 9" />
               </svg>
             </button>
@@ -2811,20 +3099,24 @@ Write a concise closure prompt that asks the council to:
                 </button>
               </div>
               <div className="space-y-2 text-xs">
-                {apiLogger.getLogs().slice(-20).reverse().map((log, i) => (
-                  <div
-                    key={i}
-                    className={`log-card ${log.level === "error" ? "error" : log.level === "warn" ? "warn" : ""}`}
-                  >
-                    <div className="flex items-center gap-2 mb-1">
-                      <span className="font-medium">[{log.provider}]</span>
-                      <span className="text-ink-500">
-                        {new Date(log.timestamp).toLocaleTimeString()}
-                      </span>
+                {apiLogger
+                  .getLogs()
+                  .slice(-20)
+                  .reverse()
+                  .map((log, i) => (
+                    <div
+                      key={i}
+                      className={`log-card ${log.level === "error" ? "error" : log.level === "warn" ? "warn" : ""}`}
+                    >
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="font-medium">[{log.provider}]</span>
+                        <span className="text-ink-500">
+                          {new Date(log.timestamp).toLocaleTimeString()}
+                        </span>
+                      </div>
+                      <div>{log.message}</div>
                     </div>
-                    <div>{log.message}</div>
-                  </div>
-                ))}
+                  ))}
                 {apiLogger.getLogs().length === 0 && (
                   <div className="text-ink-500 text-center py-4">No logs yet</div>
                 )}
@@ -2880,9 +3172,7 @@ Write a concise closure prompt that asks the council to:
                           {hasApiKey ? modelName : "No API key"}
                         </div>
                       </div>
-                      {isSpeaking && (
-                        <span className="badge badge-success text-xs">Speaking</span>
-                      )}
+                      {isSpeaking && <span className="badge badge-success text-xs">Speaking</span>}
                     </div>
                   );
                 })}
@@ -2928,7 +3218,9 @@ Write a concise closure prompt that asks the council to:
                             <div className="h-1.5 bg-white/70 rounded-full overflow-hidden">
                               <div
                                 className={`h-full bidding-bar rounded-full ${
-                                  isWinner ? "bg-gradient-to-r from-emerald-600 to-amber-400" : "bg-slate-400"
+                                  isWinner
+                                    ? "bg-gradient-to-r from-emerald-600 to-amber-400"
+                                    : "bg-slate-400"
                                 }`}
                                 style={{ width: `${barWidth}%` }}
                               />
@@ -2963,9 +3255,7 @@ Write a concise closure prompt that asks the council to:
 
                       return (
                         <div key={agentId} className="flex items-center justify-between">
-                          <span className={`text-ink-700 ${agent.color}`}>
-                            {agent.name}
-                          </span>
+                          <span className={`text-ink-700 ${agent.color}`}>{agent.name}</span>
                           <span className="text-ink-500">
                             {inputTokens}/{outputTokens} · r:{reasoningTokens} · {costLabel}
                           </span>
@@ -2975,8 +3265,8 @@ Write a concise closure prompt that asks the council to:
                     <div className="flex items-center justify-between">
                       <span className="text-emerald-300">Moderator</span>
                       <span className="text-ink-500">
-                        {moderatorUsage.inputTokens}/{moderatorUsage.outputTokens} ·
-                        r:{moderatorUsage.reasoningTokens} ·{" "}
+                        {moderatorUsage.inputTokens}/{moderatorUsage.outputTokens} · r:
+                        {moderatorUsage.reasoningTokens} ·{" "}
                         {moderatorUsage.pricingAvailable
                           ? `$${moderatorUsage.estimatedUSD.toFixed(4)}`
                           : "—"}
@@ -2995,7 +3285,6 @@ Write a concise closure prompt that asks the council to:
                   <div className="text-sm text-ink-500">No usage recorded yet.</div>
                 )}
               </div>
-
 
               {/* Discussion stats */}
               {!isRunning && currentTurn > 0 && (

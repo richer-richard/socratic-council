@@ -1,4 +1,8 @@
-import { replayBufferedStream, TransportFailure, type TransportErrorCode } from "@socratic-council/sdk";
+import {
+  replayBufferedStream,
+  TransportFailure,
+  type TransportErrorCode,
+} from "@socratic-council/sdk";
 import type {
   ProxyConfig,
   StreamHandlers,
@@ -24,34 +28,39 @@ interface TauriStreamChunk {
 type TransportLogger = (
   level: "debug" | "info" | "warn" | "error",
   message: string,
-  details?: unknown
+  details?: unknown,
 ) => void;
 
 function isTauri(): boolean {
   return (
-    typeof window !== "undefined" &&
-    ("__TAURI__" in window || "__TAURI_INTERNALS__" in window)
+    typeof window !== "undefined" && ("__TAURI__" in window || "__TAURI_INTERNALS__" in window)
   );
 }
 
 async function tauriInvoke<T>(
   cmd: string,
   args: Record<string, unknown>,
-  timeoutMs = 180000
+  timeoutMs = 180000,
 ): Promise<T> {
   const { invoke } = await import("@tauri-apps/api/core");
 
   const result = await Promise.race([
     invoke(cmd, args) as Promise<T>,
     new Promise<T>((_, reject) =>
-      setTimeout(() => reject(new Error(`Tauri command '${cmd}' timed out after ${timeoutMs}ms`)), timeoutMs)
+      setTimeout(
+        () => reject(new Error(`Tauri command '${cmd}' timed out after ${timeoutMs}ms`)),
+        timeoutMs,
+      ),
     ),
   ]);
 
   return result;
 }
 
-async function tauriListen(event: string, callback: (payload: unknown) => void): Promise<() => void> {
+async function tauriListen(
+  event: string,
+  callback: (payload: unknown) => void,
+): Promise<() => void> {
   const { listen } = await import("@tauri-apps/api/event");
   return listen(event, (e: { payload: unknown }) => callback(e.payload));
 }
@@ -72,7 +81,9 @@ function toTransportFailure(code: TransportErrorCode, message: string, details?:
   return new TransportFailure(code, message, details);
 }
 
-export function createTauriTransport(options: { proxy?: ProxyConfig; logger?: TransportLogger } = {}): Transport {
+export function createTauriTransport(
+  options: { proxy?: ProxyConfig; logger?: TransportLogger } = {},
+): Transport {
   const logger = options.logger;
   const proxy = options.proxy;
 
@@ -94,7 +105,7 @@ export function createTauriTransport(options: { proxy?: ProxyConfig; logger?: Tr
             timeout_ms: req.timeoutMs ?? 180000,
           },
         },
-        (req.timeoutMs ?? 180000) + 5000
+        (req.timeoutMs ?? 180000) + 5000,
       );
 
       if (result.error) {
@@ -110,7 +121,9 @@ export function createTauriTransport(options: { proxy?: ProxyConfig; logger?: Tr
 
   const stream = async (req: StreamRequest, handlers: StreamHandlers) => {
     if (!isTauri()) {
-      handlers.onError(toTransportFailure("FETCH_STREAM_FAILED", "Not running in Tauri environment"));
+      handlers.onError(
+        toTransportFailure("FETCH_STREAM_FAILED", "Not running in Tauri environment"),
+      );
       return;
     }
 
@@ -122,6 +135,8 @@ export function createTauriTransport(options: { proxy?: ProxyConfig; logger?: Tr
     let idleTimer: ReturnType<typeof setInterval> | null = null;
     let lastChunkAt = Date.now();
     const requestId = `req_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+    let receivedAnyChunk = false;
+    let pendingStreamFailure: TransportFailure | null = null;
 
     let abortHandler: (() => void) | null = null;
 
@@ -159,18 +174,14 @@ export function createTauriTransport(options: { proxy?: ProxyConfig; logger?: Tr
     };
 
     hardTimeoutTimer = setTimeout(() => {
-      finishError(
-        toTransportFailure("STREAM_TIMEOUT", `Request timed out after ${timeoutMs}ms`)
-      );
+      finishError(toTransportFailure("STREAM_TIMEOUT", `Request timed out after ${timeoutMs}ms`));
     }, timeoutMs);
 
     idleTimer = setInterval(() => {
       if (finished) return;
       const idleMs = Date.now() - lastChunkAt;
       if (idleMs >= idleTimeoutMs) {
-        finishError(
-          toTransportFailure("STREAM_IDLE_TIMEOUT", `No data for ${idleTimeoutMs}ms`)
-        );
+        finishError(toTransportFailure("STREAM_IDLE_TIMEOUT", `No data for ${idleTimeoutMs}ms`));
       }
     }, 5000);
 
@@ -194,16 +205,18 @@ export function createTauriTransport(options: { proxy?: ProxyConfig; logger?: Tr
         if (chunk.request_id !== requestId) return;
 
         if (chunk.error) {
-          finishError(toTransportFailure("FETCH_STREAM_FAILED", chunk.error));
+          pendingStreamFailure = toTransportFailure("FETCH_STREAM_FAILED", chunk.error);
           return;
         }
 
         if (chunk.chunk) {
           lastChunkAt = Date.now();
+          receivedAnyChunk = true;
           handlers.onChunk(chunk.chunk);
         }
 
         if (chunk.done) {
+          if (pendingStreamFailure) return;
           finishDone();
         }
       });
@@ -222,11 +235,32 @@ export function createTauriTransport(options: { proxy?: ProxyConfig; logger?: Tr
             request_id: requestId,
           },
         },
-        timeoutMs + 10000
+        timeoutMs + 10000,
       );
+
+      if (finished) return;
+
+      if (pendingStreamFailure) {
+        if (receivedAnyChunk) {
+          finishError(pendingStreamFailure);
+          return;
+        }
+        throw pendingStreamFailure;
+      }
     } catch (error) {
-      const failure = toTransportFailure("FETCH_STREAM_FAILED", "Tauri stream failed", error);
+      if (finished) return;
+
+      const failure =
+        error instanceof TransportFailure
+          ? error
+          : (pendingStreamFailure ??
+            toTransportFailure("FETCH_STREAM_FAILED", "Tauri stream failed", error));
       handlers.onFallback?.(failure);
+
+      if (receivedAnyChunk || req.signal?.aborted) {
+        finishError(failure);
+        return;
+      }
 
       try {
         const fallback = await request({
@@ -243,8 +277,8 @@ export function createTauriTransport(options: { proxy?: ProxyConfig; logger?: Tr
             toTransportFailure(
               "HTTP_ERROR",
               `HTTP ${fallback.status}: ${fallback.body}`,
-              undefined
-            )
+              undefined,
+            ),
           );
           return;
         }
@@ -253,7 +287,7 @@ export function createTauriTransport(options: { proxy?: ProxyConfig; logger?: Tr
         finishDone();
       } catch (fallbackError) {
         finishError(
-          toTransportFailure("FALLBACK_FAILED", "Fallback request failed", fallbackError)
+          toTransportFailure("FALLBACK_FAILED", "Fallback request failed", fallbackError),
         );
       }
     }

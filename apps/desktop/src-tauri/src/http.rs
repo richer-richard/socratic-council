@@ -3,12 +3,12 @@
 //! This module provides HTTP request functionality that supports SOCKS5, HTTP, and HTTPS proxies.
 //! It's designed to be called from the frontend via Tauri commands.
 
+use futures_util::StreamExt;
 use reqwest::{Client, Proxy};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::time::Duration;
 use tauri::{AppHandle, Emitter};
-use futures_util::StreamExt;
 
 /// Proxy configuration from frontend
 #[derive(Debug, Clone, Deserialize)]
@@ -61,7 +61,10 @@ fn build_proxy_url(config: &ProxyConfig) -> String {
         _ => String::new(),
     };
 
-    format!("{}://{}{}:{}", config.proxy_type, auth, config.host, config.port)
+    format!(
+        "{}://{}{}:{}",
+        config.proxy_type, auth, config.host, config.port
+    )
 }
 
 /// Build HTTP client with optional proxy
@@ -75,12 +78,10 @@ fn build_client(proxy_config: Option<&ProxyConfig>, timeout_ms: u64) -> Result<C
             let proxy_url = build_proxy_url(proxy);
 
             let proxy = match proxy.proxy_type.as_str() {
-                "socks5" | "socks5h" => {
-                    Proxy::all(&proxy_url).map_err(|e| format!("Failed to create SOCKS5 proxy: {}", e))?
-                }
-                "http" | "https" => {
-                    Proxy::all(&proxy_url).map_err(|e| format!("Failed to create HTTP proxy: {}", e))?
-                }
+                "socks5" | "socks5h" => Proxy::all(&proxy_url)
+                    .map_err(|e| format!("Failed to create SOCKS5 proxy: {}", e))?,
+                "http" | "https" => Proxy::all(&proxy_url)
+                    .map_err(|e| format!("Failed to create HTTP proxy: {}", e))?,
                 _ => return Err(format!("Unsupported proxy type: {}", proxy.proxy_type)),
             };
 
@@ -88,7 +89,9 @@ fn build_client(proxy_config: Option<&ProxyConfig>, timeout_ms: u64) -> Result<C
         }
     }
 
-    builder.build().map_err(|e| format!("Failed to build HTTP client: {}", e))
+    builder
+        .build()
+        .map_err(|e| format!("Failed to build HTTP client: {}", e))
 }
 
 /// Make a non-streaming HTTP request
@@ -135,7 +138,10 @@ pub async fn http_request(config: HttpRequestConfig) -> Result<HttpResponse, Str
         }
     }
 
-    let body = response.text().await.map_err(|e| format!("Failed to read response body: {}", e))?;
+    let body = response
+        .text()
+        .await
+        .map_err(|e| format!("Failed to read response body: {}", e))?;
 
     Ok(HttpResponse {
         status,
@@ -147,11 +153,11 @@ pub async fn http_request(config: HttpRequestConfig) -> Result<HttpResponse, Str
 
 /// Make a streaming HTTP request - emits chunks via events
 #[tauri::command]
-pub async fn http_request_stream(
-    app: AppHandle,
-    config: HttpRequestConfig,
-) -> Result<(), String> {
-    let request_id = config.request_id.clone().unwrap_or_else(|| "default".to_string());
+pub async fn http_request_stream(app: AppHandle, config: HttpRequestConfig) -> Result<(), String> {
+    let request_id = config
+        .request_id
+        .clone()
+        .unwrap_or_else(|| "default".to_string());
     let client = build_client(config.proxy.as_ref(), config.timeout_ms.unwrap_or(120000))?;
 
     let method = config.method.to_uppercase();
@@ -185,12 +191,15 @@ pub async fn http_request_stream(
         };
 
         // Emit error event
-        let _ = app.emit("http-stream-chunk", StreamChunk {
-            request_id: request_id.clone(),
-            chunk: String::new(),
-            done: true,
-            error: Some(error_msg.clone()),
-        });
+        let _ = app.emit(
+            "http-stream-chunk",
+            StreamChunk {
+                request_id: request_id.clone(),
+                chunk: String::new(),
+                done: true,
+                error: Some(error_msg.clone()),
+            },
+        );
 
         error_msg
     })?;
@@ -200,50 +209,141 @@ pub async fn http_request_stream(
         let body = response.text().await.unwrap_or_default();
         let error_msg = format!("HTTP {}: {}", status, body);
 
-        let _ = app.emit("http-stream-chunk", StreamChunk {
-            request_id,
-            chunk: String::new(),
-            done: true,
-            error: Some(error_msg.clone()),
-        });
+        let _ = app.emit(
+            "http-stream-chunk",
+            StreamChunk {
+                request_id,
+                chunk: String::new(),
+                done: true,
+                error: Some(error_msg.clone()),
+            },
+        );
 
         return Err(error_msg);
     }
 
     // Stream the response body
     let mut stream = response.bytes_stream();
+    let mut pending_bytes: Vec<u8> = Vec::new();
 
     while let Some(chunk_result) = stream.next().await {
         match chunk_result {
             Ok(bytes) => {
-                if let Ok(text) = String::from_utf8(bytes.to_vec()) {
-                    let _ = app.emit("http-stream-chunk", StreamChunk {
-                        request_id: request_id.clone(),
-                        chunk: text,
-                        done: false,
-                        error: None,
-                    });
+                pending_bytes.extend_from_slice(&bytes);
+
+                loop {
+                    match std::str::from_utf8(&pending_bytes) {
+                        Ok(text) => {
+                            if !text.is_empty() {
+                                let _ = app.emit(
+                                    "http-stream-chunk",
+                                    StreamChunk {
+                                        request_id: request_id.clone(),
+                                        chunk: text.to_string(),
+                                        done: false,
+                                        error: None,
+                                    },
+                                );
+                            }
+                            pending_bytes.clear();
+                            break;
+                        }
+                        Err(error) => {
+                            let valid_up_to = error.valid_up_to();
+                            if valid_up_to > 0 {
+                                if let Ok(text) = std::str::from_utf8(&pending_bytes[..valid_up_to])
+                                {
+                                    let _ = app.emit(
+                                        "http-stream-chunk",
+                                        StreamChunk {
+                                            request_id: request_id.clone(),
+                                            chunk: text.to_string(),
+                                            done: false,
+                                            error: None,
+                                        },
+                                    );
+                                }
+
+                                let remaining = pending_bytes.split_off(valid_up_to);
+                                pending_bytes = remaining;
+                            }
+
+                            if error.error_len().is_none() {
+                                break;
+                            }
+
+                            let error_msg =
+                                "Stream error: invalid UTF-8 sequence in response body".to_string();
+                            let _ = app.emit(
+                                "http-stream-chunk",
+                                StreamChunk {
+                                    request_id: request_id.clone(),
+                                    chunk: String::new(),
+                                    done: true,
+                                    error: Some(error_msg.clone()),
+                                },
+                            );
+                            return Err(error_msg);
+                        }
+                    }
                 }
             }
             Err(e) => {
-                let _ = app.emit("http-stream-chunk", StreamChunk {
-                    request_id: request_id.clone(),
-                    chunk: String::new(),
-                    done: true,
-                    error: Some(format!("Stream error: {}", e)),
-                });
+                let _ = app.emit(
+                    "http-stream-chunk",
+                    StreamChunk {
+                        request_id: request_id.clone(),
+                        chunk: String::new(),
+                        done: true,
+                        error: Some(format!("Stream error: {}", e)),
+                    },
+                );
                 return Err(format!("Stream error: {}", e));
             }
         }
     }
 
+    if !pending_bytes.is_empty() {
+        match String::from_utf8(pending_bytes) {
+            Ok(text) => {
+                if !text.is_empty() {
+                    let _ = app.emit(
+                        "http-stream-chunk",
+                        StreamChunk {
+                            request_id: request_id.clone(),
+                            chunk: text,
+                            done: false,
+                            error: None,
+                        },
+                    );
+                }
+            }
+            Err(_) => {
+                let error_msg = "Stream error: invalid UTF-8 sequence in response body".to_string();
+                let _ = app.emit(
+                    "http-stream-chunk",
+                    StreamChunk {
+                        request_id: request_id.clone(),
+                        chunk: String::new(),
+                        done: true,
+                        error: Some(error_msg.clone()),
+                    },
+                );
+                return Err(error_msg);
+            }
+        }
+    }
+
     // Send completion event
-    let _ = app.emit("http-stream-chunk", StreamChunk {
-        request_id,
-        chunk: String::new(),
-        done: true,
-        error: None,
-    });
+    let _ = app.emit(
+        "http-stream-chunk",
+        StreamChunk {
+            request_id,
+            chunk: String::new(),
+            done: true,
+            error: None,
+        },
+    );
 
     Ok(())
 }

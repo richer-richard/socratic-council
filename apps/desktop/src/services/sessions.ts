@@ -13,7 +13,7 @@ const SESSION_INDEX_KEY = "socratic-council-session-index-v1";
 const SESSION_KEY_PREFIX = "socratic-council-session:";
 
 export type SessionStatus = "draft" | "running" | "paused" | "completed";
-export type SessionPhase = "discussion" | "closing" | "completed";
+export type SessionPhase = "discussion" | "resolution" | "completed";
 
 export interface SessionMessage extends SharedMessage {
   isStreaming?: boolean;
@@ -60,9 +60,10 @@ export interface SessionRuntimeSnapshot {
   lastModeratorKey: string | null;
   lastModeratorBalanceKey: string | null;
   lastModeratorSynthesisTurn: number;
-  moderatorClosurePosted: boolean;
-  closingQueue: CouncilAgentId[];
-  closingNoticePosted: boolean;
+  moderatorResolutionPromptPosted: boolean;
+  moderatorFinalSummaryPosted: boolean;
+  resolutionQueue: CouncilAgentId[];
+  resolutionNoticePosted: boolean;
 }
 
 export interface DiscussionSession {
@@ -143,9 +144,10 @@ function createEmptyRuntime(): SessionRuntimeSnapshot {
     lastModeratorKey: null,
     lastModeratorBalanceKey: null,
     lastModeratorSynthesisTurn: 0,
-    moderatorClosurePosted: false,
-    closingQueue: [],
-    closingNoticePosted: false,
+    moderatorResolutionPromptPosted: false,
+    moderatorFinalSummaryPosted: false,
+    resolutionQueue: [],
+    resolutionNoticePosted: false,
   };
 }
 
@@ -185,7 +187,7 @@ function normalizeStatus(value: unknown): SessionStatus {
 
 function normalizePhase(value: unknown, status: SessionStatus): SessionPhase {
   if (status === "completed") return "completed";
-  if (value === "closing") return "closing";
+  if (value === "resolution" || value === "closing") return "resolution";
   if (value === "completed") return "completed";
   return "discussion";
 }
@@ -265,7 +267,9 @@ function normalizeMessage(input: unknown): SessionMessage | null {
     ...(record.metadata && typeof record.metadata === "object"
       ? {
           metadata: {
-            model: cleanText(record.metadata.model) as NonNullable<SessionMessage["metadata"]>["model"],
+            model: cleanText(record.metadata.model) as NonNullable<
+              SessionMessage["metadata"]
+            >["model"],
             latencyMs: clampNumber(record.metadata.latencyMs),
             ...(record.metadata.bidScore != null
               ? { bidScore: clampNumber(record.metadata.bidScore) }
@@ -278,7 +282,7 @@ function normalizeMessage(input: unknown): SessionMessage | null {
     ...(Array.isArray(record.quotedMessageIds)
       ? {
           quotedMessageIds: record.quotedMessageIds.filter(
-            (value): value is string => typeof value === "string" && value.length > 0
+            (value): value is string => typeof value === "string" && value.length > 0,
           ),
         }
       : {}),
@@ -293,7 +297,9 @@ function normalizeMessage(input: unknown): SessionMessage | null {
     ...(record.fullResponse ? { fullResponse: cleanText(record.fullResponse) } : {}),
     ...(record.displayName ? { displayName: cleanText(record.displayName) } : {}),
     ...(record.displayProvider ? { displayProvider: record.displayProvider } : {}),
-    ...(normalizeReactions(record.reactions) ? { reactions: normalizeReactions(record.reactions) } : {}),
+    ...(normalizeReactions(record.reactions)
+      ? { reactions: normalizeReactions(record.reactions) }
+      : {}),
   };
 }
 
@@ -306,7 +312,11 @@ function normalizeRuntime(input: unknown, status: SessionStatus): SessionRuntime
     };
   }
 
-  const record = input as Partial<SessionRuntimeSnapshot>;
+  const record = input as Partial<SessionRuntimeSnapshot> & {
+    moderatorClosurePosted?: unknown;
+    closingQueue?: unknown;
+    closingNoticePosted?: unknown;
+  };
   const whisperBonuses = createEmptyWhisperBonuses();
   for (const agentId of AGENT_IDS) {
     whisperBonuses[agentId] = clampNumber(record.whisperBonuses?.[agentId]);
@@ -327,23 +337,30 @@ function normalizeRuntime(input: unknown, status: SessionStatus): SessionRuntime
     lastModeratorBalanceKey:
       typeof record.lastModeratorBalanceKey === "string" ? record.lastModeratorBalanceKey : null,
     lastModeratorSynthesisTurn: clampNumber(record.lastModeratorSynthesisTurn),
-    moderatorClosurePosted: Boolean(record.moderatorClosurePosted),
-    closingQueue: Array.isArray(record.closingQueue)
-      ? record.closingQueue.filter(isCouncilAgent)
-      : [],
-    closingNoticePosted: Boolean(record.closingNoticePosted),
+    moderatorResolutionPromptPosted: Boolean(
+      record.moderatorResolutionPromptPosted ?? record.moderatorClosurePosted,
+    ),
+    moderatorFinalSummaryPosted: Boolean(record.moderatorFinalSummaryPosted),
+    resolutionQueue: Array.isArray(record.resolutionQueue)
+      ? record.resolutionQueue.filter(isCouncilAgent)
+      : Array.isArray(record.closingQueue)
+        ? record.closingQueue.filter(isCouncilAgent)
+        : [],
+    resolutionNoticePosted: Boolean(record.resolutionNoticePosted ?? record.closingNoticePosted),
   };
 }
 
-function buildPreview(messages: SessionMessage[], topic: string, attachments: SessionAttachment[]): string {
+function buildPreview(
+  messages: SessionMessage[],
+  topic: string,
+  attachments: SessionAttachment[],
+): string {
   const source =
-    [...messages]
-      .reverse()
-      .find((message) => {
-        const text = (message.content || message.fullResponse || "").trim();
-        return text.length > 0 && !message.error;
-      })?.content ??
-      (summarizeSessionAttachments(attachments) || topic);
+    [...messages].reverse().find((message) => {
+      const text = (message.content || message.fullResponse || "").trim();
+      return text.length > 0 && !message.error;
+    })?.content ??
+    (summarizeSessionAttachments(attachments) || topic);
 
   return source.replace(/\s+/g, " ").trim().slice(0, 120);
 }
@@ -357,11 +374,16 @@ function normalizeAttachment(input: unknown): SessionAttachment | null {
   if (!id || !name) return null;
 
   const kind =
-    record.kind === "image" || record.kind === "pdf" || record.kind === "text" || record.kind === "binary"
+    record.kind === "image" ||
+    record.kind === "pdf" ||
+    record.kind === "text" ||
+    record.kind === "binary"
       ? record.kind
       : "binary";
   const source =
-    record.source === "file-picker" || record.source === "photo-picker" || record.source === "camera"
+    record.source === "file-picker" ||
+    record.source === "photo-picker" ||
+    record.source === "camera"
       ? record.source
       : "file-picker";
 
@@ -377,7 +399,9 @@ function normalizeAttachment(input: unknown): SessionAttachment | null {
     height: record.height == null ? null : clampNumber(record.height),
     fallbackText: cleanText(record.fallbackText),
     ...(record.searchable != null ? { searchable: Boolean(record.searchable) } : {}),
-    ...(record.extractedChars != null ? { extractedChars: clampNumber(record.extractedChars) } : {}),
+    ...(record.extractedChars != null
+      ? { extractedChars: clampNumber(record.extractedChars) }
+      : {}),
   };
 }
 
@@ -495,7 +519,9 @@ function normalizeDiscussionSession(input: unknown): DiscussionSession | null {
     },
     messages,
     errors: Array.isArray(record.errors)
-      ? record.errors.filter((value): value is string => typeof value === "string" && value.length > 0)
+      ? record.errors.filter(
+          (value): value is string => typeof value === "string" && value.length > 0,
+        )
       : [],
     attachments,
     duoLogue:
@@ -503,10 +529,7 @@ function normalizeDiscussionSession(input: unknown): DiscussionSession | null {
       isCouncilAgent(record.duoLogue.participants?.[0]) &&
       isCouncilAgent(record.duoLogue.participants?.[1])
         ? {
-            participants: [
-              record.duoLogue.participants[0],
-              record.duoLogue.participants[1],
-            ],
+            participants: [record.duoLogue.participants[0], record.duoLogue.participants[1]],
             remainingTurns: clampNumber(record.duoLogue.remainingTurns),
           }
         : null,
@@ -518,13 +541,13 @@ function replaceIndexEntry(index: SessionSummary[], summary: SessionSummary): Se
   const next = index.filter((entry) => entry.id !== summary.id);
   next.unshift(summary);
   return next.sort(
-    (a, b) => Math.max(b.lastOpenedAt, b.updatedAt) - Math.max(a.lastOpenedAt, a.updatedAt)
+    (a, b) => Math.max(b.lastOpenedAt, b.updatedAt) - Math.max(a.lastOpenedAt, a.updatedAt),
   );
 }
 
 export function listSessionSummaries(): SessionSummary[] {
   return readIndex().sort(
-    (a, b) => Math.max(b.lastOpenedAt, b.updatedAt) - Math.max(a.lastOpenedAt, a.updatedAt)
+    (a, b) => Math.max(b.lastOpenedAt, b.updatedAt) - Math.max(a.lastOpenedAt, a.updatedAt),
   );
 }
 
@@ -641,7 +664,7 @@ export function touchDiscussionSession(id: string): DiscussionSession | null {
 
 export async function createDiscussionSession(
   topic: string,
-  pendingAttachments: ComposerAttachment[] = []
+  pendingAttachments: ComposerAttachment[] = [],
 ): Promise<DiscussionSession> {
   const trimmed = topic.trim();
   const now = Date.now();
@@ -694,8 +717,8 @@ export function stabilizeStoredSessions(): SessionSummary[] {
 
   writeIndex(
     stabilized.sort(
-      (a, b) => Math.max(b.lastOpenedAt, b.updatedAt) - Math.max(a.lastOpenedAt, a.updatedAt)
-    )
+      (a, b) => Math.max(b.lastOpenedAt, b.updatedAt) - Math.max(a.lastOpenedAt, a.updatedAt),
+    ),
   );
 
   return stabilized;
