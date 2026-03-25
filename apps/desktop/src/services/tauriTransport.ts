@@ -1,8 +1,4 @@
-import {
-  replayBufferedStream,
-  TransportFailure,
-  type TransportErrorCode,
-} from "@socratic-council/sdk";
+import { TransportFailure, type TransportErrorCode } from "@socratic-council/sdk";
 import type {
   ProxyConfig,
   StreamHandlers,
@@ -81,6 +77,17 @@ function toTransportFailure(code: TransportErrorCode, message: string, details?:
   return new TransportFailure(code, message, details);
 }
 
+async function cancelTauriStream(
+  requestId: string,
+  logger?: TransportLogger,
+): Promise<void> {
+  try {
+    await tauriInvoke<boolean>("http_cancel", { requestId }, 10000);
+  } catch (error) {
+    logger?.("warn", "Failed to cancel Tauri stream", { requestId, error });
+  }
+}
+
 export function createTauriTransport(
   options: { proxy?: ProxyConfig; logger?: TransportLogger } = {},
 ): Transport {
@@ -139,6 +146,13 @@ export function createTauriTransport(
     let pendingStreamFailure: TransportFailure | null = null;
 
     let abortHandler: (() => void) | null = null;
+    let cancelIssued = false;
+
+    const requestCancel = () => {
+      if (cancelIssued) return;
+      cancelIssued = true;
+      void cancelTauriStream(requestId, logger);
+    };
 
     const cleanup = () => {
       if (hardTimeoutTimer) {
@@ -162,6 +176,7 @@ export function createTauriTransport(
     const finishError = (failure: TransportFailure) => {
       if (finished) return;
       finished = true;
+      requestCancel();
       cleanup();
       handlers.onError(failure);
     };
@@ -206,6 +221,9 @@ export function createTauriTransport(
 
         if (chunk.error) {
           pendingStreamFailure = toTransportFailure("FETCH_STREAM_FAILED", chunk.error);
+          if (chunk.done) {
+            finishError(pendingStreamFailure);
+          }
           return;
         }
 
@@ -256,40 +274,7 @@ export function createTauriTransport(
           : (pendingStreamFailure ??
             toTransportFailure("FETCH_STREAM_FAILED", "Tauri stream failed", error));
       handlers.onFallback?.(failure);
-
-      if (receivedAnyChunk || req.signal?.aborted) {
-        finishError(failure);
-        return;
-      }
-
-      try {
-        const fallback = await request({
-          url: req.url,
-          method: req.method,
-          headers: req.headers,
-          body: req.body,
-          timeoutMs,
-          signal: req.signal,
-        });
-
-        if (fallback.status < 200 || fallback.status >= 300) {
-          finishError(
-            toTransportFailure(
-              "HTTP_ERROR",
-              `HTTP ${fallback.status}: ${fallback.body}`,
-              undefined,
-            ),
-          );
-          return;
-        }
-
-        await replayBufferedStream(fallback.body, handlers.onChunk, req.signal);
-        finishDone();
-      } catch (fallbackError) {
-        finishError(
-          toTransportFailure("FALLBACK_FAILED", "Fallback request failed", fallbackError),
-        );
-      }
+      finishError(failure);
     }
   };
 

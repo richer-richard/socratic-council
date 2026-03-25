@@ -12,6 +12,7 @@ use tauri::Manager;
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .manage(http::RequestRegistry::default())
         .plugin(tauri_plugin_store::Builder::new().build())
         .plugin(tauri_plugin_http::init())
         .plugin(tauri_plugin_dialog::init())
@@ -20,6 +21,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             http::http_request,
             http::http_request_stream,
+            http::http_cancel,
         ])
         .setup(|_app| {
             #[cfg(debug_assertions)]

@@ -30,6 +30,7 @@ export default function App() {
   });
   const [sessions, setSessions] = useState(() => stabilizeStoredSessions());
   const [activeSession, setActiveSession] = useState<DiscussionSession | null>(null);
+  const [appError, setAppError] = useState<string | null>(null);
 
   const navigate = useCallback((page: Page, sessionId?: string) => {
     if (page === "chat") {
@@ -55,13 +56,23 @@ export default function App() {
   }, [state.currentSessionId]);
 
   const handleCreateSession = useCallback(async (topic: string, attachments: ComposerAttachment[] = []) => {
-    const session = await createDiscussionSession(topic, attachments);
-    setActiveSession(session);
-    setSessions(listSessionSummaries());
-    setState({
-      currentPage: "chat",
-      currentSessionId: session.id,
-    });
+    try {
+      const session = await createDiscussionSession(topic, attachments);
+      setAppError(null);
+      setActiveSession(session);
+      setSessions(listSessionSummaries());
+      setState({
+        currentPage: "chat",
+        currentSessionId: session.id,
+      });
+    } catch (error) {
+      console.error("Failed to create session:", error);
+      setAppError(
+        error instanceof Error
+          ? error.message
+          : "Failed to create the session locally. Free up browser storage and try again.",
+      );
+    }
   }, []);
 
   const handleOpenSession = useCallback((sessionId: string) => {
@@ -77,8 +88,10 @@ export default function App() {
   }, []);
 
   const handlePersistSession = useCallback((session: DiscussionSession) => {
-    saveDiscussionSession(session);
+    const persisted = saveDiscussionSession(session);
+    setAppError(null);
     setSessions(listSessionSummaries());
+    return persisted;
   }, []);
 
   const handleDeleteSession = useCallback(async (sessionId: string) => {
@@ -120,6 +133,11 @@ export default function App() {
 
   return (
     <div className="h-screen flex flex-col bg-gray-900">
+      {appError ? (
+        <div className="border-b border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200">
+          {appError}
+        </div>
+      ) : null}
       {state.currentPage === "home" && (
         <Home
           sessions={sessions}

@@ -34,8 +34,7 @@ export type TransportErrorCode =
   | "FETCH_STREAM_FAILED"
   | "STREAM_TIMEOUT"
   | "STREAM_IDLE_TIMEOUT"
-  | "ABORTED"
-  | "FALLBACK_FAILED";
+  | "ABORTED";
 
 export class TransportFailure extends Error {
   readonly code: TransportErrorCode;
@@ -322,42 +321,7 @@ export function createFetchTransport(options: FetchTransportOptions = {}): Trans
       }
 
       handlers.onFallback?.(failure);
-
-      try {
-        const fallback = await request({
-          url: req.url,
-          method: req.method,
-          headers: req.headers,
-          body: req.body,
-          timeoutMs,
-          signal: req.signal,
-        });
-
-        if (fallback.status < 200 || fallback.status >= 300) {
-          finishError(
-            new TransportFailure(
-              "HTTP_ERROR",
-              `HTTP ${fallback.status}: ${fallback.body}`,
-              undefined,
-              fallback.status
-            )
-          );
-          return;
-        }
-
-        await replayBufferedStream(fallback.body, handlers.onChunk, req.signal);
-        finishDone();
-      } catch (fallbackError) {
-        if (req.signal?.aborted) {
-          finishError(new TransportFailure("ABORTED", "Request aborted"));
-        } else {
-          finishError(
-            fallbackError instanceof TransportFailure
-              ? fallbackError
-              : new TransportFailure("FALLBACK_FAILED", "Fallback request failed", fallbackError)
-          );
-        }
-      }
+      finishError(failure);
     }
   };
 

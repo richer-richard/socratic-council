@@ -16,6 +16,21 @@ import { createHeaders, resolveEndpoint } from "./base.js";
 import { createSseParser } from "./sse.js";
 import { type Transport, createFetchTransport } from "../transport.js";
 
+type KimiMessageContent =
+  | string
+  | Array<
+      | {
+          type: "text";
+          text: string;
+        }
+      | {
+          type: "image_url";
+          image_url: {
+            url: string;
+          };
+        }
+    >;
+
 export interface KimiCompletionOptions extends CompletionOptions {
   /** Enable web search for fact-checking (Kimi-specific) */
   useSearch?: boolean;
@@ -49,6 +64,10 @@ function estimateReasoningTokensFromThinking(thinking: string): number | undefin
   return Math.max(1, Math.ceil(trimmed.length / 4));
 }
 
+function toDataUrl(mimeType: string, data: string): string {
+  return `data:${mimeType};base64,${data}`;
+}
+
 export class KimiProvider implements BaseProvider {
   readonly provider = "kimi" as const;
   readonly apiKey: string;
@@ -78,7 +97,7 @@ export class KimiProvider implements BaseProvider {
       model: agent.model as KimiModel,
       messages: messages.map((msg) => ({
         role: msg.role,
-        content: msg.content,
+        content: this.buildMessageContent(msg),
       })),
       stream,
     };
@@ -105,6 +124,29 @@ export class KimiProvider implements BaseProvider {
     }
 
     return request;
+  }
+
+  private buildMessageContent(message: ChatMessage): KimiMessageContent {
+    if (message.role !== "user" || !message.attachments || message.attachments.length === 0) {
+      return message.content;
+    }
+
+    const content: Exclude<KimiMessageContent, string> = [];
+    if (message.content.trim()) {
+      content.push({ type: "text", text: message.content });
+    }
+
+    for (const attachment of message.attachments) {
+      if (attachment.kind !== "image") continue;
+      content.push({
+        type: "image_url",
+        image_url: {
+          url: toDataUrl(attachment.mimeType, attachment.data),
+        },
+      });
+    }
+
+    return content.length > 0 ? content : message.content;
   }
 
   /**
@@ -145,8 +187,12 @@ export class KimiProvider implements BaseProvider {
     const reasoning = (choice?.message?.reasoning_content as string) ?? "";
     const usage = data.usage as KimiUsage | undefined;
 
+    if (!content.trim() && reasoning.trim()) {
+      throw new Error("Kimi response contained reasoning but no final content");
+    }
+
     return {
-      content: content || reasoning,
+      content,
       thinking: reasoning || undefined,
       tokens: {
         input: usage?.prompt_tokens ?? 0,
@@ -240,8 +286,12 @@ export class KimiProvider implements BaseProvider {
 
     onChunk({ content: "", done: true });
 
+    if (!fullContent.trim() && reasoningContent.trim()) {
+      throw new Error("Kimi stream ended without final content");
+    }
+
     return {
-      content: fullContent || reasoningContent,
+      content: fullContent,
       thinking: reasoningContent || undefined,
       tokens: {
         input: inputTokens,

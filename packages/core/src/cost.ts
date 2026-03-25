@@ -45,6 +45,16 @@ function createEmptyBreakdown(): AgentCostBreakdown {
   };
 }
 
+function cloneBreakdown(breakdown: AgentCostBreakdown): AgentCostBreakdown {
+  return {
+    inputTokens: breakdown.inputTokens,
+    outputTokens: breakdown.outputTokens,
+    reasoningTokens: breakdown.reasoningTokens ?? 0,
+    estimatedUSD: breakdown.estimatedUSD,
+    pricingAvailable: Boolean(breakdown.pricingAvailable),
+  };
+}
+
 export class CostTrackerEngine {
   private state: CostTracker;
 
@@ -83,21 +93,35 @@ export class CostTrackerEngine {
   }
 
   getState(): CostTracker {
+    const agentCosts = {} as Record<AgentId, AgentCostBreakdown>;
+    for (const [agentId, breakdown] of Object.entries(this.state.agentCosts) as Array<
+      [AgentId, AgentCostBreakdown]
+    >) {
+      agentCosts[agentId] = cloneBreakdown(breakdown);
+    }
+
     return {
       totalInputTokens: this.state.totalInputTokens,
       totalOutputTokens: this.state.totalOutputTokens,
       totalReasoningTokens: this.state.totalReasoningTokens,
-      agentCosts: { ...this.state.agentCosts },
+      agentCosts,
       totalEstimatedUSD: this.state.totalEstimatedUSD,
     };
   }
 
   loadState(state: CostTracker): void {
+    const agentCosts = {} as Record<AgentId, AgentCostBreakdown>;
+    for (const [agentId, breakdown] of Object.entries(state.agentCosts) as Array<
+      [AgentId, AgentCostBreakdown]
+    >) {
+      agentCosts[agentId] = cloneBreakdown(breakdown);
+    }
+
     this.state = {
       totalInputTokens: state.totalInputTokens,
       totalOutputTokens: state.totalOutputTokens,
       totalReasoningTokens: state.totalReasoningTokens,
-      agentCosts: { ...state.agentCosts },
+      agentCosts,
       totalEstimatedUSD: state.totalEstimatedUSD,
     };
   }
