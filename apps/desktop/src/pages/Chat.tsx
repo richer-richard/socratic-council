@@ -10,6 +10,12 @@ import {
 } from "../services/attachments";
 import {
   type DiscussionSession,
+  type EndVoteChoice,
+  type EndVoteBallotSnapshot,
+  type EndVoteBoardSnapshot,
+  type EndVoteSnapshot,
+  type HandoffSnapshot,
+  type ModeratorConclusionSnapshot,
   type ModeratorUsageSnapshot,
   type SessionMessage as PersistedSessionMessage,
   type SessionPhase,
@@ -52,7 +58,7 @@ import type {
 interface ChatProps {
   session: DiscussionSession;
   onNavigate: (page: Page, sessionId?: string) => void;
-  onPersistSession: (session: DiscussionSession) => void;
+  onPersistSession: (session: DiscussionSession) => DiscussionSession;
 }
 
 type ChatMessage = PersistedSessionMessage;
@@ -69,6 +75,12 @@ interface DuoLogueState {
   participants: [CouncilAgentId, CouncilAgentId];
   remainingTurns: number;
 }
+
+type EndVoteState = EndVoteSnapshot;
+type EndVoteChoiceMap = Partial<Record<CouncilAgentId, EndVoteChoice>>;
+
+type EndVoteReasonMap = Partial<Record<CouncilAgentId, string>>;
+type PendingHandoffState = HandoffSnapshot;
 
 // Model display names mapping - includes both full dated IDs and aliases
 const MODEL_DISPLAY_NAMES: Record<string, string> = {
@@ -132,6 +144,7 @@ Rules:
 - Proactively call oracle.file_search for attached-file evidence and oracle.web_search for current external facts when that would materially improve the answer.
 - If you know you need a tool, emit only the @tool(name, {args}) line and stop. The app will execute it and return control to you.
 - If the room has clearly converged and more debate would be repetitive, append @end() on its own line after your visible closing message to request the closing round.
+- If you need one specific agent to answer next, append exactly one standalone line: @handoff({"to":"cathy","question":"one precise follow-up question"}).
 - If a retrieved passage looks incomplete, do one more targeted search until you have enough surrounding context.
 - Call tools early instead of burning time in hidden reasoning before the search starts.
 - Ask at most one concrete question, and only if it materially helps the group decide. Do not force a question every turn.
@@ -186,7 +199,7 @@ Rules:
 - Keep interventions sparse and high-signal to avoid unnecessary cost.
 - You may suggest who should respond next by name.
 - At the end, publish the official closing result with a score/10 and explanation instead of leaving the room with another open question.
-- Do NOT include @quote(...), @react(...), @tool(...), or @end().
+- Do NOT include @quote(...), @react(...), @tool(...), @vote(...), or @end() unless the specific prompt explicitly asks for it.
 - Do NOT impersonate any agent.`;
 
 const AGENT_CONFIG: Record<
@@ -301,6 +314,12 @@ const isModeratorMessage = (msg: unknown): boolean => {
   return record.agentId === "system" && record.displayName === "Moderator";
 };
 
+const hasStructuredVoteArtifacts = (msg: unknown): boolean => {
+  if (!msg || typeof msg !== "object") return false;
+  const record = msg as Record<string, unknown>;
+  return Boolean(record.endVoteBallot || record.endVoteBoard);
+};
+
 const REACTION_IDS = REACTION_CATALOG;
 const MAX_CONTEXT_MESSAGES = 16;
 const MAX_TOOL_ITERATIONS = 2;
@@ -324,6 +343,180 @@ function createWhisperBonuses(): Record<CouncilAgentId, number> {
   };
 }
 
+function countEndVoteChoices(
+  votes: EndVoteChoiceMap,
+  configuredAgentIds: readonly CouncilAgentId[],
+): { yes: number; no: number } {
+  let yes = 0;
+  let no = 0;
+
+  for (const agentId of configuredAgentIds) {
+    if (votes[agentId] === "yes") {
+      yes += 1;
+    } else if (votes[agentId] === "no") {
+      no += 1;
+    }
+  }
+
+  return { yes, no };
+}
+
+function getEndVoteThreshold(configuredAgentIds: readonly CouncilAgentId[]) {
+  return Math.floor(configuredAgentIds.length / 2) + 1;
+}
+
+function parseVoteChoiceFromVisibleText(content: string): EndVoteChoice | null {
+  const match = content.match(/^\s*Vote:\s*(YES|NO)\b/i);
+  if (!match) return null;
+  return match[1]?.toLowerCase() === "no" ? "no" : "yes";
+}
+
+function stripLegacyEndVoteDirective(raw: string) {
+  let voteChoice: EndVoteChoice | null = null;
+
+  const cleaned = raw.replace(
+    /(^|\n)[ \t]*@vote\(end,\s*(yes|no)\)[ \t]*(\n|$)/gi,
+    (_match, prefix: string, choice: string, suffix: string) => {
+      voteChoice = choice.toLowerCase() === "no" ? "no" : "yes";
+      return prefix && suffix ? "\n" : "";
+    },
+  );
+
+  return {
+    cleaned: normalizeMessageText(cleaned),
+    voteChoice,
+  };
+}
+
+function extractVoteReasonFromVisibleText(choice: EndVoteChoice | null, content: string) {
+  if (!choice) return "";
+
+  const pattern = choice === "no" ? /^\s*Vote:\s*NO\b[:.!-]?\s*/i : /^\s*Vote:\s*YES\b[:.!-]?\s*/i;
+  return normalizeMessageText(content).replace(pattern, "").trim();
+}
+
+function hasRequiredVoteReason(choice: EndVoteChoice | null, reason: string) {
+  return choice !== "no" || reason.trim().length >= 16;
+}
+
+function buildEndVoteBallotContent(ballot: EndVoteBallotSnapshot) {
+  const prefix = ballot.choice === "yes" ? "Submitted a YES vote." : "Submitted a NO vote.";
+  return ballot.reason ? `${prefix} ${ballot.reason}` : prefix;
+}
+
+function buildEndVoteBoardContent(board: EndVoteBoardSnapshot) {
+  const { yes, no } = countEndVoteChoices(board.votes, board.agentOrder);
+  const pending = Math.max(board.totalAgents - yes - no, 0);
+  const statusText =
+    board.status === "passed"
+      ? "Passed"
+      : board.status === "failed"
+        ? "Failed"
+        : board.status === "complete"
+          ? "Complete"
+          : "Active";
+
+  return `End vote round ${board.round}: YES ${yes}, NO ${no}, Pending ${pending}. ${statusText}${
+    board.outcome ? ` ${board.outcome}` : ""
+  }`;
+}
+
+function buildModeratorConclusionContent(conclusion: ModeratorConclusionSnapshot) {
+  const label =
+    conclusion.status === "consensus"
+      ? "Consensus"
+      : conclusion.status === "majority"
+        ? "Majority with dissent"
+        : "Unresolved";
+
+  return [
+    `${label}: ${conclusion.summary}`,
+    `Score: ${conclusion.score}/10.`,
+    conclusion.reason,
+    conclusion.next ? `Next: ${conclusion.next}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+function parseModeratorConclusionFromText(content: string): ModeratorConclusionSnapshot | null {
+  const normalized = normalizeMessageText(content);
+  if (!normalized) return null;
+
+  const lines = normalized
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  const labelLine = lines[0] ?? "";
+  const summaryMatch = labelLine.match(/^(Consensus|Majority with dissent|Unresolved):\s*(.+)$/i);
+  if (!summaryMatch) return null;
+
+  const scoreLine = lines.find((line) => /^Score:\s*\d+\s*\/\s*10\.?$/i.test(line));
+  if (!scoreLine) return null;
+  const scoreMatch = scoreLine.match(/^Score:\s*(\d+)\s*\/\s*10\.?$/i);
+  if (!scoreMatch) return null;
+
+  const statusLabel = summaryMatch[1]?.toLowerCase();
+  const status =
+    statusLabel === "consensus"
+      ? "consensus"
+      : statusLabel === "majority with dissent"
+        ? "majority"
+        : "unresolved";
+
+  const reasonCandidates = lines.filter((line) => line !== labelLine && line !== scoreLine);
+  const reason = reasonCandidates[0] ?? "";
+  if (!reason) return null;
+
+  return {
+    status,
+    summary: summaryMatch[2]?.trim() ?? "",
+    score: Math.max(0, Math.min(10, Number(scoreMatch[1]))),
+    reason,
+    ...(reasonCandidates[1] ? { next: reasonCandidates[1].replace(/^Next:\s*/i, "").trim() } : {}),
+  };
+}
+
+function extractHandoffDirective(
+  raw: string,
+  from: CouncilAgentId,
+): { cleaned: string; handoff: PendingHandoffState | null } {
+  let handoff: PendingHandoffState | null = null;
+
+  const cleaned = raw.replace(
+    /(^|\n)[ \t]*@handoff\((\{[^\n]*\})\)[ \t]*(\n|$)/gi,
+    (_match, prefix: string, payloadText: string, suffix: string) => {
+      if (!handoff) {
+        try {
+          const payload = JSON.parse(payloadText) as { to?: unknown; question?: unknown };
+          const to = isCouncilAgent(payload.to) ? payload.to : null;
+          const question =
+            typeof payload.question === "string" ? normalizeMessageText(payload.question) : "";
+          if (to && to !== from && question) {
+            handoff = {
+              from,
+              to,
+              question,
+              sourceMessageId: "",
+              timestamp: Date.now(),
+            };
+          }
+        } catch {
+          // Ignore malformed handoff directives without affecting the normal message body.
+        }
+      }
+
+      return prefix && suffix ? "\n" : "";
+    },
+  );
+
+  return {
+    cleaned: normalizeMessageText(cleaned),
+    handoff,
+  };
+}
+
 function normalizeSessionForChat(session: DiscussionSession): DiscussionSession {
   return {
     ...session,
@@ -339,6 +532,222 @@ function normalizeSessionForChat(session: DiscussionSession): DiscussionSession 
             : session.runtime.phase,
     },
   };
+}
+
+function StatusGlyph({
+  status,
+  size = 16,
+}: {
+  status: ModeratorConclusionSnapshot["status"];
+  size?: number;
+}) {
+  if (status === "consensus") {
+    return (
+      <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden="true">
+        <circle cx="8" cy="8" r="7" stroke="currentColor" strokeWidth="1.4" opacity="0.35" />
+        <path d="M4.5 8.2 6.8 10.5 11.6 5.7" stroke="currentColor" strokeWidth="1.8" />
+      </svg>
+    );
+  }
+
+  if (status === "majority") {
+    return (
+      <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden="true">
+        <circle cx="8" cy="8" r="7" stroke="currentColor" strokeWidth="1.4" opacity="0.35" />
+        <path d="M5 10.5 8 5.5 11 10.5" stroke="currentColor" strokeWidth="1.6" />
+        <path d="M6.2 9.2h3.6" stroke="currentColor" strokeWidth="1.6" />
+      </svg>
+    );
+  }
+
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <circle cx="8" cy="8" r="7" stroke="currentColor" strokeWidth="1.4" opacity="0.35" />
+      <path d="M5 5 11 11M11 5 5 11" stroke="currentColor" strokeWidth="1.8" />
+    </svg>
+  );
+}
+
+function VotePieChart({
+  yes,
+  no,
+  pending,
+}: {
+  yes: number;
+  no: number;
+  pending: number;
+}) {
+  const total = Math.max(yes + no + pending, 1);
+  const yesDeg = (yes / total) * 360;
+  const noDeg = yesDeg + (no / total) * 360;
+  const background = `conic-gradient(#34d399 0deg ${yesDeg}deg, #fb7185 ${yesDeg}deg ${noDeg}deg, rgba(148, 163, 184, 0.28) ${noDeg}deg 360deg)`;
+
+  return (
+    <div className="vote-pie-chart" style={{ background }}>
+      <div className="vote-pie-chart-inner">
+        <strong>{yes}</strong>
+        <span>YES</span>
+      </div>
+    </div>
+  );
+}
+
+function EndVoteBallotCard({
+  ballot,
+}: {
+  ballot: EndVoteBallotSnapshot;
+}) {
+  const choiceLabel = ballot.choice === "yes" ? "YES" : "NO";
+
+  return (
+    <div className={`end-vote-ballot-card ${ballot.choice === "no" ? "is-no" : "is-yes"}`}>
+      <div className="end-vote-ballot-topline">
+        <span className={`end-vote-choice-badge ${ballot.choice === "no" ? "is-no" : "is-yes"}`}>
+          {choiceLabel}
+        </span>
+        <span className="end-vote-round-label">Round {ballot.round}</span>
+      </div>
+      <div className="end-vote-ballot-copy">
+        {ballot.choice === "yes"
+          ? ballot.reason || "Supports ending the session."
+          : ballot.reason || "Requests more discussion before ending."}
+      </div>
+    </div>
+  );
+}
+
+function EndVoteBoardCard({
+  board,
+}: {
+  board: EndVoteBoardSnapshot;
+}) {
+  const { yes, no } = countEndVoteChoices(board.votes, board.agentOrder);
+  const pending = Math.max(board.totalAgents - yes - no, 0);
+  const noReasonEntries = board.agentOrder
+    .filter((agentId) => board.votes[agentId] === "no")
+    .map((agentId) => ({
+      agentId,
+      reason: board.reasons[agentId]?.trim() ?? "",
+    }))
+    .filter((entry) => entry.reason.length > 0);
+
+  const statusLabel =
+    board.status === "passed"
+      ? "Passed"
+      : board.status === "failed"
+        ? "Failed"
+        : board.status === "complete"
+          ? "Round Complete"
+          : "Voting";
+
+  return (
+    <div className={`end-vote-board-card status-${board.status}`}>
+      <div className="end-vote-board-header">
+        <div>
+          <div className="end-vote-board-kicker">System Vote Board</div>
+          <div className="end-vote-board-title">End Vote Round {board.round}</div>
+        </div>
+        <div className={`end-vote-board-status status-${board.status}`}>{statusLabel}</div>
+      </div>
+
+      <div className="end-vote-board-grid">
+        <VotePieChart yes={yes} no={no} pending={pending} />
+
+        <div className="end-vote-board-stats">
+          <div className="end-vote-board-stat is-yes">
+            <span>YES</span>
+            <strong>{yes}</strong>
+          </div>
+          <div className="end-vote-board-stat is-no">
+            <span>NO</span>
+            <strong>{no}</strong>
+          </div>
+          <div className="end-vote-board-stat is-pending">
+            <span>Pending</span>
+            <strong>{pending}</strong>
+          </div>
+          <div className="end-vote-board-threshold">
+            Requires <strong>{board.threshold}</strong> YES votes
+          </div>
+        </div>
+      </div>
+
+      <div className="end-vote-agent-grid">
+        {board.agentOrder.map((agentId) => {
+          const choice = board.votes[agentId];
+          return (
+            <div key={`${board.voteId}-${board.round}-${agentId}`} className="end-vote-agent-chip">
+              <span className="end-vote-agent-name">{AGENT_CONFIG[agentId].name}</span>
+              <span
+                className={`end-vote-agent-choice ${
+                  choice === "yes" ? "is-yes" : choice === "no" ? "is-no" : "is-pending"
+                }`}
+              >
+                {choice === "yes" ? "YES" : choice === "no" ? "NO" : "Pending"}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+
+      {board.outcome && <div className="end-vote-board-outcome">{board.outcome}</div>}
+
+      {noReasonEntries.length > 0 && (
+        <details className="end-vote-reasons-panel">
+          <summary className="end-vote-reasons-summary">
+            Show objections ({noReasonEntries.length})
+          </summary>
+          <div className="end-vote-reasons-list">
+            {noReasonEntries.map((entry) => (
+              <div key={`${board.voteId}-${board.round}-${entry.agentId}`} className="end-vote-reason-item">
+                <div className="end-vote-reason-agent">{AGENT_CONFIG[entry.agentId].name}</div>
+                <div className="end-vote-reason-copy">{entry.reason}</div>
+              </div>
+            ))}
+          </div>
+        </details>
+      )}
+    </div>
+  );
+}
+
+function ModeratorConclusionCard({
+  conclusion,
+}: {
+  conclusion: ModeratorConclusionSnapshot;
+}) {
+  const label =
+    conclusion.status === "consensus"
+      ? "Consensus"
+      : conclusion.status === "majority"
+        ? "Majority with Dissent"
+        : "Unresolved";
+
+  return (
+    <div className={`moderator-conclusion-card status-${conclusion.status}`}>
+      <div className="moderator-conclusion-topline">
+        <div className={`moderator-conclusion-status status-${conclusion.status}`}>
+          <StatusGlyph status={conclusion.status} />
+          <span>{label}</span>
+        </div>
+        <div className="moderator-conclusion-score">Score {conclusion.score}/10</div>
+      </div>
+
+      <div className="moderator-conclusion-summary">{conclusion.summary}</div>
+
+      <div className="moderator-conclusion-section">
+        <div className="moderator-conclusion-label">Reason</div>
+        <div className="moderator-conclusion-copy">{conclusion.reason}</div>
+      </div>
+
+      {conclusion.next && (
+        <div className="moderator-conclusion-section">
+          <div className="moderator-conclusion-label">Next Step</div>
+          <div className="moderator-conclusion-copy">{conclusion.next}</div>
+        </div>
+      )}
+    </div>
+  );
 }
 
 /** Live stopwatch displayed while an AI agent is streaming a response. */
@@ -532,6 +941,7 @@ export function Chat({ session, onNavigate, onPersistSession }: ChatProps) {
   const [isPaused, setIsPaused] = useState(normalizedSession.status === "paused");
   const [sessionStatus, setSessionStatus] = useState<SessionStatus>(normalizedSession.status);
   const [lastSavedAt, setLastSavedAt] = useState(normalizedSession.updatedAt);
+  const [persistenceError, setPersistenceError] = useState<string | null>(null);
   const pausedRef = useRef(normalizedSession.status === "paused");
   const [errors, setErrors] = useState<string[]>(normalizedSession.errors);
   const [sidePanelView, setSidePanelView] = useState<SidePanelView>("default");
@@ -601,6 +1011,10 @@ export function Chat({ session, onNavigate, onPersistSession }: ChatProps) {
   const phaseRef = useRef<SessionPhase>(normalizedSession.runtime.phase);
   const resolutionQueueRef = useRef<CouncilAgentId[]>(normalizedSession.runtime.resolutionQueue);
   const resolutionNoticePostedRef = useRef(normalizedSession.runtime.resolutionNoticePosted);
+  const endVoteRef = useRef<EndVoteState | null>(normalizedSession.runtime.endVote);
+  const pendingHandoffRef = useRef<PendingHandoffState | null>(
+    normalizedSession.runtime.pendingHandoff,
+  );
   const lastPersistSignatureRef = useRef("");
 
   const { config, getMaxTurns, getConfiguredProviders } = useConfig();
@@ -763,6 +1177,8 @@ export function Chat({ session, onNavigate, onPersistSession }: ChatProps) {
     phaseRef.current = "discussion";
     resolutionQueueRef.current = [];
     resolutionNoticePostedRef.current = false;
+    endVoteRef.current = null;
+    pendingHandoffRef.current = null;
     duoLogueRef.current = null;
     lastWhisperKeyRef.current = null;
     lastModeratorKeyRef.current = null;
@@ -799,6 +1215,7 @@ export function Chat({ session, onNavigate, onPersistSession }: ChatProps) {
     const nextModeratorUsage: ModeratorUsageSnapshot = {
       ...DEFAULT_MODERATOR_USAGE,
     };
+    pendingHandoffRef.current = source.runtime.pendingHandoff;
 
     for (const message of source.messages) {
       if (isCouncilAgent(message.agentId)) {
@@ -1009,7 +1426,7 @@ export function Chat({ session, onNavigate, onPersistSession }: ChatProps) {
       if (memoryManagerRef.current) {
         const context = memoryManagerRef.current.buildContext(agentId);
         const recent = context.recentMessages
-          .filter((m) => isCouncilAgent(m.agentId) || isModeratorMessage(m))
+          .filter((m) => (isCouncilAgent(m.agentId) || isModeratorMessage(m)) && !hasStructuredVoteArtifacts(m))
           .slice(-MAX_CONTEXT_MESSAGES);
         return { messages: recent, engagementDebts: context.engagementDebt };
       }
@@ -1023,7 +1440,8 @@ export function Chat({ session, onNavigate, onPersistSession }: ChatProps) {
             !m.content.includes("[No response received]") &&
             !m.content.includes("No responses recorded") &&
             !m.error &&
-            !m.isStreaming,
+            !m.isStreaming &&
+            !hasStructuredVoteArtifacts(m),
         )
         .slice(-MAX_CONTEXT_MESSAGES);
 
@@ -1116,10 +1534,21 @@ export function Chat({ session, onNavigate, onPersistSession }: ChatProps) {
       const { messages: contextMessages, engagementDebts } = getContextMessages(agentId);
 
       if (contextMessages.length === 0) {
+        const directedPrompt =
+          pendingHandoffRef.current?.to === agentId
+            ? `${AGENT_CONFIG[pendingHandoffRef.current.from].name} explicitly asked you to answer next.
+Direct question: "${pendingHandoffRef.current.question}"
+- Address this question first.
+- If the question is already resolved, say that clearly before broadening the discussion.`
+            : "";
         history.push({
           role: "user",
-          content:
+          content: [
             "You're the first to speak. State your position directly. If you need outside evidence first, emit only the @tool(...) line and stop. Include @quote(MSG_ID) only after there are messages to quote.",
+            directedPrompt,
+          ]
+            .filter(Boolean)
+            .join("\n\n"),
         });
         return history;
       }
@@ -1153,6 +1582,16 @@ export function Chat({ session, onNavigate, onPersistSession }: ChatProps) {
 
       if (extraContext.length > 0) {
         history.push(...extraContext);
+      }
+
+      if (pendingHandoffRef.current?.to === agentId) {
+        history.push({
+          role: "user",
+          content: `${AGENT_CONFIG[pendingHandoffRef.current.from].name} explicitly asked you to answer next.
+Direct question: "${pendingHandoffRef.current.question}"
+- Address this question before broadening the discussion.
+- If you think the question is based on a wrong premise, say so directly and explain why.`,
+        });
       }
 
       history.push({
@@ -1192,7 +1631,8 @@ export function Chat({ session, onNavigate, onPersistSession }: ChatProps) {
         .filter(
           (message) =>
             (isCouncilAgent(message.agentId) || isModeratorMessage(message)) &&
-            !message.isStreaming,
+            !message.isStreaming &&
+            !hasStructuredVoteArtifacts(message),
         )
         .filter((message) => (message.content ?? "").trim().length > 0)
         .slice(-MAX_CONTEXT_MESSAGES);
@@ -1217,13 +1657,97 @@ export function Chat({ session, onNavigate, onPersistSession }: ChatProps) {
 - Give the strongest supporting reason in one short clause.
 - End with a short goodbye or sign-off line to the group.
 - Do NOT ask any questions.
-- Do NOT include @quote(...), @react(...), @tool(...), or @end().
+- Do NOT include @quote(...), @react(...), @tool(...), @vote(...), or @end().
 - Do NOT introduce a brand-new topic.`,
       });
 
       return history;
     },
     [buildAttachmentContext, topic],
+  );
+
+  const buildEndVoteConversationHistory = useCallback(
+    (agentId: CouncilAgentId, voteState: EndVoteState): APIChatMessage[] => {
+      const agentConfig = AGENT_CONFIG[agentId];
+      const model = configRef.current.models[agentConfig.provider];
+      const { rawAttachments, attachmentText } = buildAttachmentContext(
+        agentConfig.provider,
+        model,
+      );
+      const history: APIChatMessage[] = [
+        {
+          role: "system",
+          content: agentConfig.systemPrompt,
+        },
+      ];
+      const threshold = getEndVoteThreshold(configuredAgentIds);
+      const firstRoundCount = countEndVoteChoices(voteState.firstRoundVotes, configuredAgentIds);
+      const firstRoundObjections = configuredAgentIds
+        .filter((candidateId) => voteState.firstRoundVotes[candidateId] === "no")
+        .map((candidateId) => {
+          const reason = voteState.firstRoundReasons[candidateId]?.trim();
+          return reason ? `- ${AGENT_CONFIG[candidateId].name}: ${reason}` : null;
+        })
+        .filter((entry): entry is string => Boolean(entry));
+
+      history.push({
+        role: "user",
+        content: [`Discussion topic: "${topic}"`, attachmentText].filter(Boolean).join("\n\n"),
+        ...(attachmentText ? { cacheControl: "ephemeral" as const } : {}),
+        ...(rawAttachments.length > 0 ? { attachments: rawAttachments } : {}),
+      });
+
+      const contextMessages = messagesRef.current
+        .filter(
+          (message) =>
+            (isCouncilAgent(message.agentId) || isModeratorMessage(message)) &&
+            !message.isStreaming,
+        )
+        .filter((message) => (message.content ?? "").trim().length > 0)
+        .slice(-MAX_CONTEXT_MESSAGES);
+
+      for (const msg of contextMessages) {
+        const speaker = isCouncilAgent(msg.agentId) ? AGENT_CONFIG[msg.agentId].name : "Moderator";
+        if (msg.agentId === agentId) {
+          history.push({ role: "assistant", content: msg.content });
+        } else {
+          history.push({
+            role: "user",
+            content: `${speaker}: ${msg.content}`,
+          });
+        }
+      }
+
+      history.push({
+        role: "user",
+        content:
+          voteState.round === 1
+            ? `${AGENT_CONFIG[voteState.proposer].name} moved to end the session now. This is end-vote round 1 of 2.
+- The motion currently includes ${AGENT_CONFIG[voteState.proposer].name}'s YES vote, so the tally starts at YES ${firstRoundCount.yes}/${configuredAgentIds.length}, NO ${firstRoundCount.no}/${configuredAgentIds.length}.
+- Write 1-3 short sentences total.
+- Your first visible sentence must start exactly with Vote: YES or Vote: NO.
+- If you vote NO, you must state one concrete reason the discussion should continue.
+- If you vote YES, briefly state why the room is ready to stop.
+- Do NOT ask a question.
+- Do NOT include @quote(...), @react(...), @tool(...), or @end().
+- End by appending exactly one standalone line: @vote(end, yes) or @vote(end, no).`
+            : `Round 1 of the end vote is complete. This is round 2 of 2 and it decides the result.
+- Round 1 tally was YES ${firstRoundCount.yes}/${configuredAgentIds.length}, NO ${firstRoundCount.no}/${configuredAgentIds.length}.
+- Round 1 objections:
+${firstRoundObjections.length > 0 ? firstRoundObjections.join("\n") : "- None. Everyone supported ending."}
+- The motion passes only if at least ${threshold} of ${configuredAgentIds.length} council agents vote YES in round 2.
+- Write 1-3 short sentences total.
+- Your first visible sentence must start exactly with Vote: YES or Vote: NO.
+- If you vote NO, you must state one concrete reason the discussion should continue.
+- If you vote YES, briefly state why the room is ready to stop.
+- Do NOT ask a question.
+- Do NOT include @quote(...), @react(...), @tool(...), or @end().
+- End by appending exactly one standalone line: @vote(end, yes) or @vote(end, no).`,
+      });
+
+      return history;
+    },
+    [buildAttachmentContext, configuredAgentIds, topic],
   );
 
   const resolveQuoteTargets = useCallback(
@@ -1389,7 +1913,7 @@ export function Chat({ session, onNavigate, onPersistSession }: ChatProps) {
                 .slice(-12);
         const { rawAttachments, attachmentText } = buildAttachmentContext(provider, model);
 
-        const history: APIChatMessage[] = [
+        let history: APIChatMessage[] = [
           { role: "system", content: MODERATOR_SYSTEM_PROMPT },
           {
             role: "user",
@@ -1456,7 +1980,8 @@ Write a brief intervention that:
 Write a concise moderator note that moves the council into the closing round:
 - tell them the next step is to wrap up instead of extending the debate,
 - instruct each agent to summarize their conclusion in a few sentences and end with a short goodbye,
-- do not leave the room with another open-ended question.`,
+- do not leave the room with another open-ended question,
+- do not use @vote(...), or @end().`,
           });
         } else if (options.kind === "final_summary") {
           history.push({
@@ -1472,7 +1997,7 @@ Write the official moderator wrap-up in 4 short sentences:
           });
         }
 
-        const result = await callProvider(
+        let result = await callProvider(
           provider,
           credential,
           model,
@@ -1508,19 +2033,86 @@ Write the official moderator wrap-up in 4 short sentences:
           return null;
         }
 
-        const { cleaned } = extractActions(result.content || "", REACTION_IDS);
-        const displayContent =
-          cleaned || normalizeMessageText(result.content || streamingContent || "");
+        let parsed = extractActions(result.content || streamingContent || "", REACTION_IDS);
+        let displayContent =
+          parsed.cleaned || normalizeMessageText(result.content || streamingContent || "");
+        let moderatorConclusion =
+          options.kind === "final_summary"
+            ? parseModeratorConclusionFromText(displayContent)
+            : null;
+
+        if (options.kind === "final_summary" && result.success && !moderatorConclusion) {
+          history = [
+            ...history,
+            {
+              role: "assistant",
+              content: displayContent || "[No response received]",
+            },
+            {
+              role: "user",
+              content:
+                "You did not follow the required 4-sentence format. Reply again now with exactly these lines: 1) Consensus:/Majority with dissent:/Unresolved: plus the plain-language outcome. 2) Score: X/10. 3) One sentence explaining the score. 4) One sentence naming the next action, test, or evidence.",
+            },
+          ];
+          streamingContent = "";
+          streamingThinking = "";
+
+          result = await callProvider(
+            provider,
+            credential,
+            model,
+            history,
+            (chunk) => {
+              if (abortRef.current) return;
+              if (chunk.content) {
+                streamingContent += chunk.content;
+              }
+              if (chunk.thinking) {
+                streamingThinking += chunk.thinking;
+              }
+              if (chunk.content || chunk.thinking) {
+                setMessages((prev) =>
+                  prev.map((m) =>
+                    m.id === newMessage.id
+                      ? { ...m, content: streamingContent, thinking: streamingThinking }
+                      : m,
+                  ),
+                );
+              }
+            },
+            proxy,
+            {
+              signal: controller.signal,
+              idleTimeoutMs: 60000,
+              requestTimeoutMs: 90000,
+            },
+          );
+
+          if (abortRef.current) {
+            setMessages((prev) => prev.filter((m) => m.id !== newMessage.id));
+            return null;
+          }
+
+          parsed = extractActions(result.content || streamingContent || "", REACTION_IDS);
+          displayContent =
+            parsed.cleaned || normalizeMessageText(result.content || streamingContent || "");
+          moderatorConclusion = parseModeratorConclusionFromText(displayContent);
+        }
+
+        const finalVisibleContent =
+          displayContent ||
+          (moderatorConclusion ? buildModeratorConclusionContent(moderatorConclusion) : "");
 
         const finalMessage: ChatMessage = {
           ...newMessage,
-          content: displayContent || "[No response received]",
+          content: finalVisibleContent || "[No response received]",
           isStreaming: false,
           tokens: result.tokens,
           latencyMs: result.latencyMs,
           error: result.error,
           thinking: result.thinking || streamingThinking || undefined,
-          fullResponse: displayContent || undefined,
+          fullResponse: finalVisibleContent || undefined,
+          moderatorConclusion: moderatorConclusion ?? undefined,
           metadata: {
             model: model as ModelId,
             latencyMs: result.latencyMs,
@@ -1970,9 +2562,27 @@ Write the official moderator wrap-up in 4 short sentences:
           parsedReactions.length === 0 && resolvedQuotes.length > 0
             ? [{ targetId: resolvedQuotes[0]!, emoji: DEFAULT_REACTION }]
             : parsedReactions;
-        const displayContent =
+        const initialDisplayContent =
           finalVisibleContent ||
           parsed.cleaned ||
+          (parsed.endRequested ? "I think we're ready to wrap this up." : "") ||
+          (toolEvents.length > 0
+            ? "Research completed, but no final answer was generated."
+            : "[No response received]");
+        const { cleaned: strippedDisplayContent, handoff } = extractHandoffDirective(
+          initialDisplayContent,
+          agentId,
+        );
+        const handoffForNextTurn =
+          result.success && !result.error && handoff && !parsed.endRequested
+            ? {
+                ...handoff,
+                sourceMessageId: newMessage.id,
+                timestamp: Date.now(),
+              }
+            : null;
+        const displayContent =
+          strippedDisplayContent ||
           (parsed.endRequested ? "I think we're ready to wrap this up." : "") ||
           (toolEvents.length > 0
             ? "Research completed, but no final answer was generated."
@@ -2000,6 +2610,19 @@ Write the official moderator wrap-up in 4 short sentences:
           const updated = prev.map((m) => (m.id === newMessage.id ? finalMessage : m));
           return applyReactions(updated, resolvedReactions, agentId);
         });
+
+        if (handoffForNextTurn) {
+          pendingHandoffRef.current = handoffForNextTurn;
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: `msg_${Date.now()}_${agentId}_handoff_notice`,
+              agentId: "system",
+              content: `${AGENT_CONFIG[agentId].name} directed the next reply to ${AGENT_CONFIG[handoffForNextTurn.to].name}: ${handoffForNextTurn.question}`,
+              timestamp: Date.now(),
+            },
+          ]);
+        }
 
         if (memoryManagerRef.current && result.success) {
           memoryManagerRef.current.addMessage(finalMessage);
@@ -2160,11 +2783,453 @@ Write the official moderator wrap-up in 4 short sentences:
     [buildResolutionConversationHistory, config, getProxy],
   );
 
+  const generateEndVoteResponse = useCallback(
+    async (
+      agentId: CouncilAgentId,
+      voteState: EndVoteState,
+    ): Promise<{ message: ChatMessage | null; choice: EndVoteChoice | null; reason: string }> => {
+      if (abortRef.current) return { message: null, choice: null, reason: "" };
+
+      const agentConfig = AGENT_CONFIG[agentId];
+      const credential = config.credentials[agentConfig.provider];
+      const model = config.models[agentConfig.provider];
+
+      if (!credential?.apiKey || !model) {
+        return { message: null, choice: "no", reason: "" };
+      }
+
+      const proxy = getProxy();
+      const controller = new AbortController();
+      activeRequestsRef.current.set(agentId, controller);
+      setTypingAgents((prev) => (prev.includes(agentId) ? prev : [...prev, agentId]));
+
+      const newMessage: ChatMessage = {
+        id: `msg_${Date.now()}_${agentId}_end_vote_${voteState.round}`,
+        agentId,
+        content: "",
+        timestamp: Date.now(),
+        isStreaming: true,
+        metadata: { model: model as ModelId, latencyMs: 0 },
+      };
+
+      setMessages((prev) => [...prev, newMessage]);
+
+      let streamingContent = "";
+      let streamingRawContent = "";
+      let streamingThinking = "";
+      try {
+        let history = buildEndVoteConversationHistory(agentId, voteState);
+        let result = await callProvider(
+          agentConfig.provider,
+          credential,
+          model,
+          history,
+          (chunk) => {
+            if (abortRef.current) return;
+            if (chunk.content) {
+              streamingRawContent += chunk.content;
+              streamingContent = stripLegacyEndVoteDirective(streamingRawContent).cleaned;
+            }
+            if (chunk.thinking) {
+              streamingThinking += chunk.thinking;
+            }
+            if (chunk.content || chunk.thinking) {
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === newMessage.id
+                    ? {
+                        ...m,
+                        content: streamingContent,
+                        thinking: streamingThinking || undefined,
+                      }
+                    : m,
+                ),
+              );
+            }
+          },
+          proxy,
+          {
+            signal: controller.signal,
+            idleTimeoutMs: 60000,
+            requestTimeoutMs: 90000,
+          },
+        );
+
+        if (abortRef.current) {
+          setMessages((prev) => prev.filter((m) => m.id !== newMessage.id));
+          return { message: null, choice: null, reason: "" };
+        }
+
+        let voteExtraction = stripLegacyEndVoteDirective(result.content || streamingRawContent || "");
+        let displayContent =
+          voteExtraction.cleaned ||
+          normalizeMessageText(result.content || streamingRawContent || streamingContent || "");
+        let voteChoice = voteExtraction.voteChoice ?? parseVoteChoiceFromVisibleText(displayContent);
+        let voteReason = extractVoteReasonFromVisibleText(voteChoice, displayContent);
+        let hasReason = hasRequiredVoteReason(voteChoice, voteReason);
+
+        if (result.success && !voteChoice) {
+          history = [
+            ...history,
+            {
+              role: "assistant",
+              content: displayContent || "[No response received]",
+            },
+            {
+              role: "user",
+              content:
+                "You did not cast a valid end vote. Reply again now. Your first visible sentence must start exactly with Vote: YES or Vote: NO. If you vote NO, you must give one concrete reason to continue. End with exactly one standalone line: @vote(end, yes) or @vote(end, no).",
+            },
+          ];
+          streamingContent = "";
+          streamingRawContent = "";
+          streamingThinking = "";
+          result = await callProvider(
+            agentConfig.provider,
+            credential,
+            model,
+            history,
+            (chunk) => {
+              if (abortRef.current) return;
+              if (chunk.content) {
+                streamingRawContent += chunk.content;
+                streamingContent = stripLegacyEndVoteDirective(streamingRawContent).cleaned;
+              }
+              if (chunk.thinking) {
+                streamingThinking += chunk.thinking;
+              }
+              if (chunk.content || chunk.thinking) {
+                setMessages((prev) =>
+                  prev.map((m) =>
+                    m.id === newMessage.id
+                      ? {
+                          ...m,
+                          content: streamingContent,
+                          thinking: streamingThinking || undefined,
+                        }
+                      : m,
+                  ),
+                );
+              }
+            },
+            proxy,
+            {
+              signal: controller.signal,
+              idleTimeoutMs: 60000,
+              requestTimeoutMs: 90000,
+            },
+          );
+
+          if (abortRef.current) {
+            setMessages((prev) => prev.filter((m) => m.id !== newMessage.id));
+            return { message: null, choice: null, reason: "" };
+          }
+
+          voteExtraction = stripLegacyEndVoteDirective(result.content || streamingRawContent || "");
+          displayContent =
+            voteExtraction.cleaned ||
+            normalizeMessageText(result.content || streamingRawContent || streamingContent || "");
+          voteChoice = voteExtraction.voteChoice ?? parseVoteChoiceFromVisibleText(displayContent);
+          voteReason = extractVoteReasonFromVisibleText(voteChoice, displayContent);
+          hasReason = hasRequiredVoteReason(voteChoice, voteReason);
+        }
+
+        if (!voteChoice || !hasReason) {
+          voteChoice = "no";
+          voteReason =
+            "I am not ready to end because I did not provide a valid ballot with a clear reason to stop.";
+          displayContent = "";
+        }
+
+        const ballot: EndVoteBallotSnapshot = {
+          voteId: voteState.id,
+          round: voteState.round,
+          choice: voteChoice,
+          ...(voteReason ? { reason: voteReason } : {}),
+        };
+        const finalVisibleContent = displayContent || buildEndVoteBallotContent(ballot);
+
+        const finalMessage: ChatMessage = {
+          ...newMessage,
+          content: finalVisibleContent || "[No response received]",
+          thinking: result.thinking || streamingThinking || undefined,
+          fullResponse: finalVisibleContent || undefined,
+          isStreaming: false,
+          tokens: result.tokens,
+          latencyMs: result.latencyMs,
+          error: result.error,
+          endVoteBallot: ballot,
+          metadata: {
+            model: model as ModelId,
+            latencyMs: result.latencyMs,
+          },
+        };
+
+        setMessages((prev) => prev.map((m) => (m.id === newMessage.id ? finalMessage : m)));
+
+        if (result.success) {
+          if (memoryManagerRef.current) {
+            memoryManagerRef.current.addMessage(finalMessage);
+          }
+
+          setTotalTokens((prev) => ({
+            input: prev.input + result.tokens.input,
+            output: prev.output + result.tokens.output,
+          }));
+
+          if (costTrackerRef.current) {
+            costTrackerRef.current.recordUsage(agentId, result.tokens, model);
+            setCostState(costTrackerRef.current.getState());
+          }
+        } else {
+          setErrors((prev) => [...prev, result.error || "Unknown error"]);
+        }
+
+        return { message: finalMessage, choice: voteChoice, reason: voteReason };
+      } finally {
+        activeRequestsRef.current.delete(agentId);
+        setTypingAgents((prev) => prev.filter((id) => id !== agentId));
+      }
+    },
+    [buildEndVoteConversationHistory, config, getProxy],
+  );
+
+  const buildEndVoteBoard = useCallback(
+    (
+      voteState: EndVoteState,
+      status: EndVoteBoardSnapshot["status"],
+      outcome?: string,
+    ): EndVoteBoardSnapshot => ({
+      voteId: voteState.id,
+      proposer: voteState.proposer,
+      round: voteState.round,
+      threshold: getEndVoteThreshold(configuredAgentIds),
+      totalAgents: configuredAgentIds.length,
+      agentOrder: [...configuredAgentIds],
+      votes: {
+        ...(voteState.round === 1 ? voteState.firstRoundVotes : voteState.secondRoundVotes),
+      },
+      reasons: {
+        ...(voteState.round === 1 ? voteState.firstRoundReasons : voteState.secondRoundReasons),
+      },
+      status,
+      ...(outcome ? { outcome } : {}),
+    }),
+    [configuredAgentIds],
+  );
+
+  const upsertEndVoteBoardMessage = useCallback((board: EndVoteBoardSnapshot) => {
+    const content = buildEndVoteBoardContent(board);
+
+    setMessages((prev) => {
+      const existingIndex = prev.findIndex(
+        (message) =>
+          message.agentId === "system" &&
+          message.endVoteBoard?.voteId === board.voteId &&
+          message.endVoteBoard?.round === board.round,
+      );
+
+      if (existingIndex === -1) {
+        return [
+          ...prev,
+          {
+            id: `msg_${Date.now()}_${board.voteId}_vote_board_${board.round}`,
+            agentId: "system",
+            content,
+            timestamp: Date.now(),
+            endVoteBoard: board,
+          },
+        ];
+      }
+
+      const next = [...prev];
+      const current = next[existingIndex]!;
+      next[existingIndex] = {
+        ...current,
+        content,
+        endVoteBoard: board,
+      };
+      return next;
+    });
+  }, []);
+
+  const beginEndVote = useCallback(
+    (proposer: CouncilAgentId) => {
+      const threshold = getEndVoteThreshold(configuredAgentIds);
+      const voteState: EndVoteState = {
+        id: `end_vote_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+        proposer,
+        round: 1,
+        queue: configuredAgentIds.filter((agentId) => agentId !== proposer),
+        firstRoundVotes: { [proposer]: "yes" },
+        firstRoundReasons: {},
+        secondRoundVotes: {},
+        secondRoundReasons: {},
+      };
+      endVoteRef.current = voteState;
+      pendingHandoffRef.current = null;
+      setDuoLogue(null);
+      duoLogueRef.current = null;
+      setConflictState(null);
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: `msg_${Date.now()}_end_vote_round_1_notice`,
+          agentId: "system",
+          content: `${AGENT_CONFIG[proposer].name} requested to end the session. End vote round 1 of 2 begins now. The other ${Math.max(configuredAgentIds.length - 1, 0)} agents must vote YES or NO, and any NO vote must state a reason. If every agent votes YES in round 1, round 2 is unnecessary and the council will move straight to the conclusion. Otherwise, round 2 will make the final decision, and ending requires at least ${threshold} YES votes.`,
+          timestamp: Date.now(),
+        },
+      ]);
+      upsertEndVoteBoardMessage(buildEndVoteBoard(voteState, "active"));
+    },
+    [buildEndVoteBoard, configuredAgentIds, upsertEndVoteBoardMessage],
+  );
+
+  const continueEndVote = useCallback(async () => {
+    const voteState = endVoteRef.current;
+    if (!voteState || abortRef.current) return;
+
+    const threshold = getEndVoteThreshold(configuredAgentIds);
+    const nextAgent = voteState.queue[0];
+
+    if (nextAgent) {
+      const { choice, reason } = await generateEndVoteResponse(nextAgent, voteState);
+      if (abortRef.current) return;
+
+      const safeChoice = choice ?? "no";
+      const nextVoteState: EndVoteState =
+        voteState.round === 1
+          ? {
+              ...voteState,
+              queue: voteState.queue.slice(1),
+              firstRoundVotes: {
+                ...voteState.firstRoundVotes,
+                [nextAgent]: safeChoice,
+              },
+              firstRoundReasons: {
+                ...voteState.firstRoundReasons,
+                ...(reason ? { [nextAgent]: reason } : {}),
+              },
+            }
+          : {
+              ...voteState,
+              queue: voteState.queue.slice(1),
+              secondRoundVotes: {
+                ...voteState.secondRoundVotes,
+                [nextAgent]: safeChoice,
+              },
+              secondRoundReasons: {
+                ...voteState.secondRoundReasons,
+                ...(reason ? { [nextAgent]: reason } : {}),
+              },
+            };
+
+      endVoteRef.current = nextVoteState;
+      upsertEndVoteBoardMessage(
+        buildEndVoteBoard(nextVoteState, nextVoteState.queue.length === 0 ? "complete" : "active"),
+      );
+      cyclePendingRef.current = cyclePendingRef.current.filter((agentId) => agentId !== nextAgent);
+      previousSpeakerRef.current = nextAgent;
+      fairnessManagerRef.current.recordSpeaker(nextAgent);
+      recentSpeakersRef.current = [...recentSpeakersRef.current.slice(-5), nextAgent];
+      currentTurnRef.current += 1;
+      setCurrentTurn(currentTurnRef.current);
+      return;
+    }
+
+    if (voteState.round === 1) {
+      const firstRoundCount = countEndVoteChoices(voteState.firstRoundVotes, configuredAgentIds);
+      if (firstRoundCount.yes === configuredAgentIds.length && firstRoundCount.no === 0) {
+        const unanimousOutcome = `All ${configuredAgentIds.length} agents voted YES in round 1, so round 2 was skipped.`;
+        upsertEndVoteBoardMessage(buildEndVoteBoard(voteState, "passed", unanimousOutcome));
+        endVoteRef.current = null;
+
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: `msg_${Date.now()}_end_vote_round_1_passed`,
+            agentId: "system",
+            content: `End vote passed unanimously in round 1 by ${firstRoundCount.yes}-${firstRoundCount.no}. Round 2 is unnecessary, so the council moves straight to the conclusion.`,
+            timestamp: Date.now(),
+          },
+        ]);
+
+        beginClosingRound(
+          `End vote passed unanimously in round 1 by ${firstRoundCount.yes}-${firstRoundCount.no}. Round 2 was skipped, so the council moves straight to closing summaries and the Moderator's final conclusion.`,
+        );
+        return;
+      }
+
+      upsertEndVoteBoardMessage(
+        buildEndVoteBoard(
+          voteState,
+          "complete",
+          "Round 2 is required because not every agent approved ending in round 1.",
+        ),
+      );
+      const roundTwoState: EndVoteState = {
+        ...voteState,
+        round: 2,
+        queue: [...configuredAgentIds],
+        secondRoundVotes: {},
+        secondRoundReasons: {},
+      };
+      endVoteRef.current = roundTwoState;
+      upsertEndVoteBoardMessage(buildEndVoteBoard(roundTwoState, "active"));
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: `msg_${Date.now()}_end_vote_round_2_notice`,
+          agentId: "system",
+          content: `End vote round 1 is complete. Tally: YES ${firstRoundCount.yes}/${configuredAgentIds.length}, NO ${firstRoundCount.no}/${configuredAgentIds.length}. Round 2 of 2 begins now and determines the result. All ${configuredAgentIds.length} agents must vote, and the motion passes only if at least ${threshold} vote YES.`,
+          timestamp: Date.now(),
+        },
+      ]);
+      return;
+    }
+
+    const finalCount = countEndVoteChoices(voteState.secondRoundVotes, configuredAgentIds);
+    const passed = finalCount.yes >= threshold;
+    upsertEndVoteBoardMessage(
+      buildEndVoteBoard(
+        voteState,
+        passed ? "passed" : "failed",
+        passed
+          ? `End vote passed in round 2 by ${finalCount.yes}-${finalCount.no}.`
+          : `End vote failed in round 2 by ${finalCount.yes}-${finalCount.no}.`,
+      ),
+    );
+    endVoteRef.current = null;
+
+    if (passed) {
+      beginClosingRound(
+        `End vote passed in round 2 by ${finalCount.yes}-${finalCount.no}. Closing round: each agent gives a short summary and goodbye, then the Moderator publishes the final summary, score, and explanation.`,
+      );
+      return;
+    }
+
+    setMessages((prev) => [
+      ...prev,
+      {
+        id: `msg_${Date.now()}_end_vote_failed`,
+        agentId: "system",
+        content: `End vote failed in round 2 by ${finalCount.yes}-${finalCount.no}. At least ${threshold} YES votes were required, so the discussion will continue.`,
+        timestamp: Date.now(),
+      },
+    ]);
+
+    if (cyclePendingRef.current.length === 0) {
+      cyclePendingRef.current = [...configuredAgentIds];
+    }
+  }, [buildEndVoteBoard, configuredAgentIds, generateEndVoteResponse, upsertEndVoteBoardMessage]);
+
   const beginClosingRound = useCallback(
     (notice: string) => {
       phaseRef.current = "resolution";
       pausedRef.current = false;
       setIsPaused(false);
+      endVoteRef.current = null;
+      pendingHandoffRef.current = null;
       setDuoLogue(null);
       duoLogueRef.current = null;
       setConflictState(null);
@@ -2212,6 +3277,42 @@ Write the official moderator wrap-up in 4 short sentences:
         }
 
         if (phaseRef.current === "discussion") {
+          if (
+            pendingHandoffRef.current &&
+            (!configuredAgentIds.includes(pendingHandoffRef.current.from) ||
+              !configuredAgentIds.includes(pendingHandoffRef.current.to))
+          ) {
+            pendingHandoffRef.current = null;
+          }
+
+          if (endVoteRef.current) {
+            if (!configuredAgentIds.includes(endVoteRef.current.proposer)) {
+              endVoteRef.current = null;
+            } else {
+              const filterVotes = (votes: EndVoteChoiceMap): EndVoteChoiceMap =>
+                Object.fromEntries(
+                  Object.entries(votes).filter(([agentId]) =>
+                    configuredAgentIds.includes(agentId as CouncilAgentId),
+                  ),
+                ) as EndVoteChoiceMap;
+              const filterReasons = (reasons: EndVoteReasonMap): EndVoteReasonMap =>
+                Object.fromEntries(
+                  Object.entries(reasons).filter(([agentId]) =>
+                    configuredAgentIds.includes(agentId as CouncilAgentId),
+                  ),
+                ) as EndVoteReasonMap;
+
+              endVoteRef.current = {
+                ...endVoteRef.current,
+                queue: endVoteRef.current.queue.filter((id) => configuredAgentIds.includes(id)),
+                firstRoundVotes: filterVotes(endVoteRef.current.firstRoundVotes),
+                firstRoundReasons: filterReasons(endVoteRef.current.firstRoundReasons),
+                secondRoundVotes: filterVotes(endVoteRef.current.secondRoundVotes),
+                secondRoundReasons: filterReasons(endVoteRef.current.secondRoundReasons),
+              };
+            }
+          }
+
           const pending = cyclePendingRef.current.filter((id) => configuredAgentIds.includes(id));
           cyclePendingRef.current = pending.length > 0 ? pending : [...configuredAgentIds];
         } else if (phaseRef.current === "resolution") {
@@ -2232,44 +3333,75 @@ Write the official moderator wrap-up in 4 short sentences:
         await generateModeratorMessage({ kind: "opening" });
       }
 
-      let closureRequestedBy: CouncilAgentId | null = null;
-
       while (
         !abortRef.current &&
         phaseRef.current === "discussion" &&
-        (maxTurns === Infinity || currentTurnRef.current < maxTurns)
+        (Boolean(endVoteRef.current) || maxTurns === Infinity || currentTurnRef.current < maxTurns)
       ) {
+        if (endVoteRef.current) {
+          await continueEndVote();
+          if (abortRef.current || phaseRef.current !== "discussion") {
+            break;
+          }
+          await new Promise((resolve) => setTimeout(resolve, 300));
+          continue;
+        }
+
         const pending = cyclePendingRef.current.filter((id) => configuredAgentIds.includes(id));
         cyclePendingRef.current = pending.length > 0 ? pending : [...configuredAgentIds];
         const pendingNow = cyclePendingRef.current;
+        const directedHandoff = pendingHandoffRef.current;
+        let selectedSpeaker: CouncilAgentId | undefined;
+        let consumedHandoff: PendingHandoffState | null = null;
 
-        const focusAgents = duoLogueRef.current?.remainingTurns
-          ? duoLogueRef.current.participants
-          : undefined;
-        const excludeForRound =
-          pendingNow.length > 1 ? (previousSpeakerRef.current ?? undefined) : undefined;
-        const bidding = generateBiddingScores(excludeForRound, AGENT_IDS, focusAgents, pendingNow);
-
-        if (config.preferences.showBiddingScores) {
-          setCurrentBidding(bidding);
-          setShowBidding(true);
-          await new Promise((resolve) => setTimeout(resolve, 1500));
+        if (
+          directedHandoff &&
+          configuredAgentIds.includes(directedHandoff.to) &&
+          configuredProviders.includes(AGENT_CONFIG[directedHandoff.to].provider)
+        ) {
+          selectedSpeaker = directedHandoff.to;
+          consumedHandoff = directedHandoff;
+          setCurrentBidding(null);
           setShowBidding(false);
+        } else if (directedHandoff) {
+          pendingHandoffRef.current = null;
         }
 
-        if (abortRef.current) break;
+        if (!selectedSpeaker) {
+          const focusAgents = duoLogueRef.current?.remainingTurns
+            ? duoLogueRef.current.participants
+            : undefined;
+          const excludeForRound =
+            pendingNow.length > 1 ? (previousSpeakerRef.current ?? undefined) : undefined;
+          const bidding = generateBiddingScores(
+            excludeForRound,
+            AGENT_IDS,
+            focusAgents,
+            pendingNow,
+          );
 
-        const rankedAgents = (Object.entries(bidding.scores) as [CouncilAgentId, number][])
-          .filter(
-            ([agentId, score]) =>
-              score > 0 &&
-              configuredProviders.includes(AGENT_CONFIG[agentId].provider) &&
-              pendingNow.includes(agentId),
-          )
-          .sort((a, b) => b[1] - a[1])
-          .map(([agentId]) => agentId);
+          if (config.preferences.showBiddingScores) {
+            setCurrentBidding(bidding);
+            setShowBidding(true);
+            await new Promise((resolve) => setTimeout(resolve, 1500));
+            setShowBidding(false);
+          }
 
-        const selectedSpeaker = rankedAgents[0];
+          if (abortRef.current) break;
+
+          const rankedAgents = (Object.entries(bidding.scores) as [CouncilAgentId, number][])
+            .filter(
+              ([agentId, score]) =>
+                score > 0 &&
+                configuredProviders.includes(AGENT_CONFIG[agentId].provider) &&
+                pendingNow.includes(agentId),
+            )
+            .sort((a, b) => b[1] - a[1])
+            .map(([agentId]) => agentId);
+
+          selectedSpeaker = rankedAgents[0];
+        }
+
         if (!selectedSpeaker) {
           break;
         }
@@ -2278,10 +3410,21 @@ Write the official moderator wrap-up in 4 short sentences:
         if ((!response || response.error) && !abortRef.current) {
           response = await generateAgentResponse(selectedSpeaker);
         }
+        if (
+          consumedHandoff &&
+          pendingHandoffRef.current?.sourceMessageId === consumedHandoff.sourceMessageId
+        ) {
+          pendingHandoffRef.current = null;
+        }
         if (abortRef.current) break;
 
         const actualSpeaker: CouncilAgentId | null =
           response && !response.error ? selectedSpeaker : null;
+
+        if (consumedHandoff && !actualSpeaker) {
+          await new Promise((resolve) => setTimeout(resolve, 300));
+          continue;
+        }
 
         cyclePendingRef.current = cyclePendingRef.current.filter((id) => id !== selectedSpeaker);
         if (actualSpeaker) {
@@ -2294,7 +3437,7 @@ Write the official moderator wrap-up in 4 short sentences:
         setCurrentTurn(currentTurnRef.current);
 
         if (actualSpeaker && response?.requestedEnd) {
-          closureRequestedBy = actualSpeaker;
+          beginEndVote(actualSpeaker);
         }
 
         if (duoLogueRef.current) {
@@ -2310,8 +3453,9 @@ Write the official moderator wrap-up in 4 short sentences:
           }
         }
 
-        if (closureRequestedBy) {
-          break;
+        if (actualSpeaker && response?.requestedEnd) {
+          await new Promise((resolve) => setTimeout(resolve, 300));
+          continue;
         }
 
         if (config.preferences.moderatorEnabled && !abortRef.current) {
@@ -2350,11 +3494,15 @@ Write the official moderator wrap-up in 4 short sentences:
         await new Promise((resolve) => setTimeout(resolve, 500));
       }
 
-      if (!abortRef.current && phaseRef.current === "discussion" && currentTurnRef.current > 0) {
-        const closureNotice = closureRequestedBy
-          ? `${AGENT_CONFIG[closureRequestedBy].name} requested to wrap up. Closing round: each agent gives a short summary and goodbye, then the Moderator publishes the final summary, score, and explanation.`
-          : `Discussion phase ended after ${currentTurnRef.current} turns. Closing round: each agent gives a short summary and goodbye, then the Moderator publishes the final summary, score, and explanation.`;
-        beginClosingRound(closureNotice);
+      if (
+        !abortRef.current &&
+        phaseRef.current === "discussion" &&
+        currentTurnRef.current > 0 &&
+        !endVoteRef.current
+      ) {
+        beginClosingRound(
+          `Discussion phase ended after ${currentTurnRef.current} turns. Closing round: each agent gives a short summary and goodbye, then the Moderator publishes the final summary, score, and explanation.`,
+        );
       }
 
       while (
@@ -2414,6 +3562,8 @@ Write the official moderator wrap-up in 4 short sentences:
       config.preferences.showBiddingScores,
       config.preferences.moderatorEnabled,
       generateBiddingScores,
+      beginEndVote,
+      continueEndVote,
       generateAgentResponse,
       generateModeratorMessage,
       generateResolutionResponse,
@@ -2577,6 +3727,8 @@ Write the official moderator wrap-up in 4 short sentences:
       errors.join("|"),
       duoLogue?.remainingTurns ?? 0,
       resolutionQueueRef.current.join(","),
+      JSON.stringify(endVoteRef.current),
+      JSON.stringify(pendingHandoffRef.current),
       messageFingerprint,
       persistedMessages.length,
     ].join("::");
@@ -2586,40 +3738,50 @@ Write the official moderator wrap-up in 4 short sentences:
     }
     lastPersistSignatureRef.current = signature;
 
-    onPersistSession({
-      id: normalizedSession.id,
-      topic,
-      title: normalizedSession.title,
-      createdAt: normalizedSession.createdAt,
-      updatedAt: nextUpdatedAt,
-      lastOpenedAt: Math.max(normalizedSession.lastOpenedAt, normalizedSession.updatedAt),
-      archivedAt: normalizedSession.archivedAt,
-      status: nextStatus,
-      currentTurn: currentTurnRef.current,
-      totalTokens,
-      moderatorUsage,
-      messages: persistedMessages,
-      errors,
-      attachments: normalizedSession.attachments,
-      duoLogue,
-      runtime: {
-        phase: phaseRef.current,
-        cyclePending: cyclePendingRef.current,
-        previousSpeaker: previousSpeakerRef.current,
-        recentSpeakers: recentSpeakersRef.current,
-        whisperBonuses: whisperBonusesRef.current,
-        lastWhisperKey: lastWhisperKeyRef.current,
-        lastModeratorKey: lastModeratorKeyRef.current,
-        lastModeratorBalanceKey: lastModeratorBalanceKeyRef.current,
-        lastModeratorSynthesisTurn: lastModeratorSynthesisTurnRef.current,
-        moderatorResolutionPromptPosted: moderatorResolutionPromptPostedRef.current,
-        moderatorFinalSummaryPosted: moderatorFinalSummaryPostedRef.current,
-        resolutionQueue: resolutionQueueRef.current,
-        resolutionNoticePosted: resolutionNoticePostedRef.current,
-      },
-    });
+    try {
+      const persisted = onPersistSession({
+        id: normalizedSession.id,
+        topic,
+        title: normalizedSession.title,
+        createdAt: normalizedSession.createdAt,
+        updatedAt: nextUpdatedAt,
+        lastOpenedAt: Math.max(normalizedSession.lastOpenedAt, normalizedSession.updatedAt),
+        archivedAt: normalizedSession.archivedAt,
+        status: nextStatus,
+        currentTurn: currentTurnRef.current,
+        totalTokens,
+        moderatorUsage,
+        messages: persistedMessages,
+        errors,
+        attachments: normalizedSession.attachments,
+        duoLogue,
+        runtime: {
+          phase: phaseRef.current,
+          cyclePending: cyclePendingRef.current,
+          previousSpeaker: previousSpeakerRef.current,
+          recentSpeakers: recentSpeakersRef.current,
+          whisperBonuses: whisperBonusesRef.current,
+          lastWhisperKey: lastWhisperKeyRef.current,
+          lastModeratorKey: lastModeratorKeyRef.current,
+          lastModeratorBalanceKey: lastModeratorBalanceKeyRef.current,
+          lastModeratorSynthesisTurn: lastModeratorSynthesisTurnRef.current,
+          moderatorResolutionPromptPosted: moderatorResolutionPromptPostedRef.current,
+          moderatorFinalSummaryPosted: moderatorFinalSummaryPostedRef.current,
+          resolutionQueue: resolutionQueueRef.current,
+          resolutionNoticePosted: resolutionNoticePostedRef.current,
+          endVote: endVoteRef.current,
+          pendingHandoff: pendingHandoffRef.current,
+        },
+      });
 
-    setLastSavedAt(nextUpdatedAt);
+      setPersistenceError(null);
+      setLastSavedAt(persisted.updatedAt);
+    } catch (error) {
+      lastPersistSignatureRef.current = "";
+      setPersistenceError(
+        error instanceof Error ? error.message : "Failed to save the session locally.",
+      );
+    }
   }, [
     errors,
     isPaused,
@@ -2718,7 +3880,9 @@ Write the official moderator wrap-up in 4 short sentences:
                         : "Saved"}
                 </span>
                 <span className="chat-autosave-pill">
-                  Autosaved locally at {formattedLastSavedAt}
+                  {persistenceError
+                    ? persistenceError
+                    : `Autosaved locally at ${formattedLastSavedAt}`}
                 </span>
               </div>
               <h1 className="chat-session-title">Socratic Council</h1>
@@ -2919,6 +4083,9 @@ Write the official moderator wrap-up in 4 short sentences:
                   ).filter(([, reaction]) => reaction?.count)
                 : [];
               const messageAttachments = getMessageAttachments(message);
+              const hasStructuredMessageBody = Boolean(
+                message.endVoteBoard || message.endVoteBallot || message.moderatorConclusion,
+              );
 
               // Determine message status classes
               const isSuccess =
@@ -3003,7 +4170,13 @@ Write the official moderator wrap-up in 4 short sentences:
 
                     {/* Message body */}
                     <div className="discord-message-body">
-                      {message.isStreaming ? (
+                      {message.endVoteBoard ? (
+                        <EndVoteBoardCard board={message.endVoteBoard} />
+                      ) : message.endVoteBallot ? (
+                        <EndVoteBallotCard ballot={message.endVoteBallot} />
+                      ) : message.moderatorConclusion ? (
+                        <ModeratorConclusionCard conclusion={message.moderatorConclusion} />
+                      ) : message.isStreaming ? (
                         <div className="markdown-content" style={{ whiteSpace: "pre-wrap" }}>
                           {message.content}
                         </div>
@@ -3163,30 +4336,32 @@ Write the official moderator wrap-up in 4 short sentences:
                       )}
                     </div>
 
-                    <div className="message-actions">
-                      <button
-                        type="button"
-                        className="message-action"
-                        onClick={() => copyQuoteToken(message.id)}
-                        title="Copy @quote() token to clipboard"
-                      >
-                        {recentlyCopiedQuote === message.id ? "Copied" : "Quote"}
-                      </button>
-                      <button
-                        type="button"
-                        className="message-action"
-                        onClick={() =>
-                          setReactionPickerTarget((prev) =>
-                            prev === message.id ? null : message.id,
-                          )
-                        }
-                        title="Add a reaction"
-                      >
-                        React
-                      </button>
-                    </div>
+                    {!hasStructuredMessageBody && (
+                      <div className="message-actions">
+                        <button
+                          type="button"
+                          className="message-action"
+                          onClick={() => copyQuoteToken(message.id)}
+                          title="Copy @quote() token to clipboard"
+                        >
+                          {recentlyCopiedQuote === message.id ? "Copied" : "Quote"}
+                        </button>
+                        <button
+                          type="button"
+                          className="message-action"
+                          onClick={() =>
+                            setReactionPickerTarget((prev) =>
+                              prev === message.id ? null : message.id,
+                            )
+                          }
+                          title="Add a reaction"
+                        >
+                          React
+                        </button>
+                      </div>
+                    )}
 
-                    {reactionPickerTarget === message.id && (
+                    {!hasStructuredMessageBody && reactionPickerTarget === message.id && (
                       <div className="reaction-picker" role="dialog" aria-label="Reaction picker">
                         {REACTION_CATALOG.map((emoji) => (
                           <button

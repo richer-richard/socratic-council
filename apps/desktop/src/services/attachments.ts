@@ -90,6 +90,11 @@ const RAW_IMAGE_MODEL_SUPPORT: Partial<Record<Provider, string[]>> = {
   openai: ["gpt-5.4"],
   anthropic: ["claude-opus-4-6"],
   google: ["gemini-3.1-pro-preview", "gemini-3-pro-preview"],
+  kimi: [
+    "moonshot-v1-128k-vision-preview",
+    "moonshot-v1-32k-vision-preview",
+    "moonshot-v1-8k-vision-preview",
+  ],
 };
 
 const RAW_PDF_MODEL_SUPPORT: Partial<Record<Provider, string[]>> = {

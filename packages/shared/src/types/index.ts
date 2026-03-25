@@ -284,7 +284,20 @@ export interface KimiRequest {
   model: KimiModel;
   messages: Array<{
     role: "user" | "assistant" | "system";
-    content: string;
+    content:
+      | string
+      | Array<
+          | {
+              type: "text";
+              text: string;
+            }
+          | {
+              type: "image_url";
+              image_url: {
+                url: string;
+              };
+            }
+        >;
   }>;
   temperature?: number;
   max_tokens?: number;

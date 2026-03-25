@@ -15,4 +15,14 @@ describe("CostTrackerEngine", () => {
     expect(state.agentCosts.george.outputTokens).toBe(80);
     expect(state.agentCosts.george.pricingAvailable).toBe(false);
   });
+
+  it("returns isolated snapshots", () => {
+    const tracker = new CostTrackerEngine([...agentIds]);
+    tracker.recordUsage("george", { input: 10, output: 5 });
+
+    const snapshot = tracker.getState();
+    snapshot.agentCosts.george.inputTokens = 999;
+
+    expect(tracker.getState().agentCosts.george.inputTokens).toBe(10);
+  });
 });

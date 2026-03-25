@@ -92,22 +92,17 @@ describe("createFetchTransport", () => {
     expect(received).toContain("data: hello");
   });
 
-  it("falls back to buffered replay on stream failure", async () => {
+  it("surfaces stream failure without replaying the request", async () => {
     const transport = createFetchTransport();
-    let callCount = 0;
+    const fallbackEvents: string[] = [];
 
     const mockFetch = vi.fn().mockImplementation(() => {
-      callCount += 1;
-      if (callCount === 1) {
-        return Promise.reject(new Error("stream failure"));
-      }
-      return Promise.resolve(new Response("data: fallback\n\n", { status: 200 }));
+      return Promise.reject(new Error("stream failure"));
     });
 
     globalThis.fetch = mockFetch as typeof fetch;
 
-    let received = "";
-    await new Promise<void>((resolve, reject) => {
+    await new Promise<void>((resolve) => {
       transport.stream(
         {
           url: "https://example.com",
@@ -116,16 +111,24 @@ describe("createFetchTransport", () => {
           body: "{}",
         },
         {
-          onChunk: (text) => {
-            received += text;
+          onChunk: () => {
+            throw new Error("stream failure should not emit chunks");
           },
-          onDone: () => resolve(),
-          onError: (error) => reject(error),
+          onDone: () => {
+            throw new Error("stream failure should not complete successfully");
+          },
+          onError: (error) => {
+            expect(error.code).toBe("FETCH_STREAM_FAILED");
+            resolve();
+          },
+          onFallback: (error) => {
+            fallbackEvents.push(error.code);
+          },
         }
       );
     });
 
-    expect(received).toContain("data: fallback");
-    expect(callCount).toBeGreaterThanOrEqual(2);
+    expect(fallbackEvents).toEqual(["FETCH_STREAM_FAILED"]);
+    expect(mockFetch).toHaveBeenCalledOnce();
   });
 });

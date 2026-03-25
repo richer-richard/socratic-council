@@ -38,6 +38,12 @@ describe("attachment transport support", () => {
     expect(mode).toBe("fallback");
   });
 
+  it("keeps raw image upload for Kimi vision models", () => {
+    const support = getProviderAttachmentSupport("kimi", "moonshot-v1-8k-vision-preview");
+    expect(support.images).toBe("raw");
+    expect(support.pdf).toBe("fallback");
+  });
+
   it("compacts oversized text uploads into a smaller local blob", async () => {
     const originalText = `${"Large attachment body.\n".repeat(160000)}Final line.`;
     const file = new File([originalText], "notes.txt", { type: "text/plain" });

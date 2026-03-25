@@ -375,7 +375,7 @@ async function verifyClaim(claim: string, context?: ToolContext): Promise<Verifi
 
   return {
     claim,
-    verdict: evidence.length > 0 ? "uncertain" : "false",
+    verdict: "uncertain",
     confidence,
     evidence,
   };

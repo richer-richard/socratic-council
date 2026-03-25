@@ -30,6 +30,293 @@ import { ConflictDetector } from "./conflict.js";
 import { DuckDuckGoOracle } from "./oracle.js";
 import { WhisperManager } from "./whisper.js";
 
+const VALID_AGENT_IDS = ["george", "cathy", "grace", "douglas", "kate", "quinn", "mary"] as const;
+const VALID_PROVIDERS = ["openai", "anthropic", "google", "deepseek", "kimi", "qwen", "minimax"] as const;
+const VALID_STATUSES = ["idle", "running", "paused", "completed"] as const;
+
+function cloneSnapshot<T>(value: T): T {
+  return structuredClone(value);
+}
+
+function normalizeNumber(value: unknown, fallback = 0): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+}
+
+function normalizePositiveNumber(value: unknown, fallback: number): number {
+  const normalized = normalizeNumber(value, fallback);
+  return normalized > 0 ? normalized : fallback;
+}
+
+function isAgentId(value: unknown): value is AgentId {
+  return typeof value === "string" && VALID_AGENT_IDS.includes(value as AgentId);
+}
+
+function isAbortLikeError(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    (error.name === "AbortError" || error.message.includes("ABORTED") || error.message.includes("aborted"))
+  );
+}
+
+function normalizeCouncilConfigValue(input: unknown): CouncilConfig {
+  const record = input && typeof input === "object" ? (input as Partial<CouncilConfig>) : {};
+  return {
+    topic: typeof record.topic === "string" ? record.topic : "",
+    maxTurns: normalizePositiveNumber(record.maxTurns, DEFAULT_COUNCIL_CONFIG.maxTurns),
+    biddingTimeout: normalizePositiveNumber(
+      record.biddingTimeout,
+      DEFAULT_COUNCIL_CONFIG.biddingTimeout,
+    ),
+    budgetLimit: Math.max(0, normalizeNumber(record.budgetLimit, DEFAULT_COUNCIL_CONFIG.budgetLimit)),
+    autoMode:
+      typeof record.autoMode === "boolean" ? record.autoMode : DEFAULT_COUNCIL_CONFIG.autoMode,
+  };
+}
+
+function normalizeAgentConfig(input: unknown): AgentConfig | null {
+  if (!input || typeof input !== "object") return null;
+  const record = input as Partial<AgentConfig>;
+  if (!isAgentId(record.id)) return null;
+
+  const base = DEFAULT_AGENTS[record.id];
+  const provider =
+    typeof record.provider === "string" &&
+    VALID_PROVIDERS.includes(record.provider as (typeof VALID_PROVIDERS)[number])
+      ? record.provider
+      : base.provider;
+  const model = typeof record.model === "string" && record.model.length > 0 ? record.model : base.model;
+  const name = typeof record.name === "string" && record.name.trim().length > 0 ? record.name : base.name;
+  const systemPrompt =
+    typeof record.systemPrompt === "string" && record.systemPrompt.length > 0
+      ? record.systemPrompt
+      : base.systemPrompt;
+
+  return {
+    ...base,
+    provider,
+    model,
+    name,
+    systemPrompt,
+    ...(typeof record.avatar === "string" && record.avatar.length > 0 ? { avatar: record.avatar } : {}),
+    ...(typeof record.temperature === "number" && Number.isFinite(record.temperature)
+      ? { temperature: record.temperature }
+      : {}),
+    ...(typeof record.maxTokens === "number" && Number.isFinite(record.maxTokens) && record.maxTokens > 0
+      ? { maxTokens: record.maxTokens }
+      : {}),
+  };
+}
+
+function normalizeMessageValue(input: unknown): Message | null {
+  if (!input || typeof input !== "object") return null;
+  const record = input as Partial<Message>;
+  const validAgentId =
+    record.agentId === "user" ||
+    record.agentId === "system" ||
+    record.agentId === "tool" ||
+    isAgentId(record.agentId);
+
+  if (!validAgentId) return null;
+  const agentId = record.agentId as Message["agentId"];
+
+  const id = typeof record.id === "string" && record.id.length > 0 ? record.id : generateId("msg");
+  const content = typeof record.content === "string" ? record.content : "";
+  const timestamp = normalizeNumber(record.timestamp, Date.now());
+  const inputTokens = normalizeNumber(record.tokens?.input);
+  const outputTokens = normalizeNumber(record.tokens?.output);
+  const reasoningTokens =
+    typeof record.tokens?.reasoning === "number" && Number.isFinite(record.tokens.reasoning)
+      ? record.tokens.reasoning
+      : undefined;
+  const metadata =
+    record.metadata &&
+    typeof record.metadata === "object" &&
+    typeof record.metadata.model === "string" &&
+    typeof record.metadata.latencyMs === "number"
+      ? {
+          model: record.metadata.model,
+          latencyMs: record.metadata.latencyMs,
+          ...(typeof record.metadata.bidScore === "number" && Number.isFinite(record.metadata.bidScore)
+            ? { bidScore: record.metadata.bidScore }
+            : {}),
+        }
+      : undefined;
+
+  return {
+    id,
+    agentId,
+    content,
+    timestamp,
+    ...((inputTokens > 0 || outputTokens > 0 || reasoningTokens !== undefined)
+      ? {
+          tokens: {
+            input: inputTokens,
+            output: outputTokens,
+            ...(reasoningTokens !== undefined ? { reasoning: reasoningTokens } : {}),
+          },
+        }
+      : {}),
+    ...(metadata ? { metadata } : {}),
+  };
+}
+
+function normalizeCostTrackerValue(
+  input: unknown,
+  agentIds: AgentId[],
+): CostTracker | undefined {
+  if (!input || typeof input !== "object") return undefined;
+  const record = input as Partial<CostTracker>;
+  const agentCosts = {} as CostTracker["agentCosts"];
+
+  for (const agentId of agentIds) {
+    const breakdown =
+      record.agentCosts && typeof record.agentCosts === "object"
+        ? (record.agentCosts as Partial<CostTracker["agentCosts"]>)[agentId]
+        : undefined;
+    agentCosts[agentId] = {
+      inputTokens: normalizeNumber(breakdown?.inputTokens),
+      outputTokens: normalizeNumber(breakdown?.outputTokens),
+      reasoningTokens: normalizeNumber(breakdown?.reasoningTokens),
+      estimatedUSD: normalizeNumber(breakdown?.estimatedUSD),
+      pricingAvailable: Boolean(breakdown?.pricingAvailable),
+    };
+  }
+
+  return {
+    totalInputTokens: normalizeNumber(record.totalInputTokens),
+    totalOutputTokens: normalizeNumber(record.totalOutputTokens),
+    totalReasoningTokens: normalizeNumber(record.totalReasoningTokens),
+    agentCosts,
+    totalEstimatedUSD: normalizeNumber(record.totalEstimatedUSD),
+  };
+}
+
+function normalizeWhisperStateValue(
+  input: unknown,
+  agentIds: AgentId[],
+): CouncilState["whisperState"] | undefined {
+  if (!input || typeof input !== "object") return undefined;
+  const record = input as NonNullable<CouncilState["whisperState"]>;
+  const messages = Array.isArray(record.messages)
+    ? record.messages
+        .map((message) => {
+          if (!message || typeof message !== "object") return null;
+          const payload = message.payload && typeof message.payload === "object" ? message.payload : {};
+          if (!isAgentId(message.from) || !isAgentId(message.to) || typeof message.type !== "string") {
+            return null;
+          }
+          return {
+            id: typeof message.id === "string" && message.id.length > 0 ? message.id : generateId("whisper"),
+            from: message.from,
+            to: message.to,
+            type: message.type,
+            payload: {
+              ...(typeof (payload as { targetTopic?: unknown }).targetTopic === "string"
+                ? { targetTopic: (payload as { targetTopic: string }).targetTopic }
+                : {}),
+              ...(typeof (payload as { proposedAction?: unknown }).proposedAction === "string"
+                ? { proposedAction: (payload as { proposedAction: string }).proposedAction }
+                : {}),
+              ...(typeof (payload as { bidBonus?: unknown }).bidBonus === "number" &&
+              Number.isFinite((payload as { bidBonus: number }).bidBonus)
+                ? { bidBonus: (payload as { bidBonus: number }).bidBonus }
+                : {}),
+            },
+            timestamp: normalizeNumber(message.timestamp, Date.now()),
+          };
+        })
+        .filter((message): message is NonNullable<CouncilState["whisperState"]>["messages"][number] => Boolean(message))
+    : [];
+
+  const pendingBonuses = {} as NonNullable<CouncilState["whisperState"]>["pendingBonuses"];
+  for (const agentId of agentIds) {
+    pendingBonuses[agentId] = normalizeNumber(record.pendingBonuses?.[agentId]);
+  }
+
+  return { messages, pendingBonuses };
+}
+
+function normalizeConflictValue(input: unknown): CouncilState["conflict"] | undefined {
+  if (!input || typeof input !== "object") return undefined;
+  const record = input as NonNullable<CouncilState["conflict"]>;
+  if (!isAgentId(record.agentPair?.[0]) || !isAgentId(record.agentPair?.[1])) return undefined;
+  return {
+    agentPair: [record.agentPair[0], record.agentPair[1]],
+    conflictScore: normalizeNumber(record.conflictScore),
+    threshold: normalizeNumber(record.threshold),
+    lastUpdated: normalizeNumber(record.lastUpdated, Date.now()),
+  };
+}
+
+function normalizeDuoLogueValue(input: unknown): CouncilState["duoLogue"] | undefined {
+  if (!input || typeof input !== "object") return undefined;
+  const record = input as NonNullable<CouncilState["duoLogue"]>;
+  if (!isAgentId(record.participants?.[0]) || !isAgentId(record.participants?.[1])) return undefined;
+  return {
+    participants: [record.participants[0], record.participants[1]],
+    remainingTurns: Math.max(0, normalizeNumber(record.remainingTurns)),
+    otherAgentsBidding: Boolean(record.otherAgentsBidding),
+  };
+}
+
+function normalizeImportedState(input: unknown): CouncilState | null {
+  if (!input || typeof input !== "object") return null;
+  const record = input as Partial<CouncilState>;
+  const agents = Array.isArray(record.agents)
+    ? record.agents
+        .map((agent) => normalizeAgentConfig(agent))
+        .filter((agent): agent is AgentConfig => Boolean(agent))
+    : [];
+
+  if (agents.length === 0) {
+    return null;
+  }
+
+  const agentIds = agents.map((agent) => agent.id);
+  const status =
+    typeof record.status === "string" &&
+    VALID_STATUSES.includes(record.status as (typeof VALID_STATUSES)[number])
+      ? record.status
+      : "idle";
+  const normalizedStatus = status === "running" ? "paused" : status;
+
+  return {
+    id: typeof record.id === "string" && record.id.length > 0 ? record.id : generateId("council"),
+    config: normalizeCouncilConfigValue(record.config),
+    agents,
+    messages: Array.isArray(record.messages)
+      ? record.messages
+          .map((message) => normalizeMessageValue(message))
+          .filter((message): message is Message => Boolean(message))
+      : [],
+    currentTurn: Math.max(0, normalizeNumber(record.currentTurn)),
+    totalCost: normalizeNumber(record.totalCost),
+    costTracker: normalizeCostTrackerValue(record.costTracker, agentIds),
+    conflict: normalizeConflictValue(record.conflict),
+    duoLogue: normalizeDuoLogueValue(record.duoLogue),
+    whisperState: normalizeWhisperStateValue(record.whisperState, agentIds),
+    status: normalizedStatus,
+    ...(typeof record.startedAt === "number" && Number.isFinite(record.startedAt)
+      ? { startedAt: record.startedAt }
+      : {}),
+    ...(normalizedStatus === "completed" &&
+    typeof record.completedAt === "number" &&
+    Number.isFinite(record.completedAt)
+      ? { completedAt: record.completedAt }
+      : {}),
+  };
+}
+
+function getLastSpeakerFromMessages(messages: Message[]): AgentId | undefined {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const agentId = messages[index]?.agentId;
+    if (isAgentId(agentId)) {
+      return agentId;
+    }
+  }
+  return undefined;
+}
+
 /**
  * Generate a unique ID for messages and councils
  */
@@ -128,7 +415,7 @@ export class Council {
    * Get the current state of the council
    */
   getState(): CouncilState {
-    return { ...this.state };
+    return cloneSnapshot(this.state);
   }
 
   /**
@@ -142,6 +429,7 @@ export class Council {
     this.state.config.topic = topic;
     this.state.status = "running";
     this.state.startedAt = Date.now();
+    this.state.completedAt = undefined;
     this.state.currentTurn = 0;
     this.state.messages = [];
     this.state.totalCost = 0;
@@ -177,7 +465,9 @@ export class Council {
    * Run the council in auto mode
    */
   private async runAutoMode(): Promise<void> {
-    let lastSpeaker: AgentId | undefined;
+    let lastSpeaker: AgentId | undefined = getLastSpeakerFromMessages(this.state.messages);
+    let shouldComplete = false;
+    let fatalError = false;
 
     while (
       this.isRunning &&
@@ -212,7 +502,12 @@ export class Council {
         const agent = this.state.agents.find((a) => a.id === biddingResult.winner);
         if (!agent) continue;
 
-        await this.generateAgentResponse(agent);
+        const message = await this.generateAgentResponse(agent);
+        if (!message) {
+          fatalError = true;
+          break;
+        }
+
         lastSpeaker = agent.id;
         this.state.currentTurn++;
 
@@ -229,15 +524,31 @@ export class Council {
         // Small delay between turns for readability
         await this.delay(500);
       } catch (error) {
-        if (error instanceof Error && error.name === "AbortError") {
+        if (isAbortLikeError(error)) {
           break;
         }
         this.emit({ type: "error", error: error as Error });
+        fatalError = true;
         break;
       }
     }
 
-    this.completeCouncil();
+    if (
+      !fatalError &&
+      this.isRunning &&
+      this.state.status === "running" &&
+      this.state.currentTurn >= this.state.config.maxTurns
+    ) {
+      shouldComplete = true;
+    }
+
+    if (fatalError && this.state.status === "running") {
+      shouldComplete = true;
+    }
+
+    if (shouldComplete) {
+      this.completeCouncil();
+    }
   }
 
   /**
@@ -292,10 +603,11 @@ export class Council {
         }
       );
 
+      const content = fullContent || result.content;
       const message: Message = {
         id: generateId("msg"),
         agentId: agent.id,
-        content: fullContent,
+        content,
         timestamp: Date.now(),
         tokens: result.tokens,
         metadata: {
@@ -311,6 +623,9 @@ export class Council {
 
       return message;
     } catch (error) {
+      if (isAbortLikeError(error)) {
+        throw error;
+      }
       this.emit({ type: "error", error: error as Error, agentId: agent.id });
       return null;
     }
@@ -399,6 +714,7 @@ export class Council {
   pause(): void {
     if (this.state.status === "running") {
       this.state.status = "paused";
+      this.abortController?.abort();
       this.emit({ type: "council_paused", state: this.getState() });
     }
   }
@@ -409,6 +725,7 @@ export class Council {
   async resume(): Promise<void> {
     if (this.state.status === "paused") {
       this.state.status = "running";
+      this.abortController = new AbortController();
       if (this.state.config.autoMode) {
         await this.runAutoMode();
       }
@@ -497,8 +814,13 @@ export class Council {
    * Import state from persistence
    */
   importState(stateJson: string): void {
-    const imported = JSON.parse(stateJson) as CouncilState;
+    const imported = normalizeImportedState(JSON.parse(stateJson));
+    if (!imported) {
+      throw new Error("Invalid council state payload");
+    }
     this.state = imported;
+    this.isRunning = false;
+    this.abortController = undefined;
 
     const agentIds = this.state.agents.map((agent) => agent.id);
     this.whisperManager = new WhisperManager(agentIds);

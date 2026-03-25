@@ -12,8 +12,68 @@ import {
 const SESSION_INDEX_KEY = "socratic-council-session-index-v1";
 const SESSION_KEY_PREFIX = "socratic-council-session:";
 
+export class SessionPersistenceError extends Error {
+  readonly cause?: unknown;
+
+  constructor(message: string, cause?: unknown) {
+    super(message);
+    this.name = "SessionPersistenceError";
+    this.cause = cause;
+  }
+}
+
 export type SessionStatus = "draft" | "running" | "paused" | "completed";
 export type SessionPhase = "discussion" | "resolution" | "completed";
+export type EndVoteChoice = "yes" | "no";
+export type EndVoteBoardStatus = "active" | "complete" | "passed" | "failed";
+export type ModeratorConclusionStatus = "consensus" | "majority" | "unresolved";
+
+export interface EndVoteSnapshot {
+  id: string;
+  proposer: CouncilAgentId;
+  round: 1 | 2;
+  queue: CouncilAgentId[];
+  firstRoundVotes: Partial<Record<CouncilAgentId, EndVoteChoice>>;
+  firstRoundReasons: Partial<Record<CouncilAgentId, string>>;
+  secondRoundVotes: Partial<Record<CouncilAgentId, EndVoteChoice>>;
+  secondRoundReasons: Partial<Record<CouncilAgentId, string>>;
+}
+
+export interface EndVoteBallotSnapshot {
+  voteId: string;
+  round: 1 | 2;
+  choice: EndVoteChoice;
+  reason?: string;
+}
+
+export interface EndVoteBoardSnapshot {
+  voteId: string;
+  proposer: CouncilAgentId;
+  round: 1 | 2;
+  threshold: number;
+  totalAgents: number;
+  agentOrder: CouncilAgentId[];
+  votes: Partial<Record<CouncilAgentId, EndVoteChoice>>;
+  reasons: Partial<Record<CouncilAgentId, string>>;
+  status: EndVoteBoardStatus;
+  outcome?: string;
+}
+
+export interface ModeratorConclusionSnapshot {
+  status: ModeratorConclusionStatus;
+  summary: string;
+  score: number;
+  reason: string;
+  next?: string;
+}
+
+export interface HandoffSnapshot {
+  from: CouncilAgentId;
+  to: CouncilAgentId;
+  question: string;
+  sourceMessageId: string;
+  timestamp: number;
+}
 
 export interface SessionMessage extends SharedMessage {
   isStreaming?: boolean;
@@ -28,6 +88,9 @@ export interface SessionMessage extends SharedMessage {
   displayName?: string;
   displayProvider?: Provider;
   requestedEnd?: boolean;
+  endVoteBallot?: EndVoteBallotSnapshot;
+  endVoteBoard?: EndVoteBoardSnapshot;
+  moderatorConclusion?: ModeratorConclusionSnapshot;
 }
 
 export interface SessionToolEvent {
@@ -66,6 +129,8 @@ export interface SessionRuntimeSnapshot {
   moderatorFinalSummaryPosted: boolean;
   resolutionQueue: CouncilAgentId[];
   resolutionNoticePosted: boolean;
+  endVote: EndVoteSnapshot | null;
+  pendingHandoff: HandoffSnapshot | null;
 }
 
 export interface DiscussionSession {
@@ -150,6 +215,8 @@ function createEmptyRuntime(): SessionRuntimeSnapshot {
     moderatorFinalSummaryPosted: false,
     resolutionQueue: [],
     resolutionNoticePosted: false,
+    endVote: null,
+    pendingHandoff: null,
   };
 }
 
@@ -178,6 +245,18 @@ function cleanText(value: unknown, fallback = ""): string {
 
 function isCouncilAgent(value: unknown): value is CouncilAgentId {
   return typeof value === "string" && AGENT_IDS.includes(value as CouncilAgentId);
+}
+
+function isEndVoteChoice(value: unknown): value is EndVoteChoice {
+  return value === "yes" || value === "no";
+}
+
+function isEndVoteBoardStatus(value: unknown): value is EndVoteBoardStatus {
+  return value === "active" || value === "complete" || value === "passed" || value === "failed";
+}
+
+function isModeratorConclusionStatus(value: unknown): value is ModeratorConclusionStatus {
+  return value === "consensus" || value === "majority" || value === "unresolved";
 }
 
 function normalizeStatus(value: unknown): SessionStatus {
@@ -235,6 +314,108 @@ function normalizeToolEvent(input: unknown): SessionToolEvent | null {
     output,
     ...(record.error ? { error: cleanText(record.error) } : {}),
     timestamp: clampNumber(record.timestamp, Date.now()),
+  };
+}
+
+function normalizeReasonRecord(value: unknown): Partial<Record<CouncilAgentId, string>> {
+  if (!value || typeof value !== "object") {
+    return {};
+  }
+
+  const reasons: Partial<Record<CouncilAgentId, string>> = {};
+  for (const [agentId, reason] of Object.entries(value)) {
+    const cleaned = cleanText(reason).trim();
+    if (isCouncilAgent(agentId) && cleaned) {
+      reasons[agentId] = cleaned;
+    }
+  }
+
+  return reasons;
+}
+
+function normalizeHandoff(input: unknown): HandoffSnapshot | null {
+  if (!input || typeof input !== "object") return null;
+
+  const record = input as Partial<HandoffSnapshot>;
+  const from = isCouncilAgent(record.from) ? record.from : null;
+  const to = isCouncilAgent(record.to) ? record.to : null;
+  const question = cleanText(record.question).trim();
+  const sourceMessageId = cleanText(record.sourceMessageId).trim();
+
+  if (!from || !to || !question || !sourceMessageId) {
+    return null;
+  }
+
+  return {
+    from,
+    to,
+    question,
+    sourceMessageId,
+    timestamp: clampNumber(record.timestamp, Date.now()),
+  };
+}
+
+function normalizeEndVoteBallot(input: unknown): EndVoteBallotSnapshot | undefined {
+  if (!input || typeof input !== "object") return undefined;
+
+  const record = input as Partial<EndVoteBallotSnapshot>;
+  const voteId = cleanText(record.voteId);
+  if (!voteId || !isEndVoteChoice(record.choice)) return undefined;
+
+  return {
+    voteId,
+    round: record.round === 2 ? 2 : 1,
+    choice: record.choice,
+    ...(cleanText(record.reason).trim() ? { reason: cleanText(record.reason).trim() } : {}),
+  };
+}
+
+function normalizeEndVoteBoard(input: unknown): EndVoteBoardSnapshot | undefined {
+  if (!input || typeof input !== "object") return undefined;
+
+  const record = input as Partial<EndVoteBoardSnapshot>;
+  const voteId = cleanText(record.voteId);
+  const proposer = isCouncilAgent(record.proposer) ? record.proposer : null;
+  if (!voteId || !proposer) return undefined;
+
+  return {
+    voteId,
+    proposer,
+    round: record.round === 2 ? 2 : 1,
+    threshold: Math.max(1, clampNumber(record.threshold, 1)),
+    totalAgents: Math.max(1, clampNumber(record.totalAgents, 1)),
+    agentOrder: Array.isArray(record.agentOrder) ? record.agentOrder.filter(isCouncilAgent) : [],
+    votes:
+      record.votes && typeof record.votes === "object"
+        ? Object.fromEntries(
+            Object.entries(record.votes).filter(
+              ([agentId, choice]) => isCouncilAgent(agentId) && isEndVoteChoice(choice),
+            ),
+          )
+        : {},
+    reasons: normalizeReasonRecord(record.reasons),
+    status: isEndVoteBoardStatus(record.status) ? record.status : "active",
+    ...(cleanText(record.outcome).trim() ? { outcome: cleanText(record.outcome).trim() } : {}),
+  };
+}
+
+function normalizeModeratorConclusion(input: unknown): ModeratorConclusionSnapshot | undefined {
+  if (!input || typeof input !== "object") return undefined;
+
+  const record = input as Partial<ModeratorConclusionSnapshot>;
+  const status = isModeratorConclusionStatus(record.status) ? record.status : null;
+  const summary = cleanText(record.summary).trim();
+  const reason = cleanText(record.reason).trim();
+  if (!status || !summary || !reason) return undefined;
+
+  const score = Math.max(0, Math.min(10, Math.round(clampNumber(record.score, 0))));
+
+  return {
+    status,
+    summary,
+    score,
+    reason,
+    ...(cleanText(record.next).trim() ? { next: cleanText(record.next).trim() } : {}),
   };
 }
 
@@ -307,6 +488,15 @@ function normalizeMessage(input: unknown): SessionMessage | null {
     ...(record.displayName ? { displayName: cleanText(record.displayName) } : {}),
     ...(record.displayProvider ? { displayProvider: record.displayProvider } : {}),
     ...(record.requestedEnd ? { requestedEnd: Boolean(record.requestedEnd) } : {}),
+    ...(normalizeEndVoteBallot(record.endVoteBallot)
+      ? { endVoteBallot: normalizeEndVoteBallot(record.endVoteBallot) }
+      : {}),
+    ...(normalizeEndVoteBoard(record.endVoteBoard)
+      ? { endVoteBoard: normalizeEndVoteBoard(record.endVoteBoard) }
+      : {}),
+    ...(normalizeModeratorConclusion(record.moderatorConclusion)
+      ? { moderatorConclusion: normalizeModeratorConclusion(record.moderatorConclusion) }
+      : {}),
     ...(normalizeReactions(record.reactions)
       ? { reactions: normalizeReactions(record.reactions) }
       : {}),
@@ -331,6 +521,42 @@ function normalizeRuntime(input: unknown, status: SessionStatus): SessionRuntime
   for (const agentId of AGENT_IDS) {
     whisperBonuses[agentId] = clampNumber(record.whisperBonuses?.[agentId]);
   }
+
+  const normalizeVoteRecord = (value: unknown): Partial<Record<CouncilAgentId, EndVoteChoice>> => {
+    if (!value || typeof value !== "object") {
+      return {};
+    }
+
+    const votes: Partial<Record<CouncilAgentId, EndVoteChoice>> = {};
+    for (const [agentId, choice] of Object.entries(value)) {
+      if (isCouncilAgent(agentId) && isEndVoteChoice(choice)) {
+        votes[agentId] = choice;
+      }
+    }
+    return votes;
+  };
+
+  const endVote =
+    record.endVote && typeof record.endVote === "object"
+      ? (() => {
+          const raw = record.endVote as Partial<EndVoteSnapshot>;
+          const id = cleanText(raw.id) || "end_vote_legacy";
+          const proposer = isCouncilAgent(raw.proposer) ? raw.proposer : null;
+          if (!proposer) return null;
+
+          return {
+            id,
+            proposer,
+            round: raw.round === 2 ? 2 : 1,
+            queue: Array.isArray(raw.queue) ? raw.queue.filter(isCouncilAgent) : [],
+            firstRoundVotes: normalizeVoteRecord(raw.firstRoundVotes),
+            firstRoundReasons: normalizeReasonRecord(raw.firstRoundReasons),
+            secondRoundVotes: normalizeVoteRecord(raw.secondRoundVotes),
+            secondRoundReasons: normalizeReasonRecord(raw.secondRoundReasons),
+          } satisfies EndVoteSnapshot;
+        })()
+      : null;
+  const pendingHandoff = normalizeHandoff(record.pendingHandoff);
 
   return {
     phase: normalizePhase(record.phase, status),
@@ -357,6 +583,8 @@ function normalizeRuntime(input: unknown, status: SessionStatus): SessionRuntime
         ? record.closingQueue.filter(isCouncilAgent)
         : [],
     resolutionNoticePosted: Boolean(record.resolutionNoticePosted ?? record.closingNoticePosted),
+    endVote,
+    pendingHandoff,
   };
 }
 
@@ -473,12 +701,7 @@ function readIndex(): SessionSummary[] {
 function writeIndex(index: SessionSummary[]): void {
   const storage = getStorage();
   if (!storage) return;
-
-  try {
-    storage.setItem(SESSION_INDEX_KEY, JSON.stringify(index));
-  } catch (error) {
-    console.error("Failed to write session index:", error);
-  }
+  storage.setItem(SESSION_INDEX_KEY, JSON.stringify(index));
 }
 
 function normalizeDiscussionSession(input: unknown): DiscussionSession | null {
@@ -592,6 +815,10 @@ export function saveDiscussionSession(session: DiscussionSession): DiscussionSes
     writeIndex(replaceIndexEntry(readIndex(), buildSummary(safeSession)));
   } catch (error) {
     console.error("Failed to save session:", error);
+    throw new SessionPersistenceError(
+      "Failed to save the session locally. Free up browser storage space and try again.",
+      error,
+    );
   }
 
   return safeSession;
@@ -646,11 +873,16 @@ function updateArchivedState(id: string, archivedAt: number | null): DiscussionS
   const existing = loadDiscussionSession(id);
   if (!existing) return null;
 
-  return saveDiscussionSession({
-    ...existing,
-    archivedAt,
-    ...(archivedAt == null ? { lastOpenedAt: Date.now() } : {}),
-  });
+  try {
+    return saveDiscussionSession({
+      ...existing,
+      archivedAt,
+      ...(archivedAt == null ? { lastOpenedAt: Date.now() } : {}),
+    });
+  } catch (error) {
+    console.error("Failed to update archived state:", error);
+    return null;
+  }
 }
 
 export function archiveDiscussionSession(id: string): DiscussionSession | null {
@@ -665,11 +897,16 @@ export function touchDiscussionSession(id: string): DiscussionSession | null {
   const existing = loadDiscussionSession(id);
   if (!existing) return null;
 
-  return saveDiscussionSession({
-    ...existing,
-    archivedAt: null,
-    lastOpenedAt: Date.now(),
-  });
+  try {
+    return saveDiscussionSession({
+      ...existing,
+      archivedAt: null,
+      lastOpenedAt: Date.now(),
+    });
+  } catch (error) {
+    console.error("Failed to touch session:", error);
+    return null;
+  }
 }
 
 export async function createDiscussionSession(
@@ -714,11 +951,16 @@ export function stabilizeStoredSessions(): SessionSummary[] {
     }
 
     if (session.status === "running") {
-      const next = saveDiscussionSession({
-        ...session,
-        status: "paused",
-      });
-      stabilized.push(buildSummary(next));
+      try {
+        const next = saveDiscussionSession({
+          ...session,
+          status: "paused",
+        });
+        stabilized.push(buildSummary(next));
+      } catch (error) {
+        console.error("Failed to stabilize running session:", error);
+        stabilized.push(summary);
+      }
       continue;
     }
 
