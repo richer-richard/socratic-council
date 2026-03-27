@@ -3732,7 +3732,7 @@ dependencies = [
 
 [[package]]
 name = "socratic-council"
-version = "0.1.1"
+version = "1.0.0"
 dependencies = [
  "futures-util",
  "reqwest 0.12.28",

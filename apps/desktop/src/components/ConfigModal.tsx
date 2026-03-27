@@ -65,7 +65,7 @@ const MODEL_OPTIONS: Record<Provider, { id: string; name: string; description?: 
   })),
 };
 
-const ABOUT_VERSION = "0.1.1";
+const ABOUT_VERSION = "1.0.0";
 const ABOUT_IDENTIFIER = "com.socratic-council.desktop";
 const ABOUT_LICENSE = "Apache-2.0";
 const ABOUT_REPOSITORY = "https://github.com/richer-richard/socratic-council";
