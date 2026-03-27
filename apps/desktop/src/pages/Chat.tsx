@@ -43,6 +43,7 @@ import {
   FairnessManager,
 } from "@socratic-council/core";
 import { calculateMessageCost } from "../utils/cost";
+import { extractHandoffDirective } from "../utils/handoff";
 import { createStreamingToolCallDetector, extractActions } from "../utils/toolActions";
 import { splitIntoInlineQuoteSegments, stripQuoteTokens } from "../utils/inlineQuotes";
 import { Virtuoso, type VirtuosoHandle } from "react-virtuoso";
@@ -475,45 +476,6 @@ function parseModeratorConclusionFromText(content: string): ModeratorConclusionS
     score: Math.max(0, Math.min(10, Number(scoreMatch[1]))),
     reason,
     ...(reasonCandidates[1] ? { next: reasonCandidates[1].replace(/^Next:\s*/i, "").trim() } : {}),
-  };
-}
-
-function extractHandoffDirective(
-  raw: string,
-  from: CouncilAgentId,
-): { cleaned: string; handoff: PendingHandoffState | null } {
-  let handoff: PendingHandoffState | null = null;
-
-  const cleaned = raw.replace(
-    /(^|\n)[ \t]*@handoff\((\{[^\n]*\})\)[ \t]*(\n|$)/gi,
-    (_match, prefix: string, payloadText: string, suffix: string) => {
-      if (!handoff) {
-        try {
-          const payload = JSON.parse(payloadText) as { to?: unknown; question?: unknown };
-          const to = isCouncilAgent(payload.to) ? payload.to : null;
-          const question =
-            typeof payload.question === "string" ? normalizeMessageText(payload.question) : "";
-          if (to && to !== from && question) {
-            handoff = {
-              from,
-              to,
-              question,
-              sourceMessageId: "",
-              timestamp: Date.now(),
-            };
-          }
-        } catch {
-          // Ignore malformed handoff directives without affecting the normal message body.
-        }
-      }
-
-      return prefix && suffix ? "\n" : "";
-    },
-  );
-
-  return {
-    cleaned: normalizeMessageText(cleaned),
-    handoff,
   };
 }
 
@@ -2569,10 +2531,12 @@ Write the official moderator wrap-up in 4 short sentences:
           (toolEvents.length > 0
             ? "Research completed, but no final answer was generated."
             : "[No response received]");
-        const { cleaned: strippedDisplayContent, handoff } = extractHandoffDirective(
-          initialDisplayContent,
-          agentId,
-        );
+        const { cleaned: strippedDisplayContent, handoff } = extractHandoffDirective({
+          raw: initialDisplayContent,
+          from: agentId,
+          validAgents: AGENT_IDS,
+          normalizeMessageText,
+        });
         const handoffForNextTurn =
           result.success && !result.error && handoff && !parsed.endRequested
             ? {
