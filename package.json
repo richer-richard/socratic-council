@@ -16,6 +16,7 @@
     "test": "vitest run --config vitest.config.ts",
     "lint": "pnpm -r lint",
     "typecheck": "pnpm -r typecheck",
+    "site:build": "node scripts/build-site.mjs",
     "clean": "pnpm -r clean && rm -rf node_modules",
     "format": "prettier --write .",
     "format:check": "prettier --check ."
