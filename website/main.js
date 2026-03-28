@@ -7,19 +7,19 @@ function buildStarfield() {
   }
 
   const fragment = document.createDocumentFragment();
-  const starCount = 110;
+  const count = 56;
 
-  for (let index = 0; index < starCount; index += 1) {
+  for (let index = 0; index < count; index += 1) {
     const star = document.createElement("span");
-    const size = Math.random() * 2.4 + 0.8;
+    const size = Math.random() * 1.9 + 0.8;
 
     star.className = "star";
     star.style.left = `${Math.random() * 100}%`;
     star.style.top = `${Math.random() * 100}%`;
     star.style.width = `${size}px`;
     star.style.height = `${size}px`;
-    star.style.setProperty("--duration", `${2.8 + Math.random() * 4.2}s`);
-    star.style.setProperty("--delay", `${Math.random() * 5}s`);
+    star.style.setProperty("--duration", `${2.6 + Math.random() * 3.8}s`);
+    star.style.setProperty("--delay", `${Math.random() * 4.5}s`);
 
     fragment.appendChild(star);
   }
@@ -47,38 +47,21 @@ function revealSections() {
       });
     },
     {
-      threshold: 0.14,
-      rootMargin: "0px 0px -6% 0px",
+      threshold: 0.12,
+      rootMargin: "0px 0px -8% 0px",
     },
   );
 
   nodes.forEach((node) => observer.observe(node));
 }
 
-function wireParallax() {
-  if (reduceMotion) {
-    return;
-  }
+function wireTopbar() {
+  const update = () => {
+    document.body.classList.toggle("is-scrolled", window.scrollY > 20);
+  };
 
-  const shell = document.querySelector(".parallax-shell");
-
-  if (!shell) {
-    return;
-  }
-
-  shell.addEventListener("pointermove", (event) => {
-    const rect = shell.getBoundingClientRect();
-    const x = (event.clientX - rect.left) / rect.width - 0.5;
-    const y = (event.clientY - rect.top) / rect.height - 0.5;
-
-    shell.style.setProperty("--shift-x", `${x * 18}px`);
-    shell.style.setProperty("--shift-y", `${y * 18}px`);
-  });
-
-  shell.addEventListener("pointerleave", () => {
-    shell.style.setProperty("--shift-x", "0px");
-    shell.style.setProperty("--shift-y", "0px");
-  });
+  update();
+  window.addEventListener("scroll", update, { passive: true });
 }
 
 function stampYear() {
@@ -89,5 +72,5 @@ function stampYear() {
 
 buildStarfield();
 revealSections();
-wireParallax();
+wireTopbar();
 stampYear();

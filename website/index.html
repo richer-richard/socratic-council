@@ -6,7 +6,7 @@
     <title>Socratic Council</title>
     <meta
       name="description"
-      content="Socratic Council is a local-first desktop app where seven AI agents debate any topic with search, export, and conflict visualization."
+      content="Socratic Council is a local-first desktop app where seven AI agents debate any topic with search, exports, conflict tracking, and a source-first build path."
     />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -18,31 +18,21 @@
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
-    <div class="site-chrome" aria-hidden="true">
-      <div class="mist mist-a"></div>
-      <div class="mist mist-b"></div>
-      <div class="mist mist-c"></div>
-      <div class="grain"></div>
-      <div class="starfield" data-starfield></div>
-    </div>
-
     <header class="topbar">
-      <a class="brand" href="#top" aria-label="Socratic Council home">
+      <a class="brandline" href="#top" aria-label="Socratic Council home">
         <img src="./assets/readme-app-icon-rounded.png" alt="" />
         <span>Socratic Council</span>
       </a>
 
-      <nav class="floating-nav" aria-label="Section navigation">
-        <a href="#lineup">Lineup</a>
+      <nav class="topnav" aria-label="Primary navigation">
+        <a href="#voices">Voices</a>
         <a href="#flow">Flow</a>
         <a href="#install">Install</a>
-        <a href="#evidence">Evidence</a>
         <a href="#builders">Builders</a>
       </nav>
 
-      <div class="topbar-actions">
+      <div class="toplinks">
         <a
-          class="ghost-link"
           href="https://github.com/richer-richard/socratic-council"
           target="_blank"
           rel="noreferrer"
@@ -50,396 +40,323 @@
           GitHub
         </a>
         <a
-          class="primary-pill"
           href="https://github.com/richer-richard/socratic-council/releases/tag/v1.0.0"
           target="_blank"
           rel="noreferrer"
         >
-          v1.0.0
+          Release
         </a>
       </div>
     </header>
 
-    <main class="page" id="top">
-      <section class="hero reveal">
-        <div class="hero-copy">
-          <p class="eyebrow">Local-first multi-agent desktop debate</p>
-          <h1>Seven minds, one chamber, no server in the middle.</h1>
-          <p class="lede">
-            Socratic Council runs a seven-agent seminar on any topic. You bring your own provider
-            keys, choose the room’s models, attach evidence, and watch the discussion unfold with
-            search, quoting, reactions, export, conflict graphs, and cost tracking built directly
-            into the desktop app.
+    <main id="top">
+      <section class="hero">
+        <div class="hero-media" aria-hidden="true">
+          <img src="./assets/experience-map.svg" alt="" />
+          <div class="hero-stars" data-starfield></div>
+        </div>
+        <div class="hero-scrim" aria-hidden="true"></div>
+
+        <div class="hero-inner">
+          <p class="hero-kicker">Local-first desktop debate app</p>
+          <h1>Socratic Council</h1>
+          <p class="hero-statement">
+            Seven agents enter the same chamber with your question, your files, and no hosted
+            control plane between them.
+          </p>
+          <p class="hero-support">
+            Bring your own provider keys. Run the discussion locally. Search the transcript, track
+            disagreement, verify evidence, and export the room when the argument is finished.
           </p>
 
           <div class="hero-actions">
             <a
-              class="primary-button"
+              class="primary-action"
               href="https://github.com/richer-richard/socratic-council/releases/tag/v1.0.0"
               target="_blank"
               rel="noreferrer"
             >
-              Open The Release
+              Open v1.0.0
             </a>
-            <a class="secondary-button" href="#install">See The Install Paths</a>
-          </div>
-
-          <div class="snapshot-band">
-            <article class="snapshot-card">
-              <strong>7 agents</strong>
-              <span>plus an optional moderator in the room</span>
-            </article>
-            <article class="snapshot-card">
-              <strong>7 providers</strong>
-              <span>OpenAI, Anthropic, Gemini, DeepSeek, Kimi, Qwen, MiniMax</span>
-            </article>
-            <article class="snapshot-card">
-              <strong>5 export modes</strong>
-              <span>Markdown, JSON, PDF, DOCX, PPTX</span>
-            </article>
-            <article class="snapshot-card">
-              <strong>Source only</strong>
-              <span>local build, local keys, local transcripts</span>
-            </article>
+            <a class="secondary-action" href="#install">Build From Source</a>
           </div>
         </div>
+      </section>
 
-        <div class="hero-visual parallax-shell">
-          <article class="constellation-card parallax-card">
-            <div class="constellation-header">
-              <p class="mini-kicker">Current ambient shape</p>
-              <span>soft motion, dark paper, warm edges</span>
-            </div>
+      <section class="section" id="voices">
+        <div class="section-inner section-two-up">
+          <div class="section-copy reveal">
+            <p class="section-kicker">Council lineup</p>
+            <h2>The room is diverse on purpose, not theatrical by accident.</h2>
+            <p>
+              Each seat maps to a different provider family so the conversation has real model
+              variance. No one is asked to cosplay a stock archetype. The chamber is there to
+              pressure weak claims, surface disagreement, and reach a defensible close.
+            </p>
+          </div>
 
-            <div class="constellation-board">
-              <div class="agent-dot george"><span>George</span></div>
-              <div class="agent-dot cathy"><span>Cathy</span></div>
-              <div class="agent-dot grace"><span>Grace</span></div>
-              <div class="agent-dot douglas"><span>Douglas</span></div>
-              <div class="agent-dot kate"><span>Kate</span></div>
-              <div class="agent-dot quinn"><span>Quinn</span></div>
-              <div class="agent-dot mary"><span>Mary</span></div>
-              <svg viewBox="0 0 260 260" class="constellation-lines" aria-hidden="true">
-                <path d="M130 24 L214 68 L236 162 L174 232 L86 232 L24 162 L46 68 Z" />
-                <path d="M130 24 L236 162 L86 232 L46 68 Z" />
-                <path d="M214 68 L24 162 L174 232 Z" />
-              </svg>
-            </div>
+          <ol class="voice-list reveal">
+            <li>
+              <span class="voice-name">George</span>
+              <span class="voice-provider">OpenAI</span>
+              <span class="voice-model">GPT-5.4</span>
+            </li>
+            <li>
+              <span class="voice-name">Cathy</span>
+              <span class="voice-provider">Anthropic</span>
+              <span class="voice-model">Claude Opus 4.6</span>
+            </li>
+            <li>
+              <span class="voice-name">Grace</span>
+              <span class="voice-provider">Google</span>
+              <span class="voice-model">Gemini 3.1 Pro</span>
+            </li>
+            <li>
+              <span class="voice-name">Douglas</span>
+              <span class="voice-provider">DeepSeek</span>
+              <span class="voice-model">DeepSeek Reasoner</span>
+            </li>
+            <li>
+              <span class="voice-name">Kate</span>
+              <span class="voice-provider">Kimi</span>
+              <span class="voice-model">Kimi K2.5</span>
+            </li>
+            <li>
+              <span class="voice-name">Quinn</span>
+              <span class="voice-provider">Qwen</span>
+              <span class="voice-model">Qwen 3.5 Plus</span>
+            </li>
+            <li>
+              <span class="voice-name">Mary</span>
+              <span class="voice-provider">MiniMax</span>
+              <span class="voice-model">MiniMax M2.5</span>
+            </li>
+            <li>
+              <span class="voice-name">Moderator</span>
+              <span class="voice-provider">Optional</span>
+              <span class="voice-model">Focus, fairness, and closure</span>
+            </li>
+          </ol>
+        </div>
+      </section>
 
-            <div class="constellation-footer">
+      <section class="section" id="flow">
+        <div class="section-inner">
+          <div class="section-copy reveal">
+            <p class="section-kicker">How the chamber moves</p>
+            <h2>
+              The product is not a chat skin. It is a discussion loop with memory, bidding, and
+              visible evidence.
+            </h2>
+            <p>
+              A turn begins with context building, passes through speaker selection and provider
+              streaming, then folds tool results, quotes, reactions, and analytics back into the
+              transcript surface.
+            </p>
+          </div>
+
+          <figure class="visual-plane reveal">
+            <img
+              src="./assets/conversation-loop.svg"
+              alt="Conversation loop showing user input, UI, context building, bidding, provider streaming, parsed actions, tool results, and analytics refresh."
+            />
+          </figure>
+
+          <div class="flow-notes reveal">
+            <div>
+              <span>01</span>
               <p>
-                Turn-taking dialogue, handoffs, inline quotes, reactions, and evidence-aware
-                moderation all happen inside a single local-first conversation loop.
+                Context is built from the live transcript, memory, attachments, and session state.
               </p>
             </div>
-          </article>
-
-          <article class="floating-note note-release parallax-card">
-            <span class="mini-kicker">Release</span>
-            <strong>v1.0.0</strong>
-            <p>First full ambient release cut from the current desktop source.</p>
-          </article>
-
-          <article class="floating-note note-local parallax-card">
-            <span class="mini-kicker">Local-first</span>
-            <strong>Your keys, your machine</strong>
-            <p>No hosted control plane. Provider credentials stay local through the Tauri store.</p>
-          </article>
-
-          <article class="floating-note note-exports parallax-card">
-            <span class="mini-kicker">Outputs</span>
-            <strong>Shareable transcripts</strong>
-            <p>Exports include charts, costs, and structure instead of raw chat logs alone.</p>
-          </article>
+            <div>
+              <span>02</span>
+              <p>
+                Each round chooses a speaker instead of flattening every reply into one assistant
+                voice.
+              </p>
+            </div>
+            <div>
+              <span>03</span>
+              <p>
+                Structured actions stay visible in the room, so verification and follow-up are part
+                of the record.
+              </p>
+            </div>
+          </div>
         </div>
       </section>
 
-      <section class="section section-lineup reveal" id="lineup">
-        <div class="section-heading pinned">
-          <p class="eyebrow">Council lineup</p>
-          <h2>Each seat has its own light, but none of them hide behind a persona prompt.</h2>
-          <p>
-            The default room maps each council member to a different provider. The point is
-            pressure-testing ideas across different model families, not dressing them up as
-            theatrical archetypes.
-          </p>
-        </div>
-
-        <div class="agent-grid">
-          <article class="agent-card george">
-            <span>OpenAI</span>
-            <strong>George</strong>
-            <p>Default model: GPT-5.4</p>
-          </article>
-          <article class="agent-card cathy">
-            <span>Anthropic</span>
-            <strong>Cathy</strong>
-            <p>Default model: Claude Opus 4.6</p>
-          </article>
-          <article class="agent-card grace">
-            <span>Google</span>
-            <strong>Grace</strong>
-            <p>Default model: Gemini 3.1 Pro</p>
-          </article>
-          <article class="agent-card douglas">
-            <span>DeepSeek</span>
-            <strong>Douglas</strong>
-            <p>Default model: DeepSeek Reasoner</p>
-          </article>
-          <article class="agent-card kate">
-            <span>Kimi</span>
-            <strong>Kate</strong>
-            <p>Default model: Kimi K2.5</p>
-          </article>
-          <article class="agent-card quinn">
-            <span>Qwen</span>
-            <strong>Quinn</strong>
-            <p>Default model: Qwen 3.5 Plus</p>
-          </article>
-          <article class="agent-card mary">
-            <span>MiniMax</span>
-            <strong>Mary</strong>
-            <p>Default model: MiniMax M2.5</p>
-          </article>
-          <article class="agent-card moderator">
-            <span>Moderator</span>
-            <strong>Optional eighth voice</strong>
-            <p>Guides focus, balance, evidence quality, and final closure.</p>
-          </article>
-        </div>
-      </section>
-
-      <section class="section section-flow reveal" id="flow">
-        <div class="section-heading">
-          <p class="eyebrow">How the room moves</p>
-          <h2>
-            The product is not just “chat”, it is a deliberately instrumented discussion loop.
-          </h2>
-          <p>
-            The diagrams in the repo already show the product’s real structure, so the site uses
-            them as anchors rather than replacing them with generic marketing abstractions.
-          </p>
-        </div>
-
-        <div class="diagram-grid">
-          <figure class="diagram-card wide">
-            <img
-              src="./assets/experience-map.svg"
-              alt="Experience map for the Socratic Council app"
-            />
-            <figcaption>
-              <strong>Experience map</strong>
-              <span>From topic entry and attachments to transcript review and export.</span>
-            </figcaption>
-          </figure>
-
-          <figure class="diagram-card">
-            <img
-              src="./assets/architecture-diagram.svg"
-              alt="Architecture diagram for the app and packages"
-            />
-            <figcaption>
-              <strong>Architecture</strong>
-              <span>Desktop app plus shared, SDK, and core workspace packages.</span>
-            </figcaption>
-          </figure>
-
-          <figure class="diagram-card offset">
-            <img src="./assets/conversation-loop.svg" alt="Conversation loop diagram" />
-            <figcaption>
-              <strong>Conversation loop</strong>
-              <span>Speaker selection, streaming text, tool actions, and analytics updates.</span>
-            </figcaption>
-          </figure>
-
-          <figure class="diagram-card">
-            <img src="./assets/export-pipeline.svg" alt="Export pipeline diagram" />
-            <figcaption>
-              <strong>Export pipeline</strong>
-              <span>Transcripts and computed stats become local shareable artifacts.</span>
-            </figcaption>
-          </figure>
-        </div>
-      </section>
-
-      <section class="section section-install reveal" id="install">
-        <div class="section-heading">
-          <p class="eyebrow">Install and first run</p>
-          <h2>There are two entry paths, and neither one asks you to trust a hosted black box.</h2>
-        </div>
-
-        <div class="install-layout">
-          <article class="install-card install-card-primary">
-            <span class="mini-kicker">Quick install</span>
-            <h3>macOS can take the single-command route.</h3>
+      <section class="section" id="evidence">
+        <div class="section-inner section-two-up section-two-up-reverse">
+          <div class="section-copy reveal">
+            <p class="section-kicker">What leaves the room</p>
+            <h2>Search, conflict, cost, and exports are not side quests after the debate.</h2>
             <p>
-              The repository ships a guided `install.sh` path that checks Xcode CLT, Homebrew,
-              Node.js, pnpm, and Rust, then builds and places the app into `/Applications`.
+              The transcript remains searchable, tool results stay in context, disagreement gets
+              rendered instead of buried, and the export layer writes structured artifacts directly
+              to disk.
             </p>
-            <pre><code>git clone https://github.com/richer-richard/socratic-council.git
+
+            <dl class="evidence-list">
+              <div>
+                <dt>Search</dt>
+                <dd>Jump straight to the line that matters in the transcript.</dd>
+              </div>
+              <div>
+                <dt>Conflict graph</dt>
+                <dd>Track pairwise disagreement instead of losing it in a long scrollback.</dd>
+              </div>
+              <div>
+                <dt>Exports</dt>
+                <dd>
+                  Markdown, JSON, PDF, DOCX, and PPTX all come from the same local transcript.
+                </dd>
+              </div>
+              <div>
+                <dt>Logs</dt>
+                <dd>
+                  Provider behavior, failures, and app events remain inspectable when things go
+                  wrong.
+                </dd>
+              </div>
+            </dl>
+          </div>
+
+          <figure class="visual-plane reveal">
+            <img
+              src="./assets/export-pipeline.svg"
+              alt="Export pipeline diagram showing transcript data flowing through stats and conflict calculation into local export formats."
+            />
+          </figure>
+        </div>
+      </section>
+
+      <section class="section" id="install">
+        <div class="section-inner">
+          <div class="section-copy reveal">
+            <p class="section-kicker">Build from source</p>
+            <h2>The repo is the product perimeter, so the install path is explicit by design.</h2>
+            <p>
+              Quick install exists for macOS. The manual path remains the source-of-truth for people
+              who want exact control over prerequisites, toolchains, and the desktop bundle.
+            </p>
+          </div>
+
+          <figure class="visual-plane reveal">
+            <img
+              src="./assets/installation-paths.svg"
+              alt="Installation paths diagram showing quick install through install.sh and the manual source-build path."
+            />
+          </figure>
+
+          <div class="install-split reveal">
+            <div>
+              <h3>Quick install</h3>
+              <p>
+                `install.sh` checks Xcode CLT, Homebrew, Node.js, pnpm, and Rust, then builds and
+                places the app in `/Applications`.
+              </p>
+              <pre><code>git clone https://github.com/richer-richard/socratic-council.git
 cd socratic-council
 ./install.sh</code></pre>
-          </article>
-
-          <article class="install-card install-card-diagram">
-            <img src="./assets/installation-paths.svg" alt="Installation paths diagram" />
-          </article>
-
-          <article class="install-card install-card-secondary">
-            <span class="mini-kicker">Manual path</span>
-            <h3>Windows, Linux, and careful macOS builders can inspect every step.</h3>
-            <p>
-              The README covers prerequisites, Node 22+, Rust, pnpm, the development loop, the
-              production build, and the platform-specific bundle outputs.
-            </p>
-            <ul class="soft-list">
-              <li>Node.js 22 or newer</li>
-              <li>pnpm 9.15.0 via corepack</li>
-              <li>Rust stable 1.77.2 or newer</li>
-              <li>Tauri v2 system prerequisites by platform</li>
-            </ul>
-          </article>
-
-          <article class="install-card install-card-run">
-            <span class="mini-kicker">First run setup</span>
-            <h3>Bring your own provider keys, then tune the room.</h3>
-            <p>
-              Settings cover provider credentials, model selection, global proxy settings, and the
-              moderator toggle. Keys are stored locally in the desktop app, not on a server you do
-              not control.
-            </p>
-          </article>
-        </div>
-      </section>
-
-      <section class="section section-evidence reveal" id="evidence">
-        <div class="section-heading">
-          <p class="eyebrow">Evidence surface</p>
-          <h2>This is where the app becomes more useful than a plain transcript window.</h2>
-          <p>
-            Search, export, conflict visualization, and logs are built into the workflow instead of
-            being treated as afterthoughts.
-          </p>
-        </div>
-
-        <div class="evidence-grid">
-          <article class="evidence-card">
-            <span class="mini-kicker">Search</span>
-            <h3>Jump straight to the line that matters.</h3>
-            <p>
-              Transcript search resolves directly back into the timeline instead of a detached
-              index.
-            </p>
-          </article>
-
-          <article class="evidence-card tall">
-            <span class="mini-kicker">Export</span>
-            <h3>Leave with something you can actually share.</h3>
-            <div class="format-stack">
-              <span>Markdown</span>
-              <span>JSON</span>
-              <span>PDF</span>
-              <span>DOCX</span>
-              <span>PPTX</span>
             </div>
-            <p>
-              The export pipeline is local and structured. It carries the transcript forward with
-              summaries, charts, and computed statistics.
-            </p>
-          </article>
 
-          <article class="evidence-card">
-            <span class="mini-kicker">Conflict graph</span>
-            <h3>Disagreement is rendered, not hidden.</h3>
-            <p>
-              Conflict relationships and pressure points are surfaced as a reviewable visual layer.
-            </p>
-          </article>
+            <div>
+              <h3>Manual install</h3>
+              <p>
+                The README walks through system prerequisites, Node 22+, pnpm 9.15.0, Rust stable,
+                and the Tauri development and production commands for macOS, Windows, and Linux.
+              </p>
+              <ul>
+                <li>Node.js 22 or newer</li>
+                <li>pnpm 9.15.0 via corepack</li>
+                <li>Rust stable 1.77.2 or newer</li>
+                <li>Tauri v2 platform prerequisites</li>
+              </ul>
+            </div>
+          </div>
 
-          <article class="evidence-card offset">
-            <span class="mini-kicker">Oracle tool</span>
-            <h3>Agents can request verification inside the room.</h3>
-            <p>
-              Tool results return into the transcript as normal messages, so evidence stays visible
-              to the whole council instead of vanishing into hidden state.
-            </p>
-          </article>
-
-          <article class="evidence-card">
-            <span class="mini-kicker">Logs</span>
-            <h3>When something breaks, the app leaves a trail.</h3>
-            <p>
-              Provider calls, app behavior, and error surfaces are easier to inspect because the
-              product already assumes debugging is part of the real workflow.
-            </p>
-          </article>
+          <figure class="visual-plane visual-plane-strip reveal">
+            <img
+              src="./assets/manual-install-flow.svg"
+              alt="Manual install flow showing prerequisites, Node.js and Corepack, Rust, pnpm install, then tauri dev or build."
+            />
+          </figure>
         </div>
       </section>
 
-      <section class="section section-builders reveal" id="builders">
-        <div class="section-heading">
-          <p class="eyebrow">For builders</p>
-          <h2>
-            A small monorepo, a desktop shell, and enough structure to evolve without theater.
-          </h2>
-        </div>
+      <section class="section" id="builders">
+        <div class="section-inner">
+          <div class="section-copy reveal">
+            <p class="section-kicker">For builders</p>
+            <h2>
+              The repo stays compact: one desktop shell, three shared packages, and a readable build
+              path.
+            </h2>
+            <p>
+              The monorepo is small enough to reason about without ceremony. Desktop UI lives in
+              `apps/desktop`; orchestration, transport, and shared contracts live in the workspace
+              packages behind it.
+            </p>
+          </div>
 
-        <div class="builder-layout">
-          <article class="builder-card">
-            <span class="mini-kicker">Monorepo layout</span>
-            <pre><code>socratic-council/
-apps/desktop        # Tauri v2 + React app
-packages/shared     # types, constants, models
-packages/sdk        # provider SDK and transport
-packages/core       # bidding, conflict, memory</code></pre>
-          </article>
+          <figure class="visual-plane reveal">
+            <img
+              src="./assets/architecture-diagram.svg"
+              alt="Architecture diagram showing the desktop app, core package, SDK package, shared package, and provider APIs."
+            />
+          </figure>
 
-          <article class="builder-card raised">
-            <span class="mini-kicker">Core commands</span>
-            <pre><code>pnpm --filter @socratic-council/desktop tauri:dev
+          <div class="builder-split reveal">
+            <div class="builder-copy">
+              <h3>Core commands</h3>
+              <pre><code>pnpm --filter @socratic-council/desktop tauri:dev
 pnpm --filter @socratic-council/desktop tauri:build
 pnpm test
 pnpm lint
 pnpm typecheck</code></pre>
-          </article>
+            </div>
 
-          <article class="builder-card">
-            <span class="mini-kicker">Why it matters</span>
-            <p>
-              The app ships source-only, so the repo itself is the real product perimeter. The site
-              therefore acts as a shaped front door to the same evidence already present in the
-              codebase and README.
-            </p>
-          </article>
+            <div class="builder-links">
+              <h3>Source trail</h3>
+              <a
+                href="https://github.com/richer-richard/socratic-council"
+                target="_blank"
+                rel="noreferrer"
+              >
+                Repository
+              </a>
+              <a
+                href="https://github.com/richer-richard/socratic-council/blob/main/README.md"
+                target="_blank"
+                rel="noreferrer"
+              >
+                Full README
+              </a>
+              <a
+                href="https://github.com/richer-richard/socratic-council/releases/tag/v1.0.0"
+                target="_blank"
+                rel="noreferrer"
+              >
+                Release notes
+              </a>
+            </div>
+          </div>
 
-          <article class="builder-card release-card">
-            <span class="mini-kicker">Links</span>
-            <a
-              href="https://github.com/richer-richard/socratic-council"
-              target="_blank"
-              rel="noreferrer"
-              >Source repository</a
-            >
-            <a
-              href="https://github.com/richer-richard/socratic-council/blob/main/README.md"
-              target="_blank"
-              rel="noreferrer"
-              >Full README</a
-            >
-            <a
-              href="https://github.com/richer-richard/socratic-council/releases/tag/v1.0.0"
-              target="_blank"
-              rel="noreferrer"
-              >Release v1.0.0</a
-            >
-          </article>
+          <figure class="visual-plane visual-plane-strip reveal">
+            <img
+              src="./assets/first-build-profile.svg"
+              alt="First build profile showing prerequisites, dependencies, frontend build, Rust and Tauri bundle, then install."
+            />
+          </figure>
         </div>
       </section>
     </main>
 
-    <footer class="footer reveal">
+    <footer class="footer">
       <p>Socratic Council</p>
-      <p>Ambient release site for the desktop source tree.</p>
+      <p>Local-first desktop debate, shipped from source.</p>
       <p>&copy; <span data-year></span> Socratic Council Team</p>
     </footer>
 

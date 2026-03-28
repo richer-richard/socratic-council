@@ -13,7 +13,9 @@ const assetCopies = [
   ["docs/assets/architecture-diagram.svg", "assets/architecture-diagram.svg"],
   ["docs/assets/conversation-loop.svg", "assets/conversation-loop.svg"],
   ["docs/assets/export-pipeline.svg", "assets/export-pipeline.svg"],
+  ["docs/assets/first-build-profile.svg", "assets/first-build-profile.svg"],
   ["docs/assets/installation-paths.svg", "assets/installation-paths.svg"],
+  ["docs/assets/manual-install-flow.svg", "assets/manual-install-flow.svg"],
 ];
 
 async function main() {
