@@ -1,5 +1,6 @@
-import type { Provider } from "../stores/config";
 import pdfWorkerUrl from "pdfjs-dist/legacy/build/pdf.worker.min.mjs?url";
+
+import type { Provider } from "../stores/config";
 
 const ATTACHMENT_DB_NAME = "socratic-council-attachments-v1";
 const ATTACHMENT_DB_VERSION = 1;
@@ -874,6 +875,9 @@ function withStore<T>(
         const store = transaction.objectStore(ATTACHMENT_STORE);
 
         let settled = false;
+        let resultReady = false;
+        let transactionComplete = false;
+        let result!: T;
         const finalize = (cb: () => void) => {
           if (settled) return;
           settled = true;
@@ -881,20 +885,34 @@ function withStore<T>(
           cb();
         };
 
-        transaction.oncomplete = () => finalize(() => resolve(result as T));
+        const maybeResolve = () => {
+          if (!resultReady || !transactionComplete) return;
+          finalize(() => resolve(result));
+        };
+
+        transaction.oncomplete = () => {
+          transactionComplete = true;
+          maybeResolve();
+        };
         transaction.onerror = () =>
           finalize(() => reject(transaction.error ?? new Error("Attachment database transaction failed")));
         transaction.onabort = () =>
           finalize(() => reject(transaction.error ?? new Error("Attachment database transaction aborted")));
 
-        let result: T;
         Promise.resolve(action(store, transaction))
           .then((value) => {
             result = value;
+            resultReady = true;
+            maybeResolve();
           })
           .catch((error) => {
+            if (settled) return;
+            try {
+              transaction.abort();
+            } catch {
+              // Ignore abort failures; the original action error is the useful signal.
+            }
             finalize(() => reject(error));
-            transaction.abort();
           });
       })
   );
@@ -984,25 +1002,24 @@ export async function loadSessionAttachmentBlobs(
 ): Promise<Map<string, LoadedAttachmentBlob>> {
   if (attachments.length === 0) return new Map();
 
-  return withStore("readonly", async (store) => {
-    const loaded = new Map<string, LoadedAttachmentBlob>();
-    for (const attachment of attachments) {
-      const record = await requestToPromise(store.get(attachment.id) as IDBRequest<StoredAttachmentBlob | undefined>);
-      if (!record?.blob) continue;
+  const records = await loadStoredAttachmentRecords(attachments);
+  const loaded = new Map<string, LoadedAttachmentBlob>();
 
-      const searchEntries =
-        sanitizeSearchEntries(record.searchEntries).length > 0
-          ? sanitizeSearchEntries(record.searchEntries)
-          : await extractSearchEntries(record.blob, attachment.name, attachment.kind, attachment.mimeType);
+  for (const { attachment, record } of records) {
+    const sanitizedEntries = sanitizeSearchEntries(record.searchEntries);
+    const searchEntries =
+      sanitizedEntries.length > 0
+        ? sanitizedEntries
+        : await extractSearchEntries(record.blob, attachment.name, attachment.kind, attachment.mimeType);
 
-      loaded.set(attachment.id, {
-        attachment,
-        blob: record.blob,
-        searchEntries,
-      });
-    }
-    return loaded;
-  });
+    loaded.set(attachment.id, {
+      attachment,
+      blob: record.blob,
+      searchEntries,
+    });
+  }
+
+  return loaded;
 }
 
 export async function loadSessionAttachmentDocuments(
@@ -1010,29 +1027,48 @@ export async function loadSessionAttachmentDocuments(
 ): Promise<LoadedAttachmentDocument[]> {
   if (attachments.length === 0) return [];
 
-  return withStore("readwrite", async (store) => {
-    const documents: LoadedAttachmentDocument[] = [];
+  const records = await loadStoredAttachmentRecords(attachments);
+  const documents: LoadedAttachmentDocument[] = [];
+  const updates: StoredAttachmentBlob[] = [];
 
+  for (const { attachment, record } of records) {
+    let searchEntries = sanitizeSearchEntries(record.searchEntries);
+    if (searchEntries.length === 0) {
+      searchEntries = await extractSearchEntries(record.blob, attachment.name, attachment.kind, attachment.mimeType);
+      updates.push({
+        ...record,
+        searchEntries,
+      } satisfies StoredAttachmentBlob);
+    }
+
+    documents.push({
+      attachment,
+      entries: searchEntries,
+    });
+  }
+
+  if (updates.length > 0) {
+    await withStore("readwrite", async (store) => {
+      for (const update of updates) {
+        store.put(update);
+      }
+    });
+  }
+
+  return documents;
+}
+
+async function loadStoredAttachmentRecords(
+  attachments: SessionAttachment[]
+): Promise<Array<{ attachment: SessionAttachment; record: StoredAttachmentBlob }>> {
+  return withStore("readonly", async (store) => {
+    const records: Array<{ attachment: SessionAttachment; record: StoredAttachmentBlob }> = [];
     for (const attachment of attachments) {
       const record = await requestToPromise(store.get(attachment.id) as IDBRequest<StoredAttachmentBlob | undefined>);
       if (!record?.blob) continue;
-
-      let searchEntries = sanitizeSearchEntries(record.searchEntries);
-      if (searchEntries.length === 0) {
-        searchEntries = await extractSearchEntries(record.blob, attachment.name, attachment.kind, attachment.mimeType);
-        store.put({
-          ...record,
-          searchEntries,
-        } satisfies StoredAttachmentBlob);
-      }
-
-      documents.push({
-        attachment,
-        entries: searchEntries,
-      });
+      records.push({ attachment, record });
     }
-
-    return documents;
+    return records;
   });
 }
 
