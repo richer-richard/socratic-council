@@ -3,9 +3,10 @@ import pdfWorkerUrl from "pdfjs-dist/legacy/build/pdf.worker.min.mjs?url";
 import type { Provider } from "../stores/config";
 
 const ATTACHMENT_DB_NAME = "socratic-council-attachments-v1";
-const ATTACHMENT_DB_VERSION = 1;
+const ATTACHMENT_DB_VERSION = 2;
 const ATTACHMENT_STORE = "session-attachments";
 const ATTACHMENT_BY_SESSION_INDEX = "by-session-id";
+const ATTACHMENT_BY_PROJECT_INDEX = "by-project-id";
 
 const IMAGE_MAX_DIMENSION = 1440;
 const IMAGE_TARGET_BYTES = 1_800_000;
@@ -136,6 +137,7 @@ export interface ComposerAttachment extends SessionAttachment {
 interface StoredAttachmentBlob {
   id: string;
   sessionId: string;
+  projectId?: string;
   blob: Blob;
   searchEntries?: AttachmentSearchEntry[];
 }
@@ -859,6 +861,9 @@ function openAttachmentDb(): Promise<IDBDatabase> {
       if (store && !store.indexNames.contains(ATTACHMENT_BY_SESSION_INDEX)) {
         store.createIndex(ATTACHMENT_BY_SESSION_INDEX, "sessionId", { unique: false });
       }
+      if (store && !store.indexNames.contains(ATTACHMENT_BY_PROJECT_INDEX)) {
+        store.createIndex(ATTACHMENT_BY_PROJECT_INDEX, "projectId", { unique: false });
+      }
     };
     request.onsuccess = () => resolve(request.result);
   });
@@ -1132,4 +1137,68 @@ export function buildAttachmentListLabel(attachments: SessionAttachment[]): stri
 
 export function estimateAttachmentPromptTokens(attachments: SessionAttachment[]): number {
   return attachments.reduce((sum, attachment) => sum + estimateTokensFromText(attachment.fallbackText), 0);
+}
+
+export async function persistProjectAttachments(
+  projectId: string,
+  attachments: ComposerAttachment[],
+): Promise<SessionAttachment[]> {
+  if (attachments.length === 0) return [];
+
+  const saved: SessionAttachment[] = [];
+  await withStore("readwrite", (store) => {
+    for (const attachment of attachments) {
+      const record: StoredAttachmentBlob = {
+        id: attachment.id,
+        sessionId: "",
+        projectId,
+        blob: attachment.blob,
+        searchEntries: attachment.searchEntries,
+      };
+      store.put(record);
+      const { blob: _b, previewUrl: _p, searchEntries: _s, ...meta } = attachment;
+      saved.push(meta);
+    }
+  });
+
+  return saved;
+}
+
+export async function loadProjectAttachmentBlobs(
+  projectId: string,
+): Promise<LoadedAttachmentBlob[]> {
+  return withStore("readonly", async (store) => {
+    const index = store.index(ATTACHMENT_BY_PROJECT_INDEX);
+    const records: StoredAttachmentBlob[] = await requestToPromise(
+      index.getAll(projectId),
+    );
+    return records.map((record) => ({
+      attachment: {
+        id: record.id,
+        name: "",
+        mimeType: "application/octet-stream",
+        size: record.blob.size,
+        kind: "binary" as const,
+        source: "file-picker" as const,
+        addedAt: 0,
+        width: null,
+        height: null,
+        fallbackText: "",
+      },
+      blob: record.blob,
+      searchEntries: record.searchEntries ?? [],
+    }));
+  });
+}
+
+export async function deleteProjectAttachmentBlobs(
+  projectId: string,
+): Promise<void> {
+  await withStore("readwrite", async (store) => {
+    const index = store.index(ATTACHMENT_BY_PROJECT_INDEX);
+    const keys = await requestToPromise(index.getAllKeys(projectId));
+    for (const key of keys) {
+      store.delete(key);
+    }
+  });
 }

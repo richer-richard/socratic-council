@@ -23,6 +23,7 @@ import {
   type SessionToolEvent,
 } from "../services/sessions";
 import { getToolPrompt, runToolCall, type ToolCall, type ToolContext } from "../services/tools";
+import { addDossierEntry, loadProject } from "../services/projects";
 import { CouncilMark } from "../components/CouncilMark";
 import { ProviderIcon, SystemIcon, UserIcon } from "../components/icons/ProviderIcons";
 import {
@@ -1119,11 +1120,28 @@ export function Chat({ session, onNavigate, onPersistSession }: ChatProps) {
     duoLogueRef.current = duoLogue;
   }, [duoLogue]);
 
+  const loadProjectEvidenceIntoMemory = useCallback((projectId: string | null) => {
+    if (!projectId || !memoryManagerRef.current) return;
+    try {
+      const project = loadProject(projectId);
+      if (project && project.dossier.length > 0) {
+        memoryManagerRef.current.setProjectEvidence(
+          project.dossier.map((entry) => ({
+            id: entry.attachmentId,
+            name: entry.name,
+            summary: entry.note || `${entry.kind.toUpperCase()} file (${entry.name})`,
+          })),
+        );
+      }
+    } catch { /* project may not exist */ }
+  }, []);
+
   const resetRuntimeState = useCallback(() => {
     costTrackerRef.current = new CostTrackerEngine(AGENT_IDS);
     setCostState(costTrackerRef.current.getState());
     memoryManagerRef.current = createMemoryManager({ windowSize: MAX_CONTEXT_MESSAGES });
     memoryManagerRef.current.setTopic(topic);
+    loadProjectEvidenceIntoMemory(session.projectId);
     setTotalTokens({ input: 0, output: 0 });
     setModeratorUsage(DEFAULT_MODERATOR_USAGE);
     currentTurnRef.current = 0;
@@ -1158,6 +1176,7 @@ export function Chat({ session, onNavigate, onPersistSession }: ChatProps) {
     costTrackerRef.current = new CostTrackerEngine(AGENT_IDS);
     memoryManagerRef.current = createMemoryManager({ windowSize: MAX_CONTEXT_MESSAGES });
     memoryManagerRef.current.setTopic(source.topic);
+    loadProjectEvidenceIntoMemory(source.projectId);
 
     const effectiveRecentSpeakers =
       source.runtime.recentSpeakers.length > 0
@@ -1390,7 +1409,7 @@ export function Chat({ session, onNavigate, onPersistSession }: ChatProps) {
         const recent = context.recentMessages
           .filter((m) => (isCouncilAgent(m.agentId) || isModeratorMessage(m)) && !hasStructuredVoteArtifacts(m))
           .slice(-MAX_CONTEXT_MESSAGES);
-        return { messages: recent, engagementDebts: context.engagementDebt };
+        return { messages: recent, engagementDebts: context.engagementDebt, projectEvidence: context.projectEvidence };
       }
 
       const fallback = messages
@@ -1407,7 +1426,7 @@ export function Chat({ session, onNavigate, onPersistSession }: ChatProps) {
         )
         .slice(-MAX_CONTEXT_MESSAGES);
 
-      return { messages: fallback, engagementDebts: [] };
+      return { messages: fallback, engagementDebts: [], projectEvidence: [] };
     },
     [messages],
   );
@@ -1493,7 +1512,7 @@ export function Chat({ session, onNavigate, onPersistSession }: ChatProps) {
         ...(rawAttachments.length > 0 ? { attachments: rawAttachments } : {}),
       });
 
-      const { messages: contextMessages, engagementDebts } = getContextMessages(agentId);
+      const { messages: contextMessages, engagementDebts, projectEvidence } = getContextMessages(agentId);
 
       if (contextMessages.length === 0) {
         const directedPrompt =
@@ -1540,6 +1559,14 @@ Direct question: "${pendingHandoffRef.current.question}"
       const engagementPrompt = buildEngagementPrompt(engagementDebts);
       if (engagementPrompt) {
         history.push({ role: "user", content: engagementPrompt });
+      }
+
+      if (projectEvidence.length > 0) {
+        const evidenceLines = projectEvidence.map((e) => `- ${e.name}: ${e.summary}`);
+        history.push({
+          role: "user",
+          content: `## PROJECT EVIDENCE\nThe following evidence has been accumulated across sessions in this project:\n${evidenceLines.join("\n")}\nYou may reference this evidence in your response.`,
+        });
       }
 
       if (extraContext.length > 0) {
@@ -3711,6 +3738,7 @@ Write the official moderator wrap-up in 4 short sentences:
         updatedAt: nextUpdatedAt,
         lastOpenedAt: Math.max(normalizedSession.lastOpenedAt, normalizedSession.updatedAt),
         archivedAt: normalizedSession.archivedAt,
+        projectId: normalizedSession.projectId,
         status: nextStatus,
         currentTurn: currentTurnRef.current,
         totalTokens,
@@ -3949,6 +3977,37 @@ Write the official moderator wrap-up in 4 short sentences:
             >
               Export
             </button>
+
+            {normalizedSession.projectId && normalizedSession.attachments.length > 0 && (
+              <button
+                onClick={() => {
+                  const projectId = normalizedSession.projectId;
+                  if (!projectId) return;
+                  const project = loadProject(projectId);
+                  if (!project) return;
+                  const existingIds = new Set(project.dossier.map((d) => d.attachmentId));
+                  const newEntries = normalizedSession.attachments.filter(
+                    (a) => !existingIds.has(a.id),
+                  );
+                  if (newEntries.length === 0) return;
+                  for (const attachment of newEntries) {
+                    addDossierEntry(projectId, {
+                      attachmentId: attachment.id,
+                      name: attachment.name,
+                      mimeType: attachment.mimeType,
+                      size: attachment.size,
+                      kind: attachment.kind,
+                      sourceSessionId: normalizedSession.id,
+                      note: attachment.fallbackText.slice(0, 200),
+                    });
+                  }
+                }}
+                className="button-secondary text-sm"
+                title="Promote session attachments to the project dossier"
+              >
+                Save to Dossier
+              </button>
+            )}
 
             {sessionStatus !== "completed" &&
               (isRunning || isPaused || sessionStatus === "paused" || currentTurn > 0) && (
