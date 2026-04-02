@@ -36,6 +36,9 @@ pnpm-debug.log*
 # Testing
 coverage/
 .nyc_output/
+.playwright-cli/
+playwright-report/
+test-results/
 
 # Planning documents (internal use only)
 PLANNING.md
