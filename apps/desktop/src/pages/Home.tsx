@@ -321,7 +321,7 @@ export function Home({
   onOpenSession,
   onRestoreSession,
   onCreateProject,
-  onOpenProject,
+  onOpenProject: _onOpenProject,
   onDeleteProject,
   onArchiveProject,
   onRestoreProject,
@@ -332,6 +332,7 @@ export function Home({
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
   const [expandedProjects, setExpandedProjects] = useState<Set<string>>(() => new Set([INBOX_KEY]));
   const [showArchived, setShowArchived] = useState(false);
+  const [focusedProjectId, setFocusedProjectId] = useState<string | null>(null);
   const [showNewProject, setShowNewProject] = useState(false);
   const [newProjectName, setNewProjectName] = useState("");
   const [newProjectDescription, setNewProjectDescription] = useState("");
@@ -411,6 +412,11 @@ export function Home({
       totalArchived,
     };
   }, [sessions, projects]);
+
+  const focusedProjectName = useMemo(() => {
+    if (focusedProjectId == null) return null;
+    return projects.find((p) => p.id === focusedProjectId)?.name ?? null;
+  }, [focusedProjectId, projects]);
 
   const clearComposerAttachments = () => {
     revokeComposerAttachmentPreviews(composerAttachments);
@@ -521,7 +527,7 @@ export function Home({
 
     setIsOpeningSession(true);
     try {
-      await onCreateSession(topic.trim(), composerAttachments);
+      await onCreateSession(topic.trim(), composerAttachments, focusedProjectId);
       clearComposerAttachments();
       setAttachmentError(null);
     } catch (error) {
@@ -678,255 +684,162 @@ export function Home({
 
         <div className="workstation-sidebar-section">
           <div className="workstation-thread-list">
-            {/* Inbox — unassigned sessions */}
-            {treeData.inboxSessions.length > 0 && (
-              <div style={{ marginBottom: 2 }}>
-                <button
-                  type="button"
-                  onClick={() => toggleProject(INBOX_KEY)}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 8,
-                    width: "100%",
-                    background: "rgba(255,255,255,0.04)",
-                    border: "1px solid rgba(255,255,255,0.08)",
-                    borderRadius: 6,
-                    padding: "7px 10px",
-                    color: "rgba(255,255,255,0.7)",
-                    fontSize: 13,
-                    fontWeight: 500,
-                    cursor: "pointer",
-                    textAlign: "left",
-                  }}
-                >
-                  <span style={{
-                    display: "inline-block",
-                    transition: "transform 0.15s",
-                    transform: expandedProjects.has(INBOX_KEY) ? "rotate(90deg)" : "rotate(0deg)",
-                    fontSize: 10,
-                  }}>
-                    ▶
-                  </span>
-                  <span style={{ flex: 1 }}>Inbox</span>
-                  <span style={{ fontSize: 11, color: "rgba(255,255,255,0.35)" }}>
-                    {treeData.inboxSessions.length}
-                  </span>
-                </button>
-                {expandedProjects.has(INBOX_KEY) && (
-                  <div style={{ paddingLeft: 20 }}>
-                    {treeData.inboxSessions.map((session) => (
-                      <div
-                        key={session.id}
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          gap: 6,
-                          padding: "5px 8px",
-                          marginTop: 1,
-                          borderRadius: 4,
-                          cursor: "pointer",
-                          background: activeSessionId === session.id ? "rgba(255,255,255,0.08)" : "transparent",
-                        }}
-                      >
+            {/* Sessions — unassigned sessions */}
+            <div>
+              <button
+                type="button"
+                onClick={() => {
+                  setFocusedProjectId(null);
+                  toggleProject(INBOX_KEY);
+                }}
+                className="workstation-project-row"
+                style={{
+                  borderColor: focusedProjectId == null ? "rgba(20,184,166,0.24)" : undefined,
+                  background: focusedProjectId == null ? "rgba(20,184,166,0.08)" : undefined,
+                }}
+              >
+                <span className="workstation-project-chevron" style={{
+                  transform: expandedProjects.has(INBOX_KEY) ? "rotate(90deg)" : "rotate(0deg)",
+                }}>
+                  ▶
+                </span>
+                <span style={{ flex: 1 }}>Sessions</span>
+                {treeData.inboxSessions.length > 0 && (
+                  <span className="workstation-project-count">{treeData.inboxSessions.length}</span>
+                )}
+              </button>
+              {expandedProjects.has(INBOX_KEY) && treeData.inboxSessions.length > 0 && (
+                <div style={{ paddingLeft: 12, marginTop: 4, display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+                  {treeData.inboxSessions.map((session) => (
+                    <div
+                      key={session.id}
+                      className={`workstation-thread ${activeSessionId === session.id ? "is-active" : ""}`}
+                    >
+                      <div className="workstation-thread-header">
                         <button
                           type="button"
                           onClick={() => onOpenSession(session.id)}
-                          style={{
-                            flex: 1,
-                            display: "flex",
-                            alignItems: "center",
-                            gap: 6,
-                            background: "none",
-                            border: "none",
-                            color: "#fff",
-                            cursor: "pointer",
-                            padding: 0,
-                            textAlign: "left",
-                            minWidth: 0,
-                          }}
+                          className="workstation-thread-open"
                         >
-                          <span className={`session-status session-status-${session.status}`} style={{ fontSize: 10, flexShrink: 0 }}>
-                            {STATUS_LABELS[session.status]}
-                          </span>
-                          <span style={{ fontSize: 12, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                            {session.title}
-                          </span>
-                          <span style={{ fontSize: 10, color: "rgba(255,255,255,0.3)", flexShrink: 0, marginLeft: "auto" }}>
-                            {formatRelativeTime(session.updatedAt)}
-                          </span>
+                          <div className="workstation-thread-meta">
+                            <span className={`session-status session-status-${session.status}`}>
+                              {STATUS_LABELS[session.status]}
+                            </span>
+                            <span>{formatRelativeTime(session.updatedAt)}</span>
+                          </div>
+                          <div className="workstation-thread-title">{session.title}</div>
+                          <div className="workstation-thread-preview">
+                            {session.preview || "No messages saved yet."}
+                          </div>
+                          <div className="workstation-thread-foot">
+                            <span>{session.currentTurn} turns</span>
+                            <span>{session.messageCount} messages</span>
+                          </div>
                         </button>
                         <button
                           type="button"
-                          onClick={() => setPendingSessionAction(session)}
-                          style={{
-                            background: "none",
-                            border: "none",
-                            color: "rgba(255,255,255,0.3)",
-                            cursor: "pointer",
-                            padding: "2px",
-                            flexShrink: 0,
-                          }}
+                          className="workstation-thread-action"
                           aria-label={`Manage ${session.title}`}
+                          title="Archive or delete session"
+                          onClick={() => setPendingSessionAction(session)}
                         >
-                          <MoreIcon size={12} />
+                          <MoreIcon size={14} />
                         </button>
                       </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
 
             {/* Active Projects */}
             {treeData.activeProjects.map((project) => {
               const projectSessions = treeData.projectSessionMap.get(project.id) ?? [];
               const isExpanded = expandedProjects.has(project.id);
+              const isFocused = focusedProjectId === project.id;
               return (
-                <div key={project.id} style={{ marginBottom: 2 }}>
-                  <div
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 6,
-                      width: "100%",
-                      background: "rgba(255,255,255,0.04)",
-                      border: "1px solid rgba(255,255,255,0.08)",
-                      borderRadius: 6,
-                      padding: "7px 10px",
-                    }}
-                  >
+                <div key={project.id}>
+                  <div className="workstation-project-row-wrap">
                     <button
                       type="button"
-                      onClick={() => toggleProject(project.id)}
+                      onClick={() => {
+                        setFocusedProjectId(project.id);
+                        toggleProject(project.id);
+                      }}
+                      className="workstation-project-row"
                       style={{
+                        borderColor: isFocused ? "rgba(20,184,166,0.24)" : undefined,
+                        background: isFocused ? "rgba(20,184,166,0.08)" : undefined,
                         flex: 1,
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 8,
-                        background: "none",
-                        border: "none",
-                        color: "rgba(255,255,255,0.7)",
-                        fontSize: 13,
-                        fontWeight: 500,
-                        cursor: "pointer",
-                        padding: 0,
-                        textAlign: "left",
-                        minWidth: 0,
                       }}
                     >
-                      <span style={{
-                        display: "inline-block",
-                        transition: "transform 0.15s",
+                      <span className="workstation-project-chevron" style={{
                         transform: isExpanded ? "rotate(90deg)" : "rotate(0deg)",
-                        fontSize: 10,
-                        flexShrink: 0,
                       }}>
                         ▶
                       </span>
-                      <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                         {project.name}
                       </span>
-                      <span style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", flexShrink: 0 }}>
-                        {projectSessions.length}
-                      </span>
+                      {projectSessions.length > 0 && (
+                        <span className="workstation-project-count">{projectSessions.length}</span>
+                      )}
                     </button>
                     <button
                       type="button"
-                      onClick={() => onOpenProject(project.id)}
-                      title="Open project details"
-                      style={{
-                        background: "none",
-                        border: "none",
-                        color: "rgba(255,255,255,0.3)",
-                        cursor: "pointer",
-                        padding: "2px",
-                        flexShrink: 0,
-                      }}
-                    >
-                      <ArrowIcon size={13} />
-                    </button>
-                    <button
-                      type="button"
+                      className="workstation-thread-action"
                       onClick={() => setPendingProjectAction(project)}
                       title="Manage project"
-                      style={{
-                        background: "none",
-                        border: "none",
-                        color: "rgba(255,255,255,0.3)",
-                        cursor: "pointer",
-                        padding: "2px",
-                        flexShrink: 0,
-                      }}
                       aria-label={`Manage ${project.name}`}
+                      style={{ marginTop: 0, width: "1.8rem", height: "1.8rem" }}
                     >
                       <MoreIcon size={12} />
                     </button>
                   </div>
                   {isExpanded && (
-                    <div style={{ paddingLeft: 20 }}>
+                    <div style={{ paddingLeft: 12, marginTop: 4, display: "flex", flexDirection: "column", gap: "0.5rem" }}>
                       {projectSessions.length > 0 ? (
                         projectSessions.map((session) => (
                           <div
                             key={session.id}
-                            style={{
-                              display: "flex",
-                              alignItems: "center",
-                              gap: 6,
-                              padding: "5px 8px",
-                              marginTop: 1,
-                              borderRadius: 4,
-                              cursor: "pointer",
-                              background: activeSessionId === session.id ? "rgba(255,255,255,0.08)" : "transparent",
-                            }}
+                            className={`workstation-thread ${activeSessionId === session.id ? "is-active" : ""}`}
                           >
-                            <button
-                              type="button"
-                              onClick={() => onOpenSession(session.id)}
-                              style={{
-                                flex: 1,
-                                display: "flex",
-                                alignItems: "center",
-                                gap: 6,
-                                background: "none",
-                                border: "none",
-                                color: "#fff",
-                                cursor: "pointer",
-                                padding: 0,
-                                textAlign: "left",
-                                minWidth: 0,
-                              }}
-                            >
-                              <span className={`session-status session-status-${session.status}`} style={{ fontSize: 10, flexShrink: 0 }}>
-                                {STATUS_LABELS[session.status]}
-                              </span>
-                              <span style={{ fontSize: 12, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                                {session.title}
-                              </span>
-                              <span style={{ fontSize: 10, color: "rgba(255,255,255,0.3)", flexShrink: 0, marginLeft: "auto" }}>
-                                {formatRelativeTime(session.updatedAt)}
-                              </span>
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => setPendingSessionAction(session)}
-                              style={{
-                                background: "none",
-                                border: "none",
-                                color: "rgba(255,255,255,0.3)",
-                                cursor: "pointer",
-                                padding: "2px",
-                                flexShrink: 0,
-                              }}
-                              aria-label={`Manage ${session.title}`}
-                            >
-                              <MoreIcon size={12} />
-                            </button>
+                            <div className="workstation-thread-header">
+                              <button
+                                type="button"
+                                onClick={() => onOpenSession(session.id)}
+                                className="workstation-thread-open"
+                              >
+                                <div className="workstation-thread-meta">
+                                  <span className={`session-status session-status-${session.status}`}>
+                                    {STATUS_LABELS[session.status]}
+                                  </span>
+                                  <span>{formatRelativeTime(session.updatedAt)}</span>
+                                </div>
+                                <div className="workstation-thread-title">{session.title}</div>
+                                <div className="workstation-thread-preview">
+                                  {session.preview || "No messages saved yet."}
+                                </div>
+                                <div className="workstation-thread-foot">
+                                  <span>{session.currentTurn} turns</span>
+                                  <span>{session.messageCount} messages</span>
+                                </div>
+                              </button>
+                              <button
+                                type="button"
+                                className="workstation-thread-action"
+                                aria-label={`Manage ${session.title}`}
+                                title="Archive or delete session"
+                                onClick={() => setPendingSessionAction(session)}
+                              >
+                                <MoreIcon size={14} />
+                              </button>
+                            </div>
                           </div>
                         ))
                       ) : (
-                        <div style={{ fontSize: 11, color: "rgba(255,255,255,0.25)", padding: "4px 8px" }}>
-                          No sessions yet
+                        <div className="workstation-empty-state" style={{ padding: "0.5rem 0" }}>
+                          No sessions yet.
                         </div>
                       )}
                     </div>
@@ -939,20 +852,14 @@ export function Home({
             <button
               type="button"
               onClick={() => setShowNewProject(true)}
+              className="workstation-project-row"
               style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 8,
-                width: "100%",
-                background: "transparent",
                 border: "1px dashed rgba(255,255,255,0.12)",
-                borderRadius: 6,
-                padding: "7px 10px",
+                background: "transparent",
                 color: "rgba(255,255,255,0.4)",
-                fontSize: 12,
-                cursor: "pointer",
-                marginBottom: 2,
+                fontSize: "0.78rem",
                 marginTop: 4,
+                gap: 8,
               }}
             >
               <PlusIcon size={12} />
@@ -965,36 +872,30 @@ export function Home({
                 <button
                   type="button"
                   onClick={() => setShowArchived((prev) => !prev)}
+                  className="workstation-project-row"
                   style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 8,
-                    width: "100%",
-                    background: "none",
+                    background: "transparent",
                     border: "none",
                     borderTop: "1px solid rgba(255,255,255,0.06)",
-                    padding: "8px 4px 4px",
+                    borderRadius: 0,
                     color: "rgba(255,255,255,0.35)",
-                    fontSize: 11,
-                    fontWeight: 500,
-                    cursor: "pointer",
+                    fontSize: "0.68rem",
                     textTransform: "uppercase",
-                    letterSpacing: "0.5px",
+                    letterSpacing: "0.05em",
+                    padding: "8px 4px 4px",
                   }}
                 >
-                  <span style={{
-                    display: "inline-block",
-                    transition: "transform 0.15s",
+                  <span className="workstation-project-chevron" style={{
                     transform: showArchived ? "rotate(90deg)" : "rotate(0deg)",
-                    fontSize: 9,
+                    fontSize: 8,
                   }}>
                     ▶
                   </span>
                   <span>Archived</span>
                 </button>
                 {showArchived && (
-                  <div style={{ opacity: 0.6 }}>
-                    {/* Archived projects with their archived sessions */}
+                  <div style={{ opacity: 0.55, display: "flex", flexDirection: "column", gap: "0.5rem", marginTop: 4 }}>
+                    {/* Archived projects with their sessions */}
                     {[...treeData.activeProjects, ...treeData.archivedProjects]
                       .filter((p) => (treeData.archivedProjectSessionMap.get(p.id)?.length ?? 0) > 0 || p.archivedAt != null)
                       .map((project) => {
@@ -1003,121 +904,65 @@ export function Home({
                         const isExpanded = expandedProjects.has(archiveKey);
                         if (archivedProjectSessions.length === 0 && project.archivedAt == null) return null;
                         return (
-                          <div key={project.id} style={{ marginBottom: 2 }}>
-                            <div
-                              style={{
-                                display: "flex",
-                                alignItems: "center",
-                                gap: 6,
-                                width: "100%",
-                                background: "rgba(255,255,255,0.02)",
-                                border: "1px solid rgba(255,255,255,0.05)",
-                                borderRadius: 6,
-                                padding: "6px 10px",
-                              }}
-                            >
+                          <div key={project.id}>
+                            <div className="workstation-project-row-wrap">
                               <button
                                 type="button"
                                 onClick={() => toggleProject(archiveKey)}
-                                style={{
-                                  flex: 1,
-                                  display: "flex",
-                                  alignItems: "center",
-                                  gap: 8,
-                                  background: "none",
-                                  border: "none",
-                                  color: "rgba(255,255,255,0.5)",
-                                  fontSize: 12,
-                                  fontWeight: 500,
-                                  cursor: "pointer",
-                                  padding: 0,
-                                  textAlign: "left",
-                                  minWidth: 0,
-                                }}
+                                className="workstation-project-row"
+                                style={{ flex: 1 }}
                               >
-                                <span style={{
-                                  display: "inline-block",
-                                  transition: "transform 0.15s",
+                                <span className="workstation-project-chevron" style={{
                                   transform: isExpanded ? "rotate(90deg)" : "rotate(0deg)",
-                                  fontSize: 9,
-                                  flexShrink: 0,
+                                  fontSize: 8,
                                 }}>
                                   ▶
                                 </span>
-                                <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                                   {project.name}
                                 </span>
-                                <span style={{ fontSize: 10, color: "rgba(255,255,255,0.25)", flexShrink: 0 }}>
-                                  {archivedProjectSessions.length}
-                                </span>
+                                {archivedProjectSessions.length > 0 && (
+                                  <span className="workstation-project-count">{archivedProjectSessions.length}</span>
+                                )}
                               </button>
                               <button
                                 type="button"
+                                className="workstation-thread-action"
                                 onClick={() => setPendingProjectAction(project)}
-                                style={{
-                                  background: "none",
-                                  border: "none",
-                                  color: "rgba(255,255,255,0.25)",
-                                  cursor: "pointer",
-                                  padding: "2px",
-                                  flexShrink: 0,
-                                }}
                                 aria-label={`Manage ${project.name}`}
+                                style={{ width: "1.6rem", height: "1.6rem", marginTop: 0 }}
                               >
-                                <MoreIcon size={12} />
+                                <MoreIcon size={11} />
                               </button>
                             </div>
                             {isExpanded && archivedProjectSessions.length > 0 && (
-                              <div style={{ paddingLeft: 20 }}>
+                              <div style={{ paddingLeft: 12, marginTop: 4, display: "flex", flexDirection: "column", gap: "0.5rem" }}>
                                 {archivedProjectSessions.map((session) => (
                                   <div
                                     key={session.id}
-                                    style={{
-                                      display: "flex",
-                                      alignItems: "center",
-                                      gap: 6,
-                                      padding: "4px 8px",
-                                      marginTop: 1,
-                                      borderRadius: 4,
-                                      cursor: "pointer",
-                                    }}
+                                    className="workstation-thread"
                                   >
-                                    <button
-                                      type="button"
-                                      onClick={() => onOpenSession(session.id)}
-                                      style={{
-                                        flex: 1,
-                                        display: "flex",
-                                        alignItems: "center",
-                                        gap: 6,
-                                        background: "none",
-                                        border: "none",
-                                        color: "rgba(255,255,255,0.5)",
-                                        cursor: "pointer",
-                                        padding: 0,
-                                        textAlign: "left",
-                                        minWidth: 0,
-                                      }}
-                                    >
-                                      <span style={{ fontSize: 12, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                                        {session.title}
-                                      </span>
-                                    </button>
-                                    <button
-                                      type="button"
-                                      onClick={() => setPendingSessionAction(session)}
-                                      style={{
-                                        background: "none",
-                                        border: "none",
-                                        color: "rgba(255,255,255,0.2)",
-                                        cursor: "pointer",
-                                        padding: "2px",
-                                        flexShrink: 0,
-                                      }}
-                                      aria-label={`Manage ${session.title}`}
-                                    >
-                                      <MoreIcon size={12} />
-                                    </button>
+                                    <div className="workstation-thread-header">
+                                      <button
+                                        type="button"
+                                        onClick={() => onOpenSession(session.id)}
+                                        className="workstation-thread-open"
+                                      >
+                                        <div className="workstation-thread-title">{session.title}</div>
+                                        <div className="workstation-thread-foot">
+                                          <span>{session.currentTurn} turns</span>
+                                          <span>Archived</span>
+                                        </div>
+                                      </button>
+                                      <button
+                                        type="button"
+                                        className="workstation-thread-action"
+                                        onClick={() => setPendingSessionAction(session)}
+                                        aria-label={`Manage ${session.title}`}
+                                      >
+                                        <MoreIcon size={14} />
+                                      </button>
+                                    </div>
                                   </div>
                                 ))}
                               </div>
@@ -1128,54 +973,28 @@ export function Home({
 
                     {/* Archived orphan sessions */}
                     {treeData.archivedInbox.map((session) => (
-                      <div
-                        key={session.id}
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          gap: 6,
-                          padding: "4px 10px",
-                          marginTop: 1,
-                          borderRadius: 4,
-                          cursor: "pointer",
-                        }}
-                      >
-                        <button
-                          type="button"
-                          onClick={() => onOpenSession(session.id)}
-                          style={{
-                            flex: 1,
-                            display: "flex",
-                            alignItems: "center",
-                            gap: 6,
-                            background: "none",
-                            border: "none",
-                            color: "rgba(255,255,255,0.5)",
-                            cursor: "pointer",
-                            padding: 0,
-                            textAlign: "left",
-                            minWidth: 0,
-                          }}
-                        >
-                          <span style={{ fontSize: 12, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                            {session.title}
-                          </span>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setPendingSessionAction(session)}
-                          style={{
-                            background: "none",
-                            border: "none",
-                            color: "rgba(255,255,255,0.2)",
-                            cursor: "pointer",
-                            padding: "2px",
-                            flexShrink: 0,
-                          }}
-                          aria-label={`Manage ${session.title}`}
-                        >
-                          <MoreIcon size={12} />
-                        </button>
+                      <div key={session.id} className="workstation-thread">
+                        <div className="workstation-thread-header">
+                          <button
+                            type="button"
+                            onClick={() => onOpenSession(session.id)}
+                            className="workstation-thread-open"
+                          >
+                            <div className="workstation-thread-title">{session.title}</div>
+                            <div className="workstation-thread-foot">
+                              <span>{session.currentTurn} turns</span>
+                              <span>Archived</span>
+                            </div>
+                          </button>
+                          <button
+                            type="button"
+                            className="workstation-thread-action"
+                            onClick={() => setPendingSessionAction(session)}
+                            aria-label={`Manage ${session.title}`}
+                          >
+                            <MoreIcon size={14} />
+                          </button>
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -1196,8 +1015,10 @@ export function Home({
       <main className="workstation-main">
         <div className="workstation-toolbar">
           <div className="workstation-toolbar-copy">
-            <span className="workstation-kicker">Session Workstation</span>
-            <h1 className="workstation-home-title">Start a new session or pick up a saved one.</h1>
+            <span className="workstation-kicker">Workspace</span>
+            <h1 className="workstation-home-title">
+              {focusedProjectName ?? "Default Workspace"}
+            </h1>
           </div>
           <div className="workstation-toolbar-badges">
             <div className="workstation-metric">
@@ -1612,8 +1433,15 @@ export function Home({
                 value={newProjectName}
                 onChange={(e) => setNewProjectName(e.target.value)}
                 maxLength={120}
-                className="workstation-topic-input"
-                style={{ fontSize: 14, padding: "8px 12px" }}
+                style={{
+                  fontSize: 14,
+                  padding: "10px 12px",
+                  background: "rgba(255,255,255,0.06)",
+                  border: "1px solid rgba(255,255,255,0.12)",
+                  borderRadius: "0.5rem",
+                  color: "#fff",
+                  outline: "none",
+                }}
                 autoFocus
                 onKeyDown={(e) => {
                   if (e.key === "Enter" && newProjectName.trim()) {
@@ -1628,8 +1456,17 @@ export function Home({
                 placeholder="Description (optional)"
                 value={newProjectDescription}
                 onChange={(e) => setNewProjectDescription(e.target.value)}
-                className="workstation-topic-input"
-                style={{ fontSize: 13, padding: "8px 12px", minHeight: 60, resize: "vertical" }}
+                style={{
+                  fontSize: 13,
+                  padding: "10px 12px",
+                  minHeight: 60,
+                  resize: "vertical",
+                  background: "rgba(255,255,255,0.06)",
+                  border: "1px solid rgba(255,255,255,0.12)",
+                  borderRadius: "0.5rem",
+                  color: "#fff",
+                  outline: "none",
+                }}
               />
             </div>
             <div className="session-action-buttons" style={{ marginTop: 14 }}>

@@ -2331,6 +2331,50 @@ body {
   padding-right: 0.125rem;
 }
 
+.workstation-project-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.55rem 0.75rem;
+  border-radius: 0.75rem;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  color: var(--ink-700);
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  text-align: left;
+  transition:
+    border-color 0.2s ease,
+    background 0.2s ease;
+}
+
+.workstation-project-row:hover {
+  background: rgba(255, 255, 255, 0.07);
+  border-color: rgba(255, 255, 255, 0.12);
+}
+
+.workstation-project-row-wrap {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.workstation-project-chevron {
+  display: inline-block;
+  flex-shrink: 0;
+  font-size: 0.6rem;
+  transition: transform 0.15s ease;
+}
+
+.workstation-project-count {
+  flex-shrink: 0;
+  font-size: 0.7rem;
+  font-weight: 500;
+  color: var(--ink-500);
+}
+
 .workstation-thread {
   display: flex;
   flex-direction: column;
