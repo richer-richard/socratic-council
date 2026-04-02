@@ -413,10 +413,6 @@ export function Home({
     };
   }, [sessions, projects]);
 
-  const focusedProjectName = useMemo(() => {
-    if (focusedProjectId == null) return null;
-    return projects.find((p) => p.id === focusedProjectId)?.name ?? null;
-  }, [focusedProjectId, projects]);
 
   const clearComposerAttachments = () => {
     revokeComposerAttachmentPreviews(composerAttachments);
@@ -1005,29 +1001,6 @@ export function Home({
       </aside>
 
       <main className="workstation-main">
-        <div className="workstation-toolbar">
-          <div className="workstation-toolbar-copy">
-            <span className="workstation-kicker">
-              {focusedProjectName ? "Project" : "Workspace"}
-            </span>
-            <span className="workstation-home-title">
-              {focusedProjectName ?? "All Sessions"}
-            </span>
-          </div>
-          <div className="workstation-toolbar-badges">
-            <div className="workstation-metric">
-              <span className="workstation-metric-label">Providers ready</span>
-              <span className="workstation-metric-value">
-                {configuredProviders.length}/{AGENT_CARDS.length}
-              </span>
-            </div>
-            <div className="workstation-metric">
-              <span className="workstation-metric-label">Autosave</span>
-              <span className="workstation-metric-value">Local-first</span>
-            </div>
-          </div>
-        </div>
-
         <div className="workstation-stage">
           <section className="workstation-composer-card">
             <div className="workstation-composer-header">
@@ -1224,6 +1197,18 @@ export function Home({
           </section>
 
           <aside className="workstation-inspector">
+            <div className="workstation-toolbar-badges">
+              <div className="workstation-metric">
+                <span className="workstation-metric-label">Providers ready</span>
+                <span className="workstation-metric-value">
+                  {configuredProviders.length}/{AGENT_CARDS.length}
+                </span>
+              </div>
+              <div className="workstation-metric">
+                <span className="workstation-metric-label">Autosave</span>
+                <span className="workstation-metric-value">Local-first</span>
+              </div>
+            </div>
             <div className="workstation-panel">
               <div className="workstation-panel-heading">Council Rack</div>
               <div className="workstation-agent-grid">
@@ -1463,7 +1448,7 @@ export function Home({
                 }}
               />
             </div>
-            <div className="session-action-buttons" style={{ marginTop: 14 }}>
+            <div className="session-action-buttons" style={{ marginTop: 14, gridTemplateColumns: "1fr 1fr" }}>
               <button
                 type="button"
                 className="session-action-button is-neutral"
