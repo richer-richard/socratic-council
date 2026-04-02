@@ -891,6 +891,10 @@ body {
   transform: translateY(-1px);
 }
 
+.session-action-button:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
 .session-action-button:disabled {
   opacity: 0.45;
   cursor: not-allowed;
@@ -2346,13 +2350,19 @@ body {
   cursor: pointer;
   text-align: left;
   transition:
-    border-color 0.2s ease,
-    background 0.2s ease;
+    border-color 0.25s ease,
+    background 0.25s ease,
+    box-shadow 0.25s ease,
+    transform 0.15s ease;
 }
 
 .workstation-project-row:hover {
   background: rgba(255, 255, 255, 0.07);
   border-color: rgba(255, 255, 255, 0.12);
+}
+
+.workstation-project-row:active {
+  transform: scale(0.98);
 }
 
 .workstation-project-row-wrap {
@@ -2365,7 +2375,7 @@ body {
   display: inline-block;
   flex-shrink: 0;
   font-size: 0.6rem;
-  transition: transform 0.15s ease;
+  transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .workstation-project-count {
@@ -2373,7 +2383,39 @@ body {
   font-size: 0.7rem;
   font-weight: 500;
   color: var(--ink-500);
+  transition: color 0.2s ease;
 }
+
+/* Expand/collapse panel animation */
+@keyframes expandDown {
+  from {
+    opacity: 0;
+    max-height: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    max-height: 2000px;
+    transform: translateY(0);
+  }
+}
+
+.workstation-expand-panel {
+  animation: expandDown 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  overflow: hidden;
+}
+
+/* Staggered entrance for session cards in expanded panels */
+.workstation-expand-panel > .workstation-thread {
+  animation: fadeIn 0.25s ease-out both;
+}
+
+.workstation-expand-panel > .workstation-thread:nth-child(1) { animation-delay: 0.03s; }
+.workstation-expand-panel > .workstation-thread:nth-child(2) { animation-delay: 0.06s; }
+.workstation-expand-panel > .workstation-thread:nth-child(3) { animation-delay: 0.09s; }
+.workstation-expand-panel > .workstation-thread:nth-child(4) { animation-delay: 0.12s; }
+.workstation-expand-panel > .workstation-thread:nth-child(5) { animation-delay: 0.15s; }
+.workstation-expand-panel > .workstation-thread:nth-child(n+6) { animation-delay: 0.18s; }
 
 .workstation-thread {
   display: flex;
@@ -2388,9 +2430,15 @@ body {
   border: 1px solid rgba(255, 255, 255, 0.06);
   color: var(--ink-900);
   transition:
-    transform 0.2s ease,
-    border-color 0.2s ease,
-    background 0.2s ease;
+    transform 0.2s cubic-bezier(0.4, 0, 0.2, 1),
+    border-color 0.25s ease,
+    background 0.25s ease,
+    box-shadow 0.25s ease,
+    opacity 0.25s ease;
+}
+
+.workstation-thread:active {
+  transform: scale(0.985);
 }
 
 .workstation-thread-header {
@@ -2434,7 +2482,8 @@ body {
   transition:
     background 0.2s ease,
     border-color 0.2s ease,
-    color 0.2s ease;
+    color 0.2s ease,
+    transform 0.15s ease;
 }
 
 .workstation-thread-action:hover {
@@ -2443,10 +2492,15 @@ body {
   color: #99f6e4;
 }
 
+.workstation-thread-action:active {
+  transform: scale(0.9);
+}
+
 .workstation-thread.is-active,
 .workstation-thread:hover {
   background: rgba(255, 255, 255, 0.07);
   border-color: rgba(20, 184, 166, 0.24);
+  box-shadow: 0 2px 12px rgba(20, 184, 166, 0.06);
 }
 
 .workstation-thread-meta,
@@ -2519,6 +2573,17 @@ body {
   gap: 1rem;
 }
 
+.workstation-toolbar-copy {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+}
+
+.workstation-toolbar-copy .workstation-kicker {
+  font-size: 0.65rem;
+  opacity: 0.55;
+}
+
 .workstation-home-title {
   font-family: var(--font-body);
   font-size: clamp(1.4rem, 2.15vw, 2rem);
@@ -2526,6 +2591,44 @@ body {
   font-weight: 700;
   letter-spacing: -0.03em;
   color: var(--ink-900);
+  transition: opacity 0.3s ease;
+}
+
+.workstation-toolbar-copy .workstation-home-title {
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.workstation-new-project-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.5rem 0.75rem;
+  margin-top: 0.25rem;
+  border: 1px dashed rgba(255, 255, 255, 0.15);
+  border-radius: 0.75rem;
+  background: rgba(255, 255, 255, 0.02);
+  color: rgba(255, 255, 255, 0.45);
+  font-size: 0.78rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition:
+    background 0.2s ease,
+    border-color 0.2s ease,
+    color 0.2s ease,
+    transform 0.15s ease;
+}
+
+.workstation-new-project-btn:hover {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.22);
+  color: rgba(255, 255, 255, 0.65);
+}
+
+.workstation-new-project-btn:active {
+  transform: scale(0.98);
 }
 
 .chat-session-title {
@@ -2770,6 +2873,12 @@ body {
   filter: brightness(1.04);
 }
 
+.workstation-launch-button:not(:disabled):active,
+.session-control-button:not(:disabled):active {
+  transform: scale(0.97);
+  box-shadow: 0 8px 20px rgba(15, 118, 110, 0.2);
+}
+
 .workstation-suggestion-row {
   display: flex;
   flex-wrap: wrap;
@@ -2792,6 +2901,10 @@ body {
 .workstation-suggestion-chip:hover {
   border-color: rgba(20, 184, 166, 0.28);
   color: var(--ink-900);
+}
+
+.workstation-suggestion-chip:active {
+  transform: scale(0.96);
 }
 
 .workstation-attachment-strip {

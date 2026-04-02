@@ -684,74 +684,6 @@ export function Home({
 
         <div className="workstation-sidebar-section">
           <div className="workstation-thread-list">
-            {/* Sessions — unassigned sessions */}
-            <div>
-              <button
-                type="button"
-                onClick={() => {
-                  setFocusedProjectId(null);
-                  toggleProject(INBOX_KEY);
-                }}
-                className="workstation-project-row"
-                style={{
-                  borderColor: focusedProjectId == null ? "rgba(20,184,166,0.24)" : undefined,
-                  background: focusedProjectId == null ? "rgba(20,184,166,0.08)" : undefined,
-                }}
-              >
-                <span className="workstation-project-chevron" style={{
-                  transform: expandedProjects.has(INBOX_KEY) ? "rotate(90deg)" : "rotate(0deg)",
-                }}>
-                  ▶
-                </span>
-                <span style={{ flex: 1 }}>Sessions</span>
-                {treeData.inboxSessions.length > 0 && (
-                  <span className="workstation-project-count">{treeData.inboxSessions.length}</span>
-                )}
-              </button>
-              {expandedProjects.has(INBOX_KEY) && treeData.inboxSessions.length > 0 && (
-                <div style={{ paddingLeft: 12, marginTop: 4, display: "flex", flexDirection: "column", gap: "0.5rem" }}>
-                  {treeData.inboxSessions.map((session) => (
-                    <div
-                      key={session.id}
-                      className={`workstation-thread ${activeSessionId === session.id ? "is-active" : ""}`}
-                    >
-                      <div className="workstation-thread-header">
-                        <button
-                          type="button"
-                          onClick={() => onOpenSession(session.id)}
-                          className="workstation-thread-open"
-                        >
-                          <div className="workstation-thread-meta">
-                            <span className={`session-status session-status-${session.status}`}>
-                              {STATUS_LABELS[session.status]}
-                            </span>
-                            <span>{formatRelativeTime(session.updatedAt)}</span>
-                          </div>
-                          <div className="workstation-thread-title">{session.title}</div>
-                          <div className="workstation-thread-preview">
-                            {session.preview || "No messages saved yet."}
-                          </div>
-                          <div className="workstation-thread-foot">
-                            <span>{session.currentTurn} turns</span>
-                            <span>{session.messageCount} messages</span>
-                          </div>
-                        </button>
-                        <button
-                          type="button"
-                          className="workstation-thread-action"
-                          aria-label={`Manage ${session.title}`}
-                          title="Archive or delete session"
-                          onClick={() => setPendingSessionAction(session)}
-                        >
-                          <MoreIcon size={14} />
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-
             {/* Active Projects */}
             {treeData.activeProjects.map((project) => {
               const projectSessions = treeData.projectSessionMap.get(project.id) ?? [];
@@ -797,7 +729,7 @@ export function Home({
                     </button>
                   </div>
                   {isExpanded && (
-                    <div style={{ paddingLeft: 12, marginTop: 4, display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+                    <div className="workstation-expand-panel" style={{ paddingLeft: 12, marginTop: 4, display: "flex", flexDirection: "column", gap: "0.5rem" }}>
                       {projectSessions.length > 0 ? (
                         projectSessions.map((session) => (
                           <div
@@ -852,19 +784,79 @@ export function Home({
             <button
               type="button"
               onClick={() => setShowNewProject(true)}
-              className="workstation-project-row"
-              style={{
-                border: "1px dashed rgba(255,255,255,0.12)",
-                background: "transparent",
-                color: "rgba(255,255,255,0.4)",
-                fontSize: "0.78rem",
-                marginTop: 4,
-                gap: 8,
-              }}
+              className="workstation-new-project-btn"
             >
               <PlusIcon size={12} />
               <span>New Project</span>
             </button>
+
+            {/* Sessions — unassigned sessions */}
+            <div>
+              <button
+                type="button"
+                onClick={() => {
+                  setFocusedProjectId(null);
+                  toggleProject(INBOX_KEY);
+                }}
+                className="workstation-project-row"
+                style={{
+                  borderColor: focusedProjectId == null ? "rgba(20,184,166,0.24)" : undefined,
+                  background: focusedProjectId == null ? "rgba(20,184,166,0.08)" : undefined,
+                }}
+              >
+                <span className="workstation-project-chevron" style={{
+                  transform: expandedProjects.has(INBOX_KEY) ? "rotate(90deg)" : "rotate(0deg)",
+                }}>
+                  ▶
+                </span>
+                <span style={{ flex: 1 }}>Sessions</span>
+                {treeData.inboxSessions.length > 0 && (
+                  <span className="workstation-project-count">{treeData.inboxSessions.length}</span>
+                )}
+              </button>
+              {expandedProjects.has(INBOX_KEY) && treeData.inboxSessions.length > 0 && (
+                <div className="workstation-expand-panel" style={{ paddingLeft: 12, marginTop: 4, display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+                  {treeData.inboxSessions.map((session) => (
+                    <div
+                      key={session.id}
+                      className={`workstation-thread ${activeSessionId === session.id ? "is-active" : ""}`}
+                    >
+                      <div className="workstation-thread-header">
+                        <button
+                          type="button"
+                          onClick={() => onOpenSession(session.id)}
+                          className="workstation-thread-open"
+                        >
+                          <div className="workstation-thread-meta">
+                            <span className={`session-status session-status-${session.status}`}>
+                              {STATUS_LABELS[session.status]}
+                            </span>
+                            <span>{formatRelativeTime(session.updatedAt)}</span>
+                          </div>
+                          <div className="workstation-thread-title">{session.title}</div>
+                          <div className="workstation-thread-preview">
+                            {session.preview || "No messages saved yet."}
+                          </div>
+                          <div className="workstation-thread-foot">
+                            <span>{session.currentTurn} turns</span>
+                            <span>{session.messageCount} messages</span>
+                          </div>
+                        </button>
+                        <button
+                          type="button"
+                          className="workstation-thread-action"
+                          aria-label={`Manage ${session.title}`}
+                          title="Archive or delete session"
+                          onClick={() => setPendingSessionAction(session)}
+                        >
+                          <MoreIcon size={14} />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
 
             {/* Archived section */}
             {treeData.totalArchived > 0 && (
@@ -894,7 +886,7 @@ export function Home({
                   <span>Archived</span>
                 </button>
                 {showArchived && (
-                  <div style={{ opacity: 0.55, display: "flex", flexDirection: "column", gap: "0.5rem", marginTop: 4 }}>
+                  <div className="workstation-expand-panel" style={{ opacity: 0.55, display: "flex", flexDirection: "column", gap: "0.5rem", marginTop: 4 }}>
                     {/* Archived projects with their sessions */}
                     {[...treeData.activeProjects, ...treeData.archivedProjects]
                       .filter((p) => (treeData.archivedProjectSessionMap.get(p.id)?.length ?? 0) > 0 || p.archivedAt != null)
@@ -936,7 +928,7 @@ export function Home({
                               </button>
                             </div>
                             {isExpanded && archivedProjectSessions.length > 0 && (
-                              <div style={{ paddingLeft: 12, marginTop: 4, display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+                              <div className="workstation-expand-panel" style={{ paddingLeft: 12, marginTop: 4, display: "flex", flexDirection: "column", gap: "0.5rem" }}>
                                 {archivedProjectSessions.map((session) => (
                                   <div
                                     key={session.id}
@@ -1015,10 +1007,12 @@ export function Home({
       <main className="workstation-main">
         <div className="workstation-toolbar">
           <div className="workstation-toolbar-copy">
-            <span className="workstation-kicker">Workspace</span>
-            <h1 className="workstation-home-title">
-              {focusedProjectName ?? "Default Workspace"}
-            </h1>
+            <span className="workstation-kicker">
+              {focusedProjectName ? "Project" : "Workspace"}
+            </span>
+            <span className="workstation-home-title">
+              {focusedProjectName ?? "All Sessions"}
+            </span>
           </div>
           <div className="workstation-toolbar-badges">
             <div className="workstation-metric">
