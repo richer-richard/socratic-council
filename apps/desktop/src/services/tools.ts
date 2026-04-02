@@ -1,9 +1,11 @@
+import { assessVerification } from "@socratic-council/core";
 import type { Citation, SearchResult, VerificationResult } from "@socratic-council/shared";
 
-import { type SessionAttachment, loadSessionAttachmentDocuments } from "./attachments";
-import { apiLogger, makeHttpRequest } from "./api";
 import { loadConfig } from "../stores/config";
 import { filterAndRankSearchResults, normalizeSearchQuery } from "../utils/searchRanking";
+
+import { apiLogger, makeHttpRequest } from "./api";
+import { type SessionAttachment, loadSessionAttachmentDocuments } from "./attachments";
 
 export type ToolName =
   | "oracle.search"
@@ -371,14 +373,7 @@ function formatFileSearchResults(matches: FileSearchMatch[]): string {
 
 async function verifyClaim(claim: string, context?: ToolContext): Promise<VerificationResult> {
   const evidence = await searchWeb(claim, context);
-  const confidence = evidence.length > 0 ? Math.min(0.8, 0.25 + evidence.length * 0.1) : 0.1;
-
-  return {
-    claim,
-    verdict: "uncertain",
-    confidence,
-    evidence,
-  };
+  return assessVerification(claim, evidence);
 }
 
 async function citeTopic(topic: string, context?: ToolContext): Promise<Citation[]> {

@@ -72,6 +72,11 @@ export interface FetchTransportOptions {
 
 const DEFAULT_TIMEOUT_MS = 180000;
 const DEFAULT_IDLE_TIMEOUT_MS = 120000;
+const UNDICI_MODULE = "undici";
+
+type UndiciModule = {
+  ProxyAgent: new (url: string) => unknown;
+};
 
 function normalizeProxyConfig(proxy?: ProxyConfig): ProxyConfig | undefined {
   if (!proxy || proxy.type === "none") return undefined;
@@ -95,10 +100,25 @@ function buildProxyUrl(proxy: ProxyConfig): string {
   return `${proxy.type}://${auth}${proxy.host}:${proxy.port}`;
 }
 
+function canUseNodeProxyDispatcher(): boolean {
+  const runtime = globalThis as typeof globalThis & {
+    process?: {
+      release?: {
+        name?: string;
+      };
+    };
+  };
+  return runtime.process?.release?.name === "node";
+}
+
 async function createDispatcher(proxy: ProxyConfig | undefined, logger?: FetchTransportOptions["logger"]) {
   if (!proxy) return undefined;
+  if (!canUseNodeProxyDispatcher()) {
+    logger?.("debug", "Proxy agent unavailable in browser runtime; continuing without proxy");
+    return undefined;
+  }
   try {
-    const undici = await import("undici");
+    const undici = (await import(/* @vite-ignore */ UNDICI_MODULE)) as UndiciModule;
     const proxyUrl = buildProxyUrl(proxy);
     return new undici.ProxyAgent(proxyUrl);
   } catch (error) {
