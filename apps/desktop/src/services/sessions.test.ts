@@ -17,6 +17,7 @@ function createSessionFixture(): DiscussionSession {
     updatedAt: timestamp,
     lastOpenedAt: timestamp,
     archivedAt: null,
+    projectId: null,
     status: "paused",
     currentTurn: 2,
     totalTokens: {

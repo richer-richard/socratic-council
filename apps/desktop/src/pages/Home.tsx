@@ -12,19 +12,26 @@ import {
   type ComposerAttachment,
 } from "../services/attachments";
 import type { SessionSummary, SessionStatus } from "../services/sessions";
+import type { ProjectSummary } from "../services/projects";
 import { useConfig, getShuffledTopics, PROVIDER_INFO, type Provider } from "../stores/config";
 
 interface HomeProps {
   sessions: SessionSummary[];
+  projects: ProjectSummary[];
   activeSessionId: string | null;
   onArchiveSession: (sessionId: string) => void | Promise<void>;
-  onCreateSession: (topic: string, attachments: ComposerAttachment[]) => void | Promise<void>;
+  onCreateSession: (topic: string, attachments: ComposerAttachment[], projectId?: string | null) => void | Promise<void>;
   onDeleteSession: (sessionId: string) => void | Promise<void>;
   onOpenSession: (sessionId: string) => void;
   onRestoreSession: (sessionId: string) => void;
+  onCreateProject: (name: string, description?: string) => void;
+  onOpenProject: (projectId: string) => void;
+  onDeleteProject: (projectId: string) => void;
+  onArchiveProject: (projectId: string) => void;
+  onRestoreProject: (projectId: string) => void;
 }
 
-type SessionFolder = "recent" | "archived";
+const INBOX_KEY = "__inbox__";
 
 const AGENT_CARDS: Array<{
   provider: Provider;
@@ -306,19 +313,29 @@ function formatRelativeTime(timestamp: number): string {
 
 export function Home({
   sessions,
+  projects,
   activeSessionId,
   onArchiveSession,
   onCreateSession,
   onDeleteSession,
   onOpenSession,
   onRestoreSession,
+  onCreateProject,
+  onOpenProject,
+  onDeleteProject,
+  onArchiveProject,
+  onRestoreProject,
 }: HomeProps) {
   const [topic, setTopic] = useState("");
   const [showSettings, setShowSettings] = useState(false);
   const [showApiWarning, setShowApiWarning] = useState(false);
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
-  const [showArchivedEmptyNotice, setShowArchivedEmptyNotice] = useState(false);
-  const [sessionFolder, setSessionFolder] = useState<SessionFolder>("recent");
+  const [expandedProjects, setExpandedProjects] = useState<Set<string>>(() => new Set([INBOX_KEY]));
+  const [showArchived, setShowArchived] = useState(false);
+  const [showNewProject, setShowNewProject] = useState(false);
+  const [newProjectName, setNewProjectName] = useState("");
+  const [newProjectDescription, setNewProjectDescription] = useState("");
+  const [pendingProjectAction, setPendingProjectAction] = useState<ProjectSummary | null>(null);
   const [pendingSessionAction, setPendingSessionAction] = useState<SessionSummary | null>(null);
   const [composerAttachments, setComposerAttachments] = useState<ComposerAttachment[]>([]);
   const [focusedAttachmentId, setFocusedAttachmentId] = useState<string | null>(null);
@@ -344,19 +361,56 @@ export function Home({
 
   const configuredProviders = getConfiguredProviders();
   const sampleTopics = useMemo(() => getShuffledTopics(5), []);
-  const recentSessions = useMemo(
-    () => sessions.filter((session) => session.archivedAt == null),
-    [sessions]
-  );
-  const archivedSessions = useMemo(
-    () =>
-      [...sessions]
-        .filter((session) => session.archivedAt != null)
-        .sort((a, b) => (b.archivedAt ?? 0) - (a.archivedAt ?? 0)),
-    [sessions]
-  );
-  const visibleSessions = sessionFolder === "archived" ? archivedSessions : recentSessions;
   const isArchivedActionTarget = pendingSessionAction?.archivedAt != null;
+
+  const treeData = useMemo(() => {
+    const activeSessions = sessions.filter((s) => s.archivedAt == null);
+    const archivedSessions = sessions.filter((s) => s.archivedAt != null);
+
+    // Group active sessions by projectId
+    const inboxSessions = activeSessions.filter((s) => s.projectId == null);
+    const activeProjects = projects.filter((p) => p.archivedAt == null);
+    const projectSessionMap = new Map<string, SessionSummary[]>();
+    for (const p of activeProjects) {
+      projectSessionMap.set(p.id, []);
+    }
+    for (const s of activeSessions) {
+      if (s.projectId != null && projectSessionMap.has(s.projectId)) {
+        projectSessionMap.get(s.projectId)!.push(s);
+      }
+    }
+
+    // Group archived sessions by projectId
+    const archivedInbox = archivedSessions.filter((s) => s.projectId == null);
+    const archivedProjects = projects.filter((p) => p.archivedAt != null);
+    const archivedProjectSessionMap = new Map<string, SessionSummary[]>();
+    // Include active projects that have archived sessions too
+    for (const p of [...activeProjects, ...archivedProjects]) {
+      if (!archivedProjectSessionMap.has(p.id)) {
+        archivedProjectSessionMap.set(p.id, []);
+      }
+    }
+    for (const s of archivedSessions) {
+      if (s.projectId != null) {
+        if (!archivedProjectSessionMap.has(s.projectId)) {
+          archivedProjectSessionMap.set(s.projectId, []);
+        }
+        archivedProjectSessionMap.get(s.projectId)!.push(s);
+      }
+    }
+
+    const totalArchived = archivedSessions.length + archivedProjects.length;
+
+    return {
+      inboxSessions,
+      activeProjects,
+      projectSessionMap,
+      archivedInbox,
+      archivedProjects,
+      archivedProjectSessionMap,
+      totalArchived,
+    };
+  }, [sessions, projects]);
 
   const clearComposerAttachments = () => {
     revokeComposerAttachmentPreviews(composerAttachments);
@@ -478,20 +532,17 @@ export function Home({
     }
   };
 
-  const handleSelectSessionFolder = (folder: SessionFolder) => {
-    if (folder === "archived" && archivedSessions.length === 0) {
-      setShowArchivedEmptyNotice(true);
-      return;
-    }
-
-    setSessionFolder(folder);
+  const toggleProject = (projectId: string) => {
+    setExpandedProjects((prev) => {
+      const next = new Set(prev);
+      if (next.has(projectId)) {
+        next.delete(projectId);
+      } else {
+        next.add(projectId);
+      }
+      return next;
+    });
   };
-
-  useEffect(() => {
-    if (sessionFolder === "archived" && archivedSessions.length === 0) {
-      setSessionFolder("recent");
-    }
-  }, [archivedSessions.length, sessionFolder]);
 
   useEffect(() => {
     if (!pendingSessionAction) return;
@@ -555,9 +606,6 @@ export function Home({
           stopCameraStream();
           setShowCameraCapture(false);
         }
-        if (showArchivedEmptyNotice) {
-          setShowArchivedEmptyNotice(false);
-        }
         if (pendingSessionAction) {
           setPendingSessionAction(null);
         }
@@ -582,7 +630,6 @@ export function Home({
   }, [
     focusedAttachmentId,
     pendingSessionAction,
-    showArchivedEmptyNotice,
     showAttachmentMenu,
     showCameraCapture,
   ]);
@@ -630,78 +677,516 @@ export function Home({
         </div>
 
         <div className="workstation-sidebar-section">
-          <div className="workstation-sidebar-header">
-            <div className="workstation-sidebar-heading">
-              {sessionFolder === "recent" ? "Recent Sessions" : "Archived Sessions"}
-            </div>
-            <div className="workstation-session-view" role="tablist" aria-label="Session folders">
-              <button
-                type="button"
-                role="tab"
-                aria-selected={sessionFolder === "recent"}
-                className={`workstation-session-view-button ${sessionFolder === "recent" ? "is-active" : ""}`}
-                onClick={() => handleSelectSessionFolder("recent")}
-              >
-                <span>Recent</span>
-                <span>{recentSessions.length}</span>
-              </button>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={sessionFolder === "archived"}
-                className={`workstation-session-view-button ${sessionFolder === "archived" ? "is-active" : ""}`}
-                onClick={() => handleSelectSessionFolder("archived")}
-              >
-                <span>Archived</span>
-                <span>{archivedSessions.length}</span>
-              </button>
-            </div>
-          </div>
           <div className="workstation-thread-list">
-            {visibleSessions.length > 0 ? (
-              visibleSessions.map((session) => (
-                <div
-                  key={session.id}
-                  className={`workstation-thread ${activeSessionId === session.id ? "is-active" : ""}`}
+            {/* Inbox — unassigned sessions */}
+            {treeData.inboxSessions.length > 0 && (
+              <div style={{ marginBottom: 2 }}>
+                <button
+                  type="button"
+                  onClick={() => toggleProject(INBOX_KEY)}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 8,
+                    width: "100%",
+                    background: "rgba(255,255,255,0.04)",
+                    border: "1px solid rgba(255,255,255,0.08)",
+                    borderRadius: 6,
+                    padding: "7px 10px",
+                    color: "rgba(255,255,255,0.7)",
+                    fontSize: 13,
+                    fontWeight: 500,
+                    cursor: "pointer",
+                    textAlign: "left",
+                  }}
                 >
-                  <div className="workstation-thread-header">
+                  <span style={{
+                    display: "inline-block",
+                    transition: "transform 0.15s",
+                    transform: expandedProjects.has(INBOX_KEY) ? "rotate(90deg)" : "rotate(0deg)",
+                    fontSize: 10,
+                  }}>
+                    ▶
+                  </span>
+                  <span style={{ flex: 1 }}>Inbox</span>
+                  <span style={{ fontSize: 11, color: "rgba(255,255,255,0.35)" }}>
+                    {treeData.inboxSessions.length}
+                  </span>
+                </button>
+                {expandedProjects.has(INBOX_KEY) && (
+                  <div style={{ paddingLeft: 20 }}>
+                    {treeData.inboxSessions.map((session) => (
+                      <div
+                        key={session.id}
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 6,
+                          padding: "5px 8px",
+                          marginTop: 1,
+                          borderRadius: 4,
+                          cursor: "pointer",
+                          background: activeSessionId === session.id ? "rgba(255,255,255,0.08)" : "transparent",
+                        }}
+                      >
+                        <button
+                          type="button"
+                          onClick={() => onOpenSession(session.id)}
+                          style={{
+                            flex: 1,
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 6,
+                            background: "none",
+                            border: "none",
+                            color: "#fff",
+                            cursor: "pointer",
+                            padding: 0,
+                            textAlign: "left",
+                            minWidth: 0,
+                          }}
+                        >
+                          <span className={`session-status session-status-${session.status}`} style={{ fontSize: 10, flexShrink: 0 }}>
+                            {STATUS_LABELS[session.status]}
+                          </span>
+                          <span style={{ fontSize: 12, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                            {session.title}
+                          </span>
+                          <span style={{ fontSize: 10, color: "rgba(255,255,255,0.3)", flexShrink: 0, marginLeft: "auto" }}>
+                            {formatRelativeTime(session.updatedAt)}
+                          </span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setPendingSessionAction(session)}
+                          style={{
+                            background: "none",
+                            border: "none",
+                            color: "rgba(255,255,255,0.3)",
+                            cursor: "pointer",
+                            padding: "2px",
+                            flexShrink: 0,
+                          }}
+                          aria-label={`Manage ${session.title}`}
+                        >
+                          <MoreIcon size={12} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Active Projects */}
+            {treeData.activeProjects.map((project) => {
+              const projectSessions = treeData.projectSessionMap.get(project.id) ?? [];
+              const isExpanded = expandedProjects.has(project.id);
+              return (
+                <div key={project.id} style={{ marginBottom: 2 }}>
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 6,
+                      width: "100%",
+                      background: "rgba(255,255,255,0.04)",
+                      border: "1px solid rgba(255,255,255,0.08)",
+                      borderRadius: 6,
+                      padding: "7px 10px",
+                    }}
+                  >
                     <button
                       type="button"
-                      onClick={() => onOpenSession(session.id)}
-                      className="workstation-thread-open"
+                      onClick={() => toggleProject(project.id)}
+                      style={{
+                        flex: 1,
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 8,
+                        background: "none",
+                        border: "none",
+                        color: "rgba(255,255,255,0.7)",
+                        fontSize: 13,
+                        fontWeight: 500,
+                        cursor: "pointer",
+                        padding: 0,
+                        textAlign: "left",
+                        minWidth: 0,
+                      }}
                     >
-                      <div className="workstation-thread-meta">
-                        <span className={`session-status session-status-${session.status}`}>
-                          {STATUS_LABELS[session.status]}
-                        </span>
-                        <span>{formatRelativeTime(session.updatedAt)}</span>
-                      </div>
-                      <div className="workstation-thread-title">{session.title}</div>
-                      <div className="workstation-thread-preview">
-                        {session.preview || "No messages saved yet."}
-                      </div>
-                      <div className="workstation-thread-foot">
-                        <span>{session.currentTurn} turns</span>
-                        <span>{session.messageCount} messages</span>
-                      </div>
+                      <span style={{
+                        display: "inline-block",
+                        transition: "transform 0.15s",
+                        transform: isExpanded ? "rotate(90deg)" : "rotate(0deg)",
+                        fontSize: 10,
+                        flexShrink: 0,
+                      }}>
+                        ▶
+                      </span>
+                      <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {project.name}
+                      </span>
+                      <span style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", flexShrink: 0 }}>
+                        {projectSessions.length}
+                      </span>
                     </button>
                     <button
                       type="button"
-                      className="workstation-thread-action"
-                      aria-label={`Manage ${session.title}`}
-                      title={session.archivedAt == null ? "Archive or delete session" : "Restore or delete session"}
-                      onClick={() => setPendingSessionAction(session)}
+                      onClick={() => onOpenProject(project.id)}
+                      title="Open project details"
+                      style={{
+                        background: "none",
+                        border: "none",
+                        color: "rgba(255,255,255,0.3)",
+                        cursor: "pointer",
+                        padding: "2px",
+                        flexShrink: 0,
+                      }}
                     >
-                      <MoreIcon size={14} />
+                      <ArrowIcon size={13} />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setPendingProjectAction(project)}
+                      title="Manage project"
+                      style={{
+                        background: "none",
+                        border: "none",
+                        color: "rgba(255,255,255,0.3)",
+                        cursor: "pointer",
+                        padding: "2px",
+                        flexShrink: 0,
+                      }}
+                      aria-label={`Manage ${project.name}`}
+                    >
+                      <MoreIcon size={12} />
                     </button>
                   </div>
+                  {isExpanded && (
+                    <div style={{ paddingLeft: 20 }}>
+                      {projectSessions.length > 0 ? (
+                        projectSessions.map((session) => (
+                          <div
+                            key={session.id}
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              gap: 6,
+                              padding: "5px 8px",
+                              marginTop: 1,
+                              borderRadius: 4,
+                              cursor: "pointer",
+                              background: activeSessionId === session.id ? "rgba(255,255,255,0.08)" : "transparent",
+                            }}
+                          >
+                            <button
+                              type="button"
+                              onClick={() => onOpenSession(session.id)}
+                              style={{
+                                flex: 1,
+                                display: "flex",
+                                alignItems: "center",
+                                gap: 6,
+                                background: "none",
+                                border: "none",
+                                color: "#fff",
+                                cursor: "pointer",
+                                padding: 0,
+                                textAlign: "left",
+                                minWidth: 0,
+                              }}
+                            >
+                              <span className={`session-status session-status-${session.status}`} style={{ fontSize: 10, flexShrink: 0 }}>
+                                {STATUS_LABELS[session.status]}
+                              </span>
+                              <span style={{ fontSize: 12, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                {session.title}
+                              </span>
+                              <span style={{ fontSize: 10, color: "rgba(255,255,255,0.3)", flexShrink: 0, marginLeft: "auto" }}>
+                                {formatRelativeTime(session.updatedAt)}
+                              </span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setPendingSessionAction(session)}
+                              style={{
+                                background: "none",
+                                border: "none",
+                                color: "rgba(255,255,255,0.3)",
+                                cursor: "pointer",
+                                padding: "2px",
+                                flexShrink: 0,
+                              }}
+                              aria-label={`Manage ${session.title}`}
+                            >
+                              <MoreIcon size={12} />
+                            </button>
+                          </div>
+                        ))
+                      ) : (
+                        <div style={{ fontSize: 11, color: "rgba(255,255,255,0.25)", padding: "4px 8px" }}>
+                          No sessions yet
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
-              ))
-            ) : (
+              );
+            })}
+
+            {/* New Project button */}
+            <button
+              type="button"
+              onClick={() => setShowNewProject(true)}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+                width: "100%",
+                background: "transparent",
+                border: "1px dashed rgba(255,255,255,0.12)",
+                borderRadius: 6,
+                padding: "7px 10px",
+                color: "rgba(255,255,255,0.4)",
+                fontSize: 12,
+                cursor: "pointer",
+                marginBottom: 2,
+                marginTop: 4,
+              }}
+            >
+              <PlusIcon size={12} />
+              <span>New Project</span>
+            </button>
+
+            {/* Archived section */}
+            {treeData.totalArchived > 0 && (
+              <div style={{ marginTop: 8 }}>
+                <button
+                  type="button"
+                  onClick={() => setShowArchived((prev) => !prev)}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 8,
+                    width: "100%",
+                    background: "none",
+                    border: "none",
+                    borderTop: "1px solid rgba(255,255,255,0.06)",
+                    padding: "8px 4px 4px",
+                    color: "rgba(255,255,255,0.35)",
+                    fontSize: 11,
+                    fontWeight: 500,
+                    cursor: "pointer",
+                    textTransform: "uppercase",
+                    letterSpacing: "0.5px",
+                  }}
+                >
+                  <span style={{
+                    display: "inline-block",
+                    transition: "transform 0.15s",
+                    transform: showArchived ? "rotate(90deg)" : "rotate(0deg)",
+                    fontSize: 9,
+                  }}>
+                    ▶
+                  </span>
+                  <span>Archived</span>
+                </button>
+                {showArchived && (
+                  <div style={{ opacity: 0.6 }}>
+                    {/* Archived projects with their archived sessions */}
+                    {[...treeData.activeProjects, ...treeData.archivedProjects]
+                      .filter((p) => (treeData.archivedProjectSessionMap.get(p.id)?.length ?? 0) > 0 || p.archivedAt != null)
+                      .map((project) => {
+                        const archivedProjectSessions = treeData.archivedProjectSessionMap.get(project.id) ?? [];
+                        const archiveKey = `archived:${project.id}`;
+                        const isExpanded = expandedProjects.has(archiveKey);
+                        if (archivedProjectSessions.length === 0 && project.archivedAt == null) return null;
+                        return (
+                          <div key={project.id} style={{ marginBottom: 2 }}>
+                            <div
+                              style={{
+                                display: "flex",
+                                alignItems: "center",
+                                gap: 6,
+                                width: "100%",
+                                background: "rgba(255,255,255,0.02)",
+                                border: "1px solid rgba(255,255,255,0.05)",
+                                borderRadius: 6,
+                                padding: "6px 10px",
+                              }}
+                            >
+                              <button
+                                type="button"
+                                onClick={() => toggleProject(archiveKey)}
+                                style={{
+                                  flex: 1,
+                                  display: "flex",
+                                  alignItems: "center",
+                                  gap: 8,
+                                  background: "none",
+                                  border: "none",
+                                  color: "rgba(255,255,255,0.5)",
+                                  fontSize: 12,
+                                  fontWeight: 500,
+                                  cursor: "pointer",
+                                  padding: 0,
+                                  textAlign: "left",
+                                  minWidth: 0,
+                                }}
+                              >
+                                <span style={{
+                                  display: "inline-block",
+                                  transition: "transform 0.15s",
+                                  transform: isExpanded ? "rotate(90deg)" : "rotate(0deg)",
+                                  fontSize: 9,
+                                  flexShrink: 0,
+                                }}>
+                                  ▶
+                                </span>
+                                <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                  {project.name}
+                                </span>
+                                <span style={{ fontSize: 10, color: "rgba(255,255,255,0.25)", flexShrink: 0 }}>
+                                  {archivedProjectSessions.length}
+                                </span>
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setPendingProjectAction(project)}
+                                style={{
+                                  background: "none",
+                                  border: "none",
+                                  color: "rgba(255,255,255,0.25)",
+                                  cursor: "pointer",
+                                  padding: "2px",
+                                  flexShrink: 0,
+                                }}
+                                aria-label={`Manage ${project.name}`}
+                              >
+                                <MoreIcon size={12} />
+                              </button>
+                            </div>
+                            {isExpanded && archivedProjectSessions.length > 0 && (
+                              <div style={{ paddingLeft: 20 }}>
+                                {archivedProjectSessions.map((session) => (
+                                  <div
+                                    key={session.id}
+                                    style={{
+                                      display: "flex",
+                                      alignItems: "center",
+                                      gap: 6,
+                                      padding: "4px 8px",
+                                      marginTop: 1,
+                                      borderRadius: 4,
+                                      cursor: "pointer",
+                                    }}
+                                  >
+                                    <button
+                                      type="button"
+                                      onClick={() => onOpenSession(session.id)}
+                                      style={{
+                                        flex: 1,
+                                        display: "flex",
+                                        alignItems: "center",
+                                        gap: 6,
+                                        background: "none",
+                                        border: "none",
+                                        color: "rgba(255,255,255,0.5)",
+                                        cursor: "pointer",
+                                        padding: 0,
+                                        textAlign: "left",
+                                        minWidth: 0,
+                                      }}
+                                    >
+                                      <span style={{ fontSize: 12, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                        {session.title}
+                                      </span>
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => setPendingSessionAction(session)}
+                                      style={{
+                                        background: "none",
+                                        border: "none",
+                                        color: "rgba(255,255,255,0.2)",
+                                        cursor: "pointer",
+                                        padding: "2px",
+                                        flexShrink: 0,
+                                      }}
+                                      aria-label={`Manage ${session.title}`}
+                                    >
+                                      <MoreIcon size={12} />
+                                    </button>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+
+                    {/* Archived orphan sessions */}
+                    {treeData.archivedInbox.map((session) => (
+                      <div
+                        key={session.id}
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 6,
+                          padding: "4px 10px",
+                          marginTop: 1,
+                          borderRadius: 4,
+                          cursor: "pointer",
+                        }}
+                      >
+                        <button
+                          type="button"
+                          onClick={() => onOpenSession(session.id)}
+                          style={{
+                            flex: 1,
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 6,
+                            background: "none",
+                            border: "none",
+                            color: "rgba(255,255,255,0.5)",
+                            cursor: "pointer",
+                            padding: 0,
+                            textAlign: "left",
+                            minWidth: 0,
+                          }}
+                        >
+                          <span style={{ fontSize: 12, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                            {session.title}
+                          </span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setPendingSessionAction(session)}
+                          style={{
+                            background: "none",
+                            border: "none",
+                            color: "rgba(255,255,255,0.2)",
+                            cursor: "pointer",
+                            padding: "2px",
+                            flexShrink: 0,
+                          }}
+                          aria-label={`Manage ${session.title}`}
+                        >
+                          <MoreIcon size={12} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Empty state */}
+            {treeData.inboxSessions.length === 0 && treeData.activeProjects.length === 0 && treeData.totalArchived === 0 && (
               <div className="workstation-empty-state">
-                {sessionFolder === "recent"
-                  ? "Your active council sessions will appear here after the first run."
-                  : "Archived sessions stay here until you restore them."}
+                Your council sessions will appear here after the first run.
               </div>
             )}
           </div>
@@ -1043,35 +1528,6 @@ export function Home({
         </div>
       )}
 
-      {showArchivedEmptyNotice && (
-        <div
-          className="modal-overlay"
-          onClick={(event) => {
-            if (event.target === event.currentTarget) {
-              setShowArchivedEmptyNotice(false);
-            }
-          }}
-        >
-          <div className="modal-content session-action-modal session-empty-modal">
-            <div className="session-action-eyebrow">Archive</div>
-            <h2 className="session-action-title">No archived sessions yet</h2>
-            <p className="session-action-copy">
-              Archive a recent session to move it out of Recent without deleting it. Archived sessions
-              will appear here when they exist.
-            </p>
-            <div className="session-action-buttons is-single">
-              <button
-                type="button"
-                className="session-action-button is-neutral"
-                onClick={() => setShowArchivedEmptyNotice(false)}
-              >
-                Close
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
       {showCameraCapture && (
         <div
           className="modal-overlay"
@@ -1126,6 +1582,138 @@ export function Home({
                 disabled={Boolean(cameraError)}
               >
                 Capture
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showNewProject && (
+        <div
+          className="modal-overlay"
+          onClick={(event) => {
+            if (event.target === event.currentTarget) {
+              setShowNewProject(false);
+              setNewProjectName("");
+              setNewProjectDescription("");
+            }
+          }}
+        >
+          <div className="modal-content session-action-modal">
+            <div className="session-action-eyebrow">New Project</div>
+            <h2 className="session-action-title">Create a research project</h2>
+            <p className="session-action-copy">
+              Group related council sessions and build a shared dossier of evidence that persists across discussions.
+            </p>
+            <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 12 }}>
+              <input
+                type="text"
+                placeholder="Project name"
+                value={newProjectName}
+                onChange={(e) => setNewProjectName(e.target.value)}
+                maxLength={120}
+                className="workstation-topic-input"
+                style={{ fontSize: 14, padding: "8px 12px" }}
+                autoFocus
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && newProjectName.trim()) {
+                    onCreateProject(newProjectName.trim(), newProjectDescription.trim());
+                    setShowNewProject(false);
+                    setNewProjectName("");
+                    setNewProjectDescription("");
+                  }
+                }}
+              />
+              <textarea
+                placeholder="Description (optional)"
+                value={newProjectDescription}
+                onChange={(e) => setNewProjectDescription(e.target.value)}
+                className="workstation-topic-input"
+                style={{ fontSize: 13, padding: "8px 12px", minHeight: 60, resize: "vertical" }}
+              />
+            </div>
+            <div className="session-action-buttons" style={{ marginTop: 14 }}>
+              <button
+                type="button"
+                className="session-action-button is-neutral"
+                onClick={() => {
+                  setShowNewProject(false);
+                  setNewProjectName("");
+                  setNewProjectDescription("");
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="session-action-button is-archive"
+                disabled={!newProjectName.trim()}
+                onClick={() => {
+                  onCreateProject(newProjectName.trim(), newProjectDescription.trim());
+                  setShowNewProject(false);
+                  setNewProjectName("");
+                  setNewProjectDescription("");
+                }}
+              >
+                Create Project
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {pendingProjectAction && (
+        <div
+          className="modal-overlay"
+          onClick={(event) => {
+            if (event.target === event.currentTarget) {
+              setPendingProjectAction(null);
+            }
+          }}
+        >
+          <div className="modal-content session-action-modal">
+            <div className="session-action-eyebrow">
+              {pendingProjectAction.archivedAt != null ? "Archived Project" : "Project Actions"}
+            </div>
+            <h2 className="session-action-title">{pendingProjectAction.name}</h2>
+            <p className="session-action-copy">
+              {pendingProjectAction.archivedAt != null
+                ? "Restore returns this project to your list. Delete removes it and all its sessions permanently."
+                : "Archive keeps this project saved but hides it. Delete removes it and all its sessions permanently."}
+            </p>
+            <div className="session-action-buttons">
+              <button
+                type="button"
+                className="session-action-button is-neutral"
+                onClick={() => setPendingProjectAction(null)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="session-action-button is-archive"
+                onClick={() => {
+                  if (pendingProjectAction.archivedAt != null) {
+                    onRestoreProject(pendingProjectAction.id);
+                  } else {
+                    onArchiveProject(pendingProjectAction.id);
+                  }
+                  setPendingProjectAction(null);
+                }}
+              >
+                {pendingProjectAction.archivedAt != null ? <RestoreIcon size={15} /> : <ArchiveIcon size={15} />}
+                <span>{pendingProjectAction.archivedAt != null ? "Restore" : "Archive"}</span>
+              </button>
+              <button
+                type="button"
+                className="session-action-button is-delete"
+                onClick={() => {
+                  onDeleteProject(pendingProjectAction.id);
+                  setPendingProjectAction(null);
+                }}
+              >
+                <TrashIcon size={15} />
+                <span>Delete</span>
               </button>
             </div>
           </div>

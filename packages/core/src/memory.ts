@@ -50,6 +50,17 @@ export interface ConversationContext {
   agentMentions: Record<AgentId, number>;
   /** Who owes engagement to whom */
   engagementDebt: EngagementDebt[];
+  /** Project-level evidence available to all sessions in this project */
+  projectEvidence: ProjectEvidence[];
+}
+
+export interface ProjectEvidence {
+  /** Unique identifier for the evidence entry */
+  id: string;
+  /** Display name of the evidence file */
+  name: string;
+  /** Brief text summary of the evidence content */
+  summary: string;
 }
 
 export interface MemoryConfig {
@@ -151,6 +162,7 @@ export class ConversationMemoryManager {
   private engagementDebts: EngagementDebt[] = [];
   private agentMentions: Record<AgentId, number>;
   private topic: string = "";
+  private projectEvidence: ProjectEvidence[] = [];
 
   constructor(config: Partial<MemoryConfig> = {}) {
     this.config = { ...DEFAULT_CONFIG, ...config };
@@ -170,6 +182,21 @@ export class ConversationMemoryManager {
    */
   setTopic(topic: string): void {
     this.topic = topic;
+  }
+
+  /**
+   * Set project-level evidence entries for cross-session context.
+   * When set, agents will be aware of dossier items from the parent project.
+   */
+  setProjectEvidence(evidence: ProjectEvidence[]): void {
+    this.projectEvidence = evidence;
+  }
+
+  /**
+   * Get current project evidence entries.
+   */
+  getProjectEvidence(): ProjectEvidence[] {
+    return this.projectEvidence;
   }
 
   /**
@@ -316,6 +343,7 @@ export class ConversationMemoryManager {
       topicThread: this.topic,
       agentMentions: { ...this.agentMentions },
       engagementDebt: this.getEngagementDebts(currentAgent),
+      projectEvidence: this.projectEvidence,
     };
   }
 

@@ -141,6 +141,7 @@ export interface DiscussionSession {
   updatedAt: number;
   lastOpenedAt: number;
   archivedAt: number | null;
+  projectId: string | null;
   status: SessionStatus;
   currentTurn: number;
   totalTokens: {
@@ -163,6 +164,7 @@ export interface SessionSummary {
   updatedAt: number;
   lastOpenedAt: number;
   archivedAt: number | null;
+  projectId: string | null;
   status: SessionStatus;
   currentTurn: number;
   messageCount: number;
@@ -656,6 +658,7 @@ function buildSummary(session: DiscussionSession): SessionSummary {
     updatedAt: session.updatedAt,
     lastOpenedAt: session.lastOpenedAt,
     archivedAt: session.archivedAt,
+    projectId: session.projectId,
     status: session.status,
     currentTurn: session.currentTurn,
     messageCount: session.messages.length,
@@ -685,6 +688,7 @@ function readIndex(): SessionSummary[] {
         updatedAt: clampNumber(entry.updatedAt),
         lastOpenedAt: clampNumber(entry.lastOpenedAt),
         archivedAt: entry.archivedAt == null ? null : clampNumber(entry.archivedAt),
+        projectId: typeof entry.projectId === "string" ? entry.projectId : null,
         status: normalizeStatus(entry.status),
         currentTurn: clampNumber(entry.currentTurn),
         messageCount: clampNumber(entry.messageCount),
@@ -737,6 +741,7 @@ function normalizeDiscussionSession(input: unknown): DiscussionSession | null {
     updatedAt,
     lastOpenedAt,
     archivedAt: record.archivedAt == null ? null : clampNumber(record.archivedAt),
+    projectId: typeof record.projectId === "string" ? record.projectId : null,
     status,
     currentTurn: clampNumber(record.currentTurn),
     totalTokens: {
@@ -912,6 +917,7 @@ export function touchDiscussionSession(id: string): DiscussionSession | null {
 export async function createDiscussionSession(
   topic: string,
   pendingAttachments: ComposerAttachment[] = [],
+  projectId: string | null = null,
 ): Promise<DiscussionSession> {
   const trimmed = topic.trim();
   const now = Date.now();
@@ -926,6 +932,7 @@ export async function createDiscussionSession(
     updatedAt: now,
     lastOpenedAt: now,
     archivedAt: null,
+    projectId,
     status: "draft",
     currentTurn: 0,
     totalTokens: { input: 0, output: 0 },
@@ -974,4 +981,8 @@ export function stabilizeStoredSessions(): SessionSummary[] {
   );
 
   return stabilized;
+}
+
+export function listSessionSummariesByProject(projectId: string | null): SessionSummary[] {
+  return listSessionSummaries().filter((s) => s.projectId === projectId);
 }
