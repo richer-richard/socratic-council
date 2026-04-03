@@ -78,6 +78,7 @@ export interface HandoffSnapshot {
 export interface SessionMessage extends SharedMessage {
   isStreaming?: boolean;
   latencyMs?: number;
+  thinkingMs?: number;
   error?: string;
   attachmentIds?: string[];
   quotedMessageIds?: string[];

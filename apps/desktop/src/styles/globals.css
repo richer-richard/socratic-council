@@ -1203,7 +1203,7 @@ body {
 }
 
 .thinking-panel {
-  margin-top: 0.65rem;
+  margin-bottom: 0.65rem;
   border: 1px solid rgba(34, 211, 238, 0.28);
   border-radius: 12px;
   background: rgba(15, 23, 42, 0.5);
@@ -1219,6 +1219,21 @@ body {
   font-weight: 700;
   padding: 0.45rem 0.7rem;
   background: rgba(34, 211, 238, 0.1);
+}
+
+.thinking-content-wrapper {
+  display: grid;
+  gap: 0;
+}
+
+.thinking-tool-list {
+  display: grid;
+  gap: 0.55rem;
+  padding: 0.65rem 0.7rem;
+}
+
+.thinking-tool-list + .thinking-content {
+  border-top: 1px solid rgba(34, 211, 238, 0.15);
 }
 
 .thinking-content {
@@ -1446,7 +1461,7 @@ body {
 
 .end-vote-agent-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
+  grid-template-columns: repeat(4, 1fr);
   gap: 0.55rem;
   margin-top: 0.95rem;
 }
@@ -1531,6 +1546,26 @@ body {
   color: var(--ink-700);
   font-size: 0.84rem;
   line-height: 1.5;
+}
+
+.end-vote-inline-badge {
+  display: inline-block;
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 0.05rem 0.3rem;
+  border-radius: 4px;
+  margin-left: 0.4rem;
+  vertical-align: middle;
+}
+
+.end-vote-inline-badge.is-yes {
+  color: #86efac;
+}
+
+.end-vote-inline-badge.is-no {
+  color: #fda4af;
 }
 
 .moderator-conclusion-card.status-consensus {
