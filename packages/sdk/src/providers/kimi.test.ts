@@ -102,7 +102,7 @@ describe("KimiProvider", () => {
     ).rejects.toThrow("reasoning but no final content");
   });
 
-  it("rejects streamed responses that never produce final content", async () => {
+  it("returns empty content with thinking when stream has reasoning but no final content", async () => {
     const provider = new KimiProvider(
       "test-key",
       {
@@ -126,9 +126,13 @@ describe("KimiProvider", () => {
     );
 
     const onChunk = vi.fn();
-    await expect(
-      provider.completeStream(createAgent(), [{ role: "user", content: "Hello" }], onChunk),
-    ).rejects.toThrow("without final content");
+    const result = await provider.completeStream(
+      createAgent(),
+      [{ role: "user", content: "Hello" }],
+      onChunk,
+    );
+    expect(result.content).toBe("");
+    expect(result.thinking).toBe("thinking only");
     expect(onChunk).toHaveBeenCalledWith({ content: "", thinking: "thinking only", done: false });
   });
 });

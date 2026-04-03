@@ -113,9 +113,11 @@ export class ZhipuProvider implements BaseProvider {
 
     const choice = data.choices?.[0];
     const content = (choice?.message?.content as string) ?? "";
+    const thinking = (choice?.message?.reasoning_content as string) ?? "";
 
     return {
       content,
+      thinking: thinking || undefined,
       tokens: {
         input: (data.usage?.prompt_tokens as number) ?? 0,
         output: (data.usage?.completion_tokens as number) ?? 0,
@@ -136,6 +138,7 @@ export class ZhipuProvider implements BaseProvider {
     const body = this.buildRequestBody(agent, messages, options, true);
 
     let fullContent = "";
+    let fullThinking = "";
     let inputTokens = 0;
     let outputTokens = 0;
     let reasoningTokens: number | undefined;
@@ -149,6 +152,12 @@ export class ZhipuProvider implements BaseProvider {
         const data: any = JSON.parse(jsonStr);
         const choice = data.choices?.[0];
         const delta = choice?.delta;
+
+        if (delta?.reasoning_content) {
+          const deltaThinking = String(delta.reasoning_content);
+          fullThinking += deltaThinking;
+          onChunk({ content: "", thinking: deltaThinking, done: false });
+        }
 
         if (delta?.content) {
           const deltaContent = String(delta.content);
@@ -197,6 +206,7 @@ export class ZhipuProvider implements BaseProvider {
 
     return {
       content: fullContent,
+      thinking: fullThinking || undefined,
       tokens: {
         input: inputTokens,
         output: outputTokens,
