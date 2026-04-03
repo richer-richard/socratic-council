@@ -4184,16 +4184,11 @@ Write the official moderator wrap-up in 4 short sentences:
                       {(isAgent || isModerator) && modelName && (
                         <span className="discord-model">({modelName})</span>
                       )}
-                      {(isAgent || isModerator) && (!!message.thinking?.trim() || (message.toolEvents?.length ?? 0) > 0) && (
-                        <span
-                          className={`discord-thinking-pill${message.isStreaming ? "" : " is-complete"}`}
-                        >
-                          {message.isStreaming
-                            ? ((message.toolEvents?.length ?? 0) > 0 ? "Working" : "Thinking")
-                            : ((message.toolEvents?.length ?? 0) > 0
-                                ? `Worked for ${((message.thinkingMs ?? message.latencyMs ?? 0) / 1000).toFixed(3)}s`
-                                : `Thought for ${((message.thinkingMs ?? message.latencyMs ?? 0) / 1000).toFixed(3)}s`
-                              )
+                      {(isAgent || isModerator) && !message.isStreaming && (!!message.thinking?.trim() || (message.toolEvents?.length ?? 0) > 0) && (
+                        <span className="discord-thinking-pill">
+                          {(message.toolEvents?.length ?? 0) > 0
+                            ? `Worked for ${((message.thinkingMs ?? message.latencyMs ?? 0) / 1000).toFixed(3)}s`
+                            : `Thought for ${((message.thinkingMs ?? message.latencyMs ?? 0) / 1000).toFixed(3)}s`
                           }
                         </span>
                       )}
@@ -4229,12 +4224,15 @@ Write the official moderator wrap-up in 4 short sentences:
                     {/* Message body */}
                     <div className="discord-message-body">
                       {/* Thinking / Working collapsible — above content */}
-                      {!message.isStreaming && (isAgent || isModerator) && (!!message.thinking?.trim() || (message.toolEvents?.length ?? 0) > 0) && (
-                        <details className="thinking-panel">
+                      {(isAgent || isModerator) && (!!message.thinking?.trim() || (message.toolEvents?.length ?? 0) > 0) && (
+                        <details className={`thinking-panel${message.isStreaming ? " is-streaming" : ""}`}>
                           <summary className="thinking-summary">
-                            {(message.toolEvents?.length ?? 0) > 0
-                              ? `Worked for ${((message.thinkingMs ?? message.latencyMs ?? 0) / 1000).toFixed(3)}s`
-                              : `Thought for ${((message.thinkingMs ?? message.latencyMs ?? 0) / 1000).toFixed(3)}s`
+                            {message.isStreaming
+                              ? ((message.toolEvents?.length ?? 0) > 0 ? "Working\u2026" : "Thinking\u2026")
+                              : ((message.toolEvents?.length ?? 0) > 0
+                                  ? `Worked for ${((message.thinkingMs ?? message.latencyMs ?? 0) / 1000).toFixed(3)}s`
+                                  : `Thought for ${((message.thinkingMs ?? message.latencyMs ?? 0) / 1000).toFixed(3)}s`
+                                )
                             }
                           </summary>
                           <div className="thinking-content-wrapper">
@@ -4328,12 +4326,22 @@ Write the official moderator wrap-up in 4 short sentences:
                                 </div>
                                 {qReactions.length > 0 && (
                                   <div className="message-quote-reactions">
-                                    {qReactions.map(([reactionId, reaction]) => (
-                                      <div key={reactionId} className="reaction-chip">
-                                        <ReactionIcon type={reactionId} size={14} />
-                                        <span>{reaction.count}</span>
-                                      </div>
-                                    ))}
+                                    {qReactions.map(([reactionId, reaction]) => {
+                                      const reactorColor =
+                                        reaction.by.length === 1 && isCouncilAgent(reaction.by[0])
+                                          ? `var(--color-${reaction.by[0]})`
+                                          : undefined;
+                                      return (
+                                        <div
+                                          key={reactionId}
+                                          className="reaction-chip"
+                                          style={reactorColor ? { borderColor: reactorColor, background: `color-mix(in srgb, ${reactorColor} 12%, transparent)` } : undefined}
+                                        >
+                                          <ReactionIcon type={reactionId} size={14} />
+                                          <span>{reaction.count}</span>
+                                        </div>
+                                      );
+                                    })}
                                   </div>
                                 )}
                               </div>
@@ -4449,12 +4457,22 @@ Write the official moderator wrap-up in 4 short sentences:
 
                     {reactionEntries.length > 0 && (
                       <div className="reaction-bar">
-                        {reactionEntries.map(([reactionId, reaction]) => (
-                          <div key={reactionId} className="reaction-chip">
-                            <ReactionIcon type={reactionId} size={16} />
-                            <span>{reaction.count}</span>
-                          </div>
-                        ))}
+                        {reactionEntries.map(([reactionId, reaction]) => {
+                          const reactorColor =
+                            reaction.by.length === 1 && isCouncilAgent(reaction.by[0])
+                              ? `var(--color-${reaction.by[0]})`
+                              : undefined;
+                          return (
+                            <div
+                              key={reactionId}
+                              className="reaction-chip"
+                              style={reactorColor ? { borderColor: reactorColor, background: `color-mix(in srgb, ${reactorColor} 12%, transparent)` } : undefined}
+                            >
+                              <ReactionIcon type={reactionId} size={16} />
+                              <span>{reaction.count}</span>
+                            </div>
+                          );
+                        })}
                       </div>
                     )}
 

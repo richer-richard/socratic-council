@@ -286,10 +286,6 @@ export class KimiProvider implements BaseProvider {
 
     onChunk({ content: "", done: true });
 
-    if (!fullContent.trim() && reasoningContent.trim()) {
-      throw new Error("Kimi stream ended without final content");
-    }
-
     return {
       content: fullContent,
       thinking: reasoningContent || undefined,
