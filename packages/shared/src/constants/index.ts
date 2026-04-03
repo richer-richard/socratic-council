@@ -766,6 +766,38 @@ export const MODEL_REGISTRY: ModelInfo[] = [
       outputCostPer1M: 2.4,
     },
   },
+
+  // Zhipu (Z.AI) models
+  {
+    id: "glm-5",
+    provider: "zhipu",
+    name: "GLM-5",
+    description: "744B MoE flagship, 40B activated, top-tier reasoning and coding",
+    contextWindow: 200000,
+    maxOutputTokens: 16384,
+    supportsThinking: true,
+    supportsVision: true,
+    supportsStreaming: true,
+    pricing: {
+      inputCostPer1M: 0.5,
+      outputCostPer1M: 2.0,
+    },
+  },
+  {
+    id: "glm-4.7",
+    provider: "zhipu",
+    name: "GLM-4.7",
+    description: "High-capability general model",
+    contextWindow: 128000,
+    maxOutputTokens: 8192,
+    supportsThinking: false,
+    supportsVision: true,
+    supportsStreaming: true,
+    pricing: {
+      inputCostPer1M: 0.25,
+      outputCostPer1M: 1.0,
+    },
+  },
 ];
 
 // =============================================================================
@@ -780,6 +812,7 @@ export const API_ENDPOINTS: Record<Provider, string> = {
   kimi: "https://api.moonshot.cn/v1/chat/completions",
   qwen: "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
   minimax: "https://api.minimaxi.com/anthropic/v1/messages",
+  zhipu: "https://open.bigmodel.cn/api/paas/v4/chat/completions",
 };
 
 // =============================================================================
@@ -787,7 +820,7 @@ export const API_ENDPOINTS: Record<Provider, string> = {
 // =============================================================================
 
 function baseSystemPrompt(name: string): string {
-  return `You are ${name} in the Socratic Council with George, Cathy, Grace, Douglas, Kate, Quinn, and Mary.
+  return `You are ${name} in the Socratic Council with George, Cathy, Grace, Douglas, Kate, Quinn, Mary, and Zara.
 
 CONVERSATION STYLE:
 - Keep responses short and direct.
@@ -870,6 +903,15 @@ export const DEFAULT_AGENTS: Record<AgentId, AgentConfig> = {
     provider: "minimax",
     model: "minimax-m2.5",
     systemPrompt: baseSystemPrompt("Mary"),
+    temperature: 1,
+    maxTokens: 4096,
+  },
+  zara: {
+    id: "zara",
+    name: "Zara",
+    provider: "zhipu",
+    model: "glm-5",
+    systemPrompt: baseSystemPrompt("Zara"),
     temperature: 1,
     maxTokens: 4096,
   },

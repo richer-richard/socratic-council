@@ -115,6 +115,7 @@ const PROVIDER_AGENT_MAP: Record<Provider, AgentId> = {
   kimi: "kate",
   qwen: "quinn",
   minimax: "mary",
+  zhipu: "zara",
 };
 
 function buildAgentConfig(provider: Provider, model: string): AgentConfig {

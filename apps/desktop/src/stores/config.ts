@@ -16,7 +16,8 @@ export type Provider =
   | "deepseek"
   | "kimi"
   | "qwen"
-  | "minimax";
+  | "minimax"
+  | "zhipu";
 export type ProxyType = "none" | "http" | "https" | "socks5" | "socks5h";
 const VALID_PROVIDERS = [
   "openai",
@@ -26,6 +27,7 @@ const VALID_PROVIDERS = [
   "kimi",
   "qwen",
   "minimax",
+  "zhipu",
 ] as const;
 
 export interface ProxyConfig {
@@ -75,6 +77,7 @@ export const LOCKED_MODELS: Record<Provider, string> = {
   kimi: "kimi-k2.5",
   qwen: "qwen3.5-plus",
   minimax: "minimax-m2.5",
+  zhipu: "glm-5",
 };
 
 export function isProvider(value: unknown): value is Provider {
@@ -406,6 +409,15 @@ export const PROVIDER_INFO: Record<Provider, {
     description: "MiniMax M2.5 (Anthropic-compatible CN endpoint)",
     keyPrefix: "sk-",
     defaultBaseUrl: "https://api.minimaxi.com/anthropic",
+  },
+  zhipu: {
+    name: "Z.AI",
+    agent: "Zara",
+    avatar: "💠",
+    color: "text-zara",
+    description: "GLM-5 (Zhipu AI, bigmodel.cn)",
+    keyPrefix: "",
+    defaultBaseUrl: "https://open.bigmodel.cn/api/paas/v4",
   },
 };
 

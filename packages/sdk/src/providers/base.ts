@@ -133,6 +133,11 @@ export function createHeaders(
         "x-api-key": apiKey,
         "anthropic-version": "2023-06-01",
       };
+    case "zhipu":
+      return {
+        ...baseHeaders,
+        Authorization: `Bearer ${apiKey}`,
+      };
     default:
       return baseHeaders;
   }

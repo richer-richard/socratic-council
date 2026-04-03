@@ -63,6 +63,11 @@ const MODEL_OPTIONS: Record<Provider, { id: string; name: string; description?: 
     name: model.name,
     description: model.description,
   })),
+  zhipu: getModelsByProvider("zhipu").map((model) => ({
+    id: model.id,
+    name: model.name,
+    description: model.description,
+  })),
 };
 
 const ABOUT_VERSION = "1.0.0";
@@ -100,6 +105,7 @@ export function ConfigModal({
     kimi: null,
     qwen: null,
     minimax: null,
+    zhipu: null,
   });
   const [testError, setTestError] = useState<string | null>(null);
 

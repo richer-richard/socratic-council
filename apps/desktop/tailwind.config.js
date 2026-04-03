@@ -12,6 +12,7 @@ export default {
         kate: "#2DD4BF", // teal
         quinn: "#22D3EE", // cyan
         mary: "#F472B6", // rose
+        zara: "#A78BFA", // violet
         // UI colors
         primary: "#14B8A6", // emerald
         secondary: "#F59E0B", // gold

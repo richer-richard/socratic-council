@@ -45,6 +45,7 @@ const AGENT_CARDS: Array<{
   { provider: "kimi", name: "Kate", color: "var(--color-kate)" },
   { provider: "qwen", name: "Quinn", color: "var(--color-quinn)" },
   { provider: "minimax", name: "Mary", color: "var(--color-mary)" },
+  { provider: "zhipu", name: "Zara", color: "var(--color-zara)" },
 ];
 
 const STATUS_LABELS: Record<SessionStatus, string> = {

@@ -59,6 +59,7 @@ export function analyzeBidContext(
     kate: ["history", "historical", "past", "precedent", "example", "tradition"],
     quinn: ["systems", "scaling", "optimization", "efficiency", "architecture", "performance"],
     mary: ["products", "market", "execution", "strategy", "adoption", "operations"],
+    zara: ["research", "knowledge", "analysis", "data", "science", "methodology", "model"],
   };
 
   const keywords = expertiseKeywords[agentId] ?? [];
