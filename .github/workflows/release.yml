@@ -1,0 +1,141 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    name: Validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v3
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: "pnpm"
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm format:check
+      - run: pnpm lint
+      - run: pnpm build
+      - run: pnpm typecheck
+      - run: pnpm test -- --reporter=verbose
+
+  build-verify:
+    name: Verify Desktop Build
+    needs: validate
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v3
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: "pnpm"
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/desktop/src-tauri -> target
+      - run: pnpm install --frozen-lockfile
+      - name: Build Tauri app
+        working-directory: apps/desktop
+        run: pnpm tauri build --bundles app
+
+  release:
+    name: Publish Release
+    needs: build-verify
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Extract version
+        id: version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> "$GITHUB_OUTPUT"
+
+      - name: Create source archives
+        env:
+          VERSION: ${{ steps.version.outputs.VERSION }}
+        run: |
+          git archive --format=tar.gz --prefix="socratic-council-${VERSION}/" -o "socratic-council-${VERSION}.tar.gz" HEAD
+          git archive --format=zip --prefix="socratic-council-${VERSION}/" -o "socratic-council-${VERSION}.zip" HEAD
+
+      - name: Generate changelog
+        id: changelog
+        run: |
+          PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+          if [ -n "$PREV_TAG" ]; then
+            CHANGES=$(git log "${PREV_TAG}..HEAD" --oneline --no-merges)
+          else
+            CHANGES=$(git log --oneline --no-merges -20)
+          fi
+          {
+            echo "CHANGES<<CHANGELOG_EOF"
+            echo "$CHANGES"
+            echo "CHANGELOG_EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Generate release body
+        env:
+          VERSION: ${{ steps.version.outputs.VERSION }}
+          CHANGES: ${{ steps.changelog.outputs.CHANGES }}
+          REPO: ${{ github.repository }}
+        run: |
+          cat > release-body.md << 'RELEASE_EOF'
+          ## Install from source (macOS)
+
+          **Prerequisites:** Node.js 22+, pnpm 9, Rust 1.77+, Xcode Command Line Tools
+
+          ### Quick install
+          ```bash
+          RELEASE_EOF
+
+          echo "curl -L https://github.com/${REPO}/archive/refs/tags/v${VERSION}.tar.gz | tar xz" >> release-body.md
+          echo "cd socratic-council-${VERSION}" >> release-body.md
+          echo "./install.sh" >> release-body.md
+
+          cat >> release-body.md << 'RELEASE_EOF'
+          ```
+
+          ### Or clone and build
+          ```bash
+          RELEASE_EOF
+
+          echo "git clone --branch v${VERSION} --depth 1 https://github.com/${REPO}.git" >> release-body.md
+          echo "cd socratic-council && ./install.sh" >> release-body.md
+
+          cat >> release-body.md << 'RELEASE_EOF'
+          ```
+
+          ### Changes since last release
+          RELEASE_EOF
+
+          echo "$CHANGES" | while IFS= read -r line; do
+            echo "- ${line}" >> release-body.md
+          done
+
+      - name: Create GitHub Release
+        env:
+          VERSION: ${{ steps.version.outputs.VERSION }}
+        run: |
+          gh release create "v${VERSION}" \
+            "socratic-council-${VERSION}.tar.gz" \
+            "socratic-council-${VERSION}.zip" \
+            --title "Socratic Council v${VERSION}" \
+            --notes-file release-body.md \
+            --latest
