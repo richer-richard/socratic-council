@@ -4,7 +4,7 @@
 
 # Socratic Council
 
-Socratic Council is a local-first desktop app that runs a seven-agent seminar on any topic. You bring provider API keys, type a topic, optionally attach files, and watch seven agents debate in a turn-taking group chat with search, quoting, export, conflict visualization, and token/cost tracking built in.
+Socratic Council is a local-first desktop app that runs an eight-agent seminar on any topic. You bring provider API keys, type a topic, optionally attach files, and watch eight agents debate in a turn-taking group chat with search, quoting, export, conflict visualization, and token/cost tracking built in.
 
 This repo ships **source only** (no installer downloads). Follow this guide to build it from source.
 
@@ -16,8 +16,8 @@ This repo ships **source only** (no installer downloads). Follow this guide to b
 |---|---|
 | Product | Local-first Tauri desktop app |
 | Stack | React + TypeScript frontend, Rust backend, pnpm monorepo |
-| Discussion model | Seven council members plus an optional moderator |
-| Providers | OpenAI, Anthropic, Google Gemini, DeepSeek, Kimi, Qwen, MiniMax |
+| Discussion model | Eight council members plus an optional moderator |
+| Providers | OpenAI, Anthropic, Google Gemini, DeepSeek, Kimi, Qwen, MiniMax, Z.AI |
 | Research tools | File search, web search, verification, citations |
 | Outputs | Searchable transcript, logs, conflict graph, structured exports |
 
@@ -43,6 +43,7 @@ This repo ships **source only** (no installer downloads). Follow this guide to b
 | Kate | Kimi | Kimi K2.5 |
 | Quinn | Qwen | Qwen 3.5 Plus |
 | Mary | MiniMax | MiniMax M2.5 |
+| Zara | Z.AI | GLM-5 |
 | Moderator | OpenAI | GPT-5.3 Instant |
 
 ## Installation Paths

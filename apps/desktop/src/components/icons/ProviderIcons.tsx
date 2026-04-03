@@ -11,6 +11,7 @@ import deepseekLogo from "../../assets/providers/deepseek.svg";
 import kimiLogo from "../../assets/providers/kimi.svg";
 import qwenLogo from "../../assets/providers/qwen.png";
 import minimaxLogo from "../../assets/providers/minimax.png";
+import zhipuLogo from "../../assets/providers/zhipu.svg";
 
 interface IconProps {
   className?: string;
@@ -94,6 +95,11 @@ export function MiniMaxIcon({ className = "", size = 24 }: IconProps) {
   return <ProviderLogo src={minimaxLogo} alt="MiniMax" className={className} size={size} />;
 }
 
+/** Zhipu / Z.AI */
+export function ZhipuIcon({ className = "", size = 24 }: IconProps) {
+  return <ProviderLogo src={zhipuLogo} alt="Z.AI" className={className} size={size} />;
+}
+
 /** System icon for system messages */
 export function SystemIcon({ className = "", size = 24 }: IconProps) {
   return (
@@ -157,6 +163,8 @@ export function getProviderIcon(provider: Provider): React.ComponentType<IconPro
       return QwenIcon;
     case "minimax":
       return MiniMaxIcon;
+    case "zhipu":
+      return ZhipuIcon;
     default:
       return SystemIcon;
   }

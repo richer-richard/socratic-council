@@ -16,7 +16,8 @@ export type Provider =
   | "deepseek"
   | "kimi"
   | "qwen"
-  | "minimax";
+  | "minimax"
+  | "zhipu";
 
 // =============================================================================
 // OPENAI MODELS & PARAMETERS
@@ -387,6 +388,36 @@ export interface MiniMaxRequest {
 }
 
 // =============================================================================
+// ZHIPU (Z.AI) MODELS & PARAMETERS
+// =============================================================================
+
+export const ZhipuModels = ["glm-5", "glm-4.7"] as const;
+
+export type ZhipuModel = (typeof ZhipuModels)[number];
+
+export const ZhipuConfigSchema = z.object({
+  model: z.enum(ZhipuModels),
+  temperature: z.number().min(0).max(1).optional().default(0.7),
+  max_tokens: z.number().min(1).max(128000).optional(),
+  top_p: z.number().min(0).max(1).optional(),
+  stream: z.boolean().optional().default(true),
+});
+
+export type ZhipuConfig = z.infer<typeof ZhipuConfigSchema>;
+
+export interface ZhipuRequest {
+  model: ZhipuModel;
+  messages: Array<{
+    role: "user" | "assistant" | "system";
+    content: string;
+  }>;
+  temperature?: number;
+  max_tokens?: number;
+  top_p?: number;
+  stream?: boolean;
+}
+
+// =============================================================================
 // UNIFIED MODEL TYPE
 // =============================================================================
 
@@ -397,7 +428,8 @@ export type ModelId =
   | DeepSeekModel
   | KimiModel
   | QwenModel
-  | MiniMaxModel;
+  | MiniMaxModel
+  | ZhipuModel;
 
 export const ModelIdSchema = z.union([
   z.enum(OpenAIModels),
@@ -407,6 +439,7 @@ export const ModelIdSchema = z.union([
   z.enum(KimiModels),
   z.enum(QwenModels),
   z.enum(MiniMaxModels),
+  z.enum(ZhipuModels),
 ]);
 
 export interface ModelInfo {
@@ -437,7 +470,8 @@ export type AgentId =
   | "douglas"
   | "kate"
   | "quinn"
-  | "mary";
+  | "mary"
+  | "zara";
 
 export interface AgentConfig {
   id: AgentId;
@@ -451,9 +485,9 @@ export interface AgentConfig {
 }
 
 export const AgentConfigSchema = z.object({
-  id: z.enum(["george", "cathy", "grace", "douglas", "kate", "quinn", "mary"]),
+  id: z.enum(["george", "cathy", "grace", "douglas", "kate", "quinn", "mary", "zara"]),
   name: z.string().min(1).max(50),
-  provider: z.enum(["openai", "anthropic", "google", "deepseek", "kimi", "qwen", "minimax"]),
+  provider: z.enum(["openai", "anthropic", "google", "deepseek", "kimi", "qwen", "minimax", "zhipu"]),
   model: ModelIdSchema,
   systemPrompt: z.string(),
   avatar: z.string().optional(),
@@ -550,6 +584,7 @@ export interface ProviderCredentials {
   kimi?: { apiKey: string; baseUrl?: string };
   qwen?: { apiKey: string; baseUrl?: string };
   minimax?: { apiKey: string; baseUrl?: string };
+  zhipu?: { apiKey: string; baseUrl?: string };
 }
 
 export const ProviderCredentialsSchema = z.object({
@@ -560,6 +595,7 @@ export const ProviderCredentialsSchema = z.object({
   kimi: z.object({ apiKey: z.string().min(1), baseUrl: z.string().optional() }).optional(),
   qwen: z.object({ apiKey: z.string().min(1), baseUrl: z.string().optional() }).optional(),
   minimax: z.object({ apiKey: z.string().min(1), baseUrl: z.string().optional() }).optional(),
+  zhipu: z.object({ apiKey: z.string().min(1), baseUrl: z.string().optional() }).optional(),
 });
 
 // =============================================================================

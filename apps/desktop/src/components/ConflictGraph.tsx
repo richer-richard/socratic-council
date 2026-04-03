@@ -28,6 +28,7 @@ const AGENT_HEX: Record<string, string> = {
   "text-kate": "#2DD4BF",
   "text-quinn": "#22D3EE",
   "text-mary": "#F472B6",
+  "text-zara": "#A78BFA",
 };
 
 export function ConflictGraph({ conflicts, agents }: ConflictGraphProps) {

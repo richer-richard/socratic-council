@@ -44,7 +44,7 @@ function createSessionFixture(): DiscussionSession {
     duoLogue: null,
     runtime: {
       phase: "discussion",
-      cyclePending: ["george", "cathy", "grace", "douglas", "kate", "quinn", "mary"],
+      cyclePending: ["george", "cathy", "grace", "douglas", "kate", "quinn", "mary", "zara"],
       previousSpeaker: null,
       recentSpeakers: [],
       whisperBonuses: {
@@ -55,6 +55,7 @@ function createSessionFixture(): DiscussionSession {
         kate: 0,
         quinn: 0,
         mary: 0,
+        zara: 0,
       },
       lastWhisperKey: null,
       lastModeratorKey: null,

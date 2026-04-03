@@ -18,6 +18,7 @@ const AGENT_NAMES: Record<AgentId, string> = {
   kate: "Kate",
   quinn: "Quinn",
   mary: "Mary",
+  zara: "Zara",
 };
 
 const DISAGREE_CUES: Array<{ cue: string; weight: number }> = [

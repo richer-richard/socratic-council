@@ -12,6 +12,7 @@ import { DeepSeekProvider } from "./deepseek.js";
 import { KimiProvider } from "./kimi.js";
 import { QwenProvider } from "./qwen.js";
 import { MiniMaxProvider } from "./minimax.js";
+import { ZhipuProvider } from "./zhipu.js";
 import type { Transport } from "../transport.js";
 
 // Re-export all providers
@@ -22,6 +23,7 @@ export { DeepSeekProvider } from "./deepseek.js";
 export { KimiProvider, type KimiCompletionOptions } from "./kimi.js";
 export { QwenProvider } from "./qwen.js";
 export { MiniMaxProvider } from "./minimax.js";
+export { ZhipuProvider } from "./zhipu.js";
 export * from "./base.js";
 
 /**
@@ -47,6 +49,8 @@ export function createProvider(
       return new QwenProvider(apiKey, options);
     case "minimax":
       return new MiniMaxProvider(apiKey, options);
+    case "zhipu":
+      return new ZhipuProvider(apiKey, options);
     default:
       throw new Error(`Unknown provider: ${provider}`);
   }
@@ -123,6 +127,15 @@ export class ProviderManager {
         "minimax",
         new MiniMaxProvider(credentials.minimax.apiKey, {
           baseUrl: credentials.minimax.baseUrl,
+          transport: this.transport,
+        })
+      );
+    }
+    if (credentials.zhipu?.apiKey) {
+      this.providers.set(
+        "zhipu",
+        new ZhipuProvider(credentials.zhipu.apiKey, {
+          baseUrl: credentials.zhipu.baseUrl,
           transport: this.transport,
         })
       );

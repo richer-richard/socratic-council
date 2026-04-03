@@ -199,6 +199,7 @@ function createEmptyWhisperBonuses(): Record<CouncilAgentId, number> {
     kate: 0,
     quinn: 0,
     mary: 0,
+    zara: 0,
   };
 }
 

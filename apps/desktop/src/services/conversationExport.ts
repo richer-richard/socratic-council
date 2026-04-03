@@ -863,6 +863,7 @@ async function buildPdfBytes(options: {
     { id: "kate", name: "Kate" },
     { id: "quinn", name: "Quinn" },
     { id: "mary", name: "Mary" },
+    { id: "zara", name: "Zara" },
   ] as const;
   const councilAgentIds: AgentId[] = councilAgents.map((a) => a.id);
 
@@ -1320,6 +1321,7 @@ async function buildPdfBytes(options: {
         kate: "2DD4BF",
         quinn: "22D3EE",
         mary: "F472B6",
+        zara: "A78BFA",
       };
 
       const low = { r: 59, g: 130, b: 246 };

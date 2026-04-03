@@ -30,8 +30,8 @@ import { ConflictDetector } from "./conflict.js";
 import { DuckDuckGoOracle } from "./oracle.js";
 import { WhisperManager } from "./whisper.js";
 
-const VALID_AGENT_IDS = ["george", "cathy", "grace", "douglas", "kate", "quinn", "mary"] as const;
-const VALID_PROVIDERS = ["openai", "anthropic", "google", "deepseek", "kimi", "qwen", "minimax"] as const;
+const VALID_AGENT_IDS = ["george", "cathy", "grace", "douglas", "kate", "quinn", "mary", "zara"] as const;
+const VALID_PROVIDERS = ["openai", "anthropic", "google", "deepseek", "kimi", "qwen", "minimax", "zhipu"] as const;
 const VALID_STATUSES = ["idle", "running", "paused", "completed"] as const;
 
 function cloneSnapshot<T>(value: T): T {

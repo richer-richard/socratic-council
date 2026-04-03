@@ -128,6 +128,9 @@ const MODEL_DISPLAY_NAMES: Record<string, string> = {
   // MiniMax
   "MiniMax-M2.5": "MiniMax M2.5",
   "minimax-m2.5": "MiniMax M2.5",
+  // Zhipu
+  "glm-5": "GLM-5",
+  "glm-4.7": "GLM-4.7",
 };
 
 const GROUP_CHAT_GUIDELINES = `
@@ -167,7 +170,7 @@ ${getToolPrompt()}
 
 const BASE_SYSTEM_PROMPT = (
   name: string,
-) => `You are ${name} in a group chat with George, Cathy, Grace, Douglas, Kate, Quinn, and Mary.
+) => `You are ${name} in a group chat with George, Cathy, Grace, Douglas, Kate, Quinn, Mary, and Zara.
 
 Do NOT adopt a persona or specialty. Speak as yourself, and keep the tone natural.
 
@@ -181,7 +184,7 @@ Proactive behavior requirements:
 
 ${GROUP_CHAT_GUIDELINES}`;
 
-const MODERATOR_SYSTEM_PROMPT = `You are the Moderator in a group chat with George, Cathy, Grace, Douglas, Kate, Quinn, and Mary.
+const MODERATOR_SYSTEM_PROMPT = `You are the Moderator in a group chat with George, Cathy, Grace, Douglas, Kate, Quinn, Mary, and Zara.
 
 Your job: keep the discussion focused, fair, rigorous, and productive.
 
@@ -271,6 +274,14 @@ const AGENT_CONFIG: Record<
     provider: "minimax",
     systemPrompt: BASE_SYSTEM_PROMPT("Mary"),
   },
+  zara: {
+    name: "Zara",
+    color: "text-zara",
+    bgColor: "bg-zara/10",
+    borderColor: "border-zara",
+    provider: "zhipu",
+    systemPrompt: BASE_SYSTEM_PROMPT("Zara"),
+  },
   system: {
     name: "System",
     color: "text-ink-500",
@@ -305,6 +316,7 @@ const AGENT_IDS: CouncilAgentId[] = [
   "kate",
   "quinn",
   "mary",
+  "zara",
 ];
 
 const isCouncilAgent = (id: unknown): id is CouncilAgentId =>
@@ -342,6 +354,7 @@ function createWhisperBonuses(): Record<CouncilAgentId, number> {
     kate: 0,
     quinn: 0,
     mary: 0,
+    zara: 0,
   };
 }
 
@@ -1325,6 +1338,7 @@ export function Chat({ session, onNavigate, onPersistSession }: ChatProps) {
         kate: 0,
         quinn: 0,
         mary: 0,
+        zara: 0,
       } as Record<CouncilAgentId, number>;
       let maxScore = -Infinity;
       let winner: CouncilAgentId = eligibleAgents[0] ?? AGENT_IDS[0];
