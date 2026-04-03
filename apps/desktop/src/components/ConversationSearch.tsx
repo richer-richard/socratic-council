@@ -43,11 +43,7 @@ export function ConversationSearch({
   const [activeIndex, setActiveIndex] = useState(0);
 
   const terms = useMemo(() => {
-    return query
-      .trim()
-      .toLowerCase()
-      .split(/\s+/g)
-      .filter(Boolean);
+    return query.trim().toLowerCase().split(/\s+/g).filter(Boolean);
   }, [query]);
 
   const results = useMemo(() => {
@@ -81,9 +77,7 @@ export function ConversationSearch({
   return (
     <div className="scale-in">
       <div className="flex items-center justify-between mb-4">
-        <h3 className="text-xs font-semibold text-ink-500 uppercase tracking-[0.24em]">
-          Search
-        </h3>
+        <h3 className="text-xs font-semibold text-ink-500 uppercase tracking-[0.24em]">Search</h3>
         <button onClick={onClose} className="button-ghost text-xs">
           Close
         </button>
@@ -102,7 +96,9 @@ export function ConversationSearch({
 
         <div className="mt-2 flex items-center justify-between text-xs text-ink-500">
           <div>
-            {terms.length === 0 ? "Type to search" : `${results.length} match${results.length === 1 ? "" : "es"}`}
+            {terms.length === 0
+              ? "Type to search"
+              : `${results.length} match${results.length === 1 ? "" : "es"}`}
           </div>
           <div className="flex items-center gap-2">
             <button
@@ -147,9 +143,7 @@ export function ConversationSearch({
                     {formatTime(r.timestamp)}
                   </div>
                 </div>
-                <div className="mt-1 text-[12px] text-ink-500 leading-snug">
-                  {r.snippet}
-                </div>
+                <div className="mt-1 text-[12px] text-ink-500 leading-snug">{r.snippet}</div>
               </button>
             ))}
           </div>
@@ -158,4 +152,3 @@ export function ConversationSearch({
     </div>
   );
 }
-

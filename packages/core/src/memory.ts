@@ -1,7 +1,7 @@
 /**
  * @fileoverview Conversation Memory System
  * Implements a sliding window approach for agent context management.
- * 
+ *
  * Key features:
  * - 20-message sliding window (configurable)
  * - Priority-based message selection
@@ -103,7 +103,7 @@ const AGENT_NAMES: Record<AgentId, string> = {
 function mentionsAgent(content: string, agentId: AgentId): boolean {
   const name = AGENT_NAMES[agentId];
   if (!name) return false;
-  
+
   // Case-insensitive check for agent name
   const regex = new RegExp(`\\b${name}\\b`, "i");
   return regex.test(content);
@@ -114,8 +114,12 @@ function mentionsAgent(content: string, agentId: AgentId): boolean {
  */
 function containsDirectQuestion(content: string): boolean {
   // Check for question marks and question-like patterns
-  return content.includes("?") || 
-    /\b(what|how|why|when|where|who|which|would|could|should|do you|does|is it|are you)\b/i.test(content);
+  return (
+    content.includes("?") ||
+    /\b(what|how|why|when|where|who|which|would|could|should|do you|does|is it|are you)\b/i.test(
+      content,
+    )
+  );
 }
 
 /**
@@ -124,15 +128,15 @@ function containsDirectQuestion(content: string): boolean {
 function containsChallenge(content: string, targetAgent: AgentId): boolean {
   const name = AGENT_NAMES[targetAgent];
   if (!name) return false;
-  
+
   const challengePatterns = [
     new RegExp(`disagree\\s+with\\s+${name}`, "i"),
     new RegExp(`${name}['s]*\\s+(argument|point|claim).*(?:weak|wrong|flawed)`, "i"),
     new RegExp(`challenge\\s+${name}`, "i"),
     new RegExp(`${name}.*mistaken`, "i"),
   ];
-  
-  return challengePatterns.some(pattern => pattern.test(content));
+
+  return challengePatterns.some((pattern) => pattern.test(content));
 }
 
 /**
@@ -140,15 +144,17 @@ function containsChallenge(content: string, targetAgent: AgentId): boolean {
  */
 function calculateEngagementScore(message: MessageWithContext): number {
   let score = 0;
-  
+
   // Points for being quoted
   score += message.quotedBy.length * 15;
-  
+
   // Points for reactions
-  const totalReactions = Object.values(message.reactedBy)
-    .reduce((sum, agents) => sum + agents.length, 0);
+  const totalReactions = Object.values(message.reactedBy).reduce(
+    (sum, agents) => sum + agents.length,
+    0,
+  );
   score += totalReactions * 5;
-  
+
   // Cap at 100
   return Math.min(score, 100);
 }
@@ -229,7 +235,7 @@ export class ConversationMemoryManager {
    * Record that an agent quoted a specific message
    */
   recordQuote(messageId: string, quotingAgent: AgentId): void {
-    const message = this.messages.find(m => m.id === messageId);
+    const message = this.messages.find((m) => m.id === messageId);
     if (message && !message.quotedBy.includes(quotingAgent)) {
       message.quotedBy.push(quotingAgent);
       message.engagementScore = calculateEngagementScore(message);
@@ -246,7 +252,7 @@ export class ConversationMemoryManager {
    * Record that an agent reacted to a specific message
    */
   recordReaction(messageId: string, reactingAgent: AgentId, reactionType: string): void {
-    const message = this.messages.find(m => m.id === messageId);
+    const message = this.messages.find((m) => m.id === messageId);
     if (message) {
       if (!message.reactedBy[reactionType]) {
         message.reactedBy[reactionType] = [];
@@ -265,7 +271,16 @@ export class ConversationMemoryManager {
     const speakerId = message.agentId;
     if (speakerId === "system" || speakerId === "user" || speakerId === "tool") return;
 
-    const agentIds: AgentId[] = ["george", "cathy", "grace", "douglas", "kate", "quinn", "mary", "zara"];
+    const agentIds: AgentId[] = [
+      "george",
+      "cathy",
+      "grace",
+      "douglas",
+      "kate",
+      "quinn",
+      "mary",
+      "zara",
+    ];
 
     for (const targetAgent of agentIds) {
       if (targetAgent === speakerId) continue;
@@ -290,7 +305,7 @@ export class ConversationMemoryManager {
       if (debtReason) {
         // Check if this debt already exists
         const existingDebt = this.engagementDebts.find(
-          d => d.debtor === targetAgent && d.messageId === message.id
+          (d) => d.debtor === targetAgent && d.messageId === message.id,
         );
 
         if (!existingDebt) {
@@ -311,7 +326,7 @@ export class ConversationMemoryManager {
    */
   private clearEngagementDebt(debtor: AgentId, creditor: AgentId, messageId: string): void {
     this.engagementDebts = this.engagementDebts.filter(
-      d => !(d.debtor === debtor && d.creditor === creditor && d.messageId === messageId)
+      (d) => !(d.debtor === debtor && d.creditor === creditor && d.messageId === messageId),
     );
   }
 
@@ -320,7 +335,7 @@ export class ConversationMemoryManager {
    */
   getEngagementDebts(agentId: AgentId): EngagementDebt[] {
     return this.engagementDebts
-      .filter(d => d.debtor === agentId)
+      .filter((d) => d.debtor === agentId)
       .sort((a, b) => b.priority - a.priority);
   }
 
@@ -366,7 +381,7 @@ export class ConversationMemoryManager {
     }
 
     // Score older messages by relevance to current agent
-    const scoredOlder = olderMessages.map(msg => {
+    const scoredOlder = olderMessages.map((msg) => {
       let score = 0;
 
       // Boost messages that mention this agent
@@ -376,10 +391,14 @@ export class ConversationMemoryManager {
 
       // Boost messages from agents this agent hasn't responded to
       const hasResponseFromAgent = recentMessages.some(
-        m => m.agentId === currentAgent && 
-             m.quotedBy.includes(msg.agentId as AgentId)
+        (m) => m.agentId === currentAgent && m.quotedBy.includes(msg.agentId as AgentId),
       );
-      if (!hasResponseFromAgent && msg.agentId !== "system" && msg.agentId !== "user" && msg.agentId !== "tool") {
+      if (
+        !hasResponseFromAgent &&
+        msg.agentId !== "system" &&
+        msg.agentId !== "user" &&
+        msg.agentId !== "tool"
+      ) {
         score += 30;
       }
 
@@ -391,7 +410,7 @@ export class ConversationMemoryManager {
 
     // Sort by score and take top priority messages
     scoredOlder.sort((a, b) => b.score - a.score);
-    const priorityMessages = scoredOlder.slice(0, priorityCount).map(s => s.message);
+    const priorityMessages = scoredOlder.slice(0, priorityCount).map((s) => s.message);
 
     // Combine and sort by timestamp
     const combined = [...priorityMessages, ...recentMessages];
@@ -426,15 +445,17 @@ export class ConversationMemoryManager {
 
     // Add recent messages with metadata
     lines.push("## CONVERSATION HISTORY\n");
-    
+
     for (const msg of context.recentMessages) {
       if (msg.agentId === "system") continue;
-      
-      const speaker = msg.agentId === "user" ? "User" : AGENT_NAMES[msg.agentId as AgentId] || msg.agentId;
-      const quotedInfo = msg.quotedBy.length > 0
-        ? ` [Quoted by: ${msg.quotedBy.map(id => AGENT_NAMES[id] || id).join(", ")}]`
-        : "";
-      
+
+      const speaker =
+        msg.agentId === "user" ? "User" : AGENT_NAMES[msg.agentId as AgentId] || msg.agentId;
+      const quotedInfo =
+        msg.quotedBy.length > 0
+          ? ` [Quoted by: ${msg.quotedBy.map((id) => AGENT_NAMES[id] || id).join(", ")}]`
+          : "";
+
       lines.push(`**${speaker}** (id: ${msg.id})${quotedInfo}:`);
       lines.push(msg.content);
       lines.push("");
@@ -443,7 +464,7 @@ export class ConversationMemoryManager {
     // Add engagement requirements if there are debts
     if (context.engagementDebt.length > 0) {
       lines.push("## YOUR REQUIRED ENGAGEMENT THIS TURN\n");
-      
+
       const topDebts = context.engagementDebt.slice(0, 3);
       for (const debt of topDebts) {
         const creditorName = AGENT_NAMES[debt.creditor];
@@ -453,7 +474,7 @@ export class ConversationMemoryManager {
           challenged: `${creditorName} challenged your position`,
           unanswered: `${creditorName}'s point hasn't been addressed`,
         }[debt.reason];
-        
+
         lines.push(`- **MUST respond to** ${creditorName} (${debt.messageId}): ${reasonText}`);
       }
       lines.push("");

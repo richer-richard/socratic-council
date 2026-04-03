@@ -56,7 +56,11 @@ describe("ConflictDetector", () => {
       baseMessage("george", "Thanks; here is a narrower claim with a testable prediction.", 7),
       baseMessage("douglas", "Makes sense. I can accept that narrower version.", 8),
       baseMessage("george", "Good point about edge cases; we should note them explicitly.", 9),
-      baseMessage("douglas", "Concur. Let's summarize the consensus and remaining uncertainty.", 10),
+      baseMessage(
+        "douglas",
+        "Concur. Let's summarize the consensus and remaining uncertainty.",
+        10,
+      ),
     ];
 
     const detector = new ConflictDetector(0, 12);
@@ -72,7 +76,7 @@ describe("ConflictDetector", () => {
       baseMessage(
         "george",
         "The budget constraint implies the project remains feasible under conservative cost assumptions across markets.",
-        1
+        1,
       ),
     ];
 
@@ -81,7 +85,7 @@ describe("ConflictDetector", () => {
       baseMessage(
         "douglas",
         "The budget constraint cannot imply feasibility; under conservative cost assumptions the project fails in most markets.",
-        2
+        2,
       ),
     ];
 
@@ -90,13 +94,14 @@ describe("ConflictDetector", () => {
       baseMessage(
         "douglas",
         "The budget constraint implies infeasibility; under conservative cost assumptions the project fails in most markets.",
-        2
+        2,
       ),
     ];
 
     const detector = new ConflictDetector(0, 6);
     const negScore = detector.evaluate(withNegation, ["george", "douglas"])?.conflictScore ?? 0;
-    const noNegScore = detector.evaluate(withoutNegation, ["george", "douglas"])?.conflictScore ?? 0;
+    const noNegScore =
+      detector.evaluate(withoutNegation, ["george", "douglas"])?.conflictScore ?? 0;
 
     expect(negScore).toBeGreaterThan(noNegScore);
   });

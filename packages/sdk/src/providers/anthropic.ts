@@ -124,7 +124,7 @@ function isClaudeOpus46(model: AnthropicModel): boolean {
 
 function buildThinkingConfig(
   model: AnthropicModel,
-  maxTokens: number
+  maxTokens: number,
 ):
   | {
       type: "enabled";
@@ -178,7 +178,7 @@ export class AnthropicProvider implements BaseProvider {
   async complete(
     agent: AgentConfig,
     messages: ChatMessage[],
-    options?: CompletionOptions
+    options?: CompletionOptions,
   ): Promise<CompletionResult> {
     const startTime = Date.now();
     const model = agent.model as AnthropicModel;
@@ -236,7 +236,7 @@ export class AnthropicProvider implements BaseProvider {
     agent: AgentConfig,
     messages: ChatMessage[],
     onChunk: StreamCallback,
-    options?: CompletionOptions
+    options?: CompletionOptions,
   ): Promise<CompletionResult> {
     const startTime = Date.now();
     const model = agent.model as AnthropicModel;
@@ -326,7 +326,7 @@ export class AnthropicProvider implements BaseProvider {
             resolve();
           },
           onError: (error) => reject(new Error(`${error.code}: ${error.message}`)),
-        }
+        },
       );
     });
 
@@ -369,11 +369,11 @@ export class AnthropicProvider implements BaseProvider {
     agent: AgentConfig,
     messages: ChatMessage[],
     model: AnthropicModel,
-    options?: CompletionOptions & { stream?: boolean }
+    options?: CompletionOptions & { stream?: boolean },
   ): AnthropicRequest {
     // Extract system message
     const systemMessage = messages.find((m) => m.role === "system");
-    
+
     // Filter and convert messages (Anthropic doesn't support system role in messages)
     const anthropicMessages: AnthropicMessage[] = messages
       .filter((m) => m.role !== "system")
@@ -394,7 +394,9 @@ export class AnthropicProvider implements BaseProvider {
       request.system = systemMessage.content;
     }
 
-    const thinking = options?.disableThinking ? undefined : buildThinkingConfig(model, request.max_tokens);
+    const thinking = options?.disableThinking
+      ? undefined
+      : buildThinkingConfig(model, request.max_tokens);
     if (thinking) {
       request.thinking = thinking;
     } else {

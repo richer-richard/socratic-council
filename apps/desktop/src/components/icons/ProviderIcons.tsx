@@ -65,9 +65,7 @@ export function OpenAIIcon({ className = "", size = 24 }: IconProps) {
 
 /** Anthropic */
 export function AnthropicIcon({ className = "", size = 24 }: IconProps) {
-  return (
-    <ProviderLogo src={anthropicLogo} alt="Anthropic" className={className} size={size} />
-  );
+  return <ProviderLogo src={anthropicLogo} alt="Anthropic" className={className} size={size} />;
 }
 
 /** Google Gemini */
@@ -171,7 +169,11 @@ export function getProviderIcon(provider: Provider): React.ComponentType<IconPro
 }
 
 /** Provider icon component that renders the correct icon based on provider */
-export function ProviderIcon({ provider, className = "", size = 24 }: { provider: Provider } & IconProps) {
+export function ProviderIcon({
+  provider,
+  className = "",
+  size = 24,
+}: { provider: Provider } & IconProps) {
   const IconComponent = getProviderIcon(provider);
   return <IconComponent className={className} size={size} />;
 }

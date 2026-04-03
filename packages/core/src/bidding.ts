@@ -35,17 +35,18 @@ export function calculateBidScore(bid: Bid): number {
 export function analyzeBidContext(
   agentId: AgentId,
   messages: Message[],
-  topic: string
+  topic: string,
 ): Omit<Bid, "timestamp"> {
   // Calculate urgency based on how long since this agent spoke
   const lastSpokeIndex = messages.findLastIndex((m) => m.agentId === agentId);
-  const messagesSinceSpoke = lastSpokeIndex === -1 ? messages.length : messages.length - lastSpokeIndex - 1;
+  const messagesSinceSpoke =
+    lastSpokeIndex === -1 ? messages.length : messages.length - lastSpokeIndex - 1;
   const urgency = Math.min(100, 20 + messagesSinceSpoke * 15);
 
   // Calculate relevance based on recent mentions or direct questions
   const recentMessages = messages.slice(-5);
-  const mentionCount = recentMessages.filter(
-    (m) => m.content.toLowerCase().includes(agentId.toLowerCase())
+  const mentionCount = recentMessages.filter((m) =>
+    m.content.toLowerCase().includes(agentId.toLowerCase()),
   ).length;
   const relevance = Math.min(100, 30 + mentionCount * 20 + Math.random() * 30);
 
@@ -86,7 +87,7 @@ export function runBiddingRound(
   messages: Message[],
   topic: string,
   excludeAgent?: AgentId,
-  whisperBonuses: Partial<Record<AgentId, number>> = {}
+  whisperBonuses: Partial<Record<AgentId, number>> = {},
 ): BiddingRound {
   if (agentIds.length === 0) {
     throw new Error("No agents available for bidding round");
@@ -142,7 +143,7 @@ export function createWhisperBid(
   agentId: AgentId,
   bonus: number,
   messages: Message[],
-  topic: string
+  topic: string,
 ): Bid {
   const bidParams = analyzeBidContext(agentId, messages, topic);
   return {

@@ -36,7 +36,7 @@ export class WhisperManager {
   sendWhisper(
     from: AgentId,
     to: AgentId,
-    message: Omit<WhisperMessage, "id" | "from" | "to" | "timestamp">
+    message: Omit<WhisperMessage, "id" | "from" | "to" | "timestamp">,
   ): WhisperMessage {
     const whisper: WhisperMessage = {
       ...message,

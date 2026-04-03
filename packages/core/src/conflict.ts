@@ -76,7 +76,10 @@ const DISAGREE_PATTERNS: Array<{ pattern: RegExp; weight: number }> = [
   { pattern: /\b(you're|you\s+are)\s+(wrong|mistaken)\b/i, weight: 16 },
   // Discourse markers that often signal pushback (especially after "Name, ...")
   { pattern: /^(?:\s*[A-Z][a-z]+[,:-]\s*)?(actually|no|but|however|yet|still)\b/i, weight: 10 },
-  { pattern: /\b(i\s+(?:can't|cannot)\s+(?:agree|see)|i\s+don't\s+buy|i\s+do\s+not\s+buy)\b/i, weight: 16 },
+  {
+    pattern: /\b(i\s+(?:can't|cannot)\s+(?:agree|see)|i\s+don't\s+buy|i\s+do\s+not\s+buy)\b/i,
+    weight: 16,
+  },
   { pattern: /\b(that\s+seems)\s+(unlikely|off|implausible)\b/i, weight: 10 },
 ];
 
@@ -146,7 +149,7 @@ function addressesAgentAtStart(content: string, agentId: AgentId): boolean {
 
 function hasNegation(content: string): boolean {
   return /\b(no|not|never|cannot|can't|won't|don't|doesn't|didn't|isn't|aren't|wasn't|weren't)\b|\b\w+n't\b/i.test(
-    content
+    content,
   );
 }
 
@@ -288,7 +291,7 @@ export class ConflictDetector {
 
   evaluateAll(
     messages: Message[],
-    agentIds: AgentId[]
+    agentIds: AgentId[],
   ): { pairs: PairwiseConflict[]; strongestPair: ConflictDetection | null } {
     const pairs: PairwiseConflict[] = [];
     let strongest: ConflictDetection | null = null;
@@ -403,7 +406,7 @@ export class ConflictDetector {
 
     const alternationBonus = Math.min(
       30,
-      countAlternations(recent.map((m) => m.agentId as AgentId)) * 6
+      countAlternations(recent.map((m) => m.agentId as AgentId)) * 6,
     );
 
     const mentionsBonus = Math.min(
@@ -411,7 +414,7 @@ export class ConflictDetector {
       recent.reduce((count, msg) => {
         const other = msg.agentId === agentA ? agentB : agentA;
         return mentionsAgentName(msg.content, other) ? count + 1 : count;
-      }, 0) * 4
+      }, 0) * 4,
     );
 
     const directedBonus = Math.min(24, directedCount * 6);
@@ -424,12 +427,11 @@ export class ConflictDetector {
     // Sustained tension: multiple turns with meaningful disagreement signals.
     // Gate on a reasonably high peak so we don't inflate mild, purely-structural back-and-forth.
     const signalTurns = adjustedScores.filter((s) => s >= 15).length;
-    const sustainedBonus =
-      recentPeak >= 28 ? Math.min(20, Math.max(0, signalTurns - 1) * 4) : 0;
+    const sustainedBonus = recentPeak >= 28 ? Math.min(20, Math.max(0, signalTurns - 1) * 4) : 0;
 
     const score = Math.min(
       100,
-      baseScore + engagementBonus + directedBonus + reciprocityBonus + sustainedBonus
+      baseScore + engagementBonus + directedBonus + reciprocityBonus + sustainedBonus,
     );
 
     return Math.round(score);

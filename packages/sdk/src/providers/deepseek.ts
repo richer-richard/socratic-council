@@ -27,7 +27,7 @@ export class DeepSeekProvider implements BaseProvider {
     this.endpoint = resolveEndpoint(
       options?.baseUrl,
       "/v1/chat/completions",
-      API_ENDPOINTS.deepseek
+      API_ENDPOINTS.deepseek,
     );
     this.transport = options?.transport ?? createFetchTransport();
   }
@@ -39,7 +39,7 @@ export class DeepSeekProvider implements BaseProvider {
     agent: AgentConfig,
     messages: ChatMessage[],
     options: CompletionOptions = {},
-    stream = false
+    stream = false,
   ): DeepSeekRequest {
     const request: DeepSeekRequest = {
       model: agent.model as DeepSeekModel,
@@ -70,7 +70,7 @@ export class DeepSeekProvider implements BaseProvider {
   async complete(
     agent: AgentConfig,
     messages: ChatMessage[],
-    options: CompletionOptions = {}
+    options: CompletionOptions = {},
   ): Promise<CompletionResult> {
     const startTime = Date.now();
     const body = this.buildRequestBody(agent, messages, options, false);
@@ -98,7 +98,7 @@ export class DeepSeekProvider implements BaseProvider {
     const latencyMs = Date.now() - startTime;
 
     const choice = data.choices?.[0];
-    const content = choice?.message?.content as string ?? "";
+    const content = (choice?.message?.content as string) ?? "";
 
     // DeepSeek V3.2 includes reasoning_content for deepseek-reasoner model
     const reasoningContent = choice?.message?.reasoning_content;
@@ -109,7 +109,9 @@ export class DeepSeekProvider implements BaseProvider {
       tokens: {
         input: (data.usage?.prompt_tokens as number) ?? 0,
         output: (data.usage?.completion_tokens as number) ?? 0,
-        reasoning: reasoningContent ? (data.usage?.completion_tokens_details?.reasoning_tokens as number | undefined) : undefined,
+        reasoning: reasoningContent
+          ? (data.usage?.completion_tokens_details?.reasoning_tokens as number | undefined)
+          : undefined,
       },
       finishReason: this.mapFinishReason(choice?.finish_reason as string | undefined),
       latencyMs,
@@ -123,7 +125,7 @@ export class DeepSeekProvider implements BaseProvider {
     agent: AgentConfig,
     messages: ChatMessage[],
     onChunk: StreamCallback,
-    options: CompletionOptions = {}
+    options: CompletionOptions = {},
   ): Promise<CompletionResult> {
     const startTime = Date.now();
     const body = this.buildRequestBody(agent, messages, options, true);
@@ -189,7 +191,7 @@ export class DeepSeekProvider implements BaseProvider {
             resolve();
           },
           onError: (error) => reject(new Error(`${error.code}: ${error.message}`)),
-        }
+        },
       );
     });
 

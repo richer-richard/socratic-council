@@ -7,6 +7,7 @@ These emoji SVGs are from Twemoji.
 - License file: https://github.com/jdecked/twemoji/blob/main/LICENSE-GRAPHICS
 
 Files included:
+
 - thumbs-up.svg (U+1F44D)
 - heart.svg (U+2764)
 - laugh.svg (U+1F602)

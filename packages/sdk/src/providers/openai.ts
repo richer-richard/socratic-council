@@ -166,10 +166,12 @@ function isOutputTextType(type: string | undefined): boolean {
 }
 
 function collectContentText(
-  content: Array<{
-    type?: string;
-    text?: string;
-  }> | undefined
+  content:
+    | Array<{
+        type?: string;
+        text?: string;
+      }>
+    | undefined,
 ): string {
   return (
     content
@@ -291,7 +293,7 @@ export class OpenAIProvider implements BaseProvider {
   async complete(
     agent: AgentConfig,
     messages: ChatMessage[],
-    options?: CompletionOptions
+    options?: CompletionOptions,
   ): Promise<CompletionResult> {
     const startTime = Date.now();
     const model = agent.model as OpenAIModel;
@@ -345,7 +347,7 @@ export class OpenAIProvider implements BaseProvider {
     agent: AgentConfig,
     messages: ChatMessage[],
     onChunk: StreamCallback,
-    options?: CompletionOptions
+    options?: CompletionOptions,
   ): Promise<CompletionResult> {
     const startTime = Date.now();
     const model = agent.model as OpenAIModel;
@@ -419,7 +421,8 @@ export class OpenAIProvider implements BaseProvider {
               reasoningTokens;
           }
 
-          const completedText = parsed.response?.output?.map((item) => collectContentText(item.content)).join("") ?? "";
+          const completedText =
+            parsed.response?.output?.map((item) => collectContentText(item.content)).join("") ?? "";
           appendFallbackText(completedText);
           return;
         }
@@ -468,7 +471,7 @@ export class OpenAIProvider implements BaseProvider {
             resolve();
           },
           onError: (error) => reject(new Error(`${error.code}: ${error.message}`)),
-        }
+        },
       );
     });
 
@@ -512,7 +515,7 @@ export class OpenAIProvider implements BaseProvider {
     agent: AgentConfig,
     messages: ChatMessage[],
     model: OpenAIModel,
-    options?: CompletionOptions & { stream?: boolean }
+    options?: CompletionOptions & { stream?: boolean },
   ): OpenAIResponsesRequest {
     // Extract system message for instructions
     const systemMessage = messages.find((m) => m.role === "system");
@@ -570,13 +573,18 @@ export class OpenAIProvider implements BaseProvider {
 
     const prefix = messages
       .slice(0, boundary + 1)
-      .map((message) => [
-        message.role,
-        message.content,
-        message.attachments
-          ?.map((attachment) => `${attachment.id}:${attachment.kind}:${attachment.name}:${attachment.data.length}`)
-          .join("|") ?? "",
-      ].join("::"))
+      .map((message) =>
+        [
+          message.role,
+          message.content,
+          message.attachments
+            ?.map(
+              (attachment) =>
+                `${attachment.id}:${attachment.kind}:${attachment.name}:${attachment.data.length}`,
+            )
+            .join("|") ?? "",
+        ].join("::"),
+      )
       .join("\n---\n");
 
     return `sc-prefix-${stableHash(prefix)}`;

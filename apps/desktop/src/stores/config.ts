@@ -1,6 +1,6 @@
 /**
  * Configuration store for managing API keys, proxy settings, and preferences
- * 
+ *
  * Proxy Logic:
  * - Single global proxy configuration applies to ALL providers
  * - No per-provider proxy overrides (removed for simplicity)
@@ -122,8 +122,10 @@ function normalizeProxyConfig(input?: Partial<ProxyConfig>): ProxyConfig {
     typeof rawPort === "number" ? rawPort : typeof rawPort === "string" ? parseInt(rawPort, 10) : 0;
   const port =
     Number.isFinite(parsedPort) && parsedPort > 0 && parsedPort <= 65535 ? parsedPort : 0;
-  const username = typeof input?.username === "string" && input.username !== "" ? input.username : undefined;
-  const password = typeof input?.password === "string" && input.password !== "" ? input.password : undefined;
+  const username =
+    typeof input?.username === "string" && input.username !== "" ? input.username : undefined;
+  const password =
+    typeof input?.password === "string" && input.password !== "" ? input.password : undefined;
 
   return {
     type,
@@ -185,7 +187,7 @@ export function loadConfig(): AppConfig {
     const stored = localStorage.getItem(STORAGE_KEY);
     if (stored) {
       const parsed = JSON.parse(stored);
-      
+
       // Merge with defaults, removing deprecated fields
       const merged: AppConfig = {
         credentials: sanitizeCredentials(parsed.credentials),
@@ -197,14 +199,14 @@ export function loadConfig(): AppConfig {
 
       // Migrate old model IDs to Claude Opus 4.6
       const currentAnthropicModel = merged.models.anthropic;
-      const needsMigration = 
+      const needsMigration =
         !currentAnthropicModel ||
         currentAnthropicModel === "claude-opus-4-5" ||
         currentAnthropicModel === "claude-opus-4-5-20251101" ||
         currentAnthropicModel === "claude-sonnet-4-5" ||
         currentAnthropicModel === "claude-3-5-sonnet-20241022" ||
         currentAnthropicModel.includes("3-5-sonnet");
-      
+
       if (needsMigration) {
         merged.models = { ...merged.models, anthropic: CLAUDE_OPUS_4_6_MODEL_ID };
       }
@@ -243,21 +245,24 @@ export function useConfig() {
     setConfigState(updater);
   }, []);
 
-  const updateCredential = useCallback((provider: Provider, credential: ProviderCredential | null) => {
-    if (!isProvider(provider)) {
-      return;
-    }
-
-    setConfigState((prev) => {
-      const newCredentials = { ...prev.credentials };
-      if (credential === null) {
-        delete newCredentials[provider];
-      } else {
-        newCredentials[provider] = credential;
+  const updateCredential = useCallback(
+    (provider: Provider, credential: ProviderCredential | null) => {
+      if (!isProvider(provider)) {
+        return;
       }
-      return { ...prev, credentials: newCredentials };
-    });
-  }, []);
+
+      setConfigState((prev) => {
+        const newCredentials = { ...prev.credentials };
+        if (credential === null) {
+          delete newCredentials[provider];
+        } else {
+          newCredentials[provider] = credential;
+        }
+        return { ...prev, credentials: newCredentials };
+      });
+    },
+    [],
+  );
 
   const updateProxy = useCallback((proxy: ProxyConfig) => {
     setConfigState((prev) => ({ ...prev, proxy: normalizeProxyConfig(proxy) }));
@@ -294,7 +299,7 @@ export function useConfig() {
 
   const getConfiguredProviders = useCallback((): Provider[] => {
     return Object.keys(config.credentials).filter(
-      (p): p is Provider => isProvider(p) && !!config.credentials[p]?.apiKey
+      (p): p is Provider => isProvider(p) && !!config.credentials[p]?.apiKey,
     );
   }, [config.credentials]);
 
@@ -338,15 +343,18 @@ export function useConfig() {
 }
 
 // Provider info for display
-export const PROVIDER_INFO: Record<Provider, {
-  name: string;
-  agent: string;
-  avatar: string;
-  color: string;
-  description: string;
-  keyPrefix: string;
-  defaultBaseUrl: string;
-}> = {
+export const PROVIDER_INFO: Record<
+  Provider,
+  {
+    name: string;
+    agent: string;
+    avatar: string;
+    color: string;
+    description: string;
+    keyPrefix: string;
+    defaultBaseUrl: string;
+  }
+> = {
   openai: {
     name: "OpenAI",
     agent: "George",

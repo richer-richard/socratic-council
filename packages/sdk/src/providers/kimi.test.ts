@@ -39,9 +39,11 @@ function createTransport(options: {
 describe("KimiProvider", () => {
   it("builds raw image inputs for vision models", () => {
     const provider = new KimiProvider("test-key");
-    const request = (provider as unknown as {
-      buildRequestBody: (...args: unknown[]) => Record<string, unknown>;
-    }).buildRequestBody(
+    const request = (
+      provider as unknown as {
+        buildRequestBody: (...args: unknown[]) => Record<string, unknown>;
+      }
+    ).buildRequestBody(
       createAgent({ model: "moonshot-v1-8k-vision-preview" }),
       [
         {
@@ -74,28 +76,25 @@ describe("KimiProvider", () => {
   });
 
   it("rejects non-stream responses that contain reasoning without final content", async () => {
-    const provider = new KimiProvider(
-      "test-key",
-      {
-        transport: createTransport({
-          request: async () => ({
-            status: 200,
-            headers: {},
-            body: JSON.stringify({
-              choices: [
-                {
-                  message: {
-                    content: "",
-                    reasoning_content: "private reasoning",
-                  },
+    const provider = new KimiProvider("test-key", {
+      transport: createTransport({
+        request: async () => ({
+          status: 200,
+          headers: {},
+          body: JSON.stringify({
+            choices: [
+              {
+                message: {
+                  content: "",
+                  reasoning_content: "private reasoning",
                 },
-              ],
-              usage: { prompt_tokens: 10, completion_tokens: 5 },
-            }),
+              },
+            ],
+            usage: { prompt_tokens: 10, completion_tokens: 5 },
           }),
         }),
-      },
-    );
+      }),
+    });
 
     await expect(
       provider.complete(createAgent(), [{ role: "user", content: "Hello" }]),
@@ -103,27 +102,24 @@ describe("KimiProvider", () => {
   });
 
   it("returns empty content with thinking when stream has reasoning but no final content", async () => {
-    const provider = new KimiProvider(
-      "test-key",
-      {
-        transport: createTransport({
-          stream: async (_request, handlers) => {
-            handlers.onChunk(
-              `data: ${JSON.stringify({
-                choices: [
-                  {
-                    delta: { reasoning_content: "thinking only" },
-                    finish_reason: "stop",
-                  },
-                ],
-                usage: { prompt_tokens: 10, completion_tokens: 5 },
-              })}\n\n`,
-            );
-            handlers.onDone();
-          },
-        }),
-      },
-    );
+    const provider = new KimiProvider("test-key", {
+      transport: createTransport({
+        stream: async (_request, handlers) => {
+          handlers.onChunk(
+            `data: ${JSON.stringify({
+              choices: [
+                {
+                  delta: { reasoning_content: "thinking only" },
+                  finish_reason: "stop",
+                },
+              ],
+              usage: { prompt_tokens: 10, completion_tokens: 5 },
+            })}\n\n`,
+          );
+          handlers.onDone();
+        },
+      }),
+    });
 
     const onChunk = vi.fn();
     const result = await provider.completeStream(

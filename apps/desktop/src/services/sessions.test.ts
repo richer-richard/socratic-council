@@ -1,10 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import {
-  SessionPersistenceError,
-  saveDiscussionSession,
-  type DiscussionSession,
-} from "./sessions";
+import { SessionPersistenceError, saveDiscussionSession, type DiscussionSession } from "./sessions";
 
 function createSessionFixture(): DiscussionSession {
   const timestamp = 1_710_000_000_000;

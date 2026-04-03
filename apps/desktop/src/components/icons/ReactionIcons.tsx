@@ -194,4 +194,3 @@ export function ReactionIcon({ type, size = 18 }: ReactionIconProps) {
     </span>
   );
 }
-

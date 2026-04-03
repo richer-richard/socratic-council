@@ -67,7 +67,11 @@ class FakeTransaction {
   constructor(private readonly records: Map<string, StoredAttachmentRecord>) {}
 
   objectStore(_name: string): IDBObjectStore {
-    return new FakeObjectStore(this.records, this, new Set([ATTACHMENT_BY_SESSION_INDEX])) as unknown as IDBObjectStore;
+    return new FakeObjectStore(
+      this.records,
+      this,
+      new Set([ATTACHMENT_BY_SESSION_INDEX]),
+    ) as unknown as IDBObjectStore;
   }
 
   schedule<T>(operation: () => T): IDBRequest<T> {
@@ -120,7 +124,7 @@ class FakeObjectStore {
   constructor(
     private readonly records: Map<string, StoredAttachmentRecord>,
     private readonly transaction: FakeTransaction | null,
-    private readonly indexes: Set<string>
+    private readonly indexes: Set<string>,
   ) {
     this.indexNames = {
       contains: (name: string) => this.indexes.has(name),
@@ -167,7 +171,7 @@ class FakeObjectStore {
         this.runRequest(() =>
           Array.from(this.records.values())
             .filter((record) => record.sessionId === sessionId)
-            .map((record) => record.id)
+            .map((record) => record.id),
         ),
     } as unknown as IDBIndex;
   }
@@ -202,7 +206,7 @@ class FakeDatabase {
 
   constructor(
     private readonly records: Map<string, StoredAttachmentRecord>,
-    private readonly state: { hasStore: boolean; indexes: Set<string> }
+    private readonly state: { hasStore: boolean; indexes: Set<string> },
   ) {
     this.objectStoreNames = {
       contains: () => this.state.hasStore,
@@ -243,7 +247,7 @@ class FakeIndexedDb {
       if (needsUpgrade) {
         request.onupgradeneeded?.call(
           request as unknown as IDBOpenDBRequest,
-          new Event("upgradeneeded") as IDBVersionChangeEvent
+          new Event("upgradeneeded") as IDBVersionChangeEvent,
         );
       }
       request.onsuccess?.call(request as unknown as IDBOpenDBRequest, new Event("success"));
@@ -312,7 +316,11 @@ describe("attachment transport support", () => {
   });
 
   it("forces PDF attachments onto fallback mode for Gemini pro", () => {
-    const mode = getAttachmentTransportMode("google", "gemini-3.1-pro-preview", createAttachment("pdf"));
+    const mode = getAttachmentTransportMode(
+      "google",
+      "gemini-3.1-pro-preview",
+      createAttachment("pdf"),
+    );
     expect(mode).toBe("fallback");
   });
 
@@ -337,7 +345,9 @@ describe("attachment transport support", () => {
   });
 
   it("loads uncached blob search entries after async extraction finishes", async () => {
-    const [attachment] = await persistSessionAttachments("session_async_blob", [createStoredComposerAttachment()]);
+    const [attachment] = await persistSessionAttachments("session_async_blob", [
+      createStoredComposerAttachment(),
+    ]);
 
     const loaded = await loadSessionAttachmentBlobs([attachment]);
 
@@ -347,7 +357,9 @@ describe("attachment transport support", () => {
   });
 
   it("reindexes uncached attachment documents without writing into an inactive transaction", async () => {
-    const [attachment] = await persistSessionAttachments("session_async_doc", [createStoredComposerAttachment()]);
+    const [attachment] = await persistSessionAttachments("session_async_doc", [
+      createStoredComposerAttachment(),
+    ]);
 
     const documents = await loadSessionAttachmentDocuments([attachment]);
     const refreshed = await loadSessionAttachmentBlobs([attachment]);

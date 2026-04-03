@@ -77,10 +77,7 @@ function toTransportFailure(code: TransportErrorCode, message: string, details?:
   return new TransportFailure(code, message, details);
 }
 
-async function cancelTauriStream(
-  requestId: string,
-  logger?: TransportLogger,
-): Promise<void> {
+async function cancelTauriStream(requestId: string, logger?: TransportLogger): Promise<void> {
   try {
     await tauriInvoke<boolean>("http_cancel", { requestId }, 10000);
   } catch (error) {

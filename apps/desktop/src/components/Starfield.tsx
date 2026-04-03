@@ -13,15 +13,15 @@ export function Starfield() {
   const stars = useMemo<Star[]>(() => {
     const generated: Star[] = [];
     const count = 150;
-    
+
     for (let i = 0; i < count; i++) {
       const random = Math.random();
       let size: "small" | "medium" | "large";
-      
+
       if (random < 0.6) size = "small";
       else if (random < 0.9) size = "medium";
       else size = "large";
-      
+
       generated.push({
         id: i,
         x: Math.random() * 100,
@@ -31,7 +31,7 @@ export function Starfield() {
         delay: Math.random() * 5,
       });
     }
-    
+
     return generated;
   }, []);
 
@@ -49,14 +49,16 @@ export function Starfield() {
         <div
           key={star.id}
           className={`star star-${star.size}`}
-          style={{
-            left: `${star.x}%`,
-            top: `${star.y}%`,
-            "--duration": `${star.duration}s`,
-            "--delay": `${star.delay}s`,
-            "--base-opacity": star.size === "small" ? 0.4 : star.size === "medium" ? 0.6 : 0.8,
-            "--peak-opacity": star.size === "small" ? 0.8 : 1,
-          } as React.CSSProperties}
+          style={
+            {
+              left: `${star.x}%`,
+              top: `${star.y}%`,
+              "--duration": `${star.duration}s`,
+              "--delay": `${star.delay}s`,
+              "--base-opacity": star.size === "small" ? 0.4 : star.size === "medium" ? 0.6 : 0.8,
+              "--peak-opacity": star.size === "small" ? 0.8 : 1,
+            } as React.CSSProperties
+          }
         />
       ))}
       {shootingStars.map((star) => (

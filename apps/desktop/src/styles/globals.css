@@ -1237,8 +1237,13 @@ body {
 }
 
 @keyframes thinkingPulse {
-  0%, 100% { opacity: 0.7; }
-  50% { opacity: 1; }
+  0%,
+  100% {
+    opacity: 0.7;
+  }
+  50% {
+    opacity: 1;
+  }
 }
 
 .thinking-content {
@@ -1619,8 +1624,7 @@ body {
   padding: 0.9rem 0.95rem;
   border-radius: 16px;
   background:
-    linear-gradient(135deg, rgba(20, 184, 166, 0.12), transparent 55%),
-    rgba(255, 255, 255, 0.04);
+    linear-gradient(135deg, rgba(20, 184, 166, 0.12), transparent 55%), rgba(255, 255, 255, 0.04);
   border: 1px solid rgba(148, 163, 184, 0.14);
 }
 
@@ -2450,12 +2454,24 @@ body {
   animation: fadeIn 0.25s ease-out both;
 }
 
-.workstation-expand-panel > .workstation-thread:nth-child(1) { animation-delay: 0.03s; }
-.workstation-expand-panel > .workstation-thread:nth-child(2) { animation-delay: 0.06s; }
-.workstation-expand-panel > .workstation-thread:nth-child(3) { animation-delay: 0.09s; }
-.workstation-expand-panel > .workstation-thread:nth-child(4) { animation-delay: 0.12s; }
-.workstation-expand-panel > .workstation-thread:nth-child(5) { animation-delay: 0.15s; }
-.workstation-expand-panel > .workstation-thread:nth-child(n+6) { animation-delay: 0.18s; }
+.workstation-expand-panel > .workstation-thread:nth-child(1) {
+  animation-delay: 0.03s;
+}
+.workstation-expand-panel > .workstation-thread:nth-child(2) {
+  animation-delay: 0.06s;
+}
+.workstation-expand-panel > .workstation-thread:nth-child(3) {
+  animation-delay: 0.09s;
+}
+.workstation-expand-panel > .workstation-thread:nth-child(4) {
+  animation-delay: 0.12s;
+}
+.workstation-expand-panel > .workstation-thread:nth-child(5) {
+  animation-delay: 0.15s;
+}
+.workstation-expand-panel > .workstation-thread:nth-child(n + 6) {
+  animation-delay: 0.18s;
+}
 
 .workstation-thread {
   display: flex;

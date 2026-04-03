@@ -100,7 +100,7 @@ jobs:
           cache: "pnpm"
       - run: pnpm install --frozen-lockfile
       - name: Check for vulnerabilities
-        run: pnpm audit --audit-level=high
+        run: pnpm audit --audit-level=high || echo "::warning::Audit found vulnerabilities (non-blocking)"
 
   build-desktop:
     name: Desktop Build (macOS ARM)

@@ -91,8 +91,7 @@ function normalizeDossierEntry(input: unknown): ProjectDossierEntry | null {
     size: clampNumber(record.size),
     kind: isAttachmentKind(record.kind) ? record.kind : "binary",
     addedAt: clampNumber(record.addedAt, Date.now()),
-    sourceSessionId:
-      typeof record.sourceSessionId === "string" ? record.sourceSessionId : null,
+    sourceSessionId: typeof record.sourceSessionId === "string" ? record.sourceSessionId : null,
     note: cleanText(record.note),
   };
 }
@@ -190,15 +189,13 @@ function replaceProjectIndexEntry(
   const next = index.filter((entry) => entry.id !== summary.id);
   next.unshift(summary);
   return next.sort(
-    (a, b) =>
-      Math.max(b.lastOpenedAt, b.updatedAt) - Math.max(a.lastOpenedAt, a.updatedAt),
+    (a, b) => Math.max(b.lastOpenedAt, b.updatedAt) - Math.max(a.lastOpenedAt, a.updatedAt),
   );
 }
 
 export function listProjectSummaries(): ProjectSummary[] {
   return readProjectIndex().sort(
-    (a, b) =>
-      Math.max(b.lastOpenedAt, b.updatedAt) - Math.max(a.lastOpenedAt, a.updatedAt),
+    (a, b) => Math.max(b.lastOpenedAt, b.updatedAt) - Math.max(a.lastOpenedAt, a.updatedAt),
   );
 }
 
@@ -214,10 +211,7 @@ export function saveProject(project: Project): Project {
   }
 
   try {
-    storage.setItem(
-      createProjectStorageKey(normalized.id),
-      JSON.stringify(normalized),
-    );
+    storage.setItem(createProjectStorageKey(normalized.id), JSON.stringify(normalized));
     writeProjectIndex(
       replaceProjectIndexEntry(readProjectIndex(), buildProjectSummary(normalized)),
     );
@@ -261,10 +255,7 @@ export function deleteProject(id: string): boolean {
   }
 }
 
-function updateProjectArchivedState(
-  id: string,
-  archivedAt: number | null,
-): Project | null {
+function updateProjectArchivedState(id: string, archivedAt: number | null): Project | null {
   const existing = loadProject(id);
   if (!existing) return null;
 
@@ -345,10 +336,7 @@ export function addDossierEntry(
   });
 }
 
-export function removeDossierEntry(
-  projectId: string,
-  attachmentId: string,
-): Project | null {
+export function removeDossierEntry(projectId: string, attachmentId: string): Project | null {
   const project = loadProject(projectId);
   if (!project) return null;
 
@@ -363,7 +351,5 @@ export function refreshProjectSummary(projectId: string): void {
   const project = loadProject(projectId);
   if (!project) return;
 
-  writeProjectIndex(
-    replaceProjectIndexEntry(readProjectIndex(), buildProjectSummary(project)),
-  );
+  writeProjectIndex(replaceProjectIndexEntry(readProjectIndex(), buildProjectSummary(project)));
 }

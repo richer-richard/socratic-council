@@ -180,7 +180,7 @@ function formatBytes(size: number): string {
 
 function fileExtension(name: string): string {
   const parts = name.toLowerCase().split(".");
-  return parts.length > 1 ? parts[parts.length - 1] ?? "" : "";
+  return parts.length > 1 ? (parts[parts.length - 1] ?? "") : "";
 }
 
 function isDocxLike(mimeType: string, name: string): boolean {
@@ -209,11 +209,19 @@ function detectAttachmentKind(file: Blob, name: string): AttachmentKind {
 }
 
 function normalizeWhitespace(input: string): string {
-  return input.replace(/\r\n/g, "\n").replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
+  return input
+    .replace(/\r\n/g, "\n")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
 }
 
 function normalizeSearchText(input: string): string {
-  return input.replace(/\r\n/g, "\n").replace(/[^\S\n]+/g, " ").replace(/\n{3,}/g, "\n\n").trim();
+  return input
+    .replace(/\r\n/g, "\n")
+    .replace(/[^\S\n]+/g, " ")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
 }
 
 function countPrintableCharacters(input: string): number {
@@ -244,7 +252,7 @@ function buildManifestFallback(
   mimeType: string,
   size: number,
   width: number | null,
-  height: number | null
+  height: number | null,
 ): string {
   const dimensions = kind === "image" && width && height ? `, ${width}x${height}px` : "";
   const label = kind === "pdf" ? "PDF" : kind === "image" ? "Image" : "File";
@@ -283,7 +291,11 @@ function buildSnippetSegments(text: string, budget: number): string {
     .join("\n");
 }
 
-function chunkLongText(text: string, label: string, limit = SEARCH_ENTRY_CHAR_LIMIT): AttachmentSearchEntry[] {
+function chunkLongText(
+  text: string,
+  label: string,
+  limit = SEARCH_ENTRY_CHAR_LIMIT,
+): AttachmentSearchEntry[] {
   const normalized = normalizeSearchText(text);
   if (!normalized) return [];
 
@@ -322,7 +334,7 @@ function chunkLongText(text: string, label: string, limit = SEARCH_ENTRY_CHAR_LI
 
 function buildFallbackText(
   attachment: Pick<SessionAttachment, "name" | "kind" | "mimeType" | "size" | "width" | "height">,
-  searchEntries: AttachmentSearchEntry[]
+  searchEntries: AttachmentSearchEntry[],
 ): string {
   const manifest = buildManifestFallback(
     attachment.name,
@@ -330,7 +342,7 @@ function buildFallbackText(
     attachment.mimeType,
     attachment.size,
     attachment.width,
-    attachment.height
+    attachment.height,
   );
 
   if (searchEntries.length === 0) {
@@ -350,7 +362,10 @@ function buildFallbackText(
   if (last && last !== first) selected.push(last);
 
   const label = attachment.kind === "image" ? "OCR notes" : "Extracted notes";
-  const perSectionBudget = Math.max(700, Math.floor((TEXT_FALLBACK_CHAR_LIMIT - manifest.length - 120) / selected.length));
+  const perSectionBudget = Math.max(
+    700,
+    Math.floor((TEXT_FALLBACK_CHAR_LIMIT - manifest.length - 120) / selected.length),
+  );
   const body = selected
     .map((entry) => `${entry.label}:\n${buildSnippetSegments(entry.text, perSectionBudget)}`)
     .join("\n\n");
@@ -364,7 +379,7 @@ function shouldCompactAttachmentBlob(kind: AttachmentKind, size: number): boolea
 
 function buildCompactedAttachmentBlob(
   attachment: Pick<SessionAttachment, "name" | "kind" | "mimeType" | "size" | "width" | "height">,
-  searchEntries: AttachmentSearchEntry[]
+  searchEntries: AttachmentSearchEntry[],
 ): Blob {
   const sections = [
     "[Compacted local copy]",
@@ -427,7 +442,10 @@ async function getPdfJs() {
         getPage: (pageNumber: number) => Promise<{
           getTextContent: () => Promise<{ items: Array<{ str?: string }> }>;
           getViewport: (options: { scale: number }) => { width: number; height: number };
-          render: (options: { canvasContext: CanvasRenderingContext2D; viewport: { width: number; height: number } }) => {
+          render: (options: {
+            canvasContext: CanvasRenderingContext2D;
+            viewport: { width: number; height: number };
+          }) => {
             promise: Promise<void>;
           };
         }>;
@@ -495,7 +513,9 @@ async function extractDocxSearchEntries(file: Blob): Promise<AttachmentSearchEnt
   try {
     const mammoth = await getMammoth();
     const result = await mammoth.extractRawText({ arrayBuffer: await file.arrayBuffer() });
-    const paragraphs = normalizeSearchText(result.value ?? "").split("\n").filter(Boolean);
+    const paragraphs = normalizeSearchText(result.value ?? "")
+      .split("\n")
+      .filter(Boolean);
     if (paragraphs.length === 0) {
       return [];
     }
@@ -514,7 +534,8 @@ async function extractDocxSearchEntries(file: Blob): Promise<AttachmentSearchEnt
       currentLength += paragraph.length + 1;
       totalChars += paragraph.length + 1;
 
-      const isBoundary = currentLength >= 2200 || buffer.length >= 12 || index === paragraphs.length - 1;
+      const isBoundary =
+        currentLength >= 2200 || buffer.length >= 12 || index === paragraphs.length - 1;
       if (!isBoundary) continue;
 
       entries.push({
@@ -532,14 +553,15 @@ async function extractDocxSearchEntries(file: Blob): Promise<AttachmentSearchEnt
   }
 }
 
-async function renderPdfPageToBlob(
-  page: {
-    getViewport: (options: { scale: number }) => { width: number; height: number };
-    render: (options: { canvasContext: CanvasRenderingContext2D; viewport: { width: number; height: number } }) => {
-      promise: Promise<void>;
-    };
-  }
-): Promise<Blob | null> {
+async function renderPdfPageToBlob(page: {
+  getViewport: (options: { scale: number }) => { width: number; height: number };
+  render: (options: {
+    canvasContext: CanvasRenderingContext2D;
+    viewport: { width: number; height: number };
+  }) => {
+    promise: Promise<void>;
+  };
+}): Promise<Blob | null> {
   const viewport = page.getViewport({ scale: 1.25 });
   const canvas = document.createElement("canvas");
   canvas.width = Math.max(1, Math.ceil(viewport.width));
@@ -567,7 +589,11 @@ async function extractPdfSearchEntries(file: Blob): Promise<AttachmentSearchEntr
     let totalChars = 0;
     let ocrPages = 0;
 
-    for (let pageNumber = 1; pageNumber <= pdf.numPages && totalChars < SEARCH_TEXT_CHAR_LIMIT; pageNumber += 1) {
+    for (
+      let pageNumber = 1;
+      pageNumber <= pdf.numPages && totalChars < SEARCH_TEXT_CHAR_LIMIT;
+      pageNumber += 1
+    ) {
       const page = await pdf.getPage(pageNumber);
       const textContent = await page.getTextContent();
       const rawText = textContent.items.map((item) => item.str ?? "").join(" ");
@@ -642,7 +668,7 @@ async function extractSearchEntries(
   file: Blob,
   name: string,
   kind: AttachmentKind,
-  mimeType: string
+  mimeType: string,
 ): Promise<AttachmentSearchEntry[]> {
   if (kind === "image") {
     return extractImageSearchEntries(file);
@@ -687,7 +713,7 @@ async function renderCanvasBlob(
   width: number,
   height: number,
   type: string,
-  quality?: number
+  quality?: number,
 ): Promise<Blob | null> {
   const canvas = document.createElement("canvas");
   canvas.width = width;
@@ -712,7 +738,7 @@ async function encodeCompressedImage(
   width: number,
   height: number,
   sourceType: string,
-  originalSize: number
+  originalSize: number,
 ): Promise<Blob | null> {
   const variants: Array<{ type: string; quality?: number }> = [];
 
@@ -752,7 +778,7 @@ async function encodeCompressedImage(
 }
 
 async function downscaleImage(
-  file: File
+  file: File,
 ): Promise<{ blob: Blob; width: number | null; height: number | null }> {
   const mimeType = file.type || "image/png";
   if (mimeType === "image/gif" || mimeType === "image/svg+xml") {
@@ -792,7 +818,7 @@ async function downscaleImage(
 
 async function buildComposerAttachment(
   file: File,
-  source: AttachmentSource
+  source: AttachmentSource,
 ): Promise<ComposerAttachment> {
   const addedAt = Date.now();
   const kind = detectAttachmentKind(file, file.name);
@@ -820,10 +846,7 @@ async function buildComposerAttachment(
     size: kind === "image" ? blob.size : originalSize,
     width,
     height,
-  } satisfies Pick<
-    SessionAttachment,
-    "name" | "kind" | "mimeType" | "size" | "width" | "height"
-  >;
+  } satisfies Pick<SessionAttachment, "name" | "kind" | "mimeType" | "size" | "width" | "height">;
 
   if (shouldCompactAttachmentBlob(kind, blob.size)) {
     blob = buildCompactedAttachmentBlob(attachmentDescriptor, searchEntries);
@@ -851,7 +874,8 @@ async function buildComposerAttachment(
 function openAttachmentDb(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     const request = window.indexedDB.open(ATTACHMENT_DB_NAME, ATTACHMENT_DB_VERSION);
-    request.onerror = () => reject(request.error ?? new Error("Failed to open attachment database"));
+    request.onerror = () =>
+      reject(request.error ?? new Error("Failed to open attachment database"));
     request.onupgradeneeded = () => {
       const db = request.result;
       const store = db.objectStoreNames.contains(ATTACHMENT_STORE)
@@ -871,7 +895,7 @@ function openAttachmentDb(): Promise<IDBDatabase> {
 
 function withStore<T>(
   mode: IDBTransactionMode,
-  action: (store: IDBObjectStore, transaction: IDBTransaction) => Promise<T> | T
+  action: (store: IDBObjectStore, transaction: IDBTransaction) => Promise<T> | T,
 ): Promise<T> {
   return openAttachmentDb().then(
     (db) =>
@@ -900,9 +924,13 @@ function withStore<T>(
           maybeResolve();
         };
         transaction.onerror = () =>
-          finalize(() => reject(transaction.error ?? new Error("Attachment database transaction failed")));
+          finalize(() =>
+            reject(transaction.error ?? new Error("Attachment database transaction failed")),
+          );
         transaction.onabort = () =>
-          finalize(() => reject(transaction.error ?? new Error("Attachment database transaction aborted")));
+          finalize(() =>
+            reject(transaction.error ?? new Error("Attachment database transaction aborted")),
+          );
 
         Promise.resolve(action(store, transaction))
           .then((value) => {
@@ -919,7 +947,7 @@ function withStore<T>(
             }
             finalize(() => reject(error));
           });
-      })
+      }),
   );
 }
 
@@ -935,8 +963,14 @@ function sanitizeSearchEntries(entries: unknown): AttachmentSearchEntry[] {
   return entries
     .map((entry) => {
       if (!entry || typeof entry !== "object") return null;
-      const label = typeof (entry as AttachmentSearchEntry).label === "string" ? (entry as AttachmentSearchEntry).label.trim() : "";
-      const text = typeof (entry as AttachmentSearchEntry).text === "string" ? normalizeSearchText((entry as AttachmentSearchEntry).text) : "";
+      const label =
+        typeof (entry as AttachmentSearchEntry).label === "string"
+          ? (entry as AttachmentSearchEntry).label.trim()
+          : "";
+      const text =
+        typeof (entry as AttachmentSearchEntry).text === "string"
+          ? normalizeSearchText((entry as AttachmentSearchEntry).text)
+          : "";
       if (!label || !text) return null;
       return {
         label,
@@ -952,7 +986,9 @@ export function revokeComposerAttachmentPreview(attachment: { previewUrl: string
   }
 }
 
-export function revokeComposerAttachmentPreviews(attachments: Array<{ previewUrl: string | null }>): void {
+export function revokeComposerAttachmentPreviews(
+  attachments: Array<{ previewUrl: string | null }>,
+): void {
   for (const attachment of attachments) {
     revokeComposerAttachmentPreview(attachment);
   }
@@ -960,7 +996,7 @@ export function revokeComposerAttachmentPreviews(attachments: Array<{ previewUrl
 
 export async function createComposerAttachments(
   files: File[],
-  source: AttachmentSource
+  source: AttachmentSource,
 ): Promise<ComposerAttachment[]> {
   const attachments: ComposerAttachment[] = [];
   const failures: string[] = [];
@@ -984,7 +1020,7 @@ export async function createComposerAttachments(
 
 export async function persistSessionAttachments(
   sessionId: string,
-  attachments: ComposerAttachment[]
+  attachments: ComposerAttachment[],
 ): Promise<SessionAttachment[]> {
   if (attachments.length === 0) return [];
 
@@ -999,11 +1035,14 @@ export async function persistSessionAttachments(
     }
   });
 
-  return attachments.map(({ blob: _blob, previewUrl: _previewUrl, searchEntries: _searchEntries, ...metadata }) => metadata);
+  return attachments.map(
+    ({ blob: _blob, previewUrl: _previewUrl, searchEntries: _searchEntries, ...metadata }) =>
+      metadata,
+  );
 }
 
 export async function loadSessionAttachmentBlobs(
-  attachments: SessionAttachment[]
+  attachments: SessionAttachment[],
 ): Promise<Map<string, LoadedAttachmentBlob>> {
   if (attachments.length === 0) return new Map();
 
@@ -1015,7 +1054,12 @@ export async function loadSessionAttachmentBlobs(
     const searchEntries =
       sanitizedEntries.length > 0
         ? sanitizedEntries
-        : await extractSearchEntries(record.blob, attachment.name, attachment.kind, attachment.mimeType);
+        : await extractSearchEntries(
+            record.blob,
+            attachment.name,
+            attachment.kind,
+            attachment.mimeType,
+          );
 
     loaded.set(attachment.id, {
       attachment,
@@ -1028,7 +1072,7 @@ export async function loadSessionAttachmentBlobs(
 }
 
 export async function loadSessionAttachmentDocuments(
-  attachments: SessionAttachment[]
+  attachments: SessionAttachment[],
 ): Promise<LoadedAttachmentDocument[]> {
   if (attachments.length === 0) return [];
 
@@ -1039,7 +1083,12 @@ export async function loadSessionAttachmentDocuments(
   for (const { attachment, record } of records) {
     let searchEntries = sanitizeSearchEntries(record.searchEntries);
     if (searchEntries.length === 0) {
-      searchEntries = await extractSearchEntries(record.blob, attachment.name, attachment.kind, attachment.mimeType);
+      searchEntries = await extractSearchEntries(
+        record.blob,
+        attachment.name,
+        attachment.kind,
+        attachment.mimeType,
+      );
       updates.push({
         ...record,
         searchEntries,
@@ -1064,12 +1113,14 @@ export async function loadSessionAttachmentDocuments(
 }
 
 async function loadStoredAttachmentRecords(
-  attachments: SessionAttachment[]
+  attachments: SessionAttachment[],
 ): Promise<Array<{ attachment: SessionAttachment; record: StoredAttachmentBlob }>> {
   return withStore("readonly", async (store) => {
     const records: Array<{ attachment: SessionAttachment; record: StoredAttachmentBlob }> = [];
     for (const attachment of attachments) {
-      const record = await requestToPromise(store.get(attachment.id) as IDBRequest<StoredAttachmentBlob | undefined>);
+      const record = await requestToPromise(
+        store.get(attachment.id) as IDBRequest<StoredAttachmentBlob | undefined>,
+      );
       if (!record?.blob) continue;
       records.push({ attachment, record });
     }
@@ -1091,12 +1142,17 @@ export function clearAllAttachmentBlobs(): Promise<void> {
   return new Promise((resolve, reject) => {
     const request = window.indexedDB.deleteDatabase(ATTACHMENT_DB_NAME);
     request.onsuccess = () => resolve();
-    request.onerror = () => reject(request.error ?? new Error("Failed to clear attachment database"));
-    request.onblocked = () => reject(new Error("Attachment database is busy. Close other windows and retry."));
+    request.onerror = () =>
+      reject(request.error ?? new Error("Failed to clear attachment database"));
+    request.onblocked = () =>
+      reject(new Error("Attachment database is busy. Close other windows and retry."));
   });
 }
 
-export function getProviderAttachmentSupport(provider: Provider, model: string): ProviderAttachmentSupport {
+export function getProviderAttachmentSupport(
+  provider: Provider,
+  model: string,
+): ProviderAttachmentSupport {
   return {
     images: (RAW_IMAGE_MODEL_SUPPORT[provider] ?? []).includes(model) ? "raw" : "fallback",
     pdf: (RAW_PDF_MODEL_SUPPORT[provider] ?? []).includes(model) ? "raw" : "fallback",
@@ -1108,7 +1164,7 @@ export function getProviderAttachmentSupport(provider: Provider, model: string):
 export function getAttachmentTransportMode(
   provider: Provider,
   model: string,
-  attachment: SessionAttachment
+  attachment: SessionAttachment,
 ): AttachmentTransportMode {
   const support = getProviderAttachmentSupport(provider, model);
   switch (attachment.kind) {
@@ -1126,7 +1182,8 @@ export function getAttachmentTransportMode(
 export function summarizeSessionAttachments(attachments: SessionAttachment[]): string {
   if (attachments.length === 0) return "";
   const names = attachments.slice(0, 3).map((attachment) => attachment.name);
-  const suffix = attachments.length > names.length ? ` +${attachments.length - names.length} more` : "";
+  const suffix =
+    attachments.length > names.length ? ` +${attachments.length - names.length} more` : "";
   return `Attachments: ${names.join(", ")}${suffix}`;
 }
 
@@ -1136,7 +1193,10 @@ export function buildAttachmentListLabel(attachments: SessionAttachment[]): stri
 }
 
 export function estimateAttachmentPromptTokens(attachments: SessionAttachment[]): number {
-  return attachments.reduce((sum, attachment) => sum + estimateTokensFromText(attachment.fallbackText), 0);
+  return attachments.reduce(
+    (sum, attachment) => sum + estimateTokensFromText(attachment.fallbackText),
+    0,
+  );
 }
 
 export async function persistProjectAttachments(
@@ -1169,9 +1229,7 @@ export async function loadProjectAttachmentBlobs(
 ): Promise<LoadedAttachmentBlob[]> {
   return withStore("readonly", async (store) => {
     const index = store.index(ATTACHMENT_BY_PROJECT_INDEX);
-    const records: StoredAttachmentBlob[] = await requestToPromise(
-      index.getAll(projectId),
-    );
+    const records: StoredAttachmentBlob[] = await requestToPromise(index.getAll(projectId));
     return records.map((record) => ({
       attachment: {
         id: record.id,
@@ -1191,9 +1249,7 @@ export async function loadProjectAttachmentBlobs(
   });
 }
 
-export async function deleteProjectAttachmentBlobs(
-  projectId: string,
-): Promise<void> {
+export async function deleteProjectAttachmentBlobs(projectId: string): Promise<void> {
   await withStore("readwrite", async (store) => {
     const index = store.index(ATTACHMENT_BY_PROJECT_INDEX);
     const keys = await requestToPromise(index.getAllKeys(projectId));

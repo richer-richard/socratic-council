@@ -20,8 +20,7 @@ export type ConversationExportMessage = {
 
 function isTauri(): boolean {
   return (
-    typeof window !== "undefined" &&
-    ("__TAURI__" in window || "__TAURI_INTERNALS__" in window)
+    typeof window !== "undefined" && ("__TAURI__" in window || "__TAURI_INTERNALS__" in window)
   );
 }
 
@@ -97,7 +96,11 @@ function hexToRgb(hex: string) {
   return { r, g, b };
 }
 
-function mixRgb(a: { r: number; g: number; b: number }, b: { r: number; g: number; b: number }, t: number) {
+function mixRgb(
+  a: { r: number; g: number; b: number },
+  b: { r: number; g: number; b: number },
+  t: number,
+) {
   const clamped = Math.max(0, Math.min(1, t));
   return {
     r: Math.round(a.r + (b.r - a.r) * clamped),
@@ -181,7 +184,9 @@ function computeStats(messages: ConversationExportMessage[]): ConversationExport
   }
 
   const speakers = Array.from(bySpeaker.values()).sort((a, b) =>
-    b.messageCount !== a.messageCount ? b.messageCount - a.messageCount : a.speaker.localeCompare(b.speaker)
+    b.messageCount !== a.messageCount
+      ? b.messageCount - a.messageCount
+      : a.speaker.localeCompare(b.speaker),
   );
 
   const totals = speakers.reduce(
@@ -192,7 +197,7 @@ function computeStats(messages: ConversationExportMessage[]): ConversationExport
       acc.totalCostUSD += s.costUSD;
       return acc;
     },
-    { totalTokensIn: 0, totalTokensOut: 0, totalTokensReasoning: 0, totalCostUSD: 0 }
+    { totalTokensIn: 0, totalTokensOut: 0, totalTokensReasoning: 0, totalCostUSD: 0 },
   );
 
   return {
@@ -224,7 +229,7 @@ function buildMarkdown(options: {
     lines.push(
       `**Total Tokens:** ${stats.totalTokensIn}/${stats.totalTokensOut}${
         stats.totalTokensReasoning > 0 ? ` (r:${stats.totalTokensReasoning})` : ""
-      }`
+      }`,
     );
   }
   if (options.includeCosts) {
@@ -241,9 +246,10 @@ function buildMarkdown(options: {
 
     const latencyLine = formatLatencyMs(msg.latencyMs);
     if (options.includeTokens && msg.tokens) {
-      const reasoning = msg.tokens.reasoning != null && msg.tokens.reasoning > 0
-        ? ` (r:${msg.tokens.reasoning})`
-        : "";
+      const reasoning =
+        msg.tokens.reasoning != null && msg.tokens.reasoning > 0
+          ? ` (r:${msg.tokens.reasoning})`
+          : "";
       const tokensLine = `${msg.tokens.input}/${msg.tokens.output}${reasoning} tokens`;
       const costLine =
         options.includeCosts && msg.costUSD != null ? ` · $${msg.costUSD.toFixed(4)}` : "";
@@ -295,14 +301,14 @@ function formatUsd(value: number) {
 }
 
 const PDF_UNICODE_FONT_STACK = [
-  "\"PingFang SC\"",
-  "\"Hiragino Sans GB\"",
-  "\"Microsoft YaHei\"",
-  "\"Noto Sans CJK SC\"",
-  "\"Source Han Sans SC\"",
-  "\"Yu Gothic\"",
+  '"PingFang SC"',
+  '"Hiragino Sans GB"',
+  '"Microsoft YaHei"',
+  '"Noto Sans CJK SC"',
+  '"Source Han Sans SC"',
+  '"Yu Gothic"',
   "Meiryo",
-  "\"Apple SD Gothic Neo\"",
+  '"Apple SD Gothic Neo"',
   "system-ui",
   "sans-serif",
 ].join(", ");
@@ -322,18 +328,16 @@ function shouldUseUnicodeSafePdf(options: {
 }) {
   if (containsUnsupportedPdfGlyphs(options.topic)) return true;
   return options.messages.some((message) =>
-    [
-      message.speaker,
-      message.model ?? "",
-      getCombinedExportBody(message),
-    ].some((value) => containsUnsupportedPdfGlyphs(value))
+    [message.speaker, message.model ?? "", getCombinedExportBody(message)].some((value) =>
+      containsUnsupportedPdfGlyphs(value),
+    ),
   );
 }
 
 function createPdfHtmlElement<K extends keyof HTMLElementTagNameMap>(
   tagName: K,
   styles: Record<string, string>,
-  text?: string
+  text?: string,
 ) {
   const element = document.createElement(tagName);
   Object.assign(element.style, styles);
@@ -346,7 +350,7 @@ function createPdfHtmlElement<K extends keyof HTMLElementTagNameMap>(
 function appendPdfHtmlBody(
   parent: HTMLElement,
   text: string,
-  messageMap: Map<string, ConversationExportMessage>
+  messageMap: Map<string, ConversationExportMessage>,
 ) {
   const segments = splitIntoInlineQuoteSegments(text);
   let appended = false;
@@ -373,10 +377,12 @@ function appendPdfHtmlBody(
             color: "#475569",
             marginBottom: "6px",
           },
-          `${quotedMessage.speaker} · ${formatTime(quotedMessage.timestamp)}`
-        )
+          `${quotedMessage.speaker} · ${formatTime(quotedMessage.timestamp)}`,
+        ),
       );
-      const quoteText = stripQuoteTokens(getResponseContent(quotedMessage) || quotedMessage.content);
+      const quoteText = stripQuoteTokens(
+        getResponseContent(quotedMessage) || quotedMessage.content,
+      );
       quote.appendChild(
         createPdfHtmlElement(
           "div",
@@ -386,8 +392,8 @@ function appendPdfHtmlBody(
             lineHeight: "1.55",
             color: "#0F172A",
           },
-          quoteText.length > 360 ? `${quoteText.slice(0, 360)}…` : quoteText
-        )
+          quoteText.length > 360 ? `${quoteText.slice(0, 360)}…` : quoteText,
+        ),
       );
       parent.appendChild(quote);
       appended = true;
@@ -405,8 +411,8 @@ function appendPdfHtmlBody(
           color: "#0F172A",
           marginTop: appended ? "10px" : "0",
         },
-        segment.text.trim()
-      )
+        segment.text.trim(),
+      ),
     );
     appended = true;
   }
@@ -421,8 +427,8 @@ function appendPdfHtmlBody(
           lineHeight: "1.65",
           color: "#475569",
         },
-        "[No response recorded]"
-      )
+        "[No response recorded]",
+      ),
     );
   }
 }
@@ -484,8 +490,8 @@ async function buildUnicodeSafePdfBytes(options: {
         marginBottom: "10px",
         fontWeight: "700",
       },
-      "Socratic Council"
-    )
+      "Socratic Council",
+    ),
   );
   cover.appendChild(
     createPdfHtmlElement(
@@ -496,8 +502,8 @@ async function buildUnicodeSafePdfBytes(options: {
         margin: "0 0 10px",
         fontWeight: "800",
       },
-      "Seminar Transcript"
-    )
+      "Seminar Transcript",
+    ),
   );
   cover.appendChild(
     createPdfHtmlElement(
@@ -508,8 +514,8 @@ async function buildUnicodeSafePdfBytes(options: {
         color: "#E2E8F0",
         whiteSpace: "pre-wrap",
       },
-      `Topic: ${safeTopic}\nExported: ${formatUtcTimestamp(exportedAt)}`
-    )
+      `Topic: ${safeTopic}\nExported: ${formatUtcTimestamp(exportedAt)}`,
+    ),
   );
   root.appendChild(cover);
 
@@ -560,8 +566,8 @@ async function buildUnicodeSafePdfBytes(options: {
           marginBottom: "6px",
           fontWeight: "700",
         },
-        card.label
-      )
+        card.label,
+      ),
     );
     cardEl.appendChild(
       createPdfHtmlElement(
@@ -572,8 +578,8 @@ async function buildUnicodeSafePdfBytes(options: {
           fontWeight: "800",
           lineHeight: "1.2",
         },
-        card.value
-      )
+        card.value,
+      ),
     );
     cardGrid.appendChild(cardEl);
   }
@@ -597,8 +603,8 @@ async function buildUnicodeSafePdfBytes(options: {
         marginBottom: "10px",
         fontWeight: "700",
       },
-      "Messages by Speaker"
-    )
+      "Messages by Speaker",
+    ),
   );
   for (const speaker of stats.speakers.slice(0, 8)) {
     const row = createPdfHtmlElement("div", {
@@ -617,8 +623,8 @@ async function buildUnicodeSafePdfBytes(options: {
           color: "#0F172A",
           fontWeight: "600",
         },
-        speaker.speaker
-      )
+        speaker.speaker,
+      ),
     );
     row.appendChild(
       createPdfHtmlElement(
@@ -628,8 +634,8 @@ async function buildUnicodeSafePdfBytes(options: {
           color: "#64748B",
           fontVariantNumeric: "tabular-nums",
         },
-        `${formatInteger(speaker.messageCount)} messages`
-      )
+        `${formatInteger(speaker.messageCount)} messages`,
+      ),
     );
     speakerPanel.appendChild(row);
   }
@@ -645,8 +651,8 @@ async function buildUnicodeSafePdfBytes(options: {
         color: "#0F172A",
         fontWeight: "800",
       },
-      "Transcript"
-    )
+      "Transcript",
+    ),
   );
 
   for (const message of options.messages) {
@@ -671,8 +677,8 @@ async function buildUnicodeSafePdfBytes(options: {
           fontWeight: "800",
           marginBottom: "6px",
         },
-        message.speaker
-      )
+        message.speaker,
+      ),
     );
 
     const metaParts = [
@@ -681,7 +687,9 @@ async function buildUnicodeSafePdfBytes(options: {
       formatLatencyMs(message.latencyMs) ?? "",
       options.includeTokens && message.tokens
         ? `${message.tokens.input}/${message.tokens.output}${
-            message.tokens.reasoning && message.tokens.reasoning > 0 ? ` · r:${message.tokens.reasoning}` : ""
+            message.tokens.reasoning && message.tokens.reasoning > 0
+              ? ` · r:${message.tokens.reasoning}`
+              : ""
           } tokens`
         : "",
       options.includeCosts && message.costUSD != null ? formatUsd(message.costUSD) : "",
@@ -696,8 +704,8 @@ async function buildUnicodeSafePdfBytes(options: {
             color: "#64748B",
             marginBottom: "14px",
           },
-          metaParts.join(" · ")
-        )
+          metaParts.join(" · "),
+        ),
       );
     }
 
@@ -715,8 +723,8 @@ async function buildUnicodeSafePdfBytes(options: {
           marginBottom: "8px",
           fontWeight: "700",
         },
-        "Response"
-      )
+        "Response",
+      ),
     );
     appendPdfHtmlBody(responseSection, getResponseContent(message) || message.content, messageMap);
     card.appendChild(responseSection);
@@ -738,8 +746,8 @@ async function buildUnicodeSafePdfBytes(options: {
             marginBottom: "8px",
             fontWeight: "700",
           },
-          "Thought Summary"
-        )
+          "Thought Summary",
+        ),
       );
       thinkingSection.appendChild(
         createPdfHtmlElement(
@@ -750,8 +758,8 @@ async function buildUnicodeSafePdfBytes(options: {
             lineHeight: "1.65",
             color: "#334155",
           },
-          thinking
-        )
+          thinking,
+        ),
       );
       card.appendChild(thinkingSection);
     }
@@ -769,9 +777,11 @@ async function buildUnicodeSafePdfBytes(options: {
 
     await new Promise<void>((resolve, reject) => {
       try {
-        (doc as unknown as {
-          html: (source: HTMLElement, options: Record<string, unknown>) => void;
-        }).html(root, {
+        (
+          doc as unknown as {
+            html: (source: HTMLElement, options: Record<string, unknown>) => void;
+          }
+        ).html(root, {
           x: 36,
           y: 36,
           width: 540,
@@ -803,7 +813,7 @@ type PdfRectDoc = {
     h: number,
     rx: number,
     ry: number,
-    style: "S" | "F" | "DF" | "FD"
+    style: "S" | "F" | "DF" | "FD",
   ) => void;
   rect: (x: number, y: number, w: number, h: number, style: "S" | "F" | "DF" | "FD") => void;
 };
@@ -815,7 +825,7 @@ function pdfRoundedRect(
   w: number,
   h: number,
   radius: number,
-  style: "S" | "F" | "DF" | "FD"
+  style: "S" | "F" | "DF" | "FD",
 ) {
   if (typeof doc.roundedRect === "function") {
     doc.roundedRect(x, y, w, h, radius, radius, style);
@@ -934,14 +944,20 @@ async function buildPdfBytes(options: {
   const chartPad = 14;
   const barLabelW = 120;
   const barRowH = 18;
-  const speakerRowsRaw = stats.speakers.map((s) => ({ speaker: s.speaker, messageCount: s.messageCount }));
+  const speakerRowsRaw = stats.speakers.map((s) => ({
+    speaker: s.speaker,
+    messageCount: s.messageCount,
+  }));
   const maxSpeakerRows = 10;
   const speakerRows = speakerRowsRaw.slice(0, maxSpeakerRows);
   if (speakerRowsRaw.length > maxSpeakerRows) {
     const otherCount = speakerRowsRaw
       .slice(maxSpeakerRows)
       .reduce((total, s) => total + s.messageCount, 0);
-    speakerRows.push({ speaker: `Other (${speakerRowsRaw.length - maxSpeakerRows})`, messageCount: otherCount });
+    speakerRows.push({
+      speaker: `Other (${speakerRowsRaw.length - maxSpeakerRows})`,
+      messageCount: otherCount,
+    });
   }
   const chartHeaderH = 34;
   const chartFooterH = 18;
@@ -1000,16 +1016,16 @@ async function buildPdfBytes(options: {
         acc.reasoning += m.tokens?.reasoning ?? 0;
         return acc;
       },
-      { input: 0, output: 0, reasoning: 0 }
+      { input: 0, output: 0, reasoning: 0 },
     );
 
     const speakerToAgentId = new Map<string, string>(
-      councilAgents.map((agent) => [agent.name, agent.id] as const)
+      councilAgents.map((agent) => [agent.name, agent.id] as const),
     );
     speakerToAgentId.set("Moderator", "system");
 
     const observedSpeakers = Array.from(
-      new Set(messages.map((m) => m.speaker).filter((name) => name.trim().length > 0))
+      new Set(messages.map((m) => m.speaker).filter((name) => name.trim().length > 0)),
     );
     const preferredOrder = [...councilAgents.map((a) => a.name), "Moderator"];
     const orderedSpeakers = [
@@ -1017,29 +1033,31 @@ async function buildPdfBytes(options: {
       ...observedSpeakers.filter((name) => !preferredOrder.includes(name)),
     ];
 
-    const costRows = orderedSpeakers.map((speakerName) => {
-      const targetAgentId = speakerToAgentId.get(speakerName);
-      const forSpeaker = messages.filter((m) => {
-        if (m.speaker === speakerName) return true;
-        if (!targetAgentId) return false;
-        const raw = typeof m.agentId === "string" ? m.agentId : m.speaker.toLowerCase();
-        return raw === targetAgentId;
-      });
-      const inputTokens = forSpeaker.reduce((sum, m) => sum + (m.tokens?.input ?? 0), 0);
-      const outputTokens = forSpeaker.reduce((sum, m) => sum + (m.tokens?.output ?? 0), 0);
-      const reasoningTokens = forSpeaker.reduce((sum, m) => sum + (m.tokens?.reasoning ?? 0), 0);
-      const priced = forSpeaker.some((m) => m.costUSD != null);
-      const estimatedUSD = forSpeaker.reduce((sum, m) => sum + (m.costUSD ?? 0), 0);
-      return {
-        name: speakerName,
-        inputTokens,
-        outputTokens,
-        reasoningTokens,
-        priced,
-        estimatedUSD,
-        messageCount: forSpeaker.length,
-      };
-    }).filter((row) => row.messageCount > 0);
+    const costRows = orderedSpeakers
+      .map((speakerName) => {
+        const targetAgentId = speakerToAgentId.get(speakerName);
+        const forSpeaker = messages.filter((m) => {
+          if (m.speaker === speakerName) return true;
+          if (!targetAgentId) return false;
+          const raw = typeof m.agentId === "string" ? m.agentId : m.speaker.toLowerCase();
+          return raw === targetAgentId;
+        });
+        const inputTokens = forSpeaker.reduce((sum, m) => sum + (m.tokens?.input ?? 0), 0);
+        const outputTokens = forSpeaker.reduce((sum, m) => sum + (m.tokens?.output ?? 0), 0);
+        const reasoningTokens = forSpeaker.reduce((sum, m) => sum + (m.tokens?.reasoning ?? 0), 0);
+        const priced = forSpeaker.some((m) => m.costUSD != null);
+        const estimatedUSD = forSpeaker.reduce((sum, m) => sum + (m.costUSD ?? 0), 0);
+        return {
+          name: speakerName,
+          inputTokens,
+          outputTokens,
+          reasoningTokens,
+          priced,
+          estimatedUSD,
+          messageCount: forSpeaker.length,
+        };
+      })
+      .filter((row) => row.messageCount > 0);
 
     const anyPricing = costRows.some((r) => r.priced);
     const totalEstimatedUSD = costRows.reduce((sum, r) => sum + (r.priced ? r.estimatedUSD : 0), 0);
@@ -1072,12 +1090,13 @@ async function buildPdfBytes(options: {
 
       const costLabel = row.priced ? formatUsd(row.estimatedUSD) : "—";
       doc.setTextColor(muted.r, muted.g, muted.b);
-      const reasoning = row.reasoningTokens && row.reasoningTokens > 0 ? ` · r:${row.reasoningTokens}` : "";
+      const reasoning =
+        row.reasoningTokens && row.reasoningTokens > 0 ? ` · r:${row.reasoningTokens}` : "";
       doc.text(
         `${row.inputTokens}/${row.outputTokens}${reasoning} · ${costLabel}`,
         ledgerX + ledgerW - ledgerPad,
         rowY + 12,
-        { align: "right" }
+        { align: "right" },
       );
       rowY += ledgerRowH;
     }
@@ -1094,7 +1113,7 @@ async function buildPdfBytes(options: {
       rowY + 22,
       {
         align: "right",
-      }
+      },
     );
   }
 
@@ -1121,7 +1140,9 @@ async function buildPdfBytes(options: {
       if (options.includeTokens && msg.tokens) {
         const inOut = `${msg.tokens.input ?? 0}/${msg.tokens.output ?? 0} tokens`;
         const reasoning =
-          msg.tokens.reasoning != null && msg.tokens.reasoning > 0 ? ` · r:${msg.tokens.reasoning}` : "";
+          msg.tokens.reasoning != null && msg.tokens.reasoning > 0
+            ? ` · r:${msg.tokens.reasoning}`
+            : "";
         parts.push(`${inOut}${reasoning}`);
       }
       if (options.includeCosts && msg.costUSD != null) parts.push(formatUsd(msg.costUSD));
@@ -1165,7 +1186,10 @@ async function buildPdfBytes(options: {
         const lines: string[] = [];
         for (const p of paragraphs) {
           const trimmed = p.replace(/\s+$/g, "");
-          if (!trimmed) { lines.push(""); continue; }
+          if (!trimmed) {
+            lines.push("");
+            continue;
+          }
           const wrapped = doc.splitTextToSize(trimmed, contentMaxW) as string[];
           lines.push(...wrapped);
         }
@@ -1304,7 +1328,11 @@ async function buildPdfBytes(options: {
     doc.text("Conflict Graph", margin, titleY);
     doc.setTextColor(muted.r, muted.g, muted.b);
     doc.setFontSize(10);
-    doc.text("Heuristic pairwise tension scores (0–100%). Higher = more sustained disagreement.", margin, titleY + 18);
+    doc.text(
+      "Heuristic pairwise tension scores (0–100%). Higher = more sustained disagreement.",
+      margin,
+      titleY + 18,
+    );
 
     if (conflicts.length === 0) {
       doc.setTextColor(muted.r, muted.g, muted.b);
@@ -1477,14 +1505,14 @@ async function buildDocxBytes(options: {
             transformation: { width: 64, height: 64 },
           }),
         ],
-      })
+      }),
     );
   }
   children.push(
     new Paragraph({
       text: "Socratic Council Transcript",
       heading: HeadingLevel.TITLE,
-    })
+    }),
   );
   children.push(new Paragraph({ text: `Topic: ${safeTopic}` }));
   children.push(new Paragraph({ text: `Exported: ${exportedAt.toLocaleString()}` }));
@@ -1521,23 +1549,25 @@ async function buildDocxBytes(options: {
     width: { size: 100, type: WidthType.PERCENTAGE },
     rows: [
       new TableRow({
-              children: [
-                headerCell("Speaker"),
-                headerCell("Messages"),
-                headerCell("Tokens (in/out/r)"),
-                headerCell("Cost"),
-              ],
-            }),
+        children: [
+          headerCell("Speaker"),
+          headerCell("Messages"),
+          headerCell("Tokens (in/out/r)"),
+          headerCell("Cost"),
+        ],
+      }),
       ...stats.speakers.map(
         (s) =>
           new TableRow({
             children: [
               bodyCell(s.speaker),
               bodyCell(String(s.messageCount)),
-              bodyCell(`${s.tokensIn}/${s.tokensOut}${s.tokensReasoning > 0 ? ` (r:${s.tokensReasoning})` : ""}`),
+              bodyCell(
+                `${s.tokensIn}/${s.tokensOut}${s.tokensReasoning > 0 ? ` (r:${s.tokensReasoning})` : ""}`,
+              ),
               bodyCell(options.includeCosts && s.costUSD > 0 ? formatUsd(s.costUSD) : "—"),
             ],
-          })
+          }),
       ),
     ],
   });
@@ -1552,15 +1582,24 @@ async function buildDocxBytes(options: {
 
     const latencyText = formatLatencyMs(msg.latencyMs);
     if (options.includeTokens && msg.tokens) {
-      const reasoning = msg.tokens.reasoning != null && msg.tokens.reasoning > 0
-        ? ` (r:${msg.tokens.reasoning})`
-        : "";
+      const reasoning =
+        msg.tokens.reasoning != null && msg.tokens.reasoning > 0
+          ? ` (r:${msg.tokens.reasoning})`
+          : "";
       const tokensLine = `${msg.tokens.input}/${msg.tokens.output}${reasoning} tokens`;
       const costLine =
         options.includeCosts && msg.costUSD != null ? ` · $${msg.costUSD.toFixed(4)}` : "";
-      children.push(new Paragraph({ text: `${tokensLine}${costLine}${latencyText ? ` · ${latencyText}` : ""}` }));
+      children.push(
+        new Paragraph({
+          text: `${tokensLine}${costLine}${latencyText ? ` · ${latencyText}` : ""}`,
+        }),
+      );
     } else if (options.includeCosts && msg.costUSD != null) {
-      children.push(new Paragraph({ text: `$${msg.costUSD.toFixed(4)}${latencyText ? ` · ${latencyText}` : ""}` }));
+      children.push(
+        new Paragraph({
+          text: `$${msg.costUSD.toFixed(4)}${latencyText ? ` · ${latencyText}` : ""}`,
+        }),
+      );
     } else if (latencyText) {
       children.push(new Paragraph({ text: latencyText }));
     }
@@ -1570,7 +1609,9 @@ async function buildDocxBytes(options: {
       const run = new TextRun({ text: line });
       return idx === 0 ? [run] : [new TextRun({ text: line, break: 1 })];
     });
-    children.push(new Paragraph({ children: runs.length > 0 ? runs : [new TextRun({ text: "" })] }));
+    children.push(
+      new Paragraph({ children: runs.length > 0 ? runs : [new TextRun({ text: "" })] }),
+    );
 
     children.push(new Paragraph({ text: "" }));
   }
@@ -1935,10 +1976,10 @@ export async function exportConversation(options: {
 }): Promise<{ path: string | null }> {
   const mustIncludeUsageMeta =
     options.format === "pdf" || options.format === "docx" || options.format === "markdown";
-  const includeTokens = mustIncludeUsageMeta ? true : options.includeTokens ?? true;
-  const includeCosts = mustIncludeUsageMeta ? true : options.includeCosts ?? true;
+  const includeTokens = mustIncludeUsageMeta ? true : (options.includeTokens ?? true);
+  const includeCosts = mustIncludeUsageMeta ? true : (options.includeCosts ?? true);
   const messages = options.messages.filter(
-    (m) => getResponseContent(m).length > 0 || getThinkingContent(m).length > 0
+    (m) => getResponseContent(m).length > 0 || getThinkingContent(m).length > 0,
   );
 
   const baseFileName =

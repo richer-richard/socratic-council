@@ -51,9 +51,8 @@ export class FairnessManager {
   calculateAdjustments(agents: AgentId[]): FairnessAdjustment[] {
     const counts = this.getSpeakingCounts();
     const windowFilled = this.recentSpeakers.length;
-    const lastSpeaker = this.recentSpeakers.length > 0
-      ? this.recentSpeakers[this.recentSpeakers.length - 1]
-      : null;
+    const lastSpeaker =
+      this.recentSpeakers.length > 0 ? this.recentSpeakers[this.recentSpeakers.length - 1] : null;
 
     return agents.map((agentId) => {
       const speakCount = counts[agentId] ?? 0;

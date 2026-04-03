@@ -11,8 +11,7 @@ function defaultBaseName() {
 
 function isTauri(): boolean {
   return (
-    typeof window !== "undefined" &&
-    ("__TAURI__" in window || "__TAURI_INTERNALS__" in window)
+    typeof window !== "undefined" && ("__TAURI__" in window || "__TAURI_INTERNALS__" in window)
   );
 }
 
@@ -57,9 +56,9 @@ export function ConversationExport({
         (m) =>
           m.content.trim().length > 0 ||
           (m.fullResponse?.trim().length ?? 0) > 0 ||
-          (m.thinking?.trim().length ?? 0) > 0
+          (m.thinking?.trim().length ?? 0) > 0,
       ).length,
-    [messages]
+    [messages],
   );
 
   const doExport = async () => {
@@ -78,7 +77,7 @@ export function ConversationExport({
       setLastResult(
         result.path
           ? { label: result.path, path: result.path }
-          : { label: "Downloaded", path: null }
+          : { label: "Downloaded", path: null },
       );
     } catch (error) {
       setLastError(error instanceof Error ? error.message : String(error));
@@ -90,9 +89,7 @@ export function ConversationExport({
   return (
     <div className="scale-in">
       <div className="flex items-center justify-between mb-4">
-        <h3 className="text-xs font-semibold text-ink-500 uppercase tracking-[0.24em]">
-          Export
-        </h3>
+        <h3 className="text-xs font-semibold text-ink-500 uppercase tracking-[0.24em]">Export</h3>
         <button onClick={onClose} className="button-ghost text-xs">
           Close
         </button>
