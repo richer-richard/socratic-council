@@ -5,8 +5,13 @@ on:
     branches: ["main", "master"]
   pull_request:
 
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  build-test:
+  check-format:
+    name: Format
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -17,13 +22,130 @@ jobs:
         with:
           node-version: 22
           cache: "pnpm"
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-      - name: Lint
-        run: pnpm lint
-      - name: Build
-        run: pnpm build
-      - name: Typecheck
-        run: pnpm typecheck
-      - name: Test
-        run: pnpm test
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm format:check
+
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v3
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: "pnpm"
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
+
+  typecheck:
+    name: Typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v3
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: "pnpm"
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v3
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: "pnpm"
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v3
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: "pnpm"
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm test -- --reporter=verbose
+
+  audit:
+    name: Audit
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v3
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: "pnpm"
+      - run: pnpm install --frozen-lockfile
+      - name: Check for vulnerabilities
+        run: pnpm audit --audit-level=high
+
+  build-desktop:
+    name: Desktop Build (macOS ARM)
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v3
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: "pnpm"
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/desktop/src-tauri -> target
+      - run: pnpm install --frozen-lockfile
+      - name: Build Tauri app
+        working-directory: apps/desktop
+        run: pnpm tauri build --bundles app
+
+  ci-pass:
+    name: CI Pass
+    if: always()
+    needs: [check-format, lint, typecheck, build, test, audit, build-desktop]
+    runs-on: ubuntu-latest
+    env:
+      FORMAT_RESULT: ${{ needs.check-format.result }}
+      LINT_RESULT: ${{ needs.lint.result }}
+      TYPECHECK_RESULT: ${{ needs.typecheck.result }}
+      BUILD_RESULT: ${{ needs.build.result }}
+      TEST_RESULT: ${{ needs.test.result }}
+      DESKTOP_RESULT: ${{ needs.build-desktop.result }}
+    steps:
+      - name: Check all jobs
+        run: |
+          failed=false
+          for result in "$FORMAT_RESULT" "$LINT_RESULT" "$TYPECHECK_RESULT" "$BUILD_RESULT" "$TEST_RESULT" "$DESKTOP_RESULT"; do
+            if [ "$result" = "failure" ]; then
+              failed=true
+            fi
+          done
+          if [ "$failed" = "true" ]; then
+            echo "::error::One or more required checks failed"
+            exit 1
+          fi
+          echo "All required checks passed"
