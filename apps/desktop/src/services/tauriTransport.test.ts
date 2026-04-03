@@ -126,9 +126,6 @@ describe("createTauriTransport", () => {
     );
 
     expect(fallbackCodes).toEqual(["FETCH_STREAM_FAILED"]);
-    expect(invokeMock).not.toHaveBeenCalledWith(
-      "http_request",
-      expect.anything(),
-    );
+    expect(invokeMock).not.toHaveBeenCalledWith("http_request", expect.anything());
   });
 });

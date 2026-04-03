@@ -1,6 +1,4 @@
-export type InlineQuoteSegment =
-  | { type: "text"; text: string }
-  | { type: "quote"; id: string };
+export type InlineQuoteSegment = { type: "text"; text: string } | { type: "quote"; id: string };
 
 const QUOTE_TOKEN_RE = /@quote\(([^)]+)\)/g;
 

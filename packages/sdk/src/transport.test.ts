@@ -36,9 +36,9 @@ describe("createFetchTransport", () => {
 
   it("returns status/body for request", async () => {
     const transport = createFetchTransport();
-    const mockFetch = vi.fn().mockResolvedValue(
-      new Response("ok", { status: 200, headers: { "x-test": "1" } })
-    );
+    const mockFetch = vi
+      .fn()
+      .mockResolvedValue(new Response("ok", { status: 200, headers: { "x-test": "1" } }));
     globalThis.fetch = mockFetch as typeof fetch;
 
     const result = await transport.request({
@@ -85,7 +85,7 @@ describe("createFetchTransport", () => {
           },
           onDone: () => resolve(),
           onError: (error) => reject(error),
-        }
+        },
       );
     });
 
@@ -124,7 +124,7 @@ describe("createFetchTransport", () => {
           onFallback: (error) => {
             fallbackEvents.push(error.code);
           },
-        }
+        },
       );
     });
 

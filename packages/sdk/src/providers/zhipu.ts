@@ -28,10 +28,7 @@ type StreamUsage = {
 
 function extractReasoningTokens(usage: StreamUsage | undefined): number | undefined {
   if (!usage) return undefined;
-  return (
-    usage.completion_tokens_details?.reasoning_tokens ??
-    usage.reasoning_tokens
-  );
+  return usage.completion_tokens_details?.reasoning_tokens ?? usage.reasoning_tokens;
 }
 
 export class ZhipuProvider implements BaseProvider {
@@ -42,11 +39,7 @@ export class ZhipuProvider implements BaseProvider {
 
   constructor(apiKey: string, options?: { baseUrl?: string; transport?: Transport }) {
     this.apiKey = apiKey;
-    this.endpoint = resolveEndpoint(
-      options?.baseUrl,
-      "/chat/completions",
-      API_ENDPOINTS.zhipu
-    );
+    this.endpoint = resolveEndpoint(options?.baseUrl, "/chat/completions", API_ENDPOINTS.zhipu);
     this.transport = options?.transport ?? createFetchTransport();
   }
 
@@ -59,7 +52,7 @@ export class ZhipuProvider implements BaseProvider {
     agent: AgentConfig,
     messages: ChatMessage[],
     options: CompletionOptions = {},
-    stream = false
+    stream = false,
   ): ZhipuRequest {
     const request: ZhipuRequest = {
       model: this.normalizeModel(agent.model),
@@ -85,7 +78,7 @@ export class ZhipuProvider implements BaseProvider {
   async complete(
     agent: AgentConfig,
     messages: ChatMessage[],
-    options: CompletionOptions = {}
+    options: CompletionOptions = {},
   ): Promise<CompletionResult> {
     const startTime = Date.now();
     const body = this.buildRequestBody(agent, messages, options, false);
@@ -132,7 +125,7 @@ export class ZhipuProvider implements BaseProvider {
     agent: AgentConfig,
     messages: ChatMessage[],
     onChunk: StreamCallback,
-    options: CompletionOptions = {}
+    options: CompletionOptions = {},
   ): Promise<CompletionResult> {
     const startTime = Date.now();
     const body = this.buildRequestBody(agent, messages, options, true);
@@ -198,7 +191,7 @@ export class ZhipuProvider implements BaseProvider {
             resolve();
           },
           onError: (error) => reject(new Error(`${error.code}: ${error.message}`)),
-        }
+        },
       );
     });
 

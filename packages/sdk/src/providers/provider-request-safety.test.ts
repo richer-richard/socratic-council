@@ -25,13 +25,15 @@ function createAgent(overrides: Partial<AgentConfig>): AgentConfig {
 describe("provider request safety", () => {
   it("omits temperature and uses xhigh reasoning for GPT-5.3-codex", () => {
     const provider = new OpenAIProvider("test-key");
-    const request = (provider as unknown as {
-      buildRequestBody: (...args: unknown[]) => Record<string, unknown>;
-    }).buildRequestBody(
+    const request = (
+      provider as unknown as {
+        buildRequestBody: (...args: unknown[]) => Record<string, unknown>;
+      }
+    ).buildRequestBody(
       createAgent({ provider: "openai", model: "gpt-5.3-codex" }),
       messages,
       "gpt-5.3-codex",
-      { stream: false }
+      { stream: false },
     );
 
     expect(request.temperature).toBeUndefined();
@@ -40,9 +42,11 @@ describe("provider request safety", () => {
 
   it("uses adaptive thinking and no temperature for Claude Opus 4.6", () => {
     const provider = new AnthropicProvider("test-key");
-    const request = (provider as unknown as {
-      buildRequestBody: (...args: unknown[]) => Record<string, unknown>;
-    }).buildRequestBody(
+    const request = (
+      provider as unknown as {
+        buildRequestBody: (...args: unknown[]) => Record<string, unknown>;
+      }
+    ).buildRequestBody(
       createAgent({
         id: "cathy",
         name: "Cathy",
@@ -52,7 +56,7 @@ describe("provider request safety", () => {
       }),
       messages,
       "claude-opus-4-6",
-      { stream: false }
+      { stream: false },
     );
 
     expect(request.thinking).toEqual({ type: "adaptive" });
@@ -61,9 +65,11 @@ describe("provider request safety", () => {
 
   it("can disable Anthropic thinking for forced final-answer retries", () => {
     const provider = new AnthropicProvider("test-key");
-    const request = (provider as unknown as {
-      buildRequestBody: (...args: unknown[]) => Record<string, unknown>;
-    }).buildRequestBody(
+    const request = (
+      provider as unknown as {
+        buildRequestBody: (...args: unknown[]) => Record<string, unknown>;
+      }
+    ).buildRequestBody(
       createAgent({
         id: "cathy",
         name: "Cathy",
@@ -73,7 +79,7 @@ describe("provider request safety", () => {
       }),
       messages,
       "claude-opus-4-6",
-      { stream: false, disableThinking: true }
+      { stream: false, disableThinking: true },
     );
 
     expect(request.thinking).toBeUndefined();
@@ -82,9 +88,11 @@ describe("provider request safety", () => {
 
   it("keeps Anthropic budget_tokens strictly below max_tokens", () => {
     const provider = new AnthropicProvider("test-key");
-    const request = (provider as unknown as {
-      buildRequestBody: (...args: unknown[]) => Record<string, unknown>;
-    }).buildRequestBody(
+    const request = (
+      provider as unknown as {
+        buildRequestBody: (...args: unknown[]) => Record<string, unknown>;
+      }
+    ).buildRequestBody(
       createAgent({
         id: "cathy",
         name: "Cathy",
@@ -94,7 +102,7 @@ describe("provider request safety", () => {
       }),
       messages,
       "claude-sonnet-4-5-20250929",
-      { stream: false }
+      { stream: false },
     );
 
     const thinking = request.thinking as { budget_tokens: number } | undefined;
@@ -104,9 +112,11 @@ describe("provider request safety", () => {
 
   it("keeps MiniMax budget_tokens strictly below max_tokens", () => {
     const provider = new MiniMaxProvider("test-key");
-    const request = (provider as unknown as {
-      buildRequestBody: (...args: unknown[]) => Record<string, unknown>;
-    }).buildRequestBody(
+    const request = (
+      provider as unknown as {
+        buildRequestBody: (...args: unknown[]) => Record<string, unknown>;
+      }
+    ).buildRequestBody(
       createAgent({
         id: "mary",
         name: "Mary",
@@ -116,7 +126,7 @@ describe("provider request safety", () => {
       }),
       messages,
       {},
-      false
+      false,
     );
 
     const thinking = request.thinking as { budget_tokens: number } | undefined;
@@ -126,9 +136,11 @@ describe("provider request safety", () => {
 
   it("adds an OpenAI prompt cache key for stable attachment context", () => {
     const provider = new OpenAIProvider("test-key");
-    const request = (provider as unknown as {
-      buildRequestBody: (...args: unknown[]) => Record<string, unknown>;
-    }).buildRequestBody(
+    const request = (
+      provider as unknown as {
+        buildRequestBody: (...args: unknown[]) => Record<string, unknown>;
+      }
+    ).buildRequestBody(
       createAgent({ provider: "openai", model: "gpt-5.3-codex" }),
       [
         { role: "system" as const, content: "System prompt" },
@@ -140,7 +152,7 @@ describe("provider request safety", () => {
         { role: "user" as const, content: "Your turn." },
       ],
       "gpt-5.3-codex",
-      { stream: false }
+      { stream: false },
     );
 
     expect(request.prompt_cache_key).toMatch(/^sc-prefix-/);
@@ -149,9 +161,11 @@ describe("provider request safety", () => {
 
   it("marks Anthropic attachment prefix blocks as cacheable", () => {
     const provider = new AnthropicProvider("test-key");
-    const request = (provider as unknown as {
-      buildRequestBody: (...args: unknown[]) => Record<string, unknown>;
-    }).buildRequestBody(
+    const request = (
+      provider as unknown as {
+        buildRequestBody: (...args: unknown[]) => Record<string, unknown>;
+      }
+    ).buildRequestBody(
       createAgent({
         id: "cathy",
         name: "Cathy",
@@ -177,10 +191,12 @@ describe("provider request safety", () => {
         },
       ],
       "claude-opus-4-6",
-      { stream: false }
+      { stream: false },
     );
 
-    const content = (request.messages as Array<{ content: unknown }>)[0]?.content as Array<Record<string, unknown>>;
+    const content = (request.messages as Array<{ content: unknown }>)[0]?.content as Array<
+      Record<string, unknown>
+    >;
     const lastBlock = content.at(-1);
     expect(Array.isArray(content)).toBe(true);
     expect(lastBlock?.type).toBe("text");

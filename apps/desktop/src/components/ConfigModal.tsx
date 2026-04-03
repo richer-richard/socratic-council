@@ -17,7 +17,15 @@ interface ConfigModalProps {
   isOpen: boolean;
   onClose: () => void;
   config: AppConfig;
-  onUpdateCredential: (provider: Provider, credential: { apiKey: string; baseUrl?: string; verified?: boolean; lastTested?: number } | null) => void;
+  onUpdateCredential: (
+    provider: Provider,
+    credential: {
+      apiKey: string;
+      baseUrl?: string;
+      verified?: boolean;
+      lastTested?: number;
+    } | null,
+  ) => void;
   onUpdateProxy: (proxy: AppConfig["proxy"]) => void;
   onUpdatePreferences: (preferences: Partial<AppConfig["preferences"]>) => void;
   onUpdateModel: (provider: Provider, model: string) => void;
@@ -97,7 +105,9 @@ export function ConfigModal({
   const [apiKeyInput, setApiKeyInput] = useState("");
   const [baseUrlInput, setBaseUrlInput] = useState("");
   const [testingProvider, setTestingProvider] = useState<Provider | null>(null);
-  const [testResults, setTestResults] = useState<Record<Provider, "success" | "failed" | "error" | null>>({
+  const [testResults, setTestResults] = useState<
+    Record<Provider, "success" | "failed" | "error" | null>
+  >({
     openai: null,
     anthropic: null,
     google: null,
@@ -141,7 +151,7 @@ export function ConfigModal({
       const success = await testProviderConnection(
         provider,
         { apiKey: key, baseUrl },
-        config.proxy
+        config.proxy,
       );
 
       if (success) {
@@ -184,7 +194,9 @@ export function ConfigModal({
             </div>
           </div>
           <div className="flex items-center gap-3">
-            <span className="badge badge-info">{configuredCount}/{PROVIDERS.length} providers</span>
+            <span className="badge badge-info">
+              {configuredCount}/{PROVIDERS.length} providers
+            </span>
             <button
               onClick={onClose}
               className="text-gray-400 hover:text-white p-2 rounded-lg hover:bg-gray-700 transition-colors"
@@ -208,9 +220,10 @@ export function ConfigModal({
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id)}
                 className={`px-4 py-3 text-sm font-medium border-b-2 transition-colors
-                  ${activeTab === tab.id
-                    ? "border-primary text-white"
-                    : "border-transparent text-gray-400 hover:text-white hover:border-gray-600"
+                  ${
+                    activeTab === tab.id
+                      ? "border-primary text-white"
+                      : "border-transparent text-gray-400 hover:text-white hover:border-gray-600"
                   }`}
               >
                 <span className="mr-2">{tab.icon}</span>
@@ -225,7 +238,8 @@ export function ConfigModal({
           {activeTab === "api-keys" && (
             <div className="space-y-4 scale-in">
               <p className="text-gray-400 text-sm mb-4">
-                Configure API keys for each AI provider. Keys are stored locally and never sent to external servers.
+                Configure API keys for each AI provider. Keys are stored locally and never sent to
+                external servers.
               </p>
 
               {PROVIDERS.map((provider) => {
@@ -271,7 +285,8 @@ export function ConfigModal({
                             )}
                           </div>
                           <p className="text-sm text-gray-400 mt-0.5">
-                            Used by <span className={info.color}>{info.agent}</span> • {info.description}
+                            Used by <span className={info.color}>{info.agent}</span> •{" "}
+                            {info.description}
                           </p>
                         </div>
                       </div>
@@ -323,9 +338,7 @@ export function ConfigModal({
                     {isEditing && (
                       <div className="mt-4 pt-4 border-t border-gray-700 space-y-3">
                         <div>
-                          <label className="block text-sm text-gray-300 mb-2">
-                            API Key:
-                          </label>
+                          <label className="block text-sm text-gray-300 mb-2">API Key:</label>
                           <input
                             type="password"
                             value={apiKeyInput}
@@ -390,7 +403,8 @@ export function ConfigModal({
                   <div>
                     <h4 className="text-blue-400 font-medium text-sm">Security Note</h4>
                     <p className="text-blue-300/80 text-sm mt-1">
-                      API keys are stored locally in your browser's storage. They are never transmitted to external servers.
+                      API keys are stored locally in your browser's storage. They are never
+                      transmitted to external servers.
                     </p>
                   </div>
                 </div>
@@ -401,7 +415,8 @@ export function ConfigModal({
           {activeTab === "models" && (
             <div className="space-y-4 scale-in">
               <p className="text-gray-400 text-sm mb-4">
-                Models are locked to one fixed model per character to keep council behavior consistent.
+                Models are locked to one fixed model per character to keep council behavior
+                consistent.
               </p>
 
               {PROVIDERS.map((provider) => {
@@ -431,8 +446,7 @@ export function ConfigModal({
                         <div className="min-w-0">
                           <div className="font-medium truncate">{model.name}</div>
                           <div className="text-xs text-gray-400 truncate">
-                            {model.description ? `${model.description} ` : ""}
-                            ({model.id})
+                            {model.description ? `${model.description} ` : ""}({model.id})
                           </div>
                         </div>
                         <span className="badge badge-info">Locked</span>
@@ -447,8 +461,9 @@ export function ConfigModal({
           {activeTab === "proxy" && (
             <div className="space-y-6 scale-in">
               <p className="text-gray-400 text-sm mb-4">
-                Configure a proxy server for API requests. This applies to <strong>all providers</strong> uniformly.
-                Use this if you're behind a firewall or need to route traffic through a specific server.
+                Configure a proxy server for API requests. This applies to{" "}
+                <strong>all providers</strong> uniformly. Use this if you're behind a firewall or
+                need to route traffic through a specific server.
               </p>
 
               <div className="bg-gray-800/50 border border-gray-700 rounded-xl p-5 space-y-4">
@@ -456,7 +471,9 @@ export function ConfigModal({
                   <label className="block text-sm text-gray-300 mb-2">Proxy Type:</label>
                   <select
                     value={config.proxy.type}
-                    onChange={(e) => onUpdateProxy({ ...config.proxy, type: e.target.value as ProxyType })}
+                    onChange={(e) =>
+                      onUpdateProxy({ ...config.proxy, type: e.target.value as ProxyType })
+                    }
                     className="w-full bg-gray-900 border border-gray-600 rounded-lg px-4 py-2.5
                       text-white focus:outline-none focus:border-primary transition-colors"
                   >
@@ -487,7 +504,9 @@ export function ConfigModal({
                         <input
                           type="number"
                           value={config.proxy.port || ""}
-                          onChange={(e) => onUpdateProxy({ ...config.proxy, port: parseInt(e.target.value) || 0 })}
+                          onChange={(e) =>
+                            onUpdateProxy({ ...config.proxy, port: parseInt(e.target.value) || 0 })
+                          }
                           placeholder="7897"
                           className="w-full bg-gray-900 border border-gray-600 rounded-lg px-4 py-2.5
                             text-white placeholder-gray-500 focus:outline-none focus:border-primary transition-all"
@@ -497,22 +516,36 @@ export function ConfigModal({
 
                     <div className="grid grid-cols-2 gap-4">
                       <div>
-                        <label className="block text-sm text-gray-300 mb-2">Username (optional):</label>
+                        <label className="block text-sm text-gray-300 mb-2">
+                          Username (optional):
+                        </label>
                         <input
                           type="text"
                           value={config.proxy.username || ""}
-                          onChange={(e) => onUpdateProxy({ ...config.proxy, username: e.target.value || undefined })}
+                          onChange={(e) =>
+                            onUpdateProxy({
+                              ...config.proxy,
+                              username: e.target.value || undefined,
+                            })
+                          }
                           placeholder="Optional"
                           className="w-full bg-gray-900 border border-gray-600 rounded-lg px-4 py-2.5
                             text-white placeholder-gray-500 focus:outline-none focus:border-primary transition-all"
                         />
                       </div>
                       <div>
-                        <label className="block text-sm text-gray-300 mb-2">Password (optional):</label>
+                        <label className="block text-sm text-gray-300 mb-2">
+                          Password (optional):
+                        </label>
                         <input
                           type="password"
                           value={config.proxy.password || ""}
-                          onChange={(e) => onUpdateProxy({ ...config.proxy, password: e.target.value || undefined })}
+                          onChange={(e) =>
+                            onUpdateProxy({
+                              ...config.proxy,
+                              password: e.target.value || undefined,
+                            })
+                          }
                           placeholder="Optional"
                           className="w-full bg-gray-900 border border-gray-600 rounded-lg px-4 py-2.5
                             text-white placeholder-gray-500 focus:outline-none focus:border-primary transition-all"
@@ -535,9 +568,9 @@ export function ConfigModal({
                   <div>
                     <h4 className="text-yellow-400 font-medium text-sm">Note</h4>
                     <p className="text-yellow-300/80 text-sm mt-1">
-                      Proxy support requires the Tauri backend to handle HTTP requests. 
-                      If you're experiencing connection issues, ensure your proxy is properly configured and accessible.
-                      The proxy setting applies to all API providers uniformly.
+                      Proxy support requires the Tauri backend to handle HTTP requests. If you're
+                      experiencing connection issues, ensure your proxy is properly configured and
+                      accessible. The proxy setting applies to all API providers uniformly.
                     </p>
                   </div>
                 </div>
@@ -555,13 +588,17 @@ export function ConfigModal({
                   <div className="flex items-center justify-between">
                     <div>
                       <div className="text-sm text-white">Show Bidding Scores</div>
-                      <div className="text-xs text-gray-400">Display agent bid scores after each round</div>
+                      <div className="text-xs text-gray-400">
+                        Display agent bid scores after each round
+                      </div>
                     </div>
                     <label className="toggle-switch">
                       <input
                         type="checkbox"
                         checked={config.preferences.showBiddingScores}
-                        onChange={(e) => onUpdatePreferences({ showBiddingScores: e.target.checked })}
+                        onChange={(e) =>
+                          onUpdatePreferences({ showBiddingScores: e.target.checked })
+                        }
                       />
                       <div className="toggle-slider" />
                     </label>
@@ -570,7 +607,9 @@ export function ConfigModal({
                   <div className="flex items-center justify-between">
                     <div>
                       <div className="text-sm text-white">Auto-scroll Messages</div>
-                      <div className="text-xs text-gray-400">Automatically scroll to new messages</div>
+                      <div className="text-xs text-gray-400">
+                        Automatically scroll to new messages
+                      </div>
                     </div>
                     <label className="toggle-switch">
                       <input
@@ -585,7 +624,9 @@ export function ConfigModal({
                   <div className="flex items-center justify-between">
                     <div>
                       <div className="text-sm text-white">Sound Effects</div>
-                      <div className="text-xs text-gray-400">Play sounds for new messages and events</div>
+                      <div className="text-xs text-gray-400">
+                        Play sounds for new messages and events
+                      </div>
                     </div>
                     <label className="toggle-switch">
                       <input
@@ -608,7 +649,9 @@ export function ConfigModal({
                       <input
                         type="checkbox"
                         checked={config.preferences.moderatorEnabled}
-                        onChange={(e) => onUpdatePreferences({ moderatorEnabled: e.target.checked })}
+                        onChange={(e) =>
+                          onUpdatePreferences({ moderatorEnabled: e.target.checked })
+                        }
                       />
                       <div className="toggle-slider" />
                     </label>
@@ -621,9 +664,11 @@ export function ConfigModal({
                 <h3 className="font-medium text-white mb-4">Default Discussion Length</h3>
                 <select
                   value={config.preferences.defaultLength}
-                  onChange={(e) => onUpdatePreferences({ 
-                    defaultLength: e.target.value as AppConfig["preferences"]["defaultLength"] 
-                  })}
+                  onChange={(e) =>
+                    onUpdatePreferences({
+                      defaultLength: e.target.value as AppConfig["preferences"]["defaultLength"],
+                    })
+                  }
                   className="w-full bg-gray-900 border border-gray-600 rounded-lg px-4 py-2.5
                     text-white focus:outline-none focus:border-primary transition-colors mb-4"
                 >
@@ -642,7 +687,9 @@ export function ConfigModal({
                     <input
                       type="number"
                       value={config.preferences.customTurns}
-                      onChange={(e) => onUpdatePreferences({ customTurns: parseInt(e.target.value) || 0 })}
+                      onChange={(e) =>
+                        onUpdatePreferences({ customTurns: parseInt(e.target.value) || 0 })
+                      }
                       min={0}
                       max={10000}
                       className="w-full bg-gray-900 border border-gray-600 rounded-lg px-4 py-2.5
@@ -661,7 +708,7 @@ export function ConfigModal({
               <div className="bg-gray-800/50 border border-gray-700 rounded-xl p-5">
                 <h3 className="font-medium text-white mb-4">Data Management</h3>
                 <div className="flex flex-wrap gap-3">
-                  <button 
+                  <button
                     onClick={() => {
                       const data = JSON.stringify(config, null, 2);
                       const blob = new Blob([data], { type: "application/json" });
@@ -677,7 +724,7 @@ export function ConfigModal({
                   >
                     Export Settings
                   </button>
-                  <button 
+                  <button
                     onClick={() => {
                       const input = document.createElement("input");
                       input.type = "file";
@@ -717,14 +764,18 @@ export function ConfigModal({
                   >
                     Import Settings
                   </button>
-                  <button 
+                  <button
                     onClick={async () => {
-                      if (!confirm("Are you sure you want to clear all local data? This cannot be undone.")) {
+                      if (
+                        !confirm(
+                          "Are you sure you want to clear all local data? This cannot be undone.",
+                        )
+                      ) {
                         return;
                       }
 
                       const appKeys = Object.keys(localStorage).filter((key) =>
-                        key.startsWith("socratic-council-")
+                        key.startsWith("socratic-council-"),
                       );
                       for (const key of appKeys) {
                         localStorage.removeItem(key);
@@ -762,7 +813,9 @@ export function ConfigModal({
 
                 <div className="grid md:grid-cols-2 gap-4 mt-5">
                   <div className="bg-gray-900 border border-gray-600 rounded-lg p-4">
-                    <div className="text-xs text-gray-400 uppercase tracking-[0.18em]">Bundle Identifier</div>
+                    <div className="text-xs text-gray-400 uppercase tracking-[0.18em]">
+                      Bundle Identifier
+                    </div>
                     <div className="text-sm text-white mt-2">{ABOUT_IDENTIFIER}</div>
                   </div>
                   <div className="bg-gray-900 border border-gray-600 rounded-lg p-4">
@@ -770,7 +823,9 @@ export function ConfigModal({
                     <div className="text-sm text-white mt-2">{ABOUT_LICENSE}</div>
                   </div>
                   <div className="bg-gray-900 border border-gray-600 rounded-lg p-4 md:col-span-2">
-                    <div className="text-xs text-gray-400 uppercase tracking-[0.18em]">Repository</div>
+                    <div className="text-xs text-gray-400 uppercase tracking-[0.18em]">
+                      Repository
+                    </div>
                     <a
                       href={ABOUT_REPOSITORY}
                       target="_blank"
@@ -818,7 +873,9 @@ export function ConfigModal({
                           <ProviderIcon provider={provider} size={24} />
                           <div className="min-w-0">
                             <div className={`font-medium ${info.color}`}>{info.agent}</div>
-                            <div className="text-xs text-gray-400 truncate">{LOCKED_MODELS[provider]}</div>
+                            <div className="text-xs text-gray-400 truncate">
+                              {LOCKED_MODELS[provider]}
+                            </div>
                           </div>
                         </div>
                         <div className="flex gap-2 flex-wrap">
@@ -840,7 +897,10 @@ export function ConfigModal({
                 <h3 className="font-medium text-white mb-4">Shortcuts</h3>
                 <div className="grid md:grid-cols-2 gap-3">
                   {ABOUT_SHORTCUTS.map((shortcut) => (
-                    <div key={shortcut.keys} className="bg-gray-900 border border-gray-600 rounded-lg p-4">
+                    <div
+                      key={shortcut.keys}
+                      className="bg-gray-900 border border-gray-600 rounded-lg p-4"
+                    >
                       <div className="text-sm text-white font-medium">{shortcut.keys}</div>
                       <div className="text-sm text-gray-400 mt-1">{shortcut.description}</div>
                     </div>
@@ -849,7 +909,6 @@ export function ConfigModal({
               </div>
             </div>
           )}
-
         </div>
 
         {/* Footer */}

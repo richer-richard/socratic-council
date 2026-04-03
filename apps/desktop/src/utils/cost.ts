@@ -6,13 +6,16 @@ import { MODEL_REGISTRY } from "@socratic-council/shared";
  */
 export function calculateMessageCost(
   modelId: string | undefined,
-  tokens: { input: number; output: number; reasoning?: number } | undefined
+  tokens: { input: number; output: number; reasoning?: number } | undefined,
 ): number | null {
   if (!modelId || !tokens) return null;
 
   const modelInfo = MODEL_REGISTRY.find((m) => m.id === modelId);
   const pricing = modelInfo?.pricing;
-  if (!pricing || (!pricing.inputCostPer1M && !pricing.outputCostPer1M && !pricing.reasoningCostPer1M)) {
+  if (
+    !pricing ||
+    (!pricing.inputCostPer1M && !pricing.outputCostPer1M && !pricing.reasoningCostPer1M)
+  ) {
     return null;
   }
 
@@ -22,4 +25,3 @@ export function calculateMessageCost(
 
   return inputCost + outputCost + reasoningCost;
 }
-

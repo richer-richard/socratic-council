@@ -53,121 +53,168 @@ export default function App() {
     setProjects(listProjectSummaries());
   }, []);
 
-  const navigate = useCallback((page: Page, sessionId?: string) => {
-    if (page === "chat") {
-      const targetSessionId = sessionId ?? state.currentSessionId;
-      if (!targetSessionId) return;
+  const navigate = useCallback(
+    (page: Page, sessionId?: string) => {
+      if (page === "chat") {
+        const targetSessionId = sessionId ?? state.currentSessionId;
+        if (!targetSessionId) return;
 
-      const nextSession = touchDiscussionSession(targetSessionId) ?? loadDiscussionSession(targetSessionId);
-      if (!nextSession) return;
+        const nextSession =
+          touchDiscussionSession(targetSessionId) ?? loadDiscussionSession(targetSessionId);
+        if (!nextSession) return;
 
-      setActiveSession(nextSession);
-      refreshAll();
-      setState((prev) => ({
-        currentPage: "chat",
-        currentSessionId: nextSession.id,
-        currentProjectId: nextSession.projectId ?? prev.currentProjectId,
-      }));
-      return;
-    }
-
-    setState((prev) => ({
-      ...prev,
-      currentPage: page,
-      currentSessionId: sessionId ?? prev.currentSessionId,
-    }));
-  }, [state.currentSessionId, refreshAll]);
-
-  const handleCreateSession = useCallback(async (
-    topic: string,
-    attachments: ComposerAttachment[] = [],
-    projectId: string | null = null,
-  ) => {
-    try {
-      const session = await createDiscussionSession(topic, attachments, projectId);
-      setAppError(null);
-      setActiveSession(session);
-      if (projectId) {
-        refreshProjectSummary(projectId);
+        setActiveSession(nextSession);
+        refreshAll();
+        setState((prev) => ({
+          currentPage: "chat",
+          currentSessionId: nextSession.id,
+          currentProjectId: nextSession.projectId ?? prev.currentProjectId,
+        }));
+        return;
       }
+
+      setState((prev) => ({
+        ...prev,
+        currentPage: page,
+        currentSessionId: sessionId ?? prev.currentSessionId,
+      }));
+    },
+    [state.currentSessionId, refreshAll],
+  );
+
+  const handleCreateSession = useCallback(
+    async (
+      topic: string,
+      attachments: ComposerAttachment[] = [],
+      projectId: string | null = null,
+    ) => {
+      try {
+        const session = await createDiscussionSession(topic, attachments, projectId);
+        setAppError(null);
+        setActiveSession(session);
+        if (projectId) {
+          refreshProjectSummary(projectId);
+        }
+        refreshAll();
+        setState((prev) => ({
+          currentPage: "chat",
+          currentSessionId: session.id,
+          currentProjectId: projectId ?? prev.currentProjectId,
+        }));
+      } catch (error) {
+        console.error("Failed to create session:", error);
+        setAppError(
+          error instanceof Error
+            ? error.message
+            : "Failed to create the session locally. Free up browser storage and try again.",
+        );
+      }
+    },
+    [refreshAll],
+  );
+
+  const handleOpenSession = useCallback(
+    (sessionId: string) => {
+      const session = touchDiscussionSession(sessionId) ?? loadDiscussionSession(sessionId);
+      if (!session) return;
+
+      setActiveSession(session);
       refreshAll();
       setState((prev) => ({
         currentPage: "chat",
         currentSessionId: session.id,
-        currentProjectId: projectId ?? prev.currentProjectId,
+        currentProjectId: session.projectId ?? prev.currentProjectId,
       }));
-    } catch (error) {
-      console.error("Failed to create session:", error);
-      setAppError(
-        error instanceof Error
-          ? error.message
-          : "Failed to create the session locally. Free up browser storage and try again.",
-      );
-    }
-  }, [refreshAll]);
+    },
+    [refreshAll],
+  );
 
-  const handleOpenSession = useCallback((sessionId: string) => {
-    const session = touchDiscussionSession(sessionId) ?? loadDiscussionSession(sessionId);
-    if (!session) return;
-
-    setActiveSession(session);
-    refreshAll();
-    setState((prev) => ({
-      currentPage: "chat",
-      currentSessionId: session.id,
-      currentProjectId: session.projectId ?? prev.currentProjectId,
-    }));
-  }, [refreshAll]);
-
-  const handlePersistSession = useCallback((session: DiscussionSession) => {
-    const persisted = saveDiscussionSession(session);
-    setAppError(null);
-    refreshAll();
-    return persisted;
-  }, [refreshAll]);
-
-  const handleDeleteSession = useCallback(async (sessionId: string) => {
-    const deleted = await deleteDiscussionSessionWithAttachments(sessionId);
-    if (!deleted) return;
-
-    refreshAll();
-    setActiveSession((current) => (current?.id === sessionId ? null : current));
-    setState((current) => {
-      if (current.currentSessionId !== sessionId) {
-        return current;
-      }
-
-      return {
-        ...current,
-        currentPage: current.currentPage === "chat" ? "home" : current.currentPage,
-        currentSessionId: null,
-      };
-    });
-  }, [refreshAll]);
-
-  const handleArchiveSession = useCallback((sessionId: string) => {
-    const archived = archiveDiscussionSession(sessionId);
-    if (!archived) return;
-
-    refreshAll();
-    setActiveSession((current) => (current?.id === sessionId ? null : current));
-    setState((current) => ({
-      ...current,
-      currentSessionId: current.currentSessionId === sessionId ? null : current.currentSessionId,
-    }));
-  }, [refreshAll]);
-
-  const handleRestoreSession = useCallback((sessionId: string) => {
-    const restored = restoreDiscussionSession(sessionId);
-    if (!restored) return;
-
-    refreshAll();
-  }, [refreshAll]);
-
-  const handleCreateProject = useCallback((name: string, description?: string) => {
-    try {
-      const project = createProject(name, description);
+  const handlePersistSession = useCallback(
+    (session: DiscussionSession) => {
+      const persisted = saveDiscussionSession(session);
       setAppError(null);
+      refreshAll();
+      return persisted;
+    },
+    [refreshAll],
+  );
+
+  const handleDeleteSession = useCallback(
+    async (sessionId: string) => {
+      const deleted = await deleteDiscussionSessionWithAttachments(sessionId);
+      if (!deleted) return;
+
+      refreshAll();
+      setActiveSession((current) => (current?.id === sessionId ? null : current));
+      setState((current) => {
+        if (current.currentSessionId !== sessionId) {
+          return current;
+        }
+
+        return {
+          ...current,
+          currentPage: current.currentPage === "chat" ? "home" : current.currentPage,
+          currentSessionId: null,
+        };
+      });
+    },
+    [refreshAll],
+  );
+
+  const handleArchiveSession = useCallback(
+    (sessionId: string) => {
+      const archived = archiveDiscussionSession(sessionId);
+      if (!archived) return;
+
+      refreshAll();
+      setActiveSession((current) => (current?.id === sessionId ? null : current));
+      setState((current) => ({
+        ...current,
+        currentSessionId: current.currentSessionId === sessionId ? null : current.currentSessionId,
+      }));
+    },
+    [refreshAll],
+  );
+
+  const handleRestoreSession = useCallback(
+    (sessionId: string) => {
+      const restored = restoreDiscussionSession(sessionId);
+      if (!restored) return;
+
+      refreshAll();
+    },
+    [refreshAll],
+  );
+
+  const handleCreateProject = useCallback(
+    (name: string, description?: string) => {
+      try {
+        const project = createProject(name, description);
+        setAppError(null);
+        setActiveProject(project);
+        refreshAll();
+        setState((prev) => ({
+          ...prev,
+          currentPage: "project",
+          currentProjectId: project.id,
+        }));
+      } catch (error) {
+        console.error("Failed to create project:", error);
+        setAppError(
+          error instanceof Error
+            ? error.message
+            : "Failed to create the project locally. Free up browser storage and try again.",
+        );
+      }
+    },
+    [refreshAll],
+  );
+
+  const handleOpenProject = useCallback(
+    (projectId: string) => {
+      const project = touchProject(projectId) ?? loadProject(projectId);
+      if (!project) return;
+
       setActiveProject(project);
       refreshAll();
       setState((prev) => ({
@@ -175,56 +222,49 @@ export default function App() {
         currentPage: "project",
         currentProjectId: project.id,
       }));
-    } catch (error) {
-      console.error("Failed to create project:", error);
-      setAppError(
-        error instanceof Error
-          ? error.message
-          : "Failed to create the project locally. Free up browser storage and try again.",
-      );
-    }
-  }, [refreshAll]);
+    },
+    [refreshAll],
+  );
 
-  const handleOpenProject = useCallback((projectId: string) => {
-    const project = touchProject(projectId) ?? loadProject(projectId);
-    if (!project) return;
+  const handleDeleteProject = useCallback(
+    (projectId: string) => {
+      const deleted = deleteProject(projectId);
+      if (!deleted) return;
 
-    setActiveProject(project);
-    refreshAll();
-    setState((prev) => ({
-      ...prev,
-      currentPage: "project",
-      currentProjectId: project.id,
-    }));
-  }, [refreshAll]);
+      refreshAll();
+      setActiveProject((current) => (current?.id === projectId ? null : current));
+      setState((current) => ({
+        ...current,
+        currentPage:
+          current.currentPage === "project" && current.currentProjectId === projectId
+            ? "home"
+            : current.currentPage,
+        currentProjectId: current.currentProjectId === projectId ? null : current.currentProjectId,
+      }));
+    },
+    [refreshAll],
+  );
 
-  const handleDeleteProject = useCallback((projectId: string) => {
-    const deleted = deleteProject(projectId);
-    if (!deleted) return;
+  const handleArchiveProject = useCallback(
+    (projectId: string) => {
+      const archived = archiveProject(projectId);
+      if (!archived) return;
 
-    refreshAll();
-    setActiveProject((current) => (current?.id === projectId ? null : current));
-    setState((current) => ({
-      ...current,
-      currentPage: current.currentPage === "project" && current.currentProjectId === projectId ? "home" : current.currentPage,
-      currentProjectId: current.currentProjectId === projectId ? null : current.currentProjectId,
-    }));
-  }, [refreshAll]);
+      refreshAll();
+      setActiveProject((current) => (current?.id === projectId ? null : current));
+    },
+    [refreshAll],
+  );
 
-  const handleArchiveProject = useCallback((projectId: string) => {
-    const archived = archiveProject(projectId);
-    if (!archived) return;
+  const handleRestoreProject = useCallback(
+    (projectId: string) => {
+      const restored = restoreProject(projectId);
+      if (!restored) return;
 
-    refreshAll();
-    setActiveProject((current) => (current?.id === projectId ? null : current));
-  }, [refreshAll]);
-
-  const handleRestoreProject = useCallback((projectId: string) => {
-    const restored = restoreProject(projectId);
-    if (!restored) return;
-
-    refreshAll();
-  }, [refreshAll]);
+      refreshAll();
+    },
+    [refreshAll],
+  );
 
   return (
     <div className="h-screen flex flex-col bg-gray-900">

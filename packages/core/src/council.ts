@@ -30,8 +30,26 @@ import { ConflictDetector } from "./conflict.js";
 import { DuckDuckGoOracle } from "./oracle.js";
 import { WhisperManager } from "./whisper.js";
 
-const VALID_AGENT_IDS = ["george", "cathy", "grace", "douglas", "kate", "quinn", "mary", "zara"] as const;
-const VALID_PROVIDERS = ["openai", "anthropic", "google", "deepseek", "kimi", "qwen", "minimax", "zhipu"] as const;
+const VALID_AGENT_IDS = [
+  "george",
+  "cathy",
+  "grace",
+  "douglas",
+  "kate",
+  "quinn",
+  "mary",
+  "zara",
+] as const;
+const VALID_PROVIDERS = [
+  "openai",
+  "anthropic",
+  "google",
+  "deepseek",
+  "kimi",
+  "qwen",
+  "minimax",
+  "zhipu",
+] as const;
 const VALID_STATUSES = ["idle", "running", "paused", "completed"] as const;
 
 function cloneSnapshot<T>(value: T): T {
@@ -54,7 +72,9 @@ function isAgentId(value: unknown): value is AgentId {
 function isAbortLikeError(error: unknown): boolean {
   return (
     error instanceof Error &&
-    (error.name === "AbortError" || error.message.includes("ABORTED") || error.message.includes("aborted"))
+    (error.name === "AbortError" ||
+      error.message.includes("ABORTED") ||
+      error.message.includes("aborted"))
   );
 }
 
@@ -67,7 +87,10 @@ function normalizeCouncilConfigValue(input: unknown): CouncilConfig {
       record.biddingTimeout,
       DEFAULT_COUNCIL_CONFIG.biddingTimeout,
     ),
-    budgetLimit: Math.max(0, normalizeNumber(record.budgetLimit, DEFAULT_COUNCIL_CONFIG.budgetLimit)),
+    budgetLimit: Math.max(
+      0,
+      normalizeNumber(record.budgetLimit, DEFAULT_COUNCIL_CONFIG.budgetLimit),
+    ),
     autoMode:
       typeof record.autoMode === "boolean" ? record.autoMode : DEFAULT_COUNCIL_CONFIG.autoMode,
   };
@@ -84,8 +107,10 @@ function normalizeAgentConfig(input: unknown): AgentConfig | null {
     VALID_PROVIDERS.includes(record.provider as (typeof VALID_PROVIDERS)[number])
       ? record.provider
       : base.provider;
-  const model = typeof record.model === "string" && record.model.length > 0 ? record.model : base.model;
-  const name = typeof record.name === "string" && record.name.trim().length > 0 ? record.name : base.name;
+  const model =
+    typeof record.model === "string" && record.model.length > 0 ? record.model : base.model;
+  const name =
+    typeof record.name === "string" && record.name.trim().length > 0 ? record.name : base.name;
   const systemPrompt =
     typeof record.systemPrompt === "string" && record.systemPrompt.length > 0
       ? record.systemPrompt
@@ -97,11 +122,15 @@ function normalizeAgentConfig(input: unknown): AgentConfig | null {
     model,
     name,
     systemPrompt,
-    ...(typeof record.avatar === "string" && record.avatar.length > 0 ? { avatar: record.avatar } : {}),
+    ...(typeof record.avatar === "string" && record.avatar.length > 0
+      ? { avatar: record.avatar }
+      : {}),
     ...(typeof record.temperature === "number" && Number.isFinite(record.temperature)
       ? { temperature: record.temperature }
       : {}),
-    ...(typeof record.maxTokens === "number" && Number.isFinite(record.maxTokens) && record.maxTokens > 0
+    ...(typeof record.maxTokens === "number" &&
+    Number.isFinite(record.maxTokens) &&
+    record.maxTokens > 0
       ? { maxTokens: record.maxTokens }
       : {}),
   };
@@ -136,7 +165,8 @@ function normalizeMessageValue(input: unknown): Message | null {
       ? {
           model: record.metadata.model,
           latencyMs: record.metadata.latencyMs,
-          ...(typeof record.metadata.bidScore === "number" && Number.isFinite(record.metadata.bidScore)
+          ...(typeof record.metadata.bidScore === "number" &&
+          Number.isFinite(record.metadata.bidScore)
             ? { bidScore: record.metadata.bidScore }
             : {}),
         }
@@ -147,7 +177,7 @@ function normalizeMessageValue(input: unknown): Message | null {
     agentId,
     content,
     timestamp,
-    ...((inputTokens > 0 || outputTokens > 0 || reasoningTokens !== undefined)
+    ...(inputTokens > 0 || outputTokens > 0 || reasoningTokens !== undefined
       ? {
           tokens: {
             input: inputTokens,
@@ -160,10 +190,7 @@ function normalizeMessageValue(input: unknown): Message | null {
   };
 }
 
-function normalizeCostTrackerValue(
-  input: unknown,
-  agentIds: AgentId[],
-): CostTracker | undefined {
+function normalizeCostTrackerValue(input: unknown, agentIds: AgentId[]): CostTracker | undefined {
   if (!input || typeof input !== "object") return undefined;
   const record = input as Partial<CostTracker>;
   const agentCosts = {} as CostTracker["agentCosts"];
@@ -201,12 +228,20 @@ function normalizeWhisperStateValue(
     ? record.messages
         .map((message) => {
           if (!message || typeof message !== "object") return null;
-          const payload = message.payload && typeof message.payload === "object" ? message.payload : {};
-          if (!isAgentId(message.from) || !isAgentId(message.to) || typeof message.type !== "string") {
+          const payload =
+            message.payload && typeof message.payload === "object" ? message.payload : {};
+          if (
+            !isAgentId(message.from) ||
+            !isAgentId(message.to) ||
+            typeof message.type !== "string"
+          ) {
             return null;
           }
           return {
-            id: typeof message.id === "string" && message.id.length > 0 ? message.id : generateId("whisper"),
+            id:
+              typeof message.id === "string" && message.id.length > 0
+                ? message.id
+                : generateId("whisper"),
             from: message.from,
             to: message.to,
             type: message.type,
@@ -225,7 +260,10 @@ function normalizeWhisperStateValue(
             timestamp: normalizeNumber(message.timestamp, Date.now()),
           };
         })
-        .filter((message): message is NonNullable<CouncilState["whisperState"]>["messages"][number] => Boolean(message))
+        .filter(
+          (message): message is NonNullable<CouncilState["whisperState"]>["messages"][number] =>
+            Boolean(message),
+        )
     : [];
 
   const pendingBonuses = {} as NonNullable<CouncilState["whisperState"]>["pendingBonuses"];
@@ -251,7 +289,8 @@ function normalizeConflictValue(input: unknown): CouncilState["conflict"] | unde
 function normalizeDuoLogueValue(input: unknown): CouncilState["duoLogue"] | undefined {
   if (!input || typeof input !== "object") return undefined;
   const record = input as NonNullable<CouncilState["duoLogue"]>;
-  if (!isAgentId(record.participants?.[0]) || !isAgentId(record.participants?.[1])) return undefined;
+  if (!isAgentId(record.participants?.[0]) || !isAgentId(record.participants?.[1]))
+    return undefined;
   return {
     participants: [record.participants[0], record.participants[1]],
     remainingTurns: Math.max(0, normalizeNumber(record.remainingTurns)),
@@ -363,7 +402,7 @@ export class Council {
     credentials: ProviderCredentials,
     config?: Partial<CouncilConfig>,
     agents?: Record<AgentId, AgentConfig>,
-    options?: { transport?: Transport }
+    options?: { transport?: Transport },
   ) {
     this.providerManager = new ProviderManager(credentials, { transport: options?.transport });
 
@@ -489,7 +528,7 @@ export class Council {
           this.state.messages,
           this.state.config.topic,
           lastSpeaker,
-          whisperBonuses
+          whisperBonuses,
         );
 
         this.emit({
@@ -572,11 +611,7 @@ export class Council {
     });
 
     // Format conversation history for the agent
-    const messages = formatConversationHistory(
-      agent,
-      this.state.messages,
-      this.state.config.topic
-    );
+    const messages = formatConversationHistory(agent, this.state.messages, this.state.config.topic);
 
     let fullContent = "";
 
@@ -600,7 +635,7 @@ export class Council {
           temperature: agent.temperature,
           maxTokens: agent.maxTokens,
           signal: this.abortController?.signal,
-        }
+        },
       );
 
       const content = fullContent || result.content;
@@ -691,7 +726,7 @@ export class Council {
   sendWhisper(
     from: AgentId,
     to: AgentId,
-    message: Omit<WhisperMessage, "id" | "from" | "to" | "timestamp">
+    message: Omit<WhisperMessage, "id" | "from" | "to" | "timestamp">,
   ): WhisperMessage {
     const whisper = this.whisperManager.sendWhisper(from, to, message);
     this.state.whisperState = this.whisperManager.getState();
@@ -778,7 +813,7 @@ export class Council {
         this.providerManager.setProvider(
           provider as AgentConfig["provider"],
           cred.apiKey,
-          cred.baseUrl
+          cred.baseUrl,
         );
       }
     }

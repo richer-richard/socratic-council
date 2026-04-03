@@ -544,15 +544,7 @@ function StatusGlyph({
   );
 }
 
-function VotePieChart({
-  yes,
-  no,
-  pending,
-}: {
-  yes: number;
-  no: number;
-  pending: number;
-}) {
+function VotePieChart({ yes, no, pending }: { yes: number; no: number; pending: number }) {
   const total = Math.max(yes + no + pending, 1);
   const yesDeg = (yes / total) * 360;
   const noDeg = yesDeg + (no / total) * 360;
@@ -568,11 +560,7 @@ function VotePieChart({
   );
 }
 
-function EndVoteBallotCard({
-  ballot,
-}: {
-  ballot: EndVoteBallotSnapshot;
-}) {
+function EndVoteBallotCard({ ballot }: { ballot: EndVoteBallotSnapshot }) {
   const choiceLabel = ballot.choice === "yes" ? "YES" : "NO";
 
   return (
@@ -592,11 +580,7 @@ function EndVoteBallotCard({
   );
 }
 
-function EndVoteBoardCard({
-  board,
-}: {
-  board: EndVoteBoardSnapshot;
-}) {
+function EndVoteBoardCard({ board }: { board: EndVoteBoardSnapshot }) {
   const { yes, no } = countEndVoteChoices(board.votes, board.agentOrder);
   const pending = Math.max(board.totalAgents - yes - no, 0);
   const allReasonEntries = board.agentOrder
@@ -676,10 +660,15 @@ function EndVoteBoardCard({
           </summary>
           <div className="end-vote-reasons-list">
             {allReasonEntries.map((entry) => (
-              <div key={`${board.voteId}-${board.round}-reason-${entry.agentId}`} className="end-vote-reason-item">
+              <div
+                key={`${board.voteId}-${board.round}-reason-${entry.agentId}`}
+                className="end-vote-reason-item"
+              >
                 <div className="end-vote-reason-agent">
                   {AGENT_CONFIG[entry.agentId].name}
-                  <span className={`end-vote-inline-badge ${entry.choice === "no" ? "is-no" : "is-yes"}`}>
+                  <span
+                    className={`end-vote-inline-badge ${entry.choice === "no" ? "is-no" : "is-yes"}`}
+                  >
                     {entry.choice === "yes" ? "YES" : "NO"}
                   </span>
                 </div>
@@ -693,11 +682,7 @@ function EndVoteBoardCard({
   );
 }
 
-function ModeratorConclusionCard({
-  conclusion,
-}: {
-  conclusion: ModeratorConclusionSnapshot;
-}) {
+function ModeratorConclusionCard({ conclusion }: { conclusion: ModeratorConclusionSnapshot }) {
   const label =
     conclusion.status === "consensus"
       ? "Consensus"
@@ -1074,10 +1059,7 @@ export function Chat({ session, onNavigate, onPersistSession }: ChatProps) {
     return map;
   }, [messages]);
 
-  const displayMessages = useMemo(
-    () => messages.filter((m) => !m.endVoteBallot),
-    [messages],
-  );
+  const displayMessages = useMemo(() => messages.filter((m) => !m.endVoteBallot), [messages]);
 
   const getMessageAttachments = useCallback(
     (message: ChatMessage) =>
@@ -1157,7 +1139,9 @@ export function Chat({ session, onNavigate, onPersistSession }: ChatProps) {
           })),
         );
       }
-    } catch { /* project may not exist */ }
+    } catch {
+      /* project may not exist */
+    }
   }, []);
 
   const resetRuntimeState = useCallback(() => {
@@ -1432,9 +1416,17 @@ export function Chat({ session, onNavigate, onPersistSession }: ChatProps) {
       if (memoryManagerRef.current) {
         const context = memoryManagerRef.current.buildContext(agentId);
         const recent = context.recentMessages
-          .filter((m) => (isCouncilAgent(m.agentId) || isModeratorMessage(m)) && !hasStructuredVoteArtifacts(m))
+          .filter(
+            (m) =>
+              (isCouncilAgent(m.agentId) || isModeratorMessage(m)) &&
+              !hasStructuredVoteArtifacts(m),
+          )
           .slice(-MAX_CONTEXT_MESSAGES);
-        return { messages: recent, engagementDebts: context.engagementDebt, projectEvidence: context.projectEvidence };
+        return {
+          messages: recent,
+          engagementDebts: context.engagementDebt,
+          projectEvidence: context.projectEvidence,
+        };
       }
 
       const fallback = messages
@@ -1537,7 +1529,11 @@ export function Chat({ session, onNavigate, onPersistSession }: ChatProps) {
         ...(rawAttachments.length > 0 ? { attachments: rawAttachments } : {}),
       });
 
-      const { messages: contextMessages, engagementDebts, projectEvidence } = getContextMessages(agentId);
+      const {
+        messages: contextMessages,
+        engagementDebts,
+        projectEvidence,
+      } = getContextMessages(agentId);
 
       if (contextMessages.length === 0) {
         const directedPrompt =
@@ -2879,11 +2875,14 @@ Write the official moderator wrap-up in 4 short sentences:
           return { message: null, choice: null, reason: "" };
         }
 
-        let voteExtraction = stripLegacyEndVoteDirective(result.content || streamingRawContent || "");
+        let voteExtraction = stripLegacyEndVoteDirective(
+          result.content || streamingRawContent || "",
+        );
         let displayContent =
           voteExtraction.cleaned ||
           normalizeMessageText(result.content || streamingRawContent || streamingContent || "");
-        let voteChoice = voteExtraction.voteChoice ?? parseVoteChoiceFromVisibleText(displayContent);
+        let voteChoice =
+          voteExtraction.voteChoice ?? parseVoteChoiceFromVisibleText(displayContent);
         let voteReason = extractVoteReasonFromVisibleText(voteChoice, displayContent);
         let hasReason = hasRequiredVoteReason(voteChoice, voteReason);
 
@@ -4184,14 +4183,15 @@ Write the official moderator wrap-up in 4 short sentences:
                       {(isAgent || isModerator) && modelName && (
                         <span className="discord-model">({modelName})</span>
                       )}
-                      {(isAgent || isModerator) && !message.isStreaming && (!!message.thinking?.trim() || (message.toolEvents?.length ?? 0) > 0) && (
-                        <span className="discord-thinking-pill">
-                          {(message.toolEvents?.length ?? 0) > 0
-                            ? `Worked for ${((message.thinkingMs ?? message.latencyMs ?? 0) / 1000).toFixed(3)}s`
-                            : `Thought for ${((message.thinkingMs ?? message.latencyMs ?? 0) / 1000).toFixed(3)}s`
-                          }
-                        </span>
-                      )}
+                      {(isAgent || isModerator) &&
+                        !message.isStreaming &&
+                        (!!message.thinking?.trim() || (message.toolEvents?.length ?? 0) > 0) && (
+                          <span className="discord-thinking-pill">
+                            {(message.toolEvents?.length ?? 0) > 0
+                              ? `Worked for ${((message.thinkingMs ?? message.latencyMs ?? 0) / 1000).toFixed(3)}s`
+                              : `Thought for ${((message.thinkingMs ?? message.latencyMs ?? 0) / 1000).toFixed(3)}s`}
+                          </span>
+                        )}
                       {(isAgent || isModerator) &&
                         (message.isStreaming || message.latencyMs != null) && (
                           <LiveStopwatch
@@ -4224,49 +4224,52 @@ Write the official moderator wrap-up in 4 short sentences:
                     {/* Message body */}
                     <div className="discord-message-body">
                       {/* Thinking / Working collapsible — above content */}
-                      {(isAgent || isModerator) && (!!message.thinking?.trim() || (message.toolEvents?.length ?? 0) > 0) && (
-                        <details className={`thinking-panel${message.isStreaming ? " is-streaming" : ""}`}>
-                          <summary className="thinking-summary">
-                            {message.isStreaming
-                              ? ((message.toolEvents?.length ?? 0) > 0 ? "Working\u2026" : "Thinking\u2026")
-                              : ((message.toolEvents?.length ?? 0) > 0
+                      {(isAgent || isModerator) &&
+                        (!!message.thinking?.trim() || (message.toolEvents?.length ?? 0) > 0) && (
+                          <details
+                            className={`thinking-panel${message.isStreaming ? " is-streaming" : ""}`}
+                          >
+                            <summary className="thinking-summary">
+                              {message.isStreaming
+                                ? (message.toolEvents?.length ?? 0) > 0
+                                  ? "Working\u2026"
+                                  : "Thinking\u2026"
+                                : (message.toolEvents?.length ?? 0) > 0
                                   ? `Worked for ${((message.thinkingMs ?? message.latencyMs ?? 0) / 1000).toFixed(3)}s`
-                                  : `Thought for ${((message.thinkingMs ?? message.latencyMs ?? 0) / 1000).toFixed(3)}s`
-                                )
-                            }
-                          </summary>
-                          <div className="thinking-content-wrapper">
-                            {(message.toolEvents?.length ?? 0) > 0 && (
-                              <div className="thinking-tool-list">
-                                {message.toolEvents!.map((event) => (
-                                  <details
-                                    key={event.id}
-                                    className={`message-tool-call${event.error ? " has-error" : ""}`}
-                                  >
-                                    <summary className="message-tool-summary">
-                                      <span>{event.summary}</span>
-                                    </summary>
-                                    <div className="message-tool-body">
-                                      <div className="message-tool-meta">
-                                        {getToolDisplayName(event.name as ToolCall["name"])} ·{" "}
-                                        {formatTime(event.timestamp)}
+                                  : `Thought for ${((message.thinkingMs ?? message.latencyMs ?? 0) / 1000).toFixed(3)}s`}
+                            </summary>
+                            <div className="thinking-content-wrapper">
+                              {(message.toolEvents?.length ?? 0) > 0 && (
+                                <div className="thinking-tool-list">
+                                  {message.toolEvents!.map((event) => (
+                                    <details
+                                      key={event.id}
+                                      className={`message-tool-call${event.error ? " has-error" : ""}`}
+                                    >
+                                      <summary className="message-tool-summary">
+                                        <span>{event.summary}</span>
+                                      </summary>
+                                      <div className="message-tool-body">
+                                        <div className="message-tool-meta">
+                                          {getToolDisplayName(event.name as ToolCall["name"])} ·{" "}
+                                          {formatTime(event.timestamp)}
+                                        </div>
+                                        <div className="message-tool-output">
+                                          {event.error
+                                            ? `Error: ${event.error}\n\n${event.output}`
+                                            : event.output}
+                                        </div>
                                       </div>
-                                      <div className="message-tool-output">
-                                        {event.error
-                                          ? `Error: ${event.error}\n\n${event.output}`
-                                          : event.output}
-                                      </div>
-                                    </div>
-                                  </details>
-                                ))}
-                              </div>
-                            )}
-                            {!!message.thinking?.trim() && (
-                              <div className="thinking-content">{message.thinking}</div>
-                            )}
-                          </div>
-                        </details>
-                      )}
+                                    </details>
+                                  ))}
+                                </div>
+                              )}
+                              {!!message.thinking?.trim() && (
+                                <div className="thinking-content">{message.thinking}</div>
+                              )}
+                            </div>
+                          </details>
+                        )}
                       {message.endVoteBoard ? (
                         <EndVoteBoardCard board={message.endVoteBoard} />
                       ) : message.endVoteBallot ? (
@@ -4335,7 +4338,14 @@ Write the official moderator wrap-up in 4 short sentences:
                                         <div
                                           key={reactionId}
                                           className="reaction-chip"
-                                          style={reactorColor ? { borderColor: reactorColor, background: `color-mix(in srgb, ${reactorColor} 12%, transparent)` } : undefined}
+                                          style={
+                                            reactorColor
+                                              ? {
+                                                  borderColor: reactorColor,
+                                                  background: `color-mix(in srgb, ${reactorColor} 12%, transparent)`,
+                                                }
+                                              : undefined
+                                          }
                                         >
                                           <ReactionIcon type={reactionId} size={14} />
                                           <span>{reaction.count}</span>
@@ -4466,7 +4476,14 @@ Write the official moderator wrap-up in 4 short sentences:
                             <div
                               key={reactionId}
                               className="reaction-chip"
-                              style={reactorColor ? { borderColor: reactorColor, background: `color-mix(in srgb, ${reactorColor} 12%, transparent)` } : undefined}
+                              style={
+                                reactorColor
+                                  ? {
+                                      borderColor: reactorColor,
+                                      background: `color-mix(in srgb, ${reactorColor} 12%, transparent)`,
+                                    }
+                                  : undefined
+                              }
                             >
                               <ReactionIcon type={reactionId} size={16} />
                               <span>{reaction.count}</span>

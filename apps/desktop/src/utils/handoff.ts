@@ -47,7 +47,7 @@ function parseStandaloneDirective(raw: string): ParsedStandaloneDirective | null
       continue;
     }
 
-    if (char === "\"") {
+    if (char === '"') {
       inString = !inString;
       index += 1;
       continue;
@@ -113,7 +113,9 @@ export function extractHandoffDirective<T extends string>({
     const payload = JSON.parse(parsed.payloadText) as { to?: unknown; question?: unknown };
     const validTargets = new Set(validAgents);
     const to =
-      typeof payload.to === "string" && validTargets.has(payload.to as T) ? (payload.to as T) : null;
+      typeof payload.to === "string" && validTargets.has(payload.to as T)
+        ? (payload.to as T)
+        : null;
     const question =
       typeof payload.question === "string" ? normalizeMessageText(payload.question) : "";
 

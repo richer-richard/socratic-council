@@ -25,7 +25,7 @@ export async function callMcpTool(
   tool: string,
   args: Record<string, unknown>,
   apiKey?: string,
-  proxy?: ProxyConfig
+  proxy?: ProxyConfig,
 ): Promise<unknown> {
   const payload: McpRpcRequest = {
     jsonrpc: "2.0",
@@ -50,7 +50,7 @@ export async function callMcpTool(
     "POST",
     headers,
     JSON.stringify(payload),
-    proxy
+    proxy,
   );
 
   if (status < 200 || status >= 300) {

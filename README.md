@@ -12,21 +12,21 @@ This repo ships **source only** (no installer downloads). Follow this guide to b
 
 ## Snapshot
 
-| Dimension | Details |
-|---|---|
-| Product | Local-first Tauri desktop app |
-| Stack | React + TypeScript frontend, Rust backend, pnpm monorepo |
-| Discussion model | Eight council members plus an optional moderator |
-| Providers | OpenAI, Anthropic, Google Gemini, DeepSeek, Kimi, Qwen, MiniMax, Z.AI |
-| Research tools | File search, web search, verification, citations |
-| Outputs | Searchable transcript, logs, conflict graph, structured exports |
+| Dimension        | Details                                                               |
+| ---------------- | --------------------------------------------------------------------- |
+| Product          | Local-first Tauri desktop app                                         |
+| Stack            | React + TypeScript frontend, Rust backend, pnpm monorepo              |
+| Discussion model | Eight council members plus an optional moderator                      |
+| Providers        | OpenAI, Anthropic, Google Gemini, DeepSeek, Kimi, Qwen, MiniMax, Z.AI |
+| Research tools   | File search, web search, verification, citations                      |
+| Outputs          | Searchable transcript, logs, conflict graph, structured exports       |
 
-| Workflow Surface | Included |
-|---|---|
-| Live discussion | Turn-taking responses, quotes, reactions, moderator nudges |
-| Evidence gathering | Attachments, tool results, source-aware follow-up |
-| Observability | Latency, tokens, cost tracking, logs |
-| Review and sharing | Search, export, conflict graph, transcript summaries |
+| Workflow Surface   | Included                                                   |
+| ------------------ | ---------------------------------------------------------- |
+| Live discussion    | Turn-taking responses, quotes, reactions, moderator nudges |
+| Evidence gathering | Attachments, tool results, source-aware follow-up          |
+| Observability      | Latency, tokens, cost tracking, logs                       |
+| Review and sharing | Search, export, conflict graph, transcript summaries       |
 
 ## Experience Map
 
@@ -34,24 +34,24 @@ This repo ships **source only** (no installer downloads). Follow this guide to b
 
 ## Council Lineup
 
-| Agent | Default provider | Default model |
-|---|---|---|
-| George | OpenAI | GPT-5.4 |
-| Cathy | Anthropic | Claude Opus 4.6 |
-| Grace | Google | Gemini 3.1 Pro |
-| Douglas | DeepSeek | DeepSeek Reasoner |
-| Kate | Kimi | Kimi K2.5 |
-| Quinn | Qwen | Qwen 3.5 Plus |
-| Mary | MiniMax | MiniMax M2.5 |
-| Zara | Z.AI | GLM-5 |
-| Moderator | OpenAI | GPT-5.3 Instant |
+| Agent     | Default provider | Default model     |
+| --------- | ---------------- | ----------------- |
+| George    | OpenAI           | GPT-5.4           |
+| Cathy     | Anthropic        | Claude Opus 4.6   |
+| Grace     | Google           | Gemini 3.1 Pro    |
+| Douglas   | DeepSeek         | DeepSeek Reasoner |
+| Kate      | Kimi             | Kimi K2.5         |
+| Quinn     | Qwen             | Qwen 3.5 Plus     |
+| Mary      | MiniMax          | MiniMax M2.5      |
+| Zara      | Z.AI             | GLM-5             |
+| Moderator | OpenAI           | GPT-5.3 Instant   |
 
 ## Installation Paths
 
-| Path | Platform | Best for | Result |
-|---|---|---|---|
-| Quick install via [`install.sh`](install.sh) | macOS | Fastest way to get the app installed locally | Builds the app, copies it to `/Applications`, and launches it |
-| Manual install via the guide below | macOS / Windows / Linux | Full control over prerequisites and build steps | Sets up a reusable local development/build environment |
+| Path                                         | Platform                | Best for                                        | Result                                                        |
+| -------------------------------------------- | ----------------------- | ----------------------------------------------- | ------------------------------------------------------------- |
+| Quick install via [`install.sh`](install.sh) | macOS                   | Fastest way to get the app installed locally    | Builds the app, copies it to `/Applications`, and launches it |
+| Manual install via the guide below           | macOS / Windows / Linux | Full control over prerequisites and build steps | Sets up a reusable local development/build environment        |
 
 ![Installation paths diagram](docs/assets/installation-paths.svg)
 
@@ -77,12 +77,12 @@ cd socratic-council
 
 The script automatically checks for (and installs if missing) Xcode CLT, Homebrew, Node.js 22+, pnpm, and Rust — then builds the production `.app` bundle, copies `Socratic Council.app` to `/Applications`, and opens the app.
 
-| Quick install behavior | What happens |
-|---|---|
-| Prerequisites | Checks Xcode CLT, Homebrew, Node.js, pnpm, and Rust |
-| Build | Runs the full production desktop build |
-| Install | Copies `Socratic Council.app` into `/Applications` |
-| Launch | Opens the installed app automatically |
+| Quick install behavior | What happens                                        |
+| ---------------------- | --------------------------------------------------- |
+| Prerequisites          | Checks Xcode CLT, Homebrew, Node.js, pnpm, and Rust |
+| Build                  | Runs the full production desktop build              |
+| Install                | Copies `Socratic Council.app` into `/Applications`  |
+| Launch                 | Opens the installed app automatically               |
 
 > Already have everything installed? The script detects existing tools and skips what it can.
 
@@ -144,18 +144,18 @@ This is the current manual installation guide for the repo. If you do not want t
 
 ### Requirements summary
 
-| Track | Use this when | Entry point |
-|---|---|---|
-| Quick install | You want the macOS app installed as fast as possible | `./install.sh` |
+| Track          | Use this when                                                  | Entry point     |
+| -------------- | -------------------------------------------------------------- | --------------- |
+| Quick install  | You want the macOS app installed as fast as possible           | `./install.sh`  |
 | Manual install | You want explicit control over dependencies and build commands | Steps 1-7 below |
 
-| Dependency | Minimum version | Why |
-|---|---|---|
-| **Git** | any recent | Clone the repository |
-| **Node.js** | **≥ 22.0.0** | Run the frontend toolchain (Vite, TypeScript, build scripts) |
-| **pnpm** | **9.15.0** (exact, via corepack) | Workspace package manager — the repo's `packageManager` field pins this version |
-| **Rust** | **stable ≥ 1.77.2** | Compile the Tauri v2 native backend |
-| **Tauri v2 system deps** | (per OS, see below) | WebView, native build tools |
+| Dependency               | Minimum version                  | Why                                                                             |
+| ------------------------ | -------------------------------- | ------------------------------------------------------------------------------- |
+| **Git**                  | any recent                       | Clone the repository                                                            |
+| **Node.js**              | **≥ 22.0.0**                     | Run the frontend toolchain (Vite, TypeScript, build scripts)                    |
+| **pnpm**                 | **9.15.0** (exact, via corepack) | Workspace package manager — the repo's `packageManager` field pins this version |
+| **Rust**                 | **stable ≥ 1.77.2**              | Compile the Tauri v2 native backend                                             |
+| **Tauri v2 system deps** | (per OS, see below)              | WebView, native build tools                                                     |
 
 The Tauri CLI (`@tauri-apps/cli ^2.5.0`) is declared as a devDependency and installed automatically by `pnpm install` — you do **not** install it globally.
 
@@ -194,7 +194,6 @@ No other system packages are required on macOS — the WebView is provided by th
 #### Windows
 
 1. **Microsoft Visual Studio C++ Build Tools** — Rust on Windows requires the MSVC toolchain.
-
    - Download **Visual Studio Build Tools** from <https://visualstudio.microsoft.com/visual-cpp-build-tools/>.
    - In the installer, select the **"Desktop development with C++"** workload. This installs:
      - MSVC v143 (or later) C++ compiler
@@ -211,7 +210,6 @@ No other system packages are required on macOS — the WebView is provided by th
    If `cl` is not on your PATH, use the "Developer Command Prompt for VS" or the "x64 Native Tools Command Prompt".
 
 2. **WebView2 Runtime** — Tauri embeds a WebView2-based window.
-
    - **Windows 11** and **Windows 10 ≥ 1803** ship with WebView2 pre-installed. Verify:
 
      ```powershell
@@ -418,12 +416,12 @@ pnpm install
 
 This runs pnpm's workspace resolution and installs dependencies for all packages:
 
-| Workspace | Path | What it installs |
-|---|---|---|
-| `@socratic-council/shared` | `packages/shared` | Shared types, constants, model registry |
-| `@socratic-council/sdk` | `packages/sdk` | Provider SDK (OpenAI, Anthropic, Google, DeepSeek, Kimi, Qwen, MiniMax), transport layer |
-| `@socratic-council/core` | `packages/core` | Council orchestration logic (bidding, conflict, cost, memory) |
-| `@socratic-council/desktop` | `apps/desktop` | Tauri v2 + React frontend, Tauri CLI (`@tauri-apps/cli`) |
+| Workspace                   | Path              | What it installs                                                                         |
+| --------------------------- | ----------------- | ---------------------------------------------------------------------------------------- |
+| `@socratic-council/shared`  | `packages/shared` | Shared types, constants, model registry                                                  |
+| `@socratic-council/sdk`     | `packages/sdk`    | Provider SDK (OpenAI, Anthropic, Google, DeepSeek, Kimi, Qwen, MiniMax), transport layer |
+| `@socratic-council/core`    | `packages/core`   | Council orchestration logic (bidding, conflict, cost, memory)                            |
+| `@socratic-council/desktop` | `apps/desktop`    | Tauri v2 + React frontend, Tauri CLI (`@tauri-apps/cli`)                                 |
 
 Verify installation succeeded:
 
@@ -448,11 +446,13 @@ pnpm --filter @socratic-council/desktop tauri:dev
 4. Once both the frontend dev server and the Rust binary are ready, a native window opens showing the app.
 
 > **First-run expectations:**
+>
 > - You will see Cargo downloading and compiling ~300+ crates. This is normal.
 > - Subsequent runs are fast because Cargo caches compiled artifacts in `apps/desktop/src-tauri/target/`.
 > - If the window appears but shows a blank page, wait a few seconds for Vite to finish compiling the frontend.
 
 **Dev mode features:**
+
 - Hot-reload for frontend changes (Vite HMR).
 - Rust changes require a restart of the `tauri:dev` command.
 - DevTools window opens automatically in debug builds.
@@ -485,14 +485,14 @@ pnpm --filter @socratic-council/desktop tauri:build
 
 **Build output locations:**
 
-| Platform | Output path | Format |
-|---|---|---|
-| macOS | `apps/desktop/src-tauri/target/release/bundle/macos/Socratic Council.app` | `.app` bundle |
-| macOS | `apps/desktop/src-tauri/target/release/bundle/dmg/Socratic Council_*.dmg` | `.dmg` disk image |
-| Windows | `apps/desktop/src-tauri/target/release/bundle/msi/Socratic Council_*.msi` | `.msi` installer |
-| Windows | `apps/desktop/src-tauri/target/release/bundle/nsis/Socratic Council_*-setup.exe` | NSIS installer |
-| Linux | `apps/desktop/src-tauri/target/release/bundle/deb/socratic-council_*.deb` | `.deb` package |
-| Linux | `apps/desktop/src-tauri/target/release/bundle/appimage/socratic-council_*.AppImage` | `.AppImage` |
+| Platform | Output path                                                                         | Format            |
+| -------- | ----------------------------------------------------------------------------------- | ----------------- |
+| macOS    | `apps/desktop/src-tauri/target/release/bundle/macos/Socratic Council.app`           | `.app` bundle     |
+| macOS    | `apps/desktop/src-tauri/target/release/bundle/dmg/Socratic Council_*.dmg`           | `.dmg` disk image |
+| Windows  | `apps/desktop/src-tauri/target/release/bundle/msi/Socratic Council_*.msi`           | `.msi` installer  |
+| Windows  | `apps/desktop/src-tauri/target/release/bundle/nsis/Socratic Council_*-setup.exe`    | NSIS installer    |
+| Linux    | `apps/desktop/src-tauri/target/release/bundle/deb/socratic-council_*.deb`           | `.deb` package    |
+| Linux    | `apps/desktop/src-tauri/target/release/bundle/appimage/socratic-council_*.AppImage` | `.AppImage`       |
 
 > **Note:** The release build is significantly slower than a dev build (10–30 minutes) due to LTO and maximum optimizations. The resulting binary is much smaller and faster.
 
@@ -570,12 +570,12 @@ On first launch, configure providers and models in **Settings**.
 
 Socratic Council uses real provider APIs — you bring your own keys. Supported providers:
 
-| Provider | API key source |
-|---|---|
-| OpenAI | <https://platform.openai.com/api-keys> |
-| Anthropic | <https://console.anthropic.com/settings/keys> |
-| Google (Gemini) | <https://aistudio.google.com/apikey> |
-| DeepSeek | <https://platform.deepseek.com/api_keys> |
+| Provider        | API key source                                  |
+| --------------- | ----------------------------------------------- |
+| OpenAI          | <https://platform.openai.com/api-keys>          |
+| Anthropic       | <https://console.anthropic.com/settings/keys>   |
+| Google (Gemini) | <https://aistudio.google.com/apikey>            |
+| DeepSeek        | <https://platform.deepseek.com/api_keys>        |
 | Kimi (Moonshot) | <https://platform.moonshot.cn/console/api-keys> |
 
 Keys are stored **locally on your machine** in the Tauri plugin-store. This repo does not run a server.
@@ -583,6 +583,7 @@ Keys are stored **locally on your machine** in the Tauri plugin-store. This repo
 ### Models
 
 Each provider supports multiple models. The Settings screen lets you choose:
+
 - The default model per provider
 - The model used by each agent (optional, depending on the UI configuration)
 
@@ -601,12 +602,14 @@ The "Moderator" is a system-role agent that can inject short guidance when tensi
 ### Home
 
 From the home screen you can:
+
 - Start a new discussion (enter a topic)
 - Open settings
 
 ### Chat
 
 The chat timeline shows:
+
 - Messages by speaker (color-coded by agent)
 - Per-message token usage (when available)
 - Per-message cost estimate (when available)
@@ -615,6 +618,7 @@ The chat timeline shows:
 ### Pause, resume, stop
 
 During a discussion you can:
+
 - **Pause** — temporarily halt generation
 - **Resume** — continue from where you paused
 - **Stop** — end the session early
@@ -622,12 +626,14 @@ During a discussion you can:
 ### Search
 
 Search lets you:
+
 - Find text in the transcript
 - Jump directly to the matching message in the timeline
 
 ### Export
 
 The app can export a conversation to:
+
 - Markdown
 - JSON
 - PDF
@@ -636,13 +642,13 @@ The app can export a conversation to:
 
 Exports are generated locally.
 
-| Format | Best for | Notes |
-|---|---|---|
-| Markdown | Sharing in docs/issues | Plain text, easiest to diff |
-| JSON | Programmatic processing | Stable schema for tooling |
-| PDF | Printing / sending | Includes charts and summaries |
-| DOCX | Editing in Word | Structured sections, tables |
-| PPTX | Slides / presentation | Graphics-first summary |
+| Format   | Best for                | Notes                         |
+| -------- | ----------------------- | ----------------------------- |
+| Markdown | Sharing in docs/issues  | Plain text, easiest to diff   |
+| JSON     | Programmatic processing | Stable schema for tooling     |
+| PDF      | Printing / sending      | Includes charts and summaries |
+| DOCX     | Editing in Word         | Structured sections, tables   |
+| PPTX     | Slides / presentation   | Graphics-first summary        |
 
 ### Logs
 

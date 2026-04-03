@@ -65,7 +65,7 @@ export interface BaseProvider {
   complete(
     agent: AgentConfig,
     messages: ChatMessage[],
-    options?: CompletionOptions
+    options?: CompletionOptions,
   ): Promise<CompletionResult>;
 
   /**
@@ -75,7 +75,7 @@ export interface BaseProvider {
     agent: AgentConfig,
     messages: ChatMessage[],
     onChunk: StreamCallback,
-    options?: CompletionOptions
+    options?: CompletionOptions,
   ): Promise<CompletionResult>;
 
   /**
@@ -87,10 +87,7 @@ export interface BaseProvider {
 /**
  * Create provider-specific headers
  */
-export function createHeaders(
-  provider: Provider,
-  apiKey: string
-): Record<string, string> {
+export function createHeaders(provider: Provider, apiKey: string): Record<string, string> {
   const baseHeaders: Record<string, string> = {
     "Content-Type": "application/json",
   };
@@ -149,7 +146,7 @@ export function createHeaders(
 export function formatConversationHistory(
   agentConfig: AgentConfig,
   conversationHistory: Message[],
-  currentTopic: string
+  currentTopic: string,
 ): ChatMessage[] {
   const messages: ChatMessage[] = [];
 
@@ -198,7 +195,7 @@ export function joinBaseUrl(baseUrl: string, path: string): string {
 export function resolveEndpoint(
   baseUrl: string | undefined,
   path: string,
-  fallback: string
+  fallback: string,
 ): string {
   if (!baseUrl) return fallback;
   const trimmed = baseUrl.replace(/\/+$/, "");

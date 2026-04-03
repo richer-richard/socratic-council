@@ -32,7 +32,7 @@ export * from "./base.js";
 export function createProvider(
   provider: Provider,
   apiKey: string,
-  options?: { baseUrl?: string; transport?: Transport }
+  options?: { baseUrl?: string; transport?: Transport },
 ): BaseProvider {
   switch (provider) {
     case "openai":
@@ -74,7 +74,7 @@ export class ProviderManager {
         new OpenAIProvider(credentials.openai.apiKey, {
           baseUrl: credentials.openai.baseUrl,
           transport: this.transport,
-        })
+        }),
       );
     }
     if (credentials.anthropic?.apiKey) {
@@ -83,7 +83,7 @@ export class ProviderManager {
         new AnthropicProvider(credentials.anthropic.apiKey, {
           baseUrl: credentials.anthropic.baseUrl,
           transport: this.transport,
-        })
+        }),
       );
     }
     if (credentials.google?.apiKey) {
@@ -92,7 +92,7 @@ export class ProviderManager {
         new GoogleProvider(credentials.google.apiKey, {
           baseUrl: credentials.google.baseUrl,
           transport: this.transport,
-        })
+        }),
       );
     }
     if (credentials.deepseek?.apiKey) {
@@ -101,7 +101,7 @@ export class ProviderManager {
         new DeepSeekProvider(credentials.deepseek.apiKey, {
           baseUrl: credentials.deepseek.baseUrl,
           transport: this.transport,
-        })
+        }),
       );
     }
     if (credentials.kimi?.apiKey) {
@@ -110,7 +110,7 @@ export class ProviderManager {
         new KimiProvider(credentials.kimi.apiKey, {
           baseUrl: credentials.kimi.baseUrl,
           transport: this.transport,
-        })
+        }),
       );
     }
     if (credentials.qwen?.apiKey) {
@@ -119,7 +119,7 @@ export class ProviderManager {
         new QwenProvider(credentials.qwen.apiKey, {
           baseUrl: credentials.qwen.baseUrl,
           transport: this.transport,
-        })
+        }),
       );
     }
     if (credentials.minimax?.apiKey) {
@@ -128,7 +128,7 @@ export class ProviderManager {
         new MiniMaxProvider(credentials.minimax.apiKey, {
           baseUrl: credentials.minimax.baseUrl,
           transport: this.transport,
-        })
+        }),
       );
     }
     if (credentials.zhipu?.apiKey) {
@@ -137,7 +137,7 @@ export class ProviderManager {
         new ZhipuProvider(credentials.zhipu.apiKey, {
           baseUrl: credentials.zhipu.baseUrl,
           transport: this.transport,
-        })
+        }),
       );
     }
   }
@@ -189,7 +189,7 @@ export class ProviderManager {
       createProvider(provider, apiKey, {
         baseUrl,
         transport: transport ?? this.transport,
-      })
+      }),
     );
   }
 

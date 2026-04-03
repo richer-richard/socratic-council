@@ -9,9 +9,9 @@ interface ConflictGraphProps {
 function scoreToColor(score: number): string {
   // Blue (low conflict) to Red (high conflict)
   const clamped = Math.max(0, Math.min(1, score));
-  const r = Math.round(59 + clamped * (220 - 59));   // 59 -> 220
-  const g = Math.round(130 + clamped * (38 - 130));   // 130 -> 38
-  const b = Math.round(246 + clamped * (38 - 246));   // 246 -> 38
+  const r = Math.round(59 + clamped * (220 - 59)); // 59 -> 220
+  const g = Math.round(130 + clamped * (38 - 130)); // 130 -> 38
+  const b = Math.round(246 + clamped * (38 - 246)); // 246 -> 38
   return `rgb(${r},${g},${b})`;
 }
 
@@ -38,7 +38,7 @@ export function ConflictGraph({ conflicts, agents }: ConflictGraphProps) {
     const cy = 110;
     const r = count <= 5 ? 80 : 88;
     return Array.from({ length: count }, (_, i) => {
-      const angle = (-Math.PI / 2) + (2 * Math.PI * i) / count;
+      const angle = -Math.PI / 2 + (2 * Math.PI * i) / count;
       return {
         x: cx + r * Math.cos(angle),
         y: cy + r * Math.sin(angle),
@@ -135,7 +135,10 @@ export function ConflictGraph({ conflicts, agents }: ConflictGraphProps) {
             {sortedPairs.map((pair) => {
               const key = `${pair.agents[0]}-${pair.agents[1]}`;
               return (
-                <div key={key} className="grid grid-cols-[1fr,3.25rem] items-center gap-3 text-[11px]">
+                <div
+                  key={key}
+                  className="grid grid-cols-[1fr,3.25rem] items-center gap-3 text-[11px]"
+                >
                   <div className="truncate">{renderPairLabel(pair)}</div>
                   <div className="text-ink-400 tabular-nums text-right">
                     {Math.round(pair.score * 100)}%

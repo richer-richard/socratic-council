@@ -53,11 +53,7 @@ export class QwenProvider implements BaseProvider {
 
   constructor(apiKey: string, options?: { baseUrl?: string; transport?: Transport }) {
     this.apiKey = apiKey;
-    this.endpoint = resolveEndpoint(
-      options?.baseUrl,
-      "/chat/completions",
-      API_ENDPOINTS.qwen
-    );
+    this.endpoint = resolveEndpoint(options?.baseUrl, "/chat/completions", API_ENDPOINTS.qwen);
     this.transport = options?.transport ?? createFetchTransport();
   }
 
@@ -71,7 +67,7 @@ export class QwenProvider implements BaseProvider {
     agent: AgentConfig,
     messages: ChatMessage[],
     options: CompletionOptions = {},
-    stream = false
+    stream = false,
   ): QwenRequest {
     const request: QwenRequest = {
       model: this.normalizeModel(agent.model),
@@ -103,7 +99,7 @@ export class QwenProvider implements BaseProvider {
   async complete(
     agent: AgentConfig,
     messages: ChatMessage[],
-    options: CompletionOptions = {}
+    options: CompletionOptions = {},
   ): Promise<CompletionResult> {
     const startTime = Date.now();
     const body = this.buildRequestBody(agent, messages, options, false);
@@ -138,7 +134,8 @@ export class QwenProvider implements BaseProvider {
       thinking: thinking || undefined,
       tokens: {
         input: (data.usage?.prompt_tokens as number) ?? 0,
-        output: (data.usage?.completion_tokens as number) ?? (data.usage?.output_tokens as number) ?? 0,
+        output:
+          (data.usage?.completion_tokens as number) ?? (data.usage?.output_tokens as number) ?? 0,
         reasoning:
           (extractReasoningTokens(data.usage as StreamUsage | undefined) as number | undefined) ??
           estimateReasoningTokensFromThinking(thinking),
@@ -152,7 +149,7 @@ export class QwenProvider implements BaseProvider {
     agent: AgentConfig,
     messages: ChatMessage[],
     onChunk: StreamCallback,
-    options: CompletionOptions = {}
+    options: CompletionOptions = {},
   ): Promise<CompletionResult> {
     const startTime = Date.now();
     const body = this.buildRequestBody(agent, messages, options, true);
@@ -218,7 +215,7 @@ export class QwenProvider implements BaseProvider {
             resolve();
           },
           onError: (error) => reject(new Error(`${error.code}: ${error.message}`)),
-        }
+        },
       );
     });
 

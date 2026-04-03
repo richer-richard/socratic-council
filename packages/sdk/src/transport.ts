@@ -111,7 +111,10 @@ function canUseNodeProxyDispatcher(): boolean {
   return runtime.process?.release?.name === "node";
 }
 
-async function createDispatcher(proxy: ProxyConfig | undefined, logger?: FetchTransportOptions["logger"]) {
+async function createDispatcher(
+  proxy: ProxyConfig | undefined,
+  logger?: FetchTransportOptions["logger"],
+) {
   if (!proxy) return undefined;
   if (!canUseNodeProxyDispatcher()) {
     logger?.("debug", "Proxy agent unavailable in browser runtime; continuing without proxy");
@@ -165,7 +168,7 @@ function computeReplayPlan(totalLength: number) {
 export async function replayBufferedStream(
   text: string,
   onChunk: (text: string) => void,
-  signal?: AbortSignal
+  signal?: AbortSignal,
 ): Promise<void> {
   if (!text) return;
   const { chunkSize, delayMs } = computeReplayPlan(text.length);
@@ -285,8 +288,8 @@ export function createFetchTransport(options: FetchTransportOptions = {}): Trans
             "HTTP_ERROR",
             `HTTP ${response.status}: ${errorText}`,
             undefined,
-            response.status
-          )
+            response.status,
+          ),
         );
         return;
       }
@@ -333,9 +336,7 @@ export function createFetchTransport(options: FetchTransportOptions = {}): Trans
 
       if (failure.code === "ABORTED" || req.signal?.aborted) {
         finishError(
-          failure.code === "ABORTED"
-            ? failure
-            : new TransportFailure("ABORTED", "Request aborted")
+          failure.code === "ABORTED" ? failure : new TransportFailure("ABORTED", "Request aborted"),
         );
         return;
       }

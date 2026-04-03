@@ -20,7 +20,11 @@ interface HomeProps {
   projects: ProjectSummary[];
   activeSessionId: string | null;
   onArchiveSession: (sessionId: string) => void | Promise<void>;
-  onCreateSession: (topic: string, attachments: ComposerAttachment[], projectId?: string | null) => void | Promise<void>;
+  onCreateSession: (
+    topic: string,
+    attachments: ComposerAttachment[],
+    projectId?: string | null,
+  ) => void | Promise<void>;
   onDeleteSession: (sessionId: string) => void | Promise<void>;
   onOpenSession: (sessionId: string) => void;
   onRestoreSession: (sessionId: string) => void;
@@ -414,7 +418,6 @@ export function Home({
     };
   }, [sessions, projects]);
 
-
   const clearComposerAttachments = () => {
     revokeComposerAttachmentPreviews(composerAttachments);
     setComposerAttachments([]);
@@ -433,7 +436,10 @@ export function Home({
     }
   };
 
-  const appendAttachments = async (files: File[], source: "file-picker" | "photo-picker" | "camera") => {
+  const appendAttachments = async (
+    files: File[],
+    source: "file-picker" | "photo-picker" | "camera",
+  ) => {
     if (files.length === 0) return;
 
     try {
@@ -630,12 +636,7 @@ export function Home({
 
     window.addEventListener("keydown", onWindowKeyDown);
     return () => window.removeEventListener("keydown", onWindowKeyDown);
-  }, [
-    focusedAttachmentId,
-    pendingSessionAction,
-    showAttachmentMenu,
-    showCameraCapture,
-  ]);
+  }, [focusedAttachmentId, pendingSessionAction, showAttachmentMenu, showCameraCapture]);
 
   useEffect(() => {
     composerAttachmentsRef.current = composerAttachments;
@@ -702,12 +703,22 @@ export function Home({
                         flex: 1,
                       }}
                     >
-                      <span className="workstation-project-chevron" style={{
-                        transform: isExpanded ? "rotate(90deg)" : "rotate(0deg)",
-                      }}>
+                      <span
+                        className="workstation-project-chevron"
+                        style={{
+                          transform: isExpanded ? "rotate(90deg)" : "rotate(0deg)",
+                        }}
+                      >
                         ▶
                       </span>
-                      <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      <span
+                        style={{
+                          flex: 1,
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
                         {project.name}
                       </span>
                       {projectSessions.length > 0 && (
@@ -726,7 +737,16 @@ export function Home({
                     </button>
                   </div>
                   {isExpanded && (
-                    <div className="workstation-expand-panel" style={{ paddingLeft: 12, marginTop: 4, display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+                    <div
+                      className="workstation-expand-panel"
+                      style={{
+                        paddingLeft: 12,
+                        marginTop: 4,
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: "0.5rem",
+                      }}
+                    >
                       {projectSessions.length > 0 ? (
                         projectSessions.map((session) => (
                           <div
@@ -740,7 +760,9 @@ export function Home({
                                 className="workstation-thread-open"
                               >
                                 <div className="workstation-thread-meta">
-                                  <span className={`session-status session-status-${session.status}`}>
+                                  <span
+                                    className={`session-status session-status-${session.status}`}
+                                  >
                                     {STATUS_LABELS[session.status]}
                                   </span>
                                   <span>{formatRelativeTime(session.updatedAt)}</span>
@@ -801,9 +823,12 @@ export function Home({
                   background: focusedProjectId == null ? "rgba(20,184,166,0.08)" : undefined,
                 }}
               >
-                <span className="workstation-project-chevron" style={{
-                  transform: expandedProjects.has(INBOX_KEY) ? "rotate(90deg)" : "rotate(0deg)",
-                }}>
+                <span
+                  className="workstation-project-chevron"
+                  style={{
+                    transform: expandedProjects.has(INBOX_KEY) ? "rotate(90deg)" : "rotate(0deg)",
+                  }}
+                >
                   ▶
                 </span>
                 <span style={{ flex: 1 }}>Sessions</span>
@@ -812,7 +837,16 @@ export function Home({
                 )}
               </button>
               {expandedProjects.has(INBOX_KEY) && treeData.inboxSessions.length > 0 && (
-                <div className="workstation-expand-panel" style={{ paddingLeft: 12, marginTop: 4, display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+                <div
+                  className="workstation-expand-panel"
+                  style={{
+                    paddingLeft: 12,
+                    marginTop: 4,
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: "0.5rem",
+                  }}
+                >
                   {treeData.inboxSessions.map((session) => (
                     <div
                       key={session.id}
@@ -874,24 +908,42 @@ export function Home({
                     padding: "8px 4px 4px",
                   }}
                 >
-                  <span className="workstation-project-chevron" style={{
-                    transform: showArchived ? "rotate(90deg)" : "rotate(0deg)",
-                    fontSize: 8,
-                  }}>
+                  <span
+                    className="workstation-project-chevron"
+                    style={{
+                      transform: showArchived ? "rotate(90deg)" : "rotate(0deg)",
+                      fontSize: 8,
+                    }}
+                  >
                     ▶
                   </span>
                   <span>Archived</span>
                 </button>
                 {showArchived && (
-                  <div className="workstation-expand-panel" style={{ opacity: 0.55, display: "flex", flexDirection: "column", gap: "0.5rem", marginTop: 4 }}>
+                  <div
+                    className="workstation-expand-panel"
+                    style={{
+                      opacity: 0.55,
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: "0.5rem",
+                      marginTop: 4,
+                    }}
+                  >
                     {/* Archived projects with their sessions */}
                     {[...treeData.activeProjects, ...treeData.archivedProjects]
-                      .filter((p) => (treeData.archivedProjectSessionMap.get(p.id)?.length ?? 0) > 0 || p.archivedAt != null)
+                      .filter(
+                        (p) =>
+                          (treeData.archivedProjectSessionMap.get(p.id)?.length ?? 0) > 0 ||
+                          p.archivedAt != null,
+                      )
                       .map((project) => {
-                        const archivedProjectSessions = treeData.archivedProjectSessionMap.get(project.id) ?? [];
+                        const archivedProjectSessions =
+                          treeData.archivedProjectSessionMap.get(project.id) ?? [];
                         const archiveKey = `archived:${project.id}`;
                         const isExpanded = expandedProjects.has(archiveKey);
-                        if (archivedProjectSessions.length === 0 && project.archivedAt == null) return null;
+                        if (archivedProjectSessions.length === 0 && project.archivedAt == null)
+                          return null;
                         return (
                           <div key={project.id}>
                             <div className="workstation-project-row-wrap">
@@ -901,17 +953,29 @@ export function Home({
                                 className="workstation-project-row"
                                 style={{ flex: 1 }}
                               >
-                                <span className="workstation-project-chevron" style={{
-                                  transform: isExpanded ? "rotate(90deg)" : "rotate(0deg)",
-                                  fontSize: 8,
-                                }}>
+                                <span
+                                  className="workstation-project-chevron"
+                                  style={{
+                                    transform: isExpanded ? "rotate(90deg)" : "rotate(0deg)",
+                                    fontSize: 8,
+                                  }}
+                                >
                                   ▶
                                 </span>
-                                <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                <span
+                                  style={{
+                                    flex: 1,
+                                    overflow: "hidden",
+                                    textOverflow: "ellipsis",
+                                    whiteSpace: "nowrap",
+                                  }}
+                                >
                                   {project.name}
                                 </span>
                                 {archivedProjectSessions.length > 0 && (
-                                  <span className="workstation-project-count">{archivedProjectSessions.length}</span>
+                                  <span className="workstation-project-count">
+                                    {archivedProjectSessions.length}
+                                  </span>
                                 )}
                               </button>
                               <button
@@ -925,19 +989,27 @@ export function Home({
                               </button>
                             </div>
                             {isExpanded && archivedProjectSessions.length > 0 && (
-                              <div className="workstation-expand-panel" style={{ paddingLeft: 12, marginTop: 4, display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+                              <div
+                                className="workstation-expand-panel"
+                                style={{
+                                  paddingLeft: 12,
+                                  marginTop: 4,
+                                  display: "flex",
+                                  flexDirection: "column",
+                                  gap: "0.5rem",
+                                }}
+                              >
                                 {archivedProjectSessions.map((session) => (
-                                  <div
-                                    key={session.id}
-                                    className="workstation-thread"
-                                  >
+                                  <div key={session.id} className="workstation-thread">
                                     <div className="workstation-thread-header">
                                       <button
                                         type="button"
                                         onClick={() => onOpenSession(session.id)}
                                         className="workstation-thread-open"
                                       >
-                                        <div className="workstation-thread-title">{session.title}</div>
+                                        <div className="workstation-thread-title">
+                                          {session.title}
+                                        </div>
                                         <div className="workstation-thread-foot">
                                           <span>{session.currentTurn} turns</span>
                                           <span>Archived</span>
@@ -992,11 +1064,13 @@ export function Home({
             )}
 
             {/* Empty state */}
-            {treeData.inboxSessions.length === 0 && treeData.activeProjects.length === 0 && treeData.totalArchived === 0 && (
-              <div className="workstation-empty-state">
-                Your council sessions will appear here after the first run.
-              </div>
-            )}
+            {treeData.inboxSessions.length === 0 &&
+              treeData.activeProjects.length === 0 &&
+              treeData.totalArchived === 0 && (
+                <div className="workstation-empty-state">
+                  Your council sessions will appear here after the first run.
+                </div>
+              )}
           </div>
         </div>
       </aside>
@@ -1127,7 +1201,11 @@ export function Home({
                           />
                         ) : (
                           <div className="workstation-attachment-fallback-icon">
-                            {attachment.kind === "image" ? <ImageIcon size={16} /> : <FileIcon size={16} />}
+                            {attachment.kind === "image" ? (
+                              <ImageIcon size={16} />
+                            ) : (
+                              <FileIcon size={16} />
+                            )}
                           </div>
                         )}
                         <div className="workstation-attachment-copy">
@@ -1175,9 +1253,7 @@ export function Home({
               {showApiWarning && !hasAnyApiKey() && (
                 <div className="workstation-warning">
                   <AlertIcon size={18} />
-                  <div>
-                    Configure at least one provider before opening a new council session.
-                  </div>
+                  <div>Configure at least one provider before opening a new council session.</div>
                   <button
                     type="button"
                     onClick={() => setShowSettings(true)}
@@ -1216,7 +1292,10 @@ export function Home({
                 {AGENT_CARDS.map((agent) => {
                   const configured = configuredProviders.includes(agent.provider);
                   return (
-                    <div key={agent.provider} className={`workstation-agent-card ${configured ? "is-ready" : ""}`}>
+                    <div
+                      key={agent.provider}
+                      className={`workstation-agent-card ${configured ? "is-ready" : ""}`}
+                    >
                       <ProviderIcon provider={agent.provider} size={28} />
                       <div>
                         <div className="workstation-agent-name" style={{ color: agent.color }}>
@@ -1404,7 +1483,8 @@ export function Home({
             <div className="session-action-eyebrow">New Project</div>
             <h2 className="session-action-title">Create a research project</h2>
             <p className="session-action-copy">
-              Group related council sessions and build a shared dossier of evidence that persists across discussions.
+              Group related council sessions and build a shared dossier of evidence that persists
+              across discussions.
             </p>
             <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 12 }}>
               <input
@@ -1449,7 +1529,10 @@ export function Home({
                 }}
               />
             </div>
-            <div className="session-action-buttons" style={{ marginTop: 14, gridTemplateColumns: "1fr 1fr" }}>
+            <div
+              className="session-action-buttons"
+              style={{ marginTop: 14, gridTemplateColumns: "1fr 1fr" }}
+            >
               <button
                 type="button"
                 className="session-action-button is-neutral"
@@ -1518,7 +1601,11 @@ export function Home({
                   setPendingProjectAction(null);
                 }}
               >
-                {pendingProjectAction.archivedAt != null ? <RestoreIcon size={15} /> : <ArchiveIcon size={15} />}
+                {pendingProjectAction.archivedAt != null ? (
+                  <RestoreIcon size={15} />
+                ) : (
+                  <ArchiveIcon size={15} />
+                )}
                 <span>{pendingProjectAction.archivedAt != null ? "Restore" : "Archive"}</span>
               </button>
               <button

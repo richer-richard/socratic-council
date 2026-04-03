@@ -463,15 +463,7 @@ export interface ModelInfo {
 // AGENT TYPES
 // =============================================================================
 
-export type AgentId =
-  | "george"
-  | "cathy"
-  | "grace"
-  | "douglas"
-  | "kate"
-  | "quinn"
-  | "mary"
-  | "zara";
+export type AgentId = "george" | "cathy" | "grace" | "douglas" | "kate" | "quinn" | "mary" | "zara";
 
 export interface AgentConfig {
   id: AgentId;
@@ -487,7 +479,16 @@ export interface AgentConfig {
 export const AgentConfigSchema = z.object({
   id: z.enum(["george", "cathy", "grace", "douglas", "kate", "quinn", "mary", "zara"]),
   name: z.string().min(1).max(50),
-  provider: z.enum(["openai", "anthropic", "google", "deepseek", "kimi", "qwen", "minimax", "zhipu"]),
+  provider: z.enum([
+    "openai",
+    "anthropic",
+    "google",
+    "deepseek",
+    "kimi",
+    "qwen",
+    "minimax",
+    "zhipu",
+  ]),
   model: ModelIdSchema,
   systemPrompt: z.string(),
   avatar: z.string().optional(),
@@ -612,11 +613,7 @@ export interface AppConfig {
 // WHISPER PROTOCOL
 // =============================================================================
 
-export type WhisperType =
-  | "alliance_request"
-  | "alliance_accept"
-  | "alliance_reject"
-  | "strategy";
+export type WhisperType = "alliance_request" | "alliance_accept" | "alliance_reject" | "strategy";
 
 export interface WhisperMessage {
   id: string;

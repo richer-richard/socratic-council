@@ -3,18 +3,18 @@ import { useState } from "react";
 import type { Page } from "../App";
 import type { ComposerAttachment } from "../services/attachments";
 import type { SessionSummary, SessionStatus } from "../services/sessions";
-import {
-  saveProject,
-  removeDossierEntry,
-  type Project,
-} from "../services/projects";
+import { saveProject, removeDossierEntry, type Project } from "../services/projects";
 
 interface ProjectDetailProps {
   project: Project;
   sessions: SessionSummary[];
   onNavigate: (page: Page, sessionId?: string) => void;
   onOpenSession: (sessionId: string) => void;
-  onCreateSession: (topic: string, attachments: ComposerAttachment[], projectId?: string | null) => void | Promise<void>;
+  onCreateSession: (
+    topic: string,
+    attachments: ComposerAttachment[],
+    projectId?: string | null,
+  ) => void | Promise<void>;
   onUpdateProject: (project: Project) => void;
 }
 
@@ -217,7 +217,13 @@ export function ProjectDetail({
       </div>
 
       {/* Tabs */}
-      <div style={{ display: "flex", borderBottom: "1px solid rgba(255,255,255,0.08)", padding: "0 20px" }}>
+      <div
+        style={{
+          display: "flex",
+          borderBottom: "1px solid rgba(255,255,255,0.08)",
+          padding: "0 20px",
+        }}
+      >
         <button
           type="button"
           onClick={() => setActiveTab("sessions")}
@@ -298,7 +304,15 @@ export function ProjectDetail({
             {/* Session list */}
             {recentSessions.length > 0 && (
               <div style={{ marginBottom: 16 }}>
-                <div style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", marginBottom: 8, textTransform: "uppercase", letterSpacing: 1 }}>
+                <div
+                  style={{
+                    fontSize: 11,
+                    color: "rgba(255,255,255,0.4)",
+                    marginBottom: 8,
+                    textTransform: "uppercase",
+                    letterSpacing: 1,
+                  }}
+                >
                   Active ({recentSessions.length})
                 </div>
                 {recentSessions.map((session) => (
@@ -314,8 +328,18 @@ export function ProjectDetail({
                     }}
                     onClick={() => onOpenSession(session.id)}
                   >
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
-                      <span className={`session-status session-status-${session.status}`} style={{ fontSize: 11 }}>
+                    <div
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                        marginBottom: 4,
+                      }}
+                    >
+                      <span
+                        className={`session-status session-status-${session.status}`}
+                        style={{ fontSize: 11 }}
+                      >
                         {STATUS_LABELS[session.status]}
                       </span>
                       <span style={{ fontSize: 11, color: "rgba(255,255,255,0.35)" }}>
@@ -333,7 +357,15 @@ export function ProjectDetail({
 
             {archivedSessions.length > 0 && (
               <div>
-                <div style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", marginBottom: 8, textTransform: "uppercase", letterSpacing: 1 }}>
+                <div
+                  style={{
+                    fontSize: 11,
+                    color: "rgba(255,255,255,0.4)",
+                    marginBottom: 8,
+                    textTransform: "uppercase",
+                    letterSpacing: 1,
+                  }}
+                >
                   Archived ({archivedSessions.length})
                 </div>
                 {archivedSessions.map((session) => (
@@ -360,7 +392,14 @@ export function ProjectDetail({
             )}
 
             {sessions.length === 0 && (
-              <div style={{ textAlign: "center", color: "rgba(255,255,255,0.35)", padding: "40px 0", fontSize: 14 }}>
+              <div
+                style={{
+                  textAlign: "center",
+                  color: "rgba(255,255,255,0.35)",
+                  padding: "40px 0",
+                  fontSize: 14,
+                }}
+              >
                 No sessions yet. Start a new session above.
               </div>
             )}
@@ -370,8 +409,8 @@ export function ProjectDetail({
         {activeTab === "dossier" && (
           <div>
             <p style={{ color: "rgba(255,255,255,0.5)", fontSize: 13, marginBottom: 16 }}>
-              Evidence accumulated across sessions in this project. Promote attachments from sessions
-              or upload directly to build a durable research dossier.
+              Evidence accumulated across sessions in this project. Promote attachments from
+              sessions or upload directly to build a durable research dossier.
             </p>
 
             {project.dossier.length > 0 ? (
@@ -392,10 +431,18 @@ export function ProjectDetail({
                   <div>
                     <div style={{ fontSize: 14, fontWeight: 500 }}>{entry.name}</div>
                     <div style={{ fontSize: 12, color: "rgba(255,255,255,0.4)", marginTop: 2 }}>
-                      {entry.kind.toUpperCase()} &middot; {formatBytes(entry.size)} &middot; Added {formatRelativeTime(entry.addedAt)}
+                      {entry.kind.toUpperCase()} &middot; {formatBytes(entry.size)} &middot; Added{" "}
+                      {formatRelativeTime(entry.addedAt)}
                     </div>
                     {entry.note && (
-                      <div style={{ fontSize: 12, color: "rgba(255,255,255,0.5)", marginTop: 4, fontStyle: "italic" }}>
+                      <div
+                        style={{
+                          fontSize: 12,
+                          color: "rgba(255,255,255,0.5)",
+                          marginTop: 4,
+                          fontStyle: "italic",
+                        }}
+                      >
                         {entry.note}
                       </div>
                     )}
@@ -418,7 +465,14 @@ export function ProjectDetail({
                 </div>
               ))
             ) : (
-              <div style={{ textAlign: "center", color: "rgba(255,255,255,0.3)", padding: "40px 0", fontSize: 14 }}>
+              <div
+                style={{
+                  textAlign: "center",
+                  color: "rgba(255,255,255,0.3)",
+                  padding: "40px 0",
+                  fontSize: 14,
+                }}
+              >
                 No evidence yet. Promote attachments from completed sessions to build the dossier.
               </div>
             )}

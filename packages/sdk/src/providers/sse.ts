@@ -41,4 +41,3 @@ export function createSseParser(onData: (data: string) => void) {
 
   return { push, flush };
 }
-

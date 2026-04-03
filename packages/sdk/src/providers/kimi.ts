@@ -76,11 +76,7 @@ export class KimiProvider implements BaseProvider {
 
   constructor(apiKey: string, options?: { baseUrl?: string; transport?: Transport }) {
     this.apiKey = apiKey;
-    this.endpoint = resolveEndpoint(
-      options?.baseUrl,
-      "/v1/chat/completions",
-      API_ENDPOINTS.kimi
-    );
+    this.endpoint = resolveEndpoint(options?.baseUrl, "/v1/chat/completions", API_ENDPOINTS.kimi);
     this.transport = options?.transport ?? createFetchTransport();
   }
 
@@ -91,7 +87,7 @@ export class KimiProvider implements BaseProvider {
     agent: AgentConfig,
     messages: ChatMessage[],
     options: KimiCompletionOptions = {},
-    stream = false
+    stream = false,
   ): KimiRequest {
     const request: KimiRequest = {
       model: agent.model as KimiModel,
@@ -155,7 +151,7 @@ export class KimiProvider implements BaseProvider {
   async complete(
     agent: AgentConfig,
     messages: ChatMessage[],
-    options: KimiCompletionOptions = {}
+    options: KimiCompletionOptions = {},
   ): Promise<CompletionResult> {
     const startTime = Date.now();
     const body = this.buildRequestBody(agent, messages, options, false);
@@ -211,7 +207,7 @@ export class KimiProvider implements BaseProvider {
     agent: AgentConfig,
     messages: ChatMessage[],
     onChunk: StreamCallback,
-    options: KimiCompletionOptions = {}
+    options: KimiCompletionOptions = {},
   ): Promise<CompletionResult> {
     const startTime = Date.now();
     const body = this.buildRequestBody(agent, messages, options, true);
@@ -280,7 +276,7 @@ export class KimiProvider implements BaseProvider {
             resolve();
           },
           onError: (error) => reject(new Error(`${error.code}: ${error.message}`)),
-        }
+        },
       );
     });
 

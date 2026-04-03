@@ -24,11 +24,7 @@ export class GoogleProvider implements BaseProvider {
 
   constructor(apiKey: string, options?: { baseUrl?: string; transport?: Transport }) {
     this.apiKey = apiKey;
-    this.baseUrl = resolveEndpoint(
-      options?.baseUrl,
-      "/v1beta/models",
-      API_ENDPOINTS.google
-    );
+    this.baseUrl = resolveEndpoint(options?.baseUrl, "/v1beta/models", API_ENDPOINTS.google);
     this.transport = options?.transport ?? createFetchTransport();
   }
 
@@ -43,9 +39,10 @@ export class GoogleProvider implements BaseProvider {
   /**
    * Convert ChatMessage array to Gemini contents format
    */
-  private formatContents(
-    messages: ChatMessage[]
-  ): { contents: GeminiRequest["contents"]; systemInstruction?: GeminiRequest["systemInstruction"] } {
+  private formatContents(messages: ChatMessage[]): {
+    contents: GeminiRequest["contents"];
+    systemInstruction?: GeminiRequest["systemInstruction"];
+  } {
     let systemInstruction: GeminiRequest["systemInstruction"] | undefined;
     const contents: GeminiRequest["contents"] = [];
 
@@ -95,7 +92,7 @@ export class GoogleProvider implements BaseProvider {
   private buildRequestBody(
     agent: AgentConfig,
     messages: ChatMessage[],
-    options: CompletionOptions = {}
+    options: CompletionOptions = {},
   ): GeminiRequest {
     const { contents, systemInstruction } = this.formatContents(messages);
     const modelInfo = getModelInfo(agent.model);
@@ -143,7 +140,7 @@ export class GoogleProvider implements BaseProvider {
   async complete(
     agent: AgentConfig,
     messages: ChatMessage[],
-    options: CompletionOptions = {}
+    options: CompletionOptions = {},
   ): Promise<CompletionResult> {
     const startTime = Date.now();
     const url = this.getApiUrl(agent.model as GeminiModel, false);
@@ -181,7 +178,7 @@ export class GoogleProvider implements BaseProvider {
       .filter((p: { text?: string; thought?: boolean }) => p.text && p.thought)
       .map((p: { text?: string }) => p.text ?? "")
       .join("");
-    
+
     // Extract token usage
     const usageMetadata = data.usageMetadata ?? {};
 
@@ -205,7 +202,7 @@ export class GoogleProvider implements BaseProvider {
     agent: AgentConfig,
     messages: ChatMessage[],
     onChunk: StreamCallback,
-    options: CompletionOptions = {}
+    options: CompletionOptions = {},
   ): Promise<CompletionResult> {
     const startTime = Date.now();
     const url = `${this.getApiUrl(agent.model as GeminiModel, true)}?alt=sse`;
@@ -269,7 +266,7 @@ export class GoogleProvider implements BaseProvider {
             resolve();
           },
           onError: (error) => reject(new Error(`${error.code}: ${error.message}`)),
-        }
+        },
       );
     });
 

@@ -3,7 +3,13 @@
  * Uses DuckDuckGo's instant answer API as a lightweight, keyless search provider.
  */
 
-import type { Citation, OracleResult, OracleTool, SearchResult, VerificationResult } from "@socratic-council/shared";
+import type {
+  Citation,
+  OracleResult,
+  OracleTool,
+  SearchResult,
+  VerificationResult,
+} from "@socratic-council/shared";
 
 const DUCKDUCKGO_ENDPOINT = "https://api.duckduckgo.com/";
 const CLAIM_STOP_WORDS = new Set([
@@ -75,8 +81,8 @@ function extractClaimTerms(claim: string): string[] {
       normalizeText(claim)
         .split(" ")
         .map((term) => term.trim())
-        .filter((term) => term.length >= 3 && !CLAIM_STOP_WORDS.has(term))
-    )
+        .filter((term) => term.length >= 3 && !CLAIM_STOP_WORDS.has(term)),
+    ),
   );
 }
 
@@ -84,7 +90,10 @@ function hasNegation(text: string): boolean {
   return NEGATION_PATTERNS.some((pattern) => pattern.test(text));
 }
 
-function scoreEvidence(claim: string, result: SearchResult): { support: number; contradiction: number } {
+function scoreEvidence(
+  claim: string,
+  result: SearchResult,
+): { support: number; contradiction: number } {
   const normalizedClaim = normalizeText(claim);
   const haystack = normalizeText(`${result.title} ${result.snippet}`);
   if (!normalizedClaim || !haystack) {
@@ -176,7 +185,11 @@ async function fetchDuckDuckGo(query: string): Promise<SearchResult[]> {
     Heading?: string;
     AbstractText?: string;
     AbstractURL?: string;
-    RelatedTopics?: Array<{ Text?: string; FirstURL?: string; Topics?: Array<{ Text?: string; FirstURL?: string }> }>;
+    RelatedTopics?: Array<{
+      Text?: string;
+      FirstURL?: string;
+      Topics?: Array<{ Text?: string; FirstURL?: string }>;
+    }>;
   };
 
   const results: SearchResult[] = [];

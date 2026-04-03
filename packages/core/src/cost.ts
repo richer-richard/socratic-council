@@ -3,12 +3,7 @@
  * Tracks per-agent token usage and estimated USD cost.
  */
 
-import type {
-  AgentCostBreakdown,
-  AgentId,
-  CostTracker,
-  ModelInfo,
-} from "@socratic-council/shared";
+import type { AgentCostBreakdown, AgentId, CostTracker, ModelInfo } from "@socratic-council/shared";
 import { getModelInfo } from "@socratic-council/shared";
 
 interface TokenUsage {
@@ -17,10 +12,13 @@ interface TokenUsage {
   reasoning?: number;
 }
 
-function estimateUsd(usage: TokenUsage, modelInfo?: ModelInfo): { usd: number; pricingAvailable: boolean } {
+function estimateUsd(
+  usage: TokenUsage,
+  modelInfo?: ModelInfo,
+): { usd: number; pricingAvailable: boolean } {
   const pricing = modelInfo?.pricing;
   const hasPricing = Boolean(
-    pricing && (pricing.inputCostPer1M || pricing.outputCostPer1M || pricing.reasoningCostPer1M)
+    pricing && (pricing.inputCostPer1M || pricing.outputCostPer1M || pricing.reasoningCostPer1M),
   );
 
   if (!hasPricing) {
@@ -29,8 +27,7 @@ function estimateUsd(usage: TokenUsage, modelInfo?: ModelInfo): { usd: number; p
 
   const inputCost = ((usage.input || 0) / 1_000_000) * (pricing?.inputCostPer1M ?? 0);
   const outputCost = ((usage.output || 0) / 1_000_000) * (pricing?.outputCostPer1M ?? 0);
-  const reasoningCost =
-    ((usage.reasoning || 0) / 1_000_000) * (pricing?.reasoningCostPer1M ?? 0);
+  const reasoningCost = ((usage.reasoning || 0) / 1_000_000) * (pricing?.reasoningCostPer1M ?? 0);
 
   return { usd: inputCost + outputCost + reasoningCost, pricingAvailable: true };
 }

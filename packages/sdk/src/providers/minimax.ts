@@ -69,7 +69,7 @@ function extractThinkingText(block: MiniMaxContentBlock | undefined): string {
   if (typeof block.thinking === "string" && block.thinking.length > 0) {
     return block.thinking;
   }
-  return block.type === "thinking" ? block.text ?? "" : "";
+  return block.type === "thinking" ? (block.text ?? "") : "";
 }
 
 function extractContentText(block: MiniMaxContentBlock | undefined): string {
@@ -112,8 +112,7 @@ function estimateReasoningTokensFromThinking(thinking: string): number | undefin
 
 function estimateMessageTokens(messages: ChatMessage[], system?: string): number {
   const chars =
-    messages.reduce((sum, message) => sum + message.content.length + 16, 0) +
-    (system?.length ?? 0);
+    messages.reduce((sum, message) => sum + message.content.length + 16, 0) + (system?.length ?? 0);
   return Math.max(1, Math.ceil(chars / 4));
 }
 
@@ -212,7 +211,7 @@ export class MiniMaxProvider implements BaseProvider {
     agent: AgentConfig,
     messages: ChatMessage[],
     options: CompletionOptions = {},
-    stream = false
+    stream = false,
   ): MiniMaxRequest {
     const systemMessage = messages.find((m) => m.role === "system");
     const maxTokens = options.maxTokens ?? agent.maxTokens ?? 4096;
@@ -246,7 +245,7 @@ export class MiniMaxProvider implements BaseProvider {
   async complete(
     agent: AgentConfig,
     messages: ChatMessage[],
-    options: CompletionOptions = {}
+    options: CompletionOptions = {},
   ): Promise<CompletionResult> {
     const startTime = Date.now();
     const body = this.buildRequestBody(agent, messages, options, false);
@@ -287,7 +286,8 @@ export class MiniMaxProvider implements BaseProvider {
           data.usage?.output_tokens ??
           data.usage?.completion_tokens ??
           estimateOutputTokens(content, thinking),
-        reasoning: extractReasoningTokens(data.usage) ?? estimateReasoningTokensFromThinking(thinking),
+        reasoning:
+          extractReasoningTokens(data.usage) ?? estimateReasoningTokensFromThinking(thinking),
       },
       finishReason: this.mapFinishReason(data.stop_reason),
       latencyMs: Date.now() - startTime,
@@ -298,7 +298,7 @@ export class MiniMaxProvider implements BaseProvider {
     agent: AgentConfig,
     messages: ChatMessage[],
     onChunk: StreamCallback,
-    options: CompletionOptions = {}
+    options: CompletionOptions = {},
   ): Promise<CompletionResult> {
     const startTime = Date.now();
     const body = this.buildRequestBody(agent, messages, options, true);
@@ -416,7 +416,7 @@ export class MiniMaxProvider implements BaseProvider {
             resolve();
           },
           onError: (error) => reject(new Error(`${error.code}: ${error.message}`)),
-        }
+        },
       );
     });
 

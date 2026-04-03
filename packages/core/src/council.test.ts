@@ -1,7 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AgentConfig, AgentId, ProviderCredentials } from "@socratic-council/shared";
 import { DEFAULT_AGENTS } from "@socratic-council/shared";
-import { TransportFailure, type StreamHandlers, type StreamRequest, type Transport } from "@socratic-council/sdk";
+import {
+  TransportFailure,
+  type StreamHandlers,
+  type StreamRequest,
+  type Transport,
+} from "@socratic-council/sdk";
 import { Council } from "./council.js";
 
 function createSingleAgent(agent: AgentConfig) {
@@ -106,11 +111,7 @@ describe("Council", () => {
 
   it("does not advance the turn when the provider is missing", async () => {
     const agent = createDeepSeekAgent({ provider: "anthropic" });
-    const council = new Council(
-      {},
-      { autoMode: true, maxTurns: 1 },
-      createSingleAgent(agent),
-    );
+    const council = new Council({}, { autoMode: true, maxTurns: 1 }, createSingleAgent(agent));
 
     await council.start("Missing provider");
 
@@ -155,9 +156,17 @@ describe("Council", () => {
     council.importState(
       JSON.stringify({
         id: "imported",
-        config: { topic: "Imported", maxTurns: 5, biddingTimeout: 1000, budgetLimit: 2, autoMode: true },
+        config: {
+          topic: "Imported",
+          maxTurns: 5,
+          biddingTimeout: 1000,
+          budgetLimit: 2,
+          autoMode: true,
+        },
         agents: [agent],
-        messages: [{ id: "m1", agentId: "system", content: "Imported topic", timestamp: Date.now() }],
+        messages: [
+          { id: "m1", agentId: "system", content: "Imported topic", timestamp: Date.now() },
+        ],
         currentTurn: 2,
         totalCost: 1.25,
         status: "running",
