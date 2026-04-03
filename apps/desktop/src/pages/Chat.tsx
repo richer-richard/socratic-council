@@ -149,7 +149,7 @@ Rules:
 - Proactively call oracle.file_search for attached-file evidence and oracle.web_search for current external facts when that would materially improve the answer.
 - If you know you need a tool, emit only the @tool(name, {args}) line and stop. The app will execute it and return control to you.
 - If the room has clearly converged and more debate would be repetitive, append @end() on its own line after your visible closing message to request the closing round.
-- If you need one specific agent to answer next, append exactly one standalone line: @handoff({"to":"cathy","question":"one precise follow-up question"}).
+- If you need one specific agent to answer next, append exactly one standalone line: @handoff({"to":"cathy","question":"one precise follow-up question"}). You may only hand off to an agent who has NOT already spoken this round. If the agent you want has already spoken, wait until the next round.
 - If a retrieved passage looks incomplete, do one more targeted search until you have enough surrounding context.
 - Call tools early instead of burning time in hidden reasoning before the search starts.
 - Ask at most one concrete question, and only if it materially helps the group decide. Do not force a question every turn.
@@ -599,10 +599,11 @@ function EndVoteBoardCard({
 }) {
   const { yes, no } = countEndVoteChoices(board.votes, board.agentOrder);
   const pending = Math.max(board.totalAgents - yes - no, 0);
-  const noReasonEntries = board.agentOrder
-    .filter((agentId) => board.votes[agentId] === "no")
+  const allReasonEntries = board.agentOrder
+    .filter((agentId) => board.votes[agentId] != null)
     .map((agentId) => ({
       agentId,
+      choice: board.votes[agentId]!,
       reason: board.reasons[agentId]?.trim() ?? "",
     }))
     .filter((entry) => entry.reason.length > 0);
@@ -668,15 +669,20 @@ function EndVoteBoardCard({
 
       {board.outcome && <div className="end-vote-board-outcome">{board.outcome}</div>}
 
-      {noReasonEntries.length > 0 && (
+      {allReasonEntries.length > 0 && (
         <details className="end-vote-reasons-panel">
           <summary className="end-vote-reasons-summary">
-            Show objections ({noReasonEntries.length})
+            Show reasons ({allReasonEntries.length})
           </summary>
           <div className="end-vote-reasons-list">
-            {noReasonEntries.map((entry) => (
-              <div key={`${board.voteId}-${board.round}-${entry.agentId}`} className="end-vote-reason-item">
-                <div className="end-vote-reason-agent">{AGENT_CONFIG[entry.agentId].name}</div>
+            {allReasonEntries.map((entry) => (
+              <div key={`${board.voteId}-${board.round}-reason-${entry.agentId}`} className="end-vote-reason-item">
+                <div className="end-vote-reason-agent">
+                  {AGENT_CONFIG[entry.agentId].name}
+                  <span className={`end-vote-inline-badge ${entry.choice === "no" ? "is-no" : "is-yes"}`}>
+                    {entry.choice === "yes" ? "YES" : "NO"}
+                  </span>
+                </div>
                 <div className="end-vote-reason-copy">{entry.reason}</div>
               </div>
             ))}
@@ -1067,6 +1073,11 @@ export function Chat({ session, onNavigate, onPersistSession }: ChatProps) {
     }
     return map;
   }, [messages]);
+
+  const displayMessages = useMemo(
+    () => messages.filter((m) => !m.endVoteBallot),
+    [messages],
+  );
 
   const getMessageAttachments = useCallback(
     (message: ChatMessage) =>
@@ -2301,6 +2312,7 @@ Write the official moderator wrap-up in 4 short sentences:
       let streamingContent = "";
       let streamingThinking = "";
       let toolEvents: SessionToolEvent[] = [];
+      let firstContentAt: number | null = null;
       let lastStreamFlushAt = 0;
       let streamFlushTimer: ReturnType<typeof setTimeout> | null = null;
       const clearStreamFlushTimer = () => {
@@ -2375,6 +2387,7 @@ Write the official moderator wrap-up in 4 short sentences:
             (chunk) => {
               if (abortRef.current) return;
               if (chunk.content) {
+                if (!firstContentAt) firstContentAt = Date.now();
                 const detection = streamingToolDetector.push(chunk.content);
                 streamingContent = detection.visibleText;
                 if (detection.toolCalls.length > 0) {
@@ -2597,6 +2610,7 @@ Write the official moderator wrap-up in 4 short sentences:
           ...newMessage,
           content: displayContent,
           thinking: result.thinking || streamingThinking || undefined,
+          thinkingMs: firstContentAt ? firstContentAt - newMessage.timestamp : undefined,
           fullResponse: displayContent || undefined,
           isStreaming: false,
           tokens: result.tokens,
@@ -3362,7 +3376,8 @@ Write the official moderator wrap-up in 4 short sentences:
         if (
           directedHandoff &&
           configuredAgentIds.includes(directedHandoff.to) &&
-          configuredProviders.includes(AGENT_CONFIG[directedHandoff.to].provider)
+          configuredProviders.includes(AGENT_CONFIG[directedHandoff.to].provider) &&
+          pendingNow.includes(directedHandoff.to)
         ) {
           selectedSpeaker = directedHandoff.to;
           consumedHandoff = directedHandoff;
@@ -4076,7 +4091,7 @@ Write the official moderator wrap-up in 4 short sentences:
             ref={virtuosoRef}
             style={{ height: "100%" }}
             className="overflow-y-auto"
-            data={messages}
+            data={displayMessages}
             computeItemKey={(_, item) => item.id}
             followOutput={(isAtBottom) =>
               config.preferences.autoScroll && isAtBottom ? "smooth" : false
@@ -4169,11 +4184,17 @@ Write the official moderator wrap-up in 4 short sentences:
                       {(isAgent || isModerator) && modelName && (
                         <span className="discord-model">({modelName})</span>
                       )}
-                      {(isAgent || isModerator) && !!message.thinking?.trim() && (
+                      {(isAgent || isModerator) && (!!message.thinking?.trim() || (message.toolEvents?.length ?? 0) > 0) && (
                         <span
                           className={`discord-thinking-pill${message.isStreaming ? "" : " is-complete"}`}
                         >
-                          {message.isStreaming ? "Thinking" : "Thought Summary"}
+                          {message.isStreaming
+                            ? ((message.toolEvents?.length ?? 0) > 0 ? "Working" : "Thinking")
+                            : ((message.toolEvents?.length ?? 0) > 0
+                                ? `Worked for ${((message.thinkingMs ?? message.latencyMs ?? 0) / 1000).toFixed(3)}s`
+                                : `Thought for ${((message.thinkingMs ?? message.latencyMs ?? 0) / 1000).toFixed(3)}s`
+                              )
+                          }
                         </span>
                       )}
                       {(isAgent || isModerator) &&
@@ -4207,6 +4228,47 @@ Write the official moderator wrap-up in 4 short sentences:
 
                     {/* Message body */}
                     <div className="discord-message-body">
+                      {/* Thinking / Working collapsible — above content */}
+                      {!message.isStreaming && (isAgent || isModerator) && (!!message.thinking?.trim() || (message.toolEvents?.length ?? 0) > 0) && (
+                        <details className="thinking-panel">
+                          <summary className="thinking-summary">
+                            {(message.toolEvents?.length ?? 0) > 0
+                              ? `Worked for ${((message.thinkingMs ?? message.latencyMs ?? 0) / 1000).toFixed(3)}s`
+                              : `Thought for ${((message.thinkingMs ?? message.latencyMs ?? 0) / 1000).toFixed(3)}s`
+                            }
+                          </summary>
+                          <div className="thinking-content-wrapper">
+                            {(message.toolEvents?.length ?? 0) > 0 && (
+                              <div className="thinking-tool-list">
+                                {message.toolEvents!.map((event) => (
+                                  <details
+                                    key={event.id}
+                                    className={`message-tool-call${event.error ? " has-error" : ""}`}
+                                  >
+                                    <summary className="message-tool-summary">
+                                      <span>{event.summary}</span>
+                                    </summary>
+                                    <div className="message-tool-body">
+                                      <div className="message-tool-meta">
+                                        {getToolDisplayName(event.name as ToolCall["name"])} ·{" "}
+                                        {formatTime(event.timestamp)}
+                                      </div>
+                                      <div className="message-tool-output">
+                                        {event.error
+                                          ? `Error: ${event.error}\n\n${event.output}`
+                                          : event.output}
+                                      </div>
+                                    </div>
+                                  </details>
+                                ))}
+                              </div>
+                            )}
+                            {!!message.thinking?.trim() && (
+                              <div className="thinking-content">{message.thinking}</div>
+                            )}
+                          </div>
+                        </details>
+                      )}
                       {message.endVoteBoard ? (
                         <EndVoteBoardCard board={message.endVoteBoard} />
                       ) : message.endVoteBallot ? (
@@ -4331,45 +4393,12 @@ Write the official moderator wrap-up in 4 short sentences:
                           })}
                         </div>
                       )}
-                      {message.toolEvents?.length ? (
-                        <div className="message-tool-list">
-                          {message.toolEvents.map((event) => (
-                            <details
-                              key={event.id}
-                              className={`message-tool-call${event.error ? " has-error" : ""}`}
-                            >
-                              <summary className="message-tool-summary">
-                                <span>{event.summary}</span>
-                              </summary>
-                              <div className="message-tool-body">
-                                <div className="message-tool-meta">
-                                  {getToolDisplayName(event.name as ToolCall["name"])} ·{" "}
-                                  {formatTime(event.timestamp)}
-                                </div>
-                                <div className="message-tool-output">
-                                  {event.error
-                                    ? `Error: ${event.error}\n\n${event.output}`
-                                    : event.output}
-                                </div>
-                              </div>
-                            </details>
-                          ))}
-                        </div>
-                      ) : null}
                       {message.isStreaming && (
                         <span className="typing-indicator">
                           <span className="typing-dot" />
                           <span className="typing-dot" />
                           <span className="typing-dot" />
                         </span>
-                      )}
-                      {!!message.thinking?.trim() && (
-                        <details className="thinking-panel">
-                          <summary className="thinking-summary">
-                            Thought Summary ({message.thinking.length.toLocaleString()} chars)
-                          </summary>
-                          <div className="thinking-content">{message.thinking}</div>
-                        </details>
                       )}
                     </div>
 
