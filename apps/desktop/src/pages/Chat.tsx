@@ -319,6 +319,17 @@ const AGENT_IDS: CouncilAgentId[] = [
   "zara",
 ];
 
+const AGENT_PARTNERS: Record<CouncilAgentId, string> = {
+  george: "Greta",
+  cathy: "Clara",
+  grace: "Gaia",
+  douglas: "Dara",
+  kate: "Kira",
+  quinn: "Quincy",
+  mary: "Mila",
+  zara: "Zoe",
+};
+
 const isCouncilAgent = (id: unknown): id is CouncilAgentId =>
   AGENT_IDS.includes(id as CouncilAgentId);
 
@@ -1059,7 +1070,17 @@ export function Chat({ session, onNavigate, onPersistSession }: ChatProps) {
     return map;
   }, [messages]);
 
-  const displayMessages = useMemo(() => messages.filter((m) => !m.endVoteBallot), [messages]);
+  const displayMessages = useMemo(() => {
+    // Hide the initial system topic bubble (it duplicates the topic shown in the header)
+    const firstMsg = messages[0];
+    const isTopicBubble =
+      firstMsg &&
+      firstMsg.agentId === "system" &&
+      !firstMsg.displayName &&
+      !firstMsg.endVoteBoard &&
+      !firstMsg.moderatorConclusion;
+    return messages.filter((m) => !m.endVoteBallot && !(isTopicBubble && m === firstMsg));
+  }, [messages]);
 
   const getMessageAttachments = useCallback(
     (message: ChatMessage) =>
@@ -1419,7 +1440,11 @@ export function Chat({ session, onNavigate, onPersistSession }: ChatProps) {
           .filter(
             (m) =>
               (isCouncilAgent(m.agentId) || isModeratorMessage(m)) &&
-              !hasStructuredVoteArtifacts(m),
+              !hasStructuredVoteArtifacts(m) &&
+              (m.content ?? "").trim().length > 0 &&
+              !m.content.includes("[No response received]") &&
+              !(m as unknown as Record<string, unknown>).error &&
+              !(m as unknown as Record<string, unknown>).isStreaming,
           )
           .slice(-MAX_CONTEXT_MESSAGES);
         return {
@@ -2043,9 +2068,10 @@ Write the official moderator wrap-up in 4 short sentences:
           return null;
         }
 
-        let parsed = extractActions(result.content || streamingContent || "", REACTION_IDS);
-        let displayContent =
-          parsed.cleaned || normalizeMessageText(result.content || streamingContent || "");
+        // Moderator is instructed NOT to use @quote/@react/@tool/@end, so skip
+        // extractActions to avoid accidentally stripping content that matches
+        // those patterns (e.g. parenthetical asides, dollar signs, etc.).
+        let displayContent = normalizeMessageText(result.content || streamingContent || "");
         let moderatorConclusion =
           options.kind === "final_summary"
             ? parseModeratorConclusionFromText(displayContent)
@@ -2103,9 +2129,7 @@ Write the official moderator wrap-up in 4 short sentences:
             return null;
           }
 
-          parsed = extractActions(result.content || streamingContent || "", REACTION_IDS);
-          displayContent =
-            parsed.cleaned || normalizeMessageText(result.content || streamingContent || "");
+          displayContent = normalizeMessageText(result.content || streamingContent || "");
           moderatorConclusion = parseModeratorConclusionFromText(displayContent);
         }
 
@@ -4280,6 +4304,11 @@ Write the official moderator wrap-up in 4 short sentences:
                         <div className="markdown-content" style={{ whiteSpace: "pre-wrap" }}>
                           {message.content}
                         </div>
+                      ) : isModerator ? (
+                        <Markdown
+                          content={message.content}
+                          className="markdown-content"
+                        />
                       ) : (
                         splitIntoInlineQuoteSegments(message.content).map((segment, idx) => {
                           if (segment.type === "quote") {
@@ -4609,7 +4638,7 @@ Write the official moderator wrap-up in 4 short sentences:
                       </div>
                       <div className="flex-1 min-w-0">
                         <div className={`text-sm font-medium truncate ${agent.color}`}>
-                          {agent.name}
+                          {agent.name}<span className="opacity-40"> & {AGENT_PARTNERS[agentId]}</span>
                         </div>
                         <div className="text-xs text-ink-500 truncate">
                           {hasApiKey ? modelName : "No API key"}
