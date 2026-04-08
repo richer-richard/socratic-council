@@ -92,6 +92,14 @@ export interface SessionMessage extends SharedMessage {
   endVoteBallot?: EndVoteBallotSnapshot;
   endVoteBoard?: EndVoteBoardSnapshot;
   moderatorConclusion?: ModeratorConclusionSnapshot;
+  observerNote?: ObserverNoteSnapshot;
+}
+
+export interface ObserverNoteSnapshot {
+  observerId: string;
+  observerName: string;
+  partnerId: string;
+  partnerName: string;
 }
 
 export interface SessionToolEvent {
@@ -150,6 +158,7 @@ export interface DiscussionSession {
     output: number;
   };
   moderatorUsage: ModeratorUsageSnapshot;
+  observerUsage: ModeratorUsageSnapshot;
   messages: SessionMessage[];
   errors: string[];
   attachments: SessionAttachment[];
@@ -757,6 +766,13 @@ function normalizeDiscussionSession(input: unknown): DiscussionSession | null {
       estimatedUSD: clampNumber(record.moderatorUsage?.estimatedUSD),
       pricingAvailable: Boolean(record.moderatorUsage?.pricingAvailable),
     },
+    observerUsage: {
+      inputTokens: clampNumber(record.observerUsage?.inputTokens),
+      outputTokens: clampNumber(record.observerUsage?.outputTokens),
+      reasoningTokens: clampNumber(record.observerUsage?.reasoningTokens),
+      estimatedUSD: clampNumber(record.observerUsage?.estimatedUSD),
+      pricingAvailable: Boolean(record.observerUsage?.pricingAvailable),
+    },
     messages,
     errors: Array.isArray(record.errors)
       ? record.errors.filter(
@@ -939,6 +955,7 @@ export async function createDiscussionSession(
     currentTurn: 0,
     totalTokens: { input: 0, output: 0 },
     moderatorUsage: { ...EMPTY_MODERATOR_USAGE },
+    observerUsage: { ...EMPTY_MODERATOR_USAGE },
     messages: [],
     errors: [],
     attachments,

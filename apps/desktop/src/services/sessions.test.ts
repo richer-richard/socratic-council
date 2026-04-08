@@ -27,6 +27,13 @@ function createSessionFixture(): DiscussionSession {
       estimatedUSD: 0,
       pricingAvailable: false,
     },
+    observerUsage: {
+      inputTokens: 0,
+      outputTokens: 0,
+      reasoningTokens: 0,
+      estimatedUSD: 0,
+      pricingAvailable: false,
+    },
     messages: [
       {
         id: "msg_1",
