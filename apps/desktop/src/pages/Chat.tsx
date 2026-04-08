@@ -47,6 +47,8 @@ import { calculateMessageCost } from "../utils/cost";
 import { extractHandoffDirective } from "../utils/handoff";
 import { createStreamingToolCallDetector, extractActions } from "../utils/toolActions";
 import { splitIntoInlineQuoteSegments, stripQuoteTokens } from "../utils/inlineQuotes";
+import { useObserverCircle } from "./useObserverCircle";
+import type { ObserverNoteSnapshot } from "../services/sessions";
 import { Virtuoso, type VirtuosoHandle } from "react-virtuoso";
 import type {
   ConflictDetection,
@@ -1531,6 +1533,21 @@ export function Chat({ session, onNavigate, onPersistSession }: ChatProps) {
     [attachmentPayloads, normalizedSession.attachments],
   );
 
+  // Outer-circle observer agents
+  const {
+    observerUsage,
+    runObserverPass,
+    getLatestNoteFor,
+    shouldRunObserverPass,
+  } = useObserverCircle({
+    topic,
+    messagesRef,
+    configRef: configRef as React.MutableRefObject<typeof config>,
+    abortRef,
+    buildAttachmentContext,
+    agentConfig: AGENT_CONFIG,
+  });
+
   // Build conversation history for API call
   const buildConversationHistory = useCallback(
     (agentId: CouncilAgentId, extraContext: APIChatMessage[] = []): APIChatMessage[] => {
@@ -1629,6 +1646,15 @@ Direct question: "${pendingHandoffRef.current.question}"
         });
       }
 
+      // Inject latest observer note (private advice from outer-circle partner)
+      const observerNote = getLatestNoteFor(agentId);
+      if (observerNote) {
+        history.push({
+          role: "user",
+          content: `[Private note from ${observerNote.observerName}]: ${observerNote.content}`,
+        });
+      }
+
       history.push({
         role: "user",
         content:
@@ -1637,7 +1663,7 @@ Direct question: "${pendingHandoffRef.current.question}"
 
       return history;
     },
-    [buildAttachmentContext, buildEngagementPrompt, getContextMessages, topic],
+    [buildAttachmentContext, buildEngagementPrompt, getContextMessages, getLatestNoteFor, topic],
   );
 
   const buildResolutionConversationHistory = useCallback(
@@ -3534,6 +3560,13 @@ Write the official moderator wrap-up in 4 short sentences:
           }
         }
 
+        // Fire outer-circle observer pass (non-blocking)
+        if (!abortRef.current && shouldRunObserverPass(currentTurnRef.current)) {
+          runObserverPass(currentTurnRef.current, (observerMsgs) => {
+            setMessages((prev) => [...prev, ...(observerMsgs as ChatMessage[])]);
+          });
+        }
+
         await new Promise((resolve) => setTimeout(resolve, 500));
       }
 
@@ -3615,6 +3648,8 @@ Write the official moderator wrap-up in 4 short sentences:
       configuredProviders,
       normalizedSession.attachments,
       resetRuntimeState,
+      shouldRunObserverPass,
+      runObserverPass,
     ],
   );
 
@@ -3795,6 +3830,7 @@ Write the official moderator wrap-up in 4 short sentences:
         currentTurn: currentTurnRef.current,
         totalTokens,
         moderatorUsage,
+        observerUsage,
         messages: persistedMessages,
         errors,
         attachments: normalizedSession.attachments,
@@ -3892,11 +3928,11 @@ Write the official moderator wrap-up in 4 short sentences:
       });
   }, [messages, getModelDisplayName]);
 
-  const totalEstimatedCostUSD = (costState?.totalEstimatedUSD ?? 0) + moderatorUsage.estimatedUSD;
+  const totalEstimatedCostUSD = (costState?.totalEstimatedUSD ?? 0) + moderatorUsage.estimatedUSD + observerUsage.estimatedUSD;
   const hasAnyPricing =
     (costState
       ? Object.values(costState.agentCosts).some((agent) => agent.pricingAvailable)
-      : false) || moderatorUsage.pricingAvailable;
+      : false) || moderatorUsage.pricingAvailable || observerUsage.pricingAvailable;
 
   return (
     <div className="app-shell flex flex-col h-screen">
@@ -4125,6 +4161,32 @@ Write the official moderator wrap-up in 4 short sentences:
             }}
             components={virtuosoComponents}
             itemContent={(_, message) => {
+              // Observer note — compact inline card
+              const obsNote = (message as ChatMessage & { observerNote?: ObserverNoteSnapshot }).observerNote;
+              if (obsNote) {
+                const partnerColor = AGENT_CONFIG[obsNote.partnerId as CouncilAgentId]?.color ?? "text-ink-500";
+                const partnerAccent = `var(--color-${obsNote.partnerId})`;
+                return (
+                  <div
+                    className="observer-note-card"
+                    style={{ borderLeftColor: partnerAccent }}
+                  >
+                    <div className="observer-note-header">
+                      <span className="observer-note-label">private note</span>
+                      <span className="observer-note-names">
+                        <span style={{ opacity: 0.6 }}>{obsNote.observerName}</span>
+                        {" → "}
+                        <span className={partnerColor}>{obsNote.partnerName}</span>
+                      </span>
+                      <span className="observer-note-time">
+                        {new Date(message.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                      </span>
+                    </div>
+                    <div className="observer-note-body">{message.content}</div>
+                  </div>
+                );
+              }
+
               const agent = AGENT_CONFIG[message.agentId] ?? AGENT_CONFIG.system;
               const isAgent = isCouncilAgent(message.agentId);
               const isSystem = message.agentId === "system";
@@ -4744,6 +4806,18 @@ Write the official moderator wrap-up in 4 short sentences:
                           : "—"}
                       </span>
                     </div>
+                    {(observerUsage.inputTokens > 0 || observerUsage.outputTokens > 0) && (
+                      <div className="flex items-center justify-between">
+                        <span className="text-ink-400">Observers</span>
+                        <span className="text-ink-500">
+                          {observerUsage.inputTokens}/{observerUsage.outputTokens} · r:
+                          {observerUsage.reasoningTokens} ·{" "}
+                          {observerUsage.pricingAvailable
+                            ? `$${observerUsage.estimatedUSD.toFixed(4)}`
+                            : "—"}
+                        </span>
+                      </div>
+                    )}
                     <div className="pt-2 border-t border-line-soft flex items-center justify-between">
                       <span className="text-ink-500">Estimated total</span>
                       <span className="text-ink-900">

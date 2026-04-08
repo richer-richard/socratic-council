@@ -465,6 +465,8 @@ export interface ModelInfo {
 
 export type AgentId = "george" | "cathy" | "grace" | "douglas" | "kate" | "quinn" | "mary" | "zara";
 
+export type ObserverId = "greta" | "clara" | "gaia" | "dara" | "kira" | "quincy" | "mila" | "zoe";
+
 export interface AgentConfig {
   id: AgentId;
   name: string;

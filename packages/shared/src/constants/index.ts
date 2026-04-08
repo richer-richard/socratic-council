@@ -2,7 +2,7 @@
  * @fileoverview Constants and default configurations for Socratic Council
  */
 
-import type { AgentConfig, AgentId, ModelInfo, Provider } from "../types/index.js";
+import type { AgentConfig, AgentId, ModelInfo, ObserverId, Provider } from "../types/index.js";
 
 // =============================================================================
 // MODEL REGISTRY - All available models with metadata
@@ -916,6 +916,39 @@ export const DEFAULT_AGENTS: Record<AgentId, AgentConfig> = {
     maxTokens: 4096,
   },
 };
+
+// =============================================================================
+// OUTER CIRCLE (OBSERVER) CONFIG
+// =============================================================================
+
+export const OBSERVER_CONFIG: Record<
+  ObserverId,
+  { name: string; partnerId: AgentId; provider: Provider }
+> = {
+  greta: { name: "Greta", partnerId: "george", provider: "openai" },
+  clara: { name: "Clara", partnerId: "cathy", provider: "anthropic" },
+  gaia: { name: "Gaia", partnerId: "grace", provider: "google" },
+  dara: { name: "Dara", partnerId: "douglas", provider: "deepseek" },
+  kira: { name: "Kira", partnerId: "kate", provider: "kimi" },
+  quincy: { name: "Quincy", partnerId: "quinn", provider: "qwen" },
+  mila: { name: "Mila", partnerId: "mary", provider: "minimax" },
+  zoe: { name: "Zoe", partnerId: "zara", provider: "zhipu" },
+};
+
+export const PARTNER_TO_OBSERVER: Record<AgentId, ObserverId> = {
+  george: "greta",
+  cathy: "clara",
+  grace: "gaia",
+  douglas: "dara",
+  kate: "kira",
+  quinn: "quincy",
+  mary: "mila",
+  zara: "zoe",
+};
+
+export const OBSERVER_IDS: ObserverId[] = [
+  "greta", "clara", "gaia", "dara", "kira", "quincy", "mila", "zoe",
+];
 
 // =============================================================================
 // BIDDING WEIGHTS

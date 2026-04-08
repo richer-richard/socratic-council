@@ -52,6 +52,7 @@ export interface DiscussionPreferences {
   autoScroll: boolean;
   soundEffects: boolean;
   moderatorEnabled: boolean;
+  observersEnabled: boolean;
 }
 
 export interface McpConfig {
@@ -101,6 +102,7 @@ const DEFAULT_CONFIG: AppConfig = {
     autoScroll: true,
     soundEffects: false,
     moderatorEnabled: true,
+    observersEnabled: true,
   },
   models: { ...LOCKED_MODELS },
   mcp: {
