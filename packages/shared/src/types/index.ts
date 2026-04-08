@@ -349,9 +349,9 @@ export interface QwenRequest {
 // =============================================================================
 
 export const MiniMaxModels = [
-  "MiniMax-M2.5",
+  "MiniMax-M2.7",
   // Lowercase alias retained for migration/back-compat.
-  "minimax-m2.5",
+  "minimax-m2.7",
 ] as const;
 
 export type MiniMaxModel = (typeof MiniMaxModels)[number];

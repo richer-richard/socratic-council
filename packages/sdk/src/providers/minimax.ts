@@ -202,9 +202,9 @@ export class MiniMaxProvider implements BaseProvider {
   }
 
   private normalizeModel(model: string): MiniMaxModel {
-    if (model === "MiniMax-M2.5") return "MiniMax-M2.5";
-    if (model === "minimax-m2.5") return "MiniMax-M2.5";
-    return "MiniMax-M2.5";
+    if (model === "MiniMax-M2.7") return "MiniMax-M2.7";
+    if (model === "minimax-m2.7") return "MiniMax-M2.7";
+    return "MiniMax-M2.7";
   }
 
   private buildRequestBody(
@@ -464,7 +464,7 @@ export class MiniMaxProvider implements BaseProvider {
         method: "POST",
         headers: createHeaders("minimax", this.apiKey),
         body: JSON.stringify({
-          model: "MiniMax-M2.5",
+          model: "MiniMax-M2.7",
           messages: [{ role: "user", content: "Say 'ok'" }],
           max_tokens: 16,
           stream: false,

@@ -93,6 +93,7 @@ export interface SessionMessage extends SharedMessage {
   endVoteBoard?: EndVoteBoardSnapshot;
   moderatorConclusion?: ModeratorConclusionSnapshot;
   observerNote?: ObserverNoteSnapshot;
+  isResolution?: boolean;
 }
 
 export interface ObserverNoteSnapshot {

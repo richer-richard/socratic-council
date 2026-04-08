@@ -2254,6 +2254,74 @@ body {
   color: var(--ink-700);
 }
 
+/* Resolution card — collapsible closing-round summary */
+.resolution-card {
+  margin: 0.4rem 1.25rem;
+  border-radius: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.15);
+  background: linear-gradient(135deg, rgba(15, 23, 42, 0.6), rgba(15, 23, 42, 0.4));
+  overflow: hidden;
+  transition: border-color 0.2s;
+}
+.resolution-card:hover {
+  border-color: var(--res-accent, rgba(148, 163, 184, 0.3));
+}
+.resolution-card[open] {
+  border-color: var(--res-accent, rgba(148, 163, 184, 0.25));
+}
+.resolution-card-summary {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  padding: 0.7rem 1rem;
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+}
+.resolution-card-summary::-webkit-details-marker {
+  display: none;
+}
+.resolution-card-icon {
+  flex-shrink: 0;
+  opacity: 0.85;
+}
+.resolution-card-header {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+.resolution-card-name {
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+.resolution-card-title {
+  font-size: 0.72rem;
+  color: var(--ink-500);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.resolution-card-time {
+  font-size: 0.65rem;
+  color: var(--ink-500);
+  opacity: 0.6;
+  flex-shrink: 0;
+}
+.resolution-card-body {
+  padding: 0 1rem 0.9rem 1rem;
+  font-size: 0.85rem;
+  line-height: 1.55;
+  border-top: 1px solid rgba(148, 163, 184, 0.1);
+}
+.resolution-card-body .markdown-content {
+  margin-top: 0.6rem;
+}
+.resolution-card-body .thinking-panel {
+  margin-bottom: 0.5rem;
+}
+
 /* Streaming message - subtle pulsing border */
 .discord-message.is-streaming::before {
   animation: streamingPulse 1.5s ease-in-out infinite;

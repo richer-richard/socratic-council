@@ -737,9 +737,9 @@ export const MODEL_REGISTRY: ModelInfo[] = [
 
   // MiniMax models
   {
-    id: "MiniMax-M2.5",
+    id: "MiniMax-M2.7",
     provider: "minimax",
-    name: "MiniMax M2.5",
+    name: "MiniMax M2.7",
     description: "Latest flagship text model",
     contextWindow: 1000000,
     maxOutputTokens: 64000,
@@ -752,9 +752,9 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     },
   },
   {
-    id: "minimax-m2.5",
+    id: "minimax-m2.7",
     provider: "minimax",
-    name: "MiniMax M2.5 (Alias)",
+    name: "MiniMax M2.7 (Alias)",
     description: "Lowercase alias retained for compatibility",
     contextWindow: 1000000,
     maxOutputTokens: 64000,
@@ -901,7 +901,7 @@ export const DEFAULT_AGENTS: Record<AgentId, AgentConfig> = {
     id: "mary",
     name: "Mary",
     provider: "minimax",
-    model: "minimax-m2.5",
+    model: "minimax-m2.7",
     systemPrompt: baseSystemPrompt("Mary"),
     temperature: 1,
     maxTokens: 4096,
