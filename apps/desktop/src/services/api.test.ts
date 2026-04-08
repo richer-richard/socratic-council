@@ -47,7 +47,7 @@ describe("callProvider", () => {
     const result = await callProvider(
       "minimax",
       { apiKey: "test-key" },
-      "minimax-m2.5",
+      "minimax-m2.7",
       [
         { role: "system", content: "System prompt" },
         { role: "user", content: "Hello" },

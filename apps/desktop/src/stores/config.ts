@@ -77,7 +77,7 @@ export const LOCKED_MODELS: Record<Provider, string> = {
   deepseek: "deepseek-reasoner",
   kimi: "kimi-k2.5",
   qwen: "qwen3.5-plus",
-  minimax: "minimax-m2.5",
+  minimax: "minimax-m2.7",
   zhipu: "glm-5",
 };
 
@@ -416,7 +416,7 @@ export const PROVIDER_INFO: Record<
     agent: "Mary",
     avatar: "🟢",
     color: "text-mary",
-    description: "MiniMax M2.5 (Anthropic-compatible CN endpoint)",
+    description: "MiniMax M2.7 (Anthropic-compatible CN endpoint)",
     keyPrefix: "sk-",
     defaultBaseUrl: "https://api.minimaxi.com/anthropic",
   },

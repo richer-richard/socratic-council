@@ -128,8 +128,8 @@ const MODEL_DISPLAY_NAMES: Record<string, string> = {
   // Qwen
   "qwen3.5-plus": "Qwen 3.5 Plus",
   // MiniMax
-  "MiniMax-M2.5": "MiniMax M2.5",
-  "minimax-m2.5": "MiniMax M2.5",
+  "MiniMax-M2.7": "MiniMax M2.7",
+  "minimax-m2.7": "MiniMax M2.7",
   // Zhipu
   "glm-5": "GLM-5",
   "glm-4.7": "GLM-4.7",
@@ -170,12 +170,24 @@ Quoting/Reactions:
 ${getToolPrompt()}
 `;
 
+// Map from agent display name to their outer-circle partner name
+const AGENT_NAME_TO_PARTNER: Record<string, string> = {
+  George: "Greta", Cathy: "Clara", Grace: "Gaia", Douglas: "Dara",
+  Kate: "Kira", Quinn: "Quincy", Mary: "Mila", Zara: "Zoe",
+};
+
 const BASE_SYSTEM_PROMPT = (
   name: string,
-) => `You are ${name} in a group chat with George, Cathy, Grace, Douglas, Kate, Quinn, Mary, and Zara.
+) => {
+  const partnerName = AGENT_NAME_TO_PARTNER[name];
+  const partnerLine = partnerName
+    ? `\nOuter-circle partner: You have a silent partner named ${partnerName} who observes the discussion and may send you private notes marked "[Private note from ${partnerName}]". When ${partnerName} raises a substantive point worth sharing, naturally weave it into your argument — e.g. "my partner ${partnerName} points out…" or "as ${partnerName} noted…". If the note is only about your delivery or strategy (not a new argument), follow the advice silently without mentioning it.\n`
+    : "";
+
+  return `You are ${name} in a group chat with George, Cathy, Grace, Douglas, Kate, Quinn, Mary, and Zara.
 
 Do NOT adopt a persona or specialty. Speak as yourself, and keep the tone natural.
-
+${partnerLine}
 Proactive behavior requirements:
 - If someone is vague, force precision by asking for a measurable claim.
 - If someone makes a strong claim, pressure-test it with one concrete challenge.
@@ -185,6 +197,7 @@ Proactive behavior requirements:
 - The goal is not endless debate. Surface the real disagreement early, then help the group reach a clear closing result.
 
 ${GROUP_CHAT_GUIDELINES}`;
+};
 
 const MODERATOR_SYSTEM_PROMPT = `You are the Moderator in a group chat with George, Cathy, Grace, Douglas, Kate, Quinn, Mary, and Zara.
 
@@ -2752,6 +2765,7 @@ Write the official moderator wrap-up in 4 short sentences:
         content: "",
         timestamp: Date.now(),
         isStreaming: true,
+        isResolution: true,
         metadata: { model: model as ModelId, latencyMs: 0 },
       };
 
@@ -4184,6 +4198,54 @@ Write the official moderator wrap-up in 4 short sentences:
                     </div>
                     <div className="observer-note-body">{message.content}</div>
                   </div>
+                );
+              }
+
+              // Resolution message — collapsible card box
+              if (
+                message.isResolution &&
+                isCouncilAgent(message.agentId) &&
+                !message.isStreaming
+              ) {
+                const resAgent = AGENT_CONFIG[message.agentId];
+                const resAccent = `var(--color-${message.agentId})`;
+                // Generate a brief title from the first sentence (strip punctuation)
+                const firstSentence = (message.content ?? "").split(/[.!?\n]/)[0] ?? "";
+                const briefTitle = firstSentence
+                  .replace(/[,;:\-–—]/g, "")
+                  .trim()
+                  .split(/\s+/)
+                  .slice(0, 8)
+                  .join(" ");
+
+                return (
+                  <details className="resolution-card" style={{ "--res-accent": resAccent } as CSSProperties}>
+                    <summary className="resolution-card-summary">
+                      <div className="resolution-card-icon">
+                        <ProviderIcon provider={resAgent.provider} size={24} />
+                      </div>
+                      <div className="resolution-card-header">
+                        <span className={`resolution-card-name ${resAgent.color}`}>{resAgent.name}</span>
+                        <span className="resolution-card-title">{briefTitle || "Closing reflection"}</span>
+                      </div>
+                      <span className="resolution-card-time">
+                        {new Date(message.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                      </span>
+                    </summary>
+                    <div className="resolution-card-body">
+                      {!!message.thinking?.trim() && (
+                        <details className="thinking-panel">
+                          <summary className="thinking-summary">
+                            Thought for {((message.thinkingMs ?? message.latencyMs ?? 0) / 1000).toFixed(1)}s
+                          </summary>
+                          <div className="thinking-content-wrapper">
+                            <div className="thinking-content">{message.thinking}</div>
+                          </div>
+                        </details>
+                      )}
+                      <Markdown content={message.content} className="markdown-content" />
+                    </div>
+                  </details>
                 );
               }
 
