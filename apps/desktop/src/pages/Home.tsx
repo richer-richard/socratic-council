@@ -40,16 +40,17 @@ const INBOX_KEY = "__inbox__";
 const AGENT_CARDS: Array<{
   provider: Provider;
   name: string;
+  partner: string;
   color: string;
 }> = [
-  { provider: "openai", name: "George", color: "var(--color-george)" },
-  { provider: "anthropic", name: "Cathy", color: "var(--color-cathy)" },
-  { provider: "google", name: "Grace", color: "var(--color-grace)" },
-  { provider: "deepseek", name: "Douglas", color: "var(--color-douglas)" },
-  { provider: "kimi", name: "Kate", color: "var(--color-kate)" },
-  { provider: "qwen", name: "Quinn", color: "var(--color-quinn)" },
-  { provider: "minimax", name: "Mary", color: "var(--color-mary)" },
-  { provider: "zhipu", name: "Zara", color: "var(--color-zara)" },
+  { provider: "openai", name: "George", partner: "Greta", color: "var(--color-george)" },
+  { provider: "anthropic", name: "Cathy", partner: "Clara", color: "var(--color-cathy)" },
+  { provider: "google", name: "Grace", partner: "Gaia", color: "var(--color-grace)" },
+  { provider: "deepseek", name: "Douglas", partner: "Dara", color: "var(--color-douglas)" },
+  { provider: "kimi", name: "Kate", partner: "Kira", color: "var(--color-kate)" },
+  { provider: "qwen", name: "Quinn", partner: "Quincy", color: "var(--color-quinn)" },
+  { provider: "minimax", name: "Mary", partner: "Mila", color: "var(--color-mary)" },
+  { provider: "zhipu", name: "Zara", partner: "Zoe", color: "var(--color-zara)" },
 ];
 
 const STATUS_LABELS: Record<SessionStatus, string> = {
@@ -1299,7 +1300,7 @@ export function Home({
                       <ProviderIcon provider={agent.provider} size={28} />
                       <div>
                         <div className="workstation-agent-name" style={{ color: agent.color }}>
-                          {agent.name}
+                          {agent.name}<span style={{ opacity: 0.4 }}> & {agent.partner}</span>
                         </div>
                         <div className="workstation-agent-provider">
                           {PROVIDER_INFO[agent.provider].name}

@@ -265,7 +265,7 @@ export async function callProvider(
 
     apiLogger.log("error", provider, "Request failed", { error: message });
 
-    if (provider === "minimax" && !aborted) {
+    if ((provider === "minimax" || provider === "zhipu") && !aborted) {
       apiLogger.log("warn", provider, "Retrying with non-stream completion after stream failure", {
         model,
         error: message,
@@ -281,7 +281,7 @@ export async function callProvider(
           success: true,
         };
       } catch (retryError) {
-        apiLogger.log("error", provider, "MiniMax non-stream retry failed", { retryError });
+        apiLogger.log("error", provider, `${provider} non-stream retry failed`, { retryError });
       }
     }
 

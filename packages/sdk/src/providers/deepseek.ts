@@ -35,24 +35,41 @@ export class DeepSeekProvider implements BaseProvider {
   /**
    * Build the request body for DeepSeek API (OpenAI-compatible format)
    */
+  private isReasonerModel(model: string): boolean {
+    return model.includes("reasoner");
+  }
+
   private buildRequestBody(
     agent: AgentConfig,
     messages: ChatMessage[],
     options: CompletionOptions = {},
     stream = false,
   ): DeepSeekRequest {
+    const isReasoner = this.isReasonerModel(agent.model);
+
+    // deepseek-reasoner does not support the system role. Convert system
+    // messages to user messages so the model still receives the instructions.
+    const adaptedMessages = isReasoner
+      ? messages.map((msg) =>
+          msg.role === "system"
+            ? { role: "user" as const, content: `[System Instructions]\n${msg.content}` }
+            : { role: msg.role, content: msg.content },
+        )
+      : messages.map((msg) => ({ role: msg.role, content: msg.content }));
+
     const request: DeepSeekRequest = {
       model: agent.model as DeepSeekModel,
-      messages: messages.map((msg) => ({
-        role: msg.role,
-        content: msg.content,
-      })),
+      messages: adaptedMessages,
       stream,
     };
 
-    // Temperature (DeepSeek supports 0-2)
-    const temperature = options.temperature ?? agent.temperature ?? 1;
-    request.temperature = Math.max(0, Math.min(2, temperature));
+    // deepseek-reasoner only accepts temperature 0; other models support 0-2.
+    if (isReasoner) {
+      request.temperature = 0;
+    } else {
+      const temperature = options.temperature ?? agent.temperature ?? 1;
+      request.temperature = Math.max(0, Math.min(2, temperature));
+    }
 
     // Max tokens
     if (options.maxTokens) {
