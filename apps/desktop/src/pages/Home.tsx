@@ -13,7 +13,7 @@ import {
 } from "../services/attachments";
 import type { SessionSummary, SessionStatus } from "../services/sessions";
 import type { ProjectSummary } from "../services/projects";
-import { useConfig, getShuffledTopics, PROVIDER_INFO, type Provider } from "../stores/config";
+import { useConfig, getShuffledTopics, type Provider } from "../stores/config";
 
 interface HomeProps {
   sessions: SessionSummary[];
@@ -52,6 +52,76 @@ const AGENT_CARDS: Array<{
   { provider: "minimax", name: "Mary", partner: "Mila", color: "var(--color-mary)" },
   { provider: "zhipu", name: "Zara", partner: "Zoe", color: "var(--color-zara)" },
 ];
+
+const AGENT_COLORS: Record<string, string> = {
+  openai: "#60a5fa",
+  anthropic: "#fbbf24",
+  google: "#34d399",
+  deepseek: "#f87171",
+  kimi: "#2dd4bf",
+  qwen: "#22d3ee",
+  minimax: "#f472b6",
+  zhipu: "#a78bfa",
+};
+
+function CouncilCircleViz({ configured }: { configured: Provider[] }) {
+  const cx = 100;
+  const cy = 100;
+  const rInner = 38;
+  const rOuter = 68;
+  const nodeR = 5;
+
+  const nodes = AGENT_CARDS.map((agent, i) => {
+    const angle = (i / 8) * Math.PI * 2 - Math.PI / 2;
+    const color = AGENT_COLORS[agent.provider] ?? "#9aa6bd";
+    const active = configured.includes(agent.provider);
+    return {
+      inner: { x: cx + Math.cos(angle) * rInner, y: cy + Math.sin(angle) * rInner },
+      outer: { x: cx + Math.cos(angle) * rOuter, y: cy + Math.sin(angle) * rOuter },
+      color,
+      active,
+      name: agent.name,
+      partner: agent.partner,
+    };
+  });
+
+  return (
+    <div className="council-circle-viz">
+      <svg viewBox="0 0 200 200" width="180" height="180">
+        <defs>
+          <radialGradient id="cc-glow" cx="50%" cy="50%" r="50%">
+            <stop offset="0%" stopColor="rgba(148, 163, 184, 0.06)" />
+            <stop offset="100%" stopColor="transparent" />
+          </radialGradient>
+        </defs>
+        <circle cx={cx} cy={cy} r="90" fill="url(#cc-glow)" />
+        {/* Rings */}
+        <circle cx={cx} cy={cy} r={rOuter} fill="none" stroke="rgba(148,163,184,0.08)" strokeWidth="0.5" />
+        <circle cx={cx} cy={cy} r={rInner} fill="none" stroke="rgba(148,163,184,0.12)" strokeWidth="0.5" />
+        {/* Connecting lines */}
+        {nodes.map((n, i) => (
+          <line key={`line-${i}`} x1={n.inner.x} y1={n.inner.y} x2={n.outer.x} y2={n.outer.y}
+            stroke={n.active ? n.color : "rgba(148,163,184,0.08)"} strokeWidth="0.5" opacity={n.active ? 0.3 : 0.15} />
+        ))}
+        {/* Outer nodes (observers) */}
+        {nodes.map((n, i) => (
+          <circle key={`outer-${i}`} cx={n.outer.x} cy={n.outer.y} r={nodeR * 0.65}
+            fill={n.active ? n.color : "rgba(148,163,184,0.15)"} opacity={n.active ? 0.35 : 0.2} />
+        ))}
+        {/* Inner nodes (speakers) */}
+        {nodes.map((n, i) => (
+          <g key={`inner-${i}`}>
+            {n.active && (
+              <circle cx={n.inner.x} cy={n.inner.y} r={nodeR * 2} fill={n.color} opacity={0.08} />
+            )}
+            <circle cx={n.inner.x} cy={n.inner.y} r={nodeR}
+              fill={n.active ? n.color : "rgba(148,163,184,0.2)"} opacity={n.active ? 0.85 : 0.3} />
+          </g>
+        ))}
+      </svg>
+    </div>
+  );
+}
 
 const STATUS_LABELS: Record<SessionStatus, string> = {
   draft: "Draft",
@@ -661,8 +731,7 @@ export function Home({
             <CouncilMark size={36} />
           </div>
           <div>
-            <div className="workstation-brand-label">Socratic Council</div>
-            <div className="workstation-brand-subtitle">Local Workstation</div>
+            <div className="workstation-brand-label" style={{ fontFamily: "var(--font-mono)", textTransform: "lowercase", letterSpacing: "0.02em" }}>socratic council</div>
           </div>
         </div>
 
@@ -1080,22 +1149,10 @@ export function Home({
         <div className="workstation-stage">
           <section className="workstation-composer-card">
             <div className="workstation-composer-header">
-              <div className="workstation-hero">
-                <div className="workstation-hero-kicker">Council Chamber</div>
-                <div className="workstation-hero-mark">
-                  <CouncilMark size={84} />
-                </div>
-                <h2 className="elegant-title workstation-display-title">Let the council work.</h2>
-                <p className="workstation-subtitle">
-                  Every thread is autosaved locally, resumable, and indexed like a real workstation.
-                </p>
-              </div>
+              <CouncilCircleViz configured={configuredProviders} />
             </div>
 
             <div className="workstation-composer-body">
-              <label htmlFor="topic-input" className="workstation-input-label">
-                Start a new line of inquiry
-              </label>
               <div className="workstation-input-shell">
                 <div ref={attachShellRef} className="workstation-attach-shell">
                   <button
@@ -1275,41 +1332,26 @@ export function Home({
           </section>
 
           <aside className="workstation-inspector">
-            <div className="workstation-toolbar-badges">
-              <div className="workstation-metric">
-                <span className="workstation-metric-label">Providers ready</span>
-                <span className="workstation-metric-value">
-                  {configuredProviders.length}/{AGENT_CARDS.length}
-                </span>
-              </div>
-              <div className="workstation-metric">
-                <span className="workstation-metric-label">Autosave</span>
-                <span className="workstation-metric-value">Local-first</span>
-              </div>
+            <div className="workstation-agent-list">
+              {AGENT_CARDS.map((agent) => {
+                const configured = configuredProviders.includes(agent.provider);
+                return (
+                  <div
+                    key={agent.provider}
+                    className={`workstation-agent-row ${configured ? "is-ready" : ""}`}
+                  >
+                    <ProviderIcon provider={agent.provider} size={20} />
+                    <span className="workstation-agent-row-name" style={{ color: configured ? agent.color : undefined }}>
+                      {agent.name}<span style={{ opacity: 0.35 }}> & {agent.partner}</span>
+                    </span>
+                  </div>
+                );
+              })}
             </div>
-            <div className="workstation-panel">
-              <div className="workstation-panel-heading">Council Rack</div>
-              <div className="workstation-agent-grid">
-                {AGENT_CARDS.map((agent) => {
-                  const configured = configuredProviders.includes(agent.provider);
-                  return (
-                    <div
-                      key={agent.provider}
-                      className={`workstation-agent-card ${configured ? "is-ready" : ""}`}
-                    >
-                      <ProviderIcon provider={agent.provider} size={28} />
-                      <div>
-                        <div className="workstation-agent-name" style={{ color: agent.color }}>
-                          {agent.name}<span style={{ opacity: 0.4 }}> & {agent.partner}</span>
-                        </div>
-                        <div className="workstation-agent-provider">
-                          {PROVIDER_INFO[agent.provider].name}
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
+            <div className="workstation-inspector-footer">
+              <span className="workstation-inspector-stat" style={{ fontFamily: "var(--font-mono)" }}>
+                {configuredProviders.length}/{AGENT_CARDS.length} ready
+              </span>
             </div>
           </aside>
         </div>

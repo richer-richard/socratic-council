@@ -167,6 +167,7 @@ Markdown:
 
 Quoting/Reactions:
 - You MUST include @quote(MSG_ID) for a specific prior message. You can quote MULTIPLE messages from different speakers or even the same speaker: @quote(MSG_A) @quote(MSG_B).
+- NEVER fabricate or invent quotes. Only use @quote(MSG_ID) with an actual message ID visible in the conversation above. If no prior messages exist, do not quote anything.
 - If it fits, include @react(MSG_ID, 👍|👎|❤️|😂|😮|😢|😡|✨|🎉).
 
 ${getToolPrompt()}
@@ -189,6 +190,7 @@ const BASE_SYSTEM_PROMPT = (
   return `You are ${name} in a group chat with George, Cathy, Grace, Douglas, Kate, Quinn, Mary, and Zara.
 
 Do NOT adopt a persona or specialty. Speak as yourself, and keep the tone natural.
+Do NOT fabricate facts, invent sources, or hallucinate quotes. Only reference messages you can actually see above.
 ${partnerLine}
 Proactive behavior requirements:
 - If someone is vague, force precision by asking for a measurable claim.
@@ -203,7 +205,7 @@ ${GROUP_CHAT_GUIDELINES}`;
 
 const MODERATOR_SYSTEM_PROMPT = `You are the Moderator in a group chat with George, Cathy, Grace, Douglas, Kate, Quinn, Mary, and Zara.
 
-Your job: keep the discussion focused, fair, rigorous, and productive.
+Your job: keep the discussion focused, fair, rigorous, and productive. Be direct and demanding — call out weak reasoning, vague claims, and circular arguments.
 
 Rules:
 - Speak briefly (1–4 sentences, max ~120 words).
@@ -221,6 +223,7 @@ Rules:
 - Keep interventions sparse and high-signal to avoid unnecessary cost.
 - You may suggest who should respond next by name.
 - At the end, publish the official closing result with a score/10 and explanation instead of leaving the room with another open question.
+- Be a harsh, honest grader. A score of 7+ requires concrete evidence cited, falsifiable criteria, and genuine disagreement resolved with clear reasoning. Most discussions deserve 4–6. Give 8+ only if the group produced a defensible, evidence-backed recommendation. Discussions that stayed abstract, repetitive, or hand-wavy should score 3–5.
 - Do NOT include @quote(...), @react(...), @tool(...), @vote(...), or @end() unless the specific prompt explicitly asks for it.
 - Do NOT impersonate any agent.`;
 
@@ -959,6 +962,7 @@ export function Chat({ session, onNavigate, onPersistSession }: ChatProps) {
   const [isTopicExpanded, setIsTopicExpanded] = useState(false);
   const [topicOverflowing, setTopicOverflowing] = useState(false);
   const [isGracefullyEnding, setIsGracefullyEnding] = useState(false);
+  const [showGracefulEndConfirm, setShowGracefulEndConfirm] = useState(false);
 
   const virtuosoRef = useRef<VirtuosoHandle>(null);
   const topicBodyRef = useRef<HTMLDivElement | null>(null);
@@ -1603,7 +1607,7 @@ Direct question: "${pendingHandoffRef.current.question}"
         history.push({
           role: "user",
           content: [
-            "You're the first to speak. State your position directly. If you need outside evidence first, emit only the @tool(...) line and stop. Include @quote(MSG_ID) only after there are messages to quote.",
+            "You are the first speaker — there are no prior messages to quote or reference. Do NOT use @quote(...) or @react(...) in this message. State your position directly. If you need outside evidence first, emit only the @tool(...) line and stop.",
             directedPrompt,
           ]
             .filter(Boolean)
@@ -1728,8 +1732,8 @@ Direct question: "${pendingHandoffRef.current.question}"
       history.push({
         role: "user",
         content: `The discussion phase has ended after ${turnsCompleted} turns. You are now in the closing round.
-- Write 2–4 sentences total.
-- Briefly summarize the conclusion or recommendation you stand by.
+- Start with a short title on its own line (3–6 words, no punctuation, no dashes). This is the headline of your closing reflection.
+- Then write 2–4 sentences summarizing the conclusion or recommendation you stand by.
 - Give the strongest supporting reason in one short clause.
 - End with a short goodbye or sign-off line to the group.
 - Do NOT ask any questions.
@@ -4033,30 +4037,7 @@ Write the official moderator wrap-up in 4 short sentences:
               </div>
             )}
 
-            {sessionStatus !== "completed" && isPaused && currentTurn > 0 && (
-              <button
-                onClick={() => {
-                  void handleGracefulEnd();
-                }}
-                disabled={isGracefullyEnding}
-                className="session-control-icon-button is-graceful-end"
-                title="Gracefully end — skip to closing summary"
-              >
-                <svg
-                  width="18"
-                  height="18"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2.25"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                >
-                  <path d="M5 5v14" />
-                  <path d="m9 7 10 5-10 5V7Z" fill="currentColor" stroke="none" />
-                </svg>
-              </button>
-            )}
+            {/* Gracefully End button moved after Pause — see below */}
 
             <button
               onClick={() => setSidePanelView((prev) => (prev === "logs" ? "default" : "logs"))}
@@ -4112,41 +4093,38 @@ Write the official moderator wrap-up in 4 short sentences:
 
             {sessionStatus !== "completed" &&
               (isRunning || isPaused || sessionStatus === "paused" || currentTurn > 0) && (
-                <button
-                  onClick={handlePauseResume}
-                  disabled={isGracefullyEnding}
-                  className={`session-control-icon-button ${isPaused ? "is-resume" : ""}`}
-                  title={isPaused ? "Resume" : "Pause"}
-                >
-                  {isPaused ? (
-                    <svg
-                      width="18"
-                      height="18"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2.25"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
+                <>
+                  <button
+                    onClick={handlePauseResume}
+                    disabled={isGracefullyEnding}
+                    className={`session-control-icon-button ${isPaused ? "is-resume" : "is-pause"}`}
+                    title={isPaused ? "Resume" : "Pause"}
+                  >
+                    {isPaused ? (
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+                        <polygon points="8 6 18 12 8 18 8 6" fill="currentColor" />
+                      </svg>
+                    ) : (
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.25" strokeLinecap="round">
+                        <line x1="10" y1="7" x2="10" y2="17" />
+                        <line x1="14" y1="7" x2="14" y2="17" />
+                      </svg>
+                    )}
+                  </button>
+                  {currentTurn > 0 && (
+                    <button
+                      onClick={() => setShowGracefulEndConfirm(true)}
+                      disabled={isGracefullyEnding}
+                      className="session-control-icon-button is-graceful-end"
+                      title="Gracefully end discussion"
                     >
-                      <polygon points="8 6 18 12 8 18 8 6" fill="currentColor" stroke="none" />
-                    </svg>
-                  ) : (
-                    <svg
-                      width="18"
-                      height="18"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2.25"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    >
-                      <line x1="10" y1="7" x2="10" y2="17" />
-                      <line x1="14" y1="7" x2="14" y2="17" />
-                    </svg>
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+                        <path d="M5 5v14" stroke="currentColor" strokeWidth="2.25" strokeLinecap="round" />
+                        <path d="m9 7 10 5-10 5V7Z" fill="currentColor" />
+                      </svg>
+                    </button>
                   )}
-                </button>
+                </>
               )}
           </div>
         </div>
@@ -4205,14 +4183,15 @@ Write the official moderator wrap-up in 4 short sentences:
               ) {
                 const resAgent = AGENT_CONFIG[message.agentId];
                 const resAccent = `var(--color-${message.agentId})`;
-                // Generate a brief title from the first sentence (strip punctuation)
-                const firstSentence = (message.content ?? "").split(/[.!?\n]/)[0] ?? "";
-                const briefTitle = firstSentence
-                  .replace(/[,;:\-–—]/g, "")
-                  .trim()
-                  .split(/\s+/)
-                  .slice(0, 8)
-                  .join(" ");
+                // Use first line as the agent-authored title, rest as body
+                const contentLines = (message.content ?? "").split("\n");
+                const firstLine = (contentLines[0] ?? "").trim();
+                const restContent = contentLines.slice(1).join("\n").trim();
+                // If first line is short enough to be a title, use it; otherwise extract
+                const briefTitle = firstLine.length <= 60 && firstLine.length > 0
+                  ? firstLine.replace(/[.!?,;:\-–—]/g, "").trim()
+                  : firstLine.split(/[.!?\n]/)[0]?.replace(/[,;:\-–—]/g, "").trim().split(/\s+/).slice(0, 8).join(" ") || "Closing reflection";
+                const bodyContent = restContent || message.content;
 
                 return (
                   <details className="resolution-card" style={{ "--res-accent": resAccent } as CSSProperties}>
@@ -4239,7 +4218,7 @@ Write the official moderator wrap-up in 4 short sentences:
                           </div>
                         </details>
                       )}
-                      <Markdown content={message.content} className="markdown-content" />
+                      <Markdown content={bodyContent} className="markdown-content" />
                     </div>
                   </details>
                 );
@@ -4952,6 +4931,44 @@ Write the official moderator wrap-up in 4 short sentences:
               <span className="typing-dot" />
               <span className="typing-dot" />
             </span>
+          </div>
+        </div>
+      )}
+
+      {/* Graceful End confirmation modal */}
+      {showGracefulEndConfirm && (
+        <div className="modal-overlay" onClick={() => setShowGracefulEndConfirm(false)}>
+          <div
+            className="modal-content graceful-end-confirm-modal"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="graceful-end-confirm-icon">
+              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#fb923c" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M5 5v14" />
+                <path d="m9 7 10 5-10 5V7Z" fill="#fb923c" stroke="none" />
+              </svg>
+            </div>
+            <h3 className="graceful-end-confirm-title">End discussion?</h3>
+            <p className="graceful-end-confirm-copy">
+              This will move to closing summaries. Each agent will give a final reflection, then the moderator will score the discussion. This action cannot be undone.
+            </p>
+            <div className="graceful-end-confirm-actions">
+              <button
+                className="graceful-end-confirm-btn is-cancel"
+                onClick={() => setShowGracefulEndConfirm(false)}
+              >
+                Cancel
+              </button>
+              <button
+                className="graceful-end-confirm-btn is-confirm"
+                onClick={() => {
+                  setShowGracefulEndConfirm(false);
+                  void handleGracefulEnd();
+                }}
+              >
+                End discussion
+              </button>
+            </div>
           </div>
         </div>
       )}

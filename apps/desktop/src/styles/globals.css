@@ -1,4 +1,4 @@
-@import url("https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600;700&family=Manrope:wght@300;400;500;600;700;800&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Manrope:wght@300;400;500;600;700;800&display=swap");
 
 @tailwind base;
 @tailwind components;
@@ -7,6 +7,7 @@
 :root {
   --font-display: "Cormorant Garamond", "Times New Roman", serif;
   --font-body: "Manrope", "Helvetica Neue", sans-serif;
+  --font-mono: "JetBrains Mono", "Menlo", monospace;
 
   --paper-100: #0b0f14;
   --paper-200: #0f172a;
@@ -3287,6 +3288,50 @@ body {
   background: rgba(20, 184, 166, 0.08);
 }
 
+/* Flat agent list (redesigned right sidebar) */
+.workstation-agent-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  padding: 0.5rem 0;
+}
+.workstation-agent-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.45rem 0.6rem;
+  border-radius: 6px;
+  opacity: 0.4;
+  transition: opacity 0.15s;
+}
+.workstation-agent-row.is-ready {
+  opacity: 1;
+}
+.workstation-agent-row-name {
+  font-size: 0.82rem;
+  font-weight: 500;
+  color: var(--ink-500);
+  font-family: var(--font-mono);
+}
+.workstation-inspector-footer {
+  padding: 0.6rem;
+  border-top: 1px solid rgba(148, 163, 184, 0.1);
+  margin-top: auto;
+}
+.workstation-inspector-stat {
+  font-size: 0.7rem;
+  color: var(--ink-500);
+  opacity: 0.6;
+}
+
+/* Council circle visualization */
+.council-circle-viz {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 1.5rem 0 0.5rem 0;
+}
+
 .session-status {
   display: inline-flex;
   align-items: center;
@@ -3448,6 +3493,7 @@ body {
 }
 
 /* Icon-only compact control buttons (pause/resume, graceful end) */
+/* Icon-only compact control buttons */
 .session-control-icon-button {
   display: inline-flex;
   align-items: center;
@@ -3455,37 +3501,85 @@ body {
   width: 2.4rem;
   height: 2.4rem;
   border-radius: 10px;
-  border: 1px solid rgba(148, 163, 184, 0.2);
-  background: rgba(15, 23, 42, 0.6);
-  color: var(--ink-700);
+  border: none;
   cursor: pointer;
   transition: all 0.15s;
   flex-shrink: 0;
-}
-.session-control-icon-button:hover {
-  background: rgba(15, 23, 42, 0.85);
-  border-color: rgba(148, 163, 184, 0.35);
-  color: #fff;
 }
 .session-control-icon-button:disabled {
   opacity: 0.4;
   cursor: not-allowed;
 }
+.session-control-icon-button.is-pause {
+  background: rgba(52, 211, 153, 0.85);
+  color: #fff;
+}
+.session-control-icon-button.is-pause:hover {
+  background: rgba(52, 211, 153, 1);
+}
 .session-control-icon-button.is-resume {
-  color: var(--accent-emerald, #34d399);
-  border-color: rgba(52, 211, 153, 0.3);
+  background: rgba(52, 211, 153, 0.85);
+  color: #fff;
 }
 .session-control-icon-button.is-resume:hover {
-  background: rgba(52, 211, 153, 0.15);
-  color: #6ee7b7;
+  background: rgba(52, 211, 153, 1);
 }
 .session-control-icon-button.is-graceful-end {
-  color: #fb923c;
-  border-color: rgba(251, 146, 60, 0.3);
+  background: rgba(251, 146, 60, 0.85);
+  color: #fff;
 }
 .session-control-icon-button.is-graceful-end:hover {
-  background: rgba(251, 146, 60, 0.15);
-  color: #fdba74;
+  background: rgba(251, 146, 60, 1);
+}
+
+/* Graceful End confirmation modal */
+.graceful-end-confirm-modal {
+  width: min(24rem, calc(100vw - 2rem));
+  padding: 1.75rem;
+  text-align: center;
+}
+.graceful-end-confirm-icon {
+  margin-bottom: 0.75rem;
+}
+.graceful-end-confirm-title {
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: var(--ink-900);
+  margin-bottom: 0.5rem;
+}
+.graceful-end-confirm-copy {
+  font-size: 0.85rem;
+  color: var(--ink-500);
+  line-height: 1.55;
+  margin-bottom: 1.25rem;
+}
+.graceful-end-confirm-actions {
+  display: flex;
+  gap: 0.75rem;
+  justify-content: center;
+}
+.graceful-end-confirm-btn {
+  padding: 0.55rem 1.25rem;
+  border-radius: 10px;
+  font-size: 0.85rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s;
+  border: none;
+}
+.graceful-end-confirm-btn.is-cancel {
+  background: rgba(148, 163, 184, 0.15);
+  color: var(--ink-700);
+}
+.graceful-end-confirm-btn.is-cancel:hover {
+  background: rgba(148, 163, 184, 0.25);
+}
+.graceful-end-confirm-btn.is-confirm {
+  background: rgba(251, 146, 60, 0.85);
+  color: #fff;
+}
+.graceful-end-confirm-btn.is-confirm:hover {
+  background: rgba(251, 146, 60, 1);
 }
 
 @media (max-width: 1180px) {
