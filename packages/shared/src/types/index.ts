@@ -314,7 +314,7 @@ export interface KimiRequest {
 // QWEN MODELS & PARAMETERS
 // =============================================================================
 
-export const QwenModels = ["qwen3.5-plus"] as const;
+export const QwenModels = ["qwen3.6-plus", "qwen3.5-plus"] as const;
 
 export type QwenModel = (typeof QwenModels)[number];
 
@@ -349,9 +349,9 @@ export interface QwenRequest {
 // =============================================================================
 
 export const MiniMaxModels = [
-  "MiniMax-M2.7",
+  "MiniMax-M2.7-highspeed",
   // Lowercase alias retained for migration/back-compat.
-  "minimax-m2.7",
+  "minimax-m2.7-highspeed",
 ] as const;
 
 export type MiniMaxModel = (typeof MiniMaxModels)[number];
@@ -391,7 +391,7 @@ export interface MiniMaxRequest {
 // ZHIPU (Z.AI) MODELS & PARAMETERS
 // =============================================================================
 
-export const ZhipuModels = ["glm-5", "glm-4.7"] as const;
+export const ZhipuModels = ["glm-5.1", "glm-5", "glm-4.7"] as const;
 
 export type ZhipuModel = (typeof ZhipuModels)[number];
 

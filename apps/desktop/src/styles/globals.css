@@ -3447,6 +3447,47 @@ body {
   background: rgba(20, 184, 166, 0.12);
 }
 
+/* Icon-only compact control buttons (pause/resume, graceful end) */
+.session-control-icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.4rem;
+  height: 2.4rem;
+  border-radius: 10px;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  background: rgba(15, 23, 42, 0.6);
+  color: var(--ink-700);
+  cursor: pointer;
+  transition: all 0.15s;
+  flex-shrink: 0;
+}
+.session-control-icon-button:hover {
+  background: rgba(15, 23, 42, 0.85);
+  border-color: rgba(148, 163, 184, 0.35);
+  color: #fff;
+}
+.session-control-icon-button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.session-control-icon-button.is-resume {
+  color: var(--accent-emerald, #34d399);
+  border-color: rgba(52, 211, 153, 0.3);
+}
+.session-control-icon-button.is-resume:hover {
+  background: rgba(52, 211, 153, 0.15);
+  color: #6ee7b7;
+}
+.session-control-icon-button.is-graceful-end {
+  color: #fb923c;
+  border-color: rgba(251, 146, 60, 0.3);
+}
+.session-control-icon-button.is-graceful-end:hover {
+  background: rgba(251, 146, 60, 0.15);
+  color: #fdba74;
+}
+
 @media (max-width: 1180px) {
   .workstation-shell {
     grid-template-columns: 1fr;

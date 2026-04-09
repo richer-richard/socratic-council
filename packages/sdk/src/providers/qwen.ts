@@ -58,9 +58,9 @@ export class QwenProvider implements BaseProvider {
   }
 
   private normalizeModel(model: string): QwenModel {
-    // Canonical model required by current council mapping.
+    if (model === "qwen3.6-plus") return "qwen3.6-plus";
     if (model === "qwen3.5-plus") return "qwen3.5-plus";
-    return "qwen3.5-plus";
+    return "qwen3.6-plus";
   }
 
   private buildRequestBody(
@@ -253,7 +253,7 @@ export class QwenProvider implements BaseProvider {
         method: "POST",
         headers: createHeaders("qwen", this.apiKey),
         body: JSON.stringify({
-          model: "qwen3.5-plus",
+          model: "qwen3.6-plus",
           messages: [{ role: "user", content: "Hello" }],
           max_tokens: 10,
         }),

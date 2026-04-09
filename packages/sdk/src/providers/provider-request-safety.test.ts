@@ -121,7 +121,7 @@ describe("provider request safety", () => {
         id: "mary",
         name: "Mary",
         provider: "minimax",
-        model: "minimax-m2.7",
+        model: "minimax-m2.7-highspeed",
         maxTokens: 4096,
       }),
       messages,

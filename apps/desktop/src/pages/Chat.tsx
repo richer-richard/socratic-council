@@ -126,11 +126,13 @@ const MODEL_DISPLAY_NAMES: Record<string, string> = {
   "kimi-k2-thinking": "Kimi K2 Thinking",
   "moonshot-v1-128k": "Moonshot V1 128K",
   // Qwen
+  "qwen3.6-plus": "Qwen 3.6 Plus",
   "qwen3.5-plus": "Qwen 3.5 Plus",
   // MiniMax
-  "MiniMax-M2.7": "MiniMax M2.7",
-  "minimax-m2.7": "MiniMax M2.7",
+  "MiniMax-M2.7-highspeed": "MiniMax M2.7",
+  "minimax-m2.7-highspeed": "MiniMax M2.7",
   // Zhipu
+  "glm-5.1": "GLM-5.1",
   "glm-5": "GLM-5",
   "glm-4.7": "GLM-4.7",
 };
@@ -4037,25 +4039,22 @@ Write the official moderator wrap-up in 4 short sentences:
                   void handleGracefulEnd();
                 }}
                 disabled={isGracefullyEnding}
-                className="session-control-button is-graceful-end"
-                title="Skip to the closing summary"
+                className="session-control-icon-button is-graceful-end"
+                title="Gracefully end — skip to closing summary"
               >
-                <span className="session-control-icon">
-                  <svg
-                    width="18"
-                    height="18"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2.25"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  >
-                    <path d="M5 5v14" />
-                    <path d="m9 7 10 5-10 5V7Z" fill="currentColor" stroke="none" />
-                  </svg>
-                </span>
-                <span>{isGracefullyEnding ? "Closing…" : "Gracefully End"}</span>
+                <svg
+                  width="18"
+                  height="18"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.25"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M5 5v14" />
+                  <path d="m9 7 10 5-10 5V7Z" fill="currentColor" stroke="none" />
+                </svg>
               </button>
             )}
 
@@ -4116,40 +4115,37 @@ Write the official moderator wrap-up in 4 short sentences:
                 <button
                   onClick={handlePauseResume}
                   disabled={isGracefullyEnding}
-                  className={`session-control-button ${isPaused ? "is-resume" : ""}`}
+                  className={`session-control-icon-button ${isPaused ? "is-resume" : ""}`}
                   title={isPaused ? "Resume" : "Pause"}
                 >
-                  <span className="session-control-icon">
-                    {isPaused ? (
-                      <svg
-                        width="18"
-                        height="18"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2.25"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      >
-                        <polygon points="8 6 18 12 8 18 8 6" fill="currentColor" stroke="none" />
-                      </svg>
-                    ) : (
-                      <svg
-                        width="18"
-                        height="18"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2.25"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      >
-                        <line x1="10" y1="7" x2="10" y2="17" />
-                        <line x1="14" y1="7" x2="14" y2="17" />
-                      </svg>
-                    )}
-                  </span>
-                  <span>{isPaused ? "Resume" : "Pause"}</span>
+                  {isPaused ? (
+                    <svg
+                      width="18"
+                      height="18"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2.25"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <polygon points="8 6 18 12 8 18 8 6" fill="currentColor" stroke="none" />
+                    </svg>
+                  ) : (
+                    <svg
+                      width="18"
+                      height="18"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2.25"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <line x1="10" y1="7" x2="10" y2="17" />
+                      <line x1="14" y1="7" x2="14" y2="17" />
+                    </svg>
+                  )}
                 </button>
               )}
           </div>
