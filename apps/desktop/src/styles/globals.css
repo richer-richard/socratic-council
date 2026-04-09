@@ -663,6 +663,8 @@ body {
 /* =========================================================================== */
 
 .badge {
+  font-family: var(--font-mono);
+  text-transform: lowercase;
   padding: 0.25rem 0.6rem;
   font-size: 0.75rem;
   font-weight: 600;
@@ -724,7 +726,8 @@ body {
 }
 
 .winner-highlight {
-  animation: winnerGlow 1s ease-in-out 3;
+  border: 1px solid currentColor;
+  box-shadow: none;
 }
 
 /* =========================================================================== */
@@ -1023,7 +1026,7 @@ body {
   gap: 1.25rem;
   padding: 1.1rem 1.4rem;
   margin: 0.85rem 0;
-  border-radius: 18px;
+  border-radius: 12px;
   background: var(--panel-bg);
   border: 1px solid var(--line-soft);
   box-shadow: 0 18px 30px rgba(6, 8, 13, 0.45);
@@ -1040,14 +1043,14 @@ body {
   left: 0;
   top: 16px;
   bottom: 16px;
-  width: 3px;
+  width: 2px;
   background: var(--accent);
   border-radius: 999px;
+  opacity: 0.4;
 }
 
 .discord-message:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 22px 36px rgba(6, 8, 13, 0.6);
+  box-shadow: 0 20px 34px rgba(6, 8, 13, 0.55);
 }
 
 .discord-message.message-highlight {
@@ -1122,21 +1125,23 @@ body {
 }
 
 .discord-model {
+  font-family: var(--font-mono);
   font-size: 0.7rem;
   color: var(--ink-500);
   font-weight: 600;
-  text-transform: uppercase;
+  text-transform: lowercase;
   letter-spacing: 0.08em;
 }
 
 .discord-thinking-pill {
+  font-family: var(--font-mono);
   font-size: 0.65rem;
-  color: #67e8f9;
+  color: var(--ink-500);
   font-weight: 700;
-  text-transform: uppercase;
+  text-transform: lowercase;
   letter-spacing: 0.08em;
-  border: 1px solid rgba(34, 211, 238, 0.35);
-  background: rgba(34, 211, 238, 0.12);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  background: transparent;
   border-radius: 999px;
   padding: 0.1rem 0.4rem;
 }
@@ -1144,8 +1149,9 @@ body {
 /* Removed green is-complete variant — always use cyan */
 
 .discord-role {
+  font-family: var(--font-mono);
   font-size: 0.65rem;
-  text-transform: uppercase;
+  text-transform: lowercase;
   letter-spacing: 0.15em;
   padding: 0.2rem 0.45rem;
   background: rgba(255, 255, 255, 0.08);
@@ -1154,6 +1160,7 @@ body {
 }
 
 .discord-stopwatch {
+  font-family: var(--font-mono);
   font-size: 0.6875rem;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
@@ -1165,17 +1172,19 @@ body {
 }
 
 .discord-stopwatch.is-ticking {
-  color: var(--accent-emerald);
-  background: rgba(20, 184, 166, 0.12);
+  color: var(--ink-700);
+  background: rgba(148, 163, 184, 0.08);
 }
 
 .discord-timestamp {
+  font-family: var(--font-mono);
   font-size: 0.7rem;
   color: var(--ink-500);
   margin-left: auto;
 }
 
 .discord-tokens {
+  font-family: var(--font-mono);
   font-size: 0.6875rem;
   color: var(--ink-400);
   background: var(--surface-alt);
@@ -1184,10 +1193,11 @@ body {
 }
 
 .discord-cost {
+  font-family: var(--font-mono);
   font-size: 0.6875rem;
   font-weight: 500;
-  color: var(--accent-emerald, #10b981);
-  background: rgba(16, 185, 129, 0.1);
+  color: var(--ink-500);
+  background: rgba(148, 163, 184, 0.08);
   padding: 0.125rem 0.375rem;
   border-radius: 3px;
 }
@@ -1201,7 +1211,7 @@ body {
 
 .thinking-panel {
   margin-bottom: 0.65rem;
-  border: 1px solid rgba(34, 211, 238, 0.28);
+  border: 1px solid rgba(148, 163, 184, 0.15);
   border-radius: 12px;
   background: rgba(15, 23, 42, 0.5);
   overflow: hidden;
@@ -1209,13 +1219,14 @@ body {
 
 .thinking-summary {
   cursor: pointer;
+  font-family: var(--font-mono);
   font-size: 0.72rem;
   letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: #67e8f9;
+  text-transform: lowercase;
+  color: var(--ink-500);
   font-weight: 700;
   padding: 0.45rem 0.7rem;
-  background: rgba(34, 211, 238, 0.1);
+  background: rgba(148, 163, 184, 0.06);
 }
 
 .thinking-content-wrapper {
@@ -1230,7 +1241,7 @@ body {
 }
 
 .thinking-tool-list + .thinking-content {
-  border-top: 1px solid rgba(34, 211, 238, 0.15);
+  border-top: 1px solid rgba(148, 163, 184, 0.1);
 }
 
 .thinking-panel.is-streaming .thinking-summary {
@@ -1248,9 +1259,10 @@ body {
 }
 
 .thinking-content {
+  font-family: var(--font-mono);
   padding: 0.65rem 0.7rem 0.75rem;
   color: var(--ink-700);
-  font-size: 0.86rem;
+  font-size: 0.8rem;
   line-height: 1.45;
   white-space: pre-wrap;
   max-height: 16rem;
@@ -1799,6 +1811,7 @@ body {
 }
 
 .message-quote-header {
+  font-family: var(--font-mono);
   font-size: 0.7rem;
   color: var(--ink-500);
   text-transform: uppercase;
@@ -1891,7 +1904,7 @@ body {
 }
 
 .message-tool-call {
-  border: 1px solid rgba(56, 189, 248, 0.2);
+  border: 1px solid rgba(148, 163, 184, 0.12);
   border-radius: 12px;
   background: rgba(15, 23, 42, 0.44);
   overflow: hidden;
@@ -1909,7 +1922,8 @@ body {
   align-items: center;
   gap: 0.55rem;
   padding: 0.55rem 0.75rem;
-  color: #93c5fd;
+  font-family: var(--font-mono);
+  color: var(--ink-500);
   font-size: 0.84rem;
   font-weight: 600;
   line-height: 1.35;
@@ -1939,6 +1953,7 @@ body {
 }
 
 .message-tool-meta {
+  font-family: var(--font-mono);
   font-size: 0.7rem;
   color: var(--ink-500);
   text-transform: uppercase;
@@ -1990,6 +2005,8 @@ body {
 }
 
 .message-action {
+  font-family: var(--font-mono);
+  text-transform: lowercase;
   border-radius: 999px;
   border: 1px solid var(--line-soft);
   background: rgba(255, 255, 255, 0.08);
@@ -2013,6 +2030,7 @@ body {
 }
 
 .reaction-chip {
+  font-family: var(--font-mono);
   display: inline-flex;
   align-items: center;
   gap: 0.25rem;
@@ -2235,6 +2253,7 @@ body {
   color: var(--ink-500);
 }
 .observer-note-label {
+  font-family: var(--font-mono);
   text-transform: uppercase;
   letter-spacing: 0.08em;
   font-weight: 600;
@@ -2245,9 +2264,11 @@ body {
   border-radius: 4px;
 }
 .observer-note-names {
+  font-family: var(--font-mono);
   font-weight: 500;
 }
 .observer-note-time {
+  font-family: var(--font-mono);
   margin-left: auto;
   opacity: 0.5;
 }
@@ -2395,6 +2416,7 @@ body {
 .workstation-panel-heading,
 .workstation-metric-label,
 .workstation-input-label {
+  font-family: var(--font-mono);
   text-transform: uppercase;
   letter-spacing: 0.18em;
   font-size: 0.7rem;
@@ -3345,6 +3367,8 @@ body {
 }
 
 .session-status {
+  font-family: var(--font-mono);
+  text-transform: lowercase;
   display: inline-flex;
   align-items: center;
   gap: 0.35rem;
@@ -3412,6 +3436,7 @@ body {
 }
 
 .chat-autosave-pill {
+  font-family: var(--font-mono);
   display: inline-flex;
   align-items: center;
   padding: 0.3rem 0.7rem;
