@@ -431,41 +431,80 @@ export const PROVIDER_INFO: Record<
   },
 };
 
-// Sample topics - will be shuffled each time
+// Sample topics — shuffled each time, showing 6
 export const SAMPLE_TOPICS = [
+  // Technology & AI
   "Should AI systems have legal rights?",
-  "Is democracy the best form of government?",
-  "Can consciousness be replicated artificially?",
-  "Should we colonize Mars?",
-  "Is privacy more important than security?",
-  "Should genetic engineering be allowed on humans?",
-  "Is universal basic income a good idea?",
-  "Should social media be regulated?",
+  "Can AI be held accountable for its decisions?",
+  "Should autonomous weapons be banned by treaty?",
+  "Is open-source AI safer than closed-source?",
+  "Should we pause AI development until regulation catches up?",
+  "Will AI eliminate more jobs than it creates?",
+  "Should deepfakes be criminalized?",
   "Can machines ever truly understand language?",
-  "Is it ethical to eat meat?",
-  "Should we fear superintelligent AI?",
-  "Is free will an illusion?",
+  // Governance & Society
+  "Is democracy the best form of government?",
   "Should voting be mandatory?",
+  "Is the concept of nations outdated?",
+  "Should there be a global government?",
+  "Is surveillance justified for public safety?",
+  "Should corporations have the same rights as people?",
+  "Is ranked-choice voting better than first-past-the-post?",
+  "Should judges be elected or appointed?",
+  // Economics
   "Is capitalism sustainable?",
-  "Can art be created by machines?",
+  "Is universal basic income a good idea?",
+  "Should we abolish patents?",
+  "Is infinite economic growth possible on a finite planet?",
+  "Should billionaires exist?",
+  "Is the gig economy exploitative or liberating?",
+  "Should central banks issue digital currencies?",
+  "Is free trade always beneficial?",
+  // Ethics & Philosophy
+  "Is free will an illusion?",
+  "Is it ethical to eat meat?",
+  "Is meritocracy truly fair?",
+  "Can morality exist without religion?",
+  "Is privacy a right or a luxury?",
+  "Should we prioritize equality or freedom?",
+  "Is civil disobedience ever justified?",
+  "Does punishment deter crime?",
+  // Science & Health
+  "Should we attempt to reverse aging?",
+  "Should genetic engineering be allowed on humans?",
+  "Should drugs be decriminalized?",
+  "Is immortality desirable?",
+  "Should we pursue human brain uploading?",
+  "Is gain-of-function research worth the risk?",
+  "Should psychedelics be used in therapy?",
+  "Should we colonize Mars?",
+  // Culture & Education
+  "Should education be free for everyone?",
+  "Can art be objectively good?",
+  "Should social media be regulated?",
+  "Is cancel culture a form of accountability or mob rule?",
+  "Should history curricula include uncomfortable truths?",
+  "Is nostalgia a useful emotion or a cognitive trap?",
+  "Can virtual relationships replace real ones?",
+  "Should children have access to social media?",
+  // Environment
+  "Is nuclear power the answer to climate change?",
+  "Should we geoengineer the climate?",
+  "Is degrowth necessary to save the planet?",
+  "Should meat production be taxed for its carbon footprint?",
+  "Is individual action or systemic change more important for the environment?",
+  // Provocative
+  "Should we fear superintelligent AI?",
+  "Is globalization a force for good?",
   "Should there be limits on free speech?",
   "Is technological progress always beneficial?",
-  "Should education be free for everyone?",
-  "Is immortality desirable?",
-  "Can AI be held accountable for its decisions?",
-  "Freedom and safety, which one is more important?",
   "Should we pursue contact with extraterrestrial life?",
-  "Is globalization a force for good?",
-  "Should drugs be decriminalized?",
-  "Can virtual relationships replace real ones?",
-  "Is the concept of nations outdated?",
-  "Should AI be used in warfare?",
-  "Is human enhancement through technology ethical?",
-  "Should we attempt to reverse aging?",
-  "Is meritocracy truly fair?",
+  "Is the scientific method the only valid way to know things?",
+  "Should we trust experts or the wisdom of crowds?",
+  "Is competition or cooperation the engine of progress?",
 ];
 
-export function getShuffledTopics(count: number = 4): string[] {
+export function getShuffledTopics(count: number = 6): string[] {
   const shuffled = [...SAMPLE_TOPICS].sort(() => Math.random() - 0.5);
   return shuffled.slice(0, count);
 }
