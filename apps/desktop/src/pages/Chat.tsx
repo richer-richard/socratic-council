@@ -4175,55 +4175,6 @@ Write the official moderator wrap-up in 4 short sentences:
                 );
               }
 
-              // Resolution message — collapsible card box
-              if (
-                message.isResolution &&
-                isCouncilAgent(message.agentId) &&
-                !message.isStreaming
-              ) {
-                const resAgent = AGENT_CONFIG[message.agentId];
-                const resAccent = `var(--color-${message.agentId})`;
-                // Use first line as the agent-authored title, rest as body
-                const contentLines = (message.content ?? "").split("\n");
-                const firstLine = (contentLines[0] ?? "").trim();
-                const restContent = contentLines.slice(1).join("\n").trim();
-                // If first line is short enough to be a title, use it; otherwise extract
-                const briefTitle = firstLine.length <= 60 && firstLine.length > 0
-                  ? firstLine.replace(/[.!?,;:\-–—]/g, "").trim()
-                  : firstLine.split(/[.!?\n]/)[0]?.replace(/[,;:\-–—]/g, "").trim().split(/\s+/).slice(0, 8).join(" ") || "Closing reflection";
-                const bodyContent = restContent || message.content;
-
-                return (
-                  <details className="resolution-card" style={{ "--res-accent": resAccent } as CSSProperties}>
-                    <summary className="resolution-card-summary">
-                      <div className="resolution-card-icon">
-                        <ProviderIcon provider={resAgent.provider} size={24} />
-                      </div>
-                      <div className="resolution-card-header">
-                        <span className={`resolution-card-name ${resAgent.color}`}>{resAgent.name}</span>
-                        <span className="resolution-card-title">{briefTitle || "Closing reflection"}</span>
-                      </div>
-                      <span className="resolution-card-time">
-                        {new Date(message.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-                      </span>
-                    </summary>
-                    <div className="resolution-card-body">
-                      {!!message.thinking?.trim() && (
-                        <details className="thinking-panel">
-                          <summary className="thinking-summary">
-                            Thought for {((message.thinkingMs ?? message.latencyMs ?? 0) / 1000).toFixed(1)}s
-                          </summary>
-                          <div className="thinking-content-wrapper">
-                            <div className="thinking-content">{message.thinking}</div>
-                          </div>
-                        </details>
-                      )}
-                      <Markdown content={bodyContent} className="markdown-content" />
-                    </div>
-                  </details>
-                );
-              }
-
               const agent = AGENT_CONFIG[message.agentId] ?? AGENT_CONFIG.system;
               const isAgent = isCouncilAgent(message.agentId);
               const isSystem = message.agentId === "system";
