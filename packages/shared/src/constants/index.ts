@@ -720,6 +720,21 @@ export const MODEL_REGISTRY: ModelInfo[] = [
 
   // Qwen models (Alibaba Cloud Bailian / DashScope compatible mode)
   {
+    id: "qwen3.6-plus",
+    provider: "qwen",
+    name: "Qwen 3.6 Plus",
+    description: "Latest general-purpose high-capability model",
+    contextWindow: 131072,
+    maxOutputTokens: 8192,
+    supportsThinking: true,
+    supportsVision: false,
+    supportsStreaming: true,
+    pricing: {
+      inputCostPer1M: 0.56,
+      outputCostPer1M: 1.68,
+    },
+  },
+  {
     id: "qwen3.5-plus",
     provider: "qwen",
     name: "Qwen 3.5 Plus",
@@ -737,9 +752,9 @@ export const MODEL_REGISTRY: ModelInfo[] = [
 
   // MiniMax models
   {
-    id: "MiniMax-M2.7",
+    id: "MiniMax-M2.7-highspeed",
     provider: "minimax",
-    name: "MiniMax M2.7",
+    name: "MiniMax M2.7 Highspeed",
     description: "Latest flagship text model",
     contextWindow: 1000000,
     maxOutputTokens: 64000,
@@ -752,9 +767,9 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     },
   },
   {
-    id: "minimax-m2.7",
+    id: "minimax-m2.7-highspeed",
     provider: "minimax",
-    name: "MiniMax M2.7 (Alias)",
+    name: "MiniMax M2.7 Highspeed (Alias)",
     description: "Lowercase alias retained for compatibility",
     contextWindow: 1000000,
     maxOutputTokens: 64000,
@@ -768,6 +783,21 @@ export const MODEL_REGISTRY: ModelInfo[] = [
   },
 
   // Zhipu (Z.AI) models
+  {
+    id: "glm-5.1",
+    provider: "zhipu",
+    name: "GLM-5.1",
+    description: "Latest flagship with improved reasoning and coding",
+    contextWindow: 200000,
+    maxOutputTokens: 16384,
+    supportsThinking: true,
+    supportsVision: true,
+    supportsStreaming: true,
+    pricing: {
+      inputCostPer1M: 0.5,
+      outputCostPer1M: 2.0,
+    },
+  },
   {
     id: "glm-5",
     provider: "zhipu",
@@ -892,7 +922,7 @@ export const DEFAULT_AGENTS: Record<AgentId, AgentConfig> = {
     id: "quinn",
     name: "Quinn",
     provider: "qwen",
-    model: "qwen3.5-plus",
+    model: "qwen3.6-plus",
     systemPrompt: baseSystemPrompt("Quinn"),
     temperature: 1,
     maxTokens: 4096,
@@ -901,7 +931,7 @@ export const DEFAULT_AGENTS: Record<AgentId, AgentConfig> = {
     id: "mary",
     name: "Mary",
     provider: "minimax",
-    model: "minimax-m2.7",
+    model: "minimax-m2.7-highspeed",
     systemPrompt: baseSystemPrompt("Mary"),
     temperature: 1,
     maxTokens: 4096,
@@ -910,7 +940,7 @@ export const DEFAULT_AGENTS: Record<AgentId, AgentConfig> = {
     id: "zara",
     name: "Zara",
     provider: "zhipu",
-    model: "glm-5",
+    model: "glm-5.1",
     systemPrompt: baseSystemPrompt("Zara"),
     temperature: 1,
     maxTokens: 4096,
