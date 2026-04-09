@@ -514,6 +514,10 @@ function normalizeMessage(input: unknown): SessionMessage | null {
     ...(normalizeReactions(record.reactions)
       ? { reactions: normalizeReactions(record.reactions) }
       : {}),
+    ...(record.observerNote && typeof record.observerNote === "object"
+      ? { observerNote: record.observerNote }
+      : {}),
+    ...(record.isResolution ? { isResolution: true } : {}),
   };
 }
 

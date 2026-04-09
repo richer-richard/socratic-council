@@ -71,7 +71,8 @@ interface ObserverCircleConfig {
 // ---------------------------------------------------------------------------
 
 const MAX_OBSERVER_CONTEXT = 16;
-const OBSERVER_INTERVAL = 1; // every turn — observers send notes as often as possible
+// Observers fire after every single turn — they pass notes freely anytime
+const OBSERVER_INTERVAL = 1;
 
 function buildObserverSystemPrompt(observerName: string, partnerName: string): string {
   return `You are ${observerName}, the outer-circle partner of ${partnerName} in the Socratic Council.

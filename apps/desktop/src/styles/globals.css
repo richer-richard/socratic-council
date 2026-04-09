@@ -3307,15 +3307,26 @@ body {
 .workstation-agent-row.is-ready {
   opacity: 1;
 }
+.workstation-agent-row-info {
+  display: flex;
+  flex-direction: column;
+  gap: 0.05rem;
+  min-width: 0;
+}
 .workstation-agent-row-name {
   font-size: 0.82rem;
   font-weight: 500;
   color: var(--ink-500);
   font-family: var(--font-mono);
 }
+.workstation-agent-row-model {
+  font-size: 0.65rem;
+  color: var(--ink-500);
+  opacity: 0.5;
+  font-family: var(--font-mono);
+}
 .workstation-inspector-footer {
   padding: 0.6rem;
-  border-top: 1px solid rgba(148, 163, 184, 0.1);
   margin-top: auto;
 }
 .workstation-inspector-stat {
@@ -3329,7 +3340,8 @@ body {
   display: flex;
   justify-content: center;
   align-items: center;
-  padding: 1.5rem 0 0.5rem 0;
+  padding: 2rem 0 1rem 0;
+  flex: 1;
 }
 
 .session-status {

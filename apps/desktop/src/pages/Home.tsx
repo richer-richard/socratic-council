@@ -53,6 +53,21 @@ const AGENT_CARDS: Array<{
   { provider: "zhipu", name: "Zara", partner: "Zoe", color: "var(--color-zara)" },
 ];
 
+const MODEL_DISPLAY_NAMES: Record<string, string> = {
+  openai: "GPT-5.4",
+  anthropic: "Claude Opus 4.6",
+  google: "Gemini 3.1 Pro",
+  deepseek: "DeepSeek Reasoner",
+  kimi: "Kimi K2.5",
+  qwen: "Qwen 3.6 Plus",
+  minimax: "MiniMax M2.7",
+  zhipu: "GLM-5.1",
+};
+
+function getModelDisplayName(provider: string): string {
+  return MODEL_DISPLAY_NAMES[provider] ?? provider;
+}
+
 const AGENT_COLORS: Record<string, string> = {
   openai: "#60a5fa",
   anthropic: "#fbbf24",
@@ -87,7 +102,7 @@ function CouncilCircleViz({ configured }: { configured: Provider[] }) {
 
   return (
     <div className="council-circle-viz">
-      <svg viewBox="0 0 200 200" width="180" height="180">
+      <svg viewBox="0 0 200 200" width="420" height="420">
         <defs>
           <radialGradient id="cc-glow" cx="50%" cy="50%" r="50%">
             <stop offset="0%" stopColor="rgba(148, 163, 184, 0.06)" />
@@ -1332,18 +1347,25 @@ export function Home({
           </section>
 
           <aside className="workstation-inspector">
+            <div className="workstation-panel-heading" style={{ fontFamily: "var(--font-mono)", marginBottom: "0.6rem" }}>
+              Council Rack
+            </div>
             <div className="workstation-agent-list">
               {AGENT_CARDS.map((agent) => {
                 const configured = configuredProviders.includes(agent.provider);
+                const modelName = configured ? getModelDisplayName(agent.provider) : "not configured";
                 return (
                   <div
                     key={agent.provider}
                     className={`workstation-agent-row ${configured ? "is-ready" : ""}`}
                   >
                     <ProviderIcon provider={agent.provider} size={20} />
-                    <span className="workstation-agent-row-name" style={{ color: configured ? agent.color : undefined }}>
-                      {agent.name}<span style={{ opacity: 0.35 }}> & {agent.partner}</span>
-                    </span>
+                    <div className="workstation-agent-row-info">
+                      <span className="workstation-agent-row-name" style={{ color: configured ? agent.color : undefined }}>
+                        {agent.name}<span style={{ opacity: 0.35 }}> & {agent.partner}</span>
+                      </span>
+                      <span className="workstation-agent-row-model">{modelName}</span>
+                    </div>
                   </div>
                 );
               })}
