@@ -755,11 +755,12 @@ export function Home({
             type="button"
             onClick={() => setShowSettings(true)}
             className="workstation-sidebar-button"
+            style={{ fontFamily: "var(--font-mono)" }}
           >
             <GearIcon size={16} />
             <span>Settings</span>
           </button>
-          <div className="workstation-sidebar-pill">
+          <div className="workstation-sidebar-pill" style={{ fontFamily: "var(--font-mono)" }}>
             <ArchiveIcon size={14} />
             <span>{sessions.length} saved locally</span>
           </div>
@@ -850,7 +851,7 @@ export function Home({
                                   >
                                     {STATUS_LABELS[session.status]}
                                   </span>
-                                  <span>{formatRelativeTime(session.updatedAt)}</span>
+                                  <span style={{ fontFamily: "var(--font-mono)" }}>{formatRelativeTime(session.updatedAt)}</span>
                                 </div>
                                 <div className="workstation-thread-title">{session.title}</div>
                                 <div className="workstation-thread-preview">
@@ -889,6 +890,7 @@ export function Home({
               type="button"
               onClick={() => setShowNewProject(true)}
               className="workstation-new-project-btn"
+              style={{ fontFamily: "var(--font-mono)" }}
             >
               <PlusIcon size={12} />
               <span>New Project</span>
@@ -947,7 +949,7 @@ export function Home({
                             <span className={`session-status session-status-${session.status}`}>
                               {STATUS_LABELS[session.status]}
                             </span>
-                            <span>{formatRelativeTime(session.updatedAt)}</span>
+                            <span style={{ fontFamily: "var(--font-mono)" }}>{formatRelativeTime(session.updatedAt)}</span>
                           </div>
                           <div className="workstation-thread-title">{session.title}</div>
                           <div className="workstation-thread-preview">
@@ -1244,7 +1246,7 @@ export function Home({
                   <ArrowIcon size={18} />
                 </button>
               </div>
-              <div className="workstation-input-help">
+              <div className="workstation-input-help" style={{ fontFamily: "var(--font-mono)" }}>
                 Upload images, PDFs, DOCX, code, text, and other files. Large non-image files are
                 compacted locally.
               </div>
@@ -1317,6 +1319,7 @@ export function Home({
                     type="button"
                     onClick={() => setTopic(sample)}
                     className="workstation-suggestion-chip"
+                    style={{ fontFamily: "var(--font-mono)" }}
                   >
                     {sample}
                   </button>
