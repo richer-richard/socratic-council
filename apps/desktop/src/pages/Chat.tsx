@@ -4747,15 +4747,15 @@ Write the official moderator wrap-up in 4 short sentences:
 
               <div className="panel-card p-4 mb-6">
                 <div className="flex items-center justify-between mb-3">
-                  <h3 className="text-xs font-semibold text-ink-500 uppercase tracking-[0.24em]" style={{ fontFamily: "var(--font-mono)" }}>
+                  <h3 className="text-[10px] font-semibold text-ink-500 uppercase tracking-[0.24em]" style={{ fontFamily: "var(--font-mono)" }}>
                     Cost Ledger
                   </h3>
-                  <span className="badge text-xs">
+                  <span className="badge text-[10px]">
                     {totalTokens.input + totalTokens.output} tokens
                   </span>
                 </div>
                 {costState ? (
-                  <div className="space-y-2 text-xs" style={{ fontFamily: "var(--font-mono)" }}>
+                  <div className="space-y-2 text-[10px]" style={{ fontFamily: "var(--font-mono)" }}>
                     {AGENT_IDS.map((agentId) => {
                       const agent = AGENT_CONFIG[agentId];
                       const breakdown = costState.agentCosts[agentId];

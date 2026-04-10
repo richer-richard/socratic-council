@@ -233,7 +233,8 @@ export async function callProvider(
     idleTimeoutMs: options?.idleTimeoutMs,
     signal: options?.signal,
     disableThinking: options?.disableThinking,
-  };
+    ...(provider === "kimi" && { useSearch: true }),
+  } as CompletionOptions;
 
   try {
     const result = await instance.completeStream(

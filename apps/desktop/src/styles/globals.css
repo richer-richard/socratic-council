@@ -2454,7 +2454,7 @@ body {
   padding: 0.55rem 0.75rem;
   border-radius: 999px;
   font-family: var(--font-mono);
-  font-size: 0.82rem;
+  font-size: 0.70rem;
   color: var(--ink-700);
   background: rgba(255, 255, 255, 0.04);
   border: 1px solid rgba(255, 255, 255, 0.08);
@@ -2536,7 +2536,7 @@ body {
   background: rgba(255, 255, 255, 0.04);
   border: 1px solid rgba(255, 255, 255, 0.06);
   color: var(--ink-700);
-  font-size: 0.82rem;
+  font-size: 0.70rem;
   font-weight: 600;
   cursor: pointer;
   text-align: left;
@@ -2710,13 +2710,13 @@ body {
   justify-content: space-between;
   gap: 0.75rem;
   font-family: var(--font-mono);
-  font-size: 0.72rem;
+  font-size: 0.62rem;
   color: var(--ink-500);
 }
 
 .workstation-thread-title {
   font-family: var(--font-mono);
-  font-size: 0.96rem;
+  font-size: 0.82rem;
   font-weight: 600;
   color: var(--ink-900);
   overflow-wrap: anywhere;
@@ -2733,6 +2733,7 @@ body {
 
 .workstation-thread-preview {
   font-family: var(--font-mono);
+  font-size: 0.70rem;
   overflow-wrap: anywhere;
   word-break: break-word;
 }
@@ -3038,7 +3039,7 @@ body {
 .workstation-input-help {
   font-family: var(--font-mono);
   margin-top: -0.2rem;
-  font-size: 0.74rem;
+  font-size: 0.62rem;
   color: var(--ink-500);
 }
 
@@ -3098,7 +3099,7 @@ body {
   border: 1px solid rgba(255, 255, 255, 0.1);
   background: rgba(255, 255, 255, 0.04);
   color: var(--ink-700);
-  font-size: 0.82rem;
+  font-size: 0.70rem;
   transition:
     transform 0.2s ease,
     border-color 0.2s ease,
@@ -3352,13 +3353,13 @@ body {
   min-width: 0;
 }
 .workstation-agent-row-name {
-  font-size: 0.82rem;
+  font-size: 0.70rem;
   font-weight: 500;
   color: var(--ink-500);
   font-family: var(--font-mono);
 }
 .workstation-agent-row-model {
-  font-size: 0.65rem;
+  font-size: 0.55rem;
   color: var(--ink-500);
   opacity: 0.5;
   font-family: var(--font-mono);

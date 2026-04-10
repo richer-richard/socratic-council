@@ -33,7 +33,7 @@ export interface ToolResult {
 }
 
 const TOOL_TIMEOUT_MS = 15000;
-const MAX_RESULTS = 5;
+const MAX_RESULTS = 50;
 const FILE_SEARCH_SNIPPET_TARGET = 1100;
 const FILE_SEARCH_SNIPPET_LEAD = 260;
 

@@ -30,13 +30,19 @@ function parseToolDirectiveAt(raw: string, start: number): ParsedToolDirective |
   let cursor = start + TOOL_PREFIX.length;
   const nameStart = cursor;
 
-  while (cursor < raw.length && raw[cursor] !== ",") {
+  while (cursor < raw.length && raw[cursor] !== "," && raw[cursor] !== ";") {
     cursor += 1;
   }
 
   if (cursor >= raw.length) return null;
 
-  const toolName = raw.slice(nameStart, cursor).trim();
+  let toolName = raw.slice(nameStart, cursor).trim();
+  if (
+    (toolName.startsWith('"') && toolName.endsWith('"')) ||
+    (toolName.startsWith("'") && toolName.endsWith("'"))
+  ) {
+    toolName = toolName.slice(1, -1);
+  }
   cursor += 1;
   const argsStart = cursor;
 

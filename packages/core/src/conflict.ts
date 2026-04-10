@@ -371,7 +371,7 @@ export class ConflictDetector {
       // Damp very short / low-signal messages so they don't dominate the score
       // purely due to structural bonuses.
       const signalWeight = messageSignalWeight(msg.content, base);
-      adjusted = Math.round(adjusted * signalWeight);
+      adjusted = adjusted * signalWeight;
 
       if (adjusted >= 30) {
         if (msg.agentId === agentA) strongByA += 1;
@@ -434,6 +434,6 @@ export class ConflictDetector {
       baseScore + engagementBonus + directedBonus + reciprocityBonus + sustainedBonus,
     );
 
-    return Math.round(score);
+    return score;
   }
 }
