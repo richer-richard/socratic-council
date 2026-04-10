@@ -82,6 +82,15 @@ export function getToolPrompt(): string {
     "Never emit tool_use, tool_call, function_call, XML tags, or provider-specific tool syntax.",
     "Available tools:",
     ...TOOL_DEFINITIONS.map((tool) => `- ${tool.name}: ${tool.description} args=${tool.args}`),
+    "",
+    'Canvas (optional brainstorming): use @canvas({"op":"append|replace","section":"TITLE","text":"..."}) on its own line.',
+    "Use the canvas to organize your reasoning before writing your final answer:",
+    '- "Key Points" section for core claims and evidence',
+    '- "Argument Structure" section for your logical outline',
+    '- "Counterpoints" section for anticipated objections',
+    '- "Evidence Notes" section for facts, citations, and data',
+    "You may emit multiple @canvas(...) lines. Canvas content persists across turns.",
+    "Build your canvas early in your thinking process, then write your response.",
   ];
   return lines.join("\n");
 }

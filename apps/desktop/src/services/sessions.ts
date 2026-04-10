@@ -165,6 +165,7 @@ export interface DiscussionSession {
   attachments: SessionAttachment[];
   duoLogue: DuoLogueSnapshot | null;
   runtime: SessionRuntimeSnapshot;
+  canvasStates?: Record<string, unknown>;
 }
 
 export interface SessionSummary {
