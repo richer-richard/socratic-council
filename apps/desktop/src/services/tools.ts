@@ -83,14 +83,15 @@ export function getToolPrompt(): string {
     "Available tools:",
     ...TOOL_DEFINITIONS.map((tool) => `- ${tool.name}: ${tool.description} args=${tool.args}`),
     "",
-    'Canvas (optional brainstorming): use @canvas({"op":"append|replace","section":"TITLE","text":"..."}) on its own line.',
-    "Use the canvas to organize your reasoning before writing your final answer:",
-    '- "Key Points" section for core claims and evidence',
-    '- "Argument Structure" section for your logical outline',
-    '- "Counterpoints" section for anticipated objections',
-    '- "Evidence Notes" section for facts, citations, and data',
-    "You may emit multiple @canvas(...) lines. Canvas content persists across turns.",
-    "Build your canvas early in your thinking process, then write your response.",
+    'Canvas (brainstorming workspace): use @canvas({"op":"append|replace","section":"TITLE","text":"..."}) on its own line.',
+    "IMPORTANT: Always draft your key points on the canvas BEFORE writing your response. This is your workspace — use it proactively every turn.",
+    "Before answering, emit @canvas lines to organize:",
+    '- "Key Points" — your core claims and the evidence backing each one',
+    '- "Argument Structure" — your logical outline for this response',
+    '- "Counterpoints" — objections you anticipate and how to address them',
+    '- "Evidence Notes" — facts, citations, data, and search results worth keeping',
+    "Canvas content persists across turns — you will see your prior notes. Update and refine them each turn.",
+    "Draft on canvas first, then write your final response using what you organized.",
   ];
   return lines.join("\n");
 }

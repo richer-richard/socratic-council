@@ -374,7 +374,7 @@ const hasStructuredVoteArtifacts = (msg: unknown): boolean => {
 
 const REACTION_IDS = REACTION_CATALOG;
 const MAX_CONTEXT_MESSAGES = 16;
-const MAX_TOOL_ITERATIONS = 2;
+const MAX_TOOL_ITERATIONS = 6;
 const DEFAULT_MODERATOR_USAGE: ModeratorUsageSnapshot = {
   inputTokens: 0,
   outputTokens: 0,
@@ -1702,7 +1702,7 @@ Direct question: "${pendingHandoffRef.current.question}"
       history.push({
         role: "user",
         content:
-          "Your turn. Get enough context first; if exact wording or evidence is uncertain, use tools before answering. If you need a tool, emit only the @tool(...) line and stop so the app can run it. Otherwise respond directly to one specific message above and either add one new point or narrow the group toward a decision.",
+          "Your turn. First, draft your key points on the canvas using @canvas(...) lines. Then, if exact wording or evidence is uncertain, use @tool(...) to search — you can output text, search, and continue writing across multiple rounds. Respond directly to one specific message above and either add one new point or narrow the group toward a decision.",
       });
 
       return history;
@@ -2555,6 +2555,7 @@ Write the official moderator wrap-up in 4 short sentences:
 
         let history = buildConversationHistory(agentId);
         let result = await runCompletion(history, modelUsed);
+        let accumulatedContent = "";
 
         if (!result.success && agentConfig.provider === "anthropic" && model.includes("opus")) {
           // If the full dated model ID fails, try the alias as fallback
@@ -2569,6 +2570,11 @@ Write the official moderator wrap-up in 4 short sentences:
           }
         }
 
+        // Accumulate visible content from the initial completion
+        if (result.content) {
+          accumulatedContent = result.content;
+        }
+
         while (result.success && toolIteration < MAX_TOOL_ITERATIONS) {
           const parsedForTools = extractActions(
             result.rawContent || result.content || "",
@@ -2581,7 +2587,7 @@ Write the official moderator wrap-up in 4 short sentences:
           if (toolCalls.length === 0) break;
 
           const interim =
-            result.content ||
+            accumulatedContent ||
             parsedForTools.cleaned ||
             (toolIteration === 0 ? "Researching sources..." : "Gathering more context...");
           setMessages((prev) =>
@@ -2603,10 +2609,29 @@ Write the official moderator wrap-up in 4 short sentences:
             ),
           );
 
+          // Include the agent's prior output as assistant message so it can continue naturally
           const extraContext = buildToolContextMessages(results);
-          history = buildConversationHistory(agentId, extraContext);
+          const priorAssistant = accumulatedContent.trim();
+          if (priorAssistant) {
+            history = buildConversationHistory(agentId, [
+              { role: "assistant", content: priorAssistant },
+              ...extraContext,
+            ]);
+          } else {
+            history = buildConversationHistory(agentId, extraContext);
+          }
           result = await runCompletion(history, modelUsed);
           toolIteration += 1;
+
+          // Accumulate new content from this completion
+          const newContent = (result.content || "").trim();
+          if (newContent) {
+            accumulatedContent = accumulatedContent
+              ? accumulatedContent + "\n\n" + newContent
+              : newContent;
+            streamingContent = accumulatedContent;
+            flushStreamingMessage(true);
+          }
         }
 
         // Strip canvas directives from the final content
@@ -2683,7 +2708,7 @@ Write the official moderator wrap-up in 4 short sentences:
           return null;
         }
 
-        const finalVisibleContent = normalizeMessageText(result.content || streamingContent || "");
+        const finalVisibleContent = normalizeMessageText(accumulatedContent || result.content || streamingContent || "");
         const resolvedQuotes = resolveQuoteTargets(agentId, parsed.quoteTargets);
         const parsedReactions = parsed.reactions.map((reaction) => ({
           targetId: reaction.targetId,
