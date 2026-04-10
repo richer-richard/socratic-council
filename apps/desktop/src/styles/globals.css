@@ -176,6 +176,7 @@ body {
 }
 
 .elegant-subtitle {
+  font-family: var(--font-mono);
   font-size: 1rem;
   font-weight: 600;
   letter-spacing: 0.35em;
@@ -460,6 +461,7 @@ body {
 }
 
 .agent-card-provider {
+  font-family: var(--font-mono);
   font-size: 0.65rem;
   color: var(--ink-500);
   text-transform: uppercase;
@@ -541,6 +543,7 @@ body {
 }
 
 .button-secondary {
+  font-family: var(--font-mono);
   background: rgba(255, 255, 255, 0.08);
   color: var(--ink-700);
   border: 1px solid var(--line-soft);
@@ -843,6 +846,7 @@ body {
 }
 
 .session-action-eyebrow {
+  font-family: var(--font-mono);
   margin-bottom: 0.55rem;
   text-transform: uppercase;
   letter-spacing: 0.18em;
@@ -953,7 +957,7 @@ body {
   padding: 1rem 1.25rem;
   color: var(--ink-900);
   font-size: 1.05rem;
-  font-family: var(--font-body);
+  font-family: var(--font-mono);
   transition: all 0.2s ease;
 }
 
@@ -1119,6 +1123,7 @@ body {
 }
 
 .discord-username {
+  font-family: var(--font-mono);
   font-weight: 600;
   font-size: 1.05rem;
   line-height: 1.2;
@@ -1307,6 +1312,7 @@ body {
   align-items: center;
   gap: 0.35rem;
   border-radius: 999px;
+  font-family: var(--font-mono);
   font-size: 0.72rem;
   font-weight: 700;
   letter-spacing: 0.08em;
@@ -1342,6 +1348,7 @@ body {
 .end-vote-round-label,
 .end-vote-board-kicker,
 .moderator-conclusion-label {
+  font-family: var(--font-mono);
   font-size: 0.68rem;
   font-weight: 700;
   letter-spacing: 0.12em;
@@ -1437,6 +1444,7 @@ body {
 .vote-pie-chart-inner span {
   margin-top: 0.18rem;
   color: var(--ink-500);
+  font-family: var(--font-mono);
   font-size: 0.62rem;
   font-weight: 700;
   letter-spacing: 0.14em;
@@ -1459,6 +1467,7 @@ body {
 .end-vote-board-stat span {
   display: block;
   color: var(--ink-500);
+  font-family: var(--font-mono);
   font-size: 0.65rem;
   letter-spacing: 0.1em;
   text-transform: uppercase;
@@ -1507,6 +1516,7 @@ body {
 }
 
 .end-vote-agent-choice {
+  font-family: var(--font-mono);
   font-size: 0.7rem;
   font-weight: 700;
   letter-spacing: 0.08em;
@@ -1573,6 +1583,7 @@ body {
 
 .end-vote-inline-badge {
   display: inline-block;
+  font-family: var(--font-mono);
   font-size: 0.62rem;
   font-weight: 700;
   letter-spacing: 0.08em;
@@ -2403,7 +2414,7 @@ body {
 }
 
 .workstation-brand-label {
-  font-family: var(--font-display);
+  font-family: var(--font-mono);
   font-size: 1.6rem;
   line-height: 1;
   color: var(--ink-900);
@@ -2442,6 +2453,7 @@ body {
   gap: 0.45rem;
   padding: 0.55rem 0.75rem;
   border-radius: 999px;
+  font-family: var(--font-mono);
   font-size: 0.82rem;
   color: var(--ink-700);
   background: rgba(255, 255, 255, 0.04);
@@ -2616,9 +2628,8 @@ body {
   min-width: 0;
   padding: 0.95rem 1rem;
   text-align: left;
-  border-radius: 1rem;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 0;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.08);
   color: var(--ink-900);
   transition:
     transform 0.2s cubic-bezier(0.4, 0, 0.2, 1),
@@ -2689,9 +2700,7 @@ body {
 
 .workstation-thread.is-active,
 .workstation-thread:hover {
-  background: rgba(255, 255, 255, 0.07);
-  border-color: rgba(20, 184, 166, 0.24);
-  box-shadow: 0 2px 12px rgba(20, 184, 166, 0.06);
+  background: rgba(255, 255, 255, 0.03);
 }
 
 .workstation-thread-meta,
@@ -2700,11 +2709,13 @@ body {
   align-items: center;
   justify-content: space-between;
   gap: 0.75rem;
+  font-family: var(--font-mono);
   font-size: 0.72rem;
   color: var(--ink-500);
 }
 
 .workstation-thread-title {
+  font-family: var(--font-mono);
   font-size: 0.96rem;
   font-weight: 600;
   color: var(--ink-900);
@@ -2721,6 +2732,7 @@ body {
 }
 
 .workstation-thread-preview {
+  font-family: var(--font-mono);
   overflow-wrap: anywhere;
   word-break: break-word;
 }
@@ -2802,6 +2814,7 @@ body {
   border-radius: 0.75rem;
   background: rgba(255, 255, 255, 0.02);
   color: rgba(255, 255, 255, 0.45);
+  font-family: var(--font-mono);
   font-size: 0.78rem;
   font-weight: 500;
   cursor: pointer;
@@ -2823,7 +2836,7 @@ body {
 }
 
 .chat-session-title {
-  font-family: var(--font-display);
+  font-family: var(--font-mono);
   font-size: clamp(1.8rem, 3vw, 2.55rem);
   line-height: 1;
   font-weight: 700;
@@ -2883,7 +2896,7 @@ body {
 
 .workstation-composer-header {
   padding-bottom: 1.5rem;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  border-bottom: 1px solid transparent;
 }
 
 .workstation-hero {
@@ -2914,6 +2927,7 @@ body {
 }
 
 .workstation-subtitle {
+  font-family: var(--font-mono);
   max-width: 42rem;
   margin: 0;
 }
@@ -3022,6 +3036,7 @@ body {
 }
 
 .workstation-input-help {
+  font-family: var(--font-mono);
   margin-top: -0.2rem;
   font-size: 0.74rem;
   color: var(--ink-500);
@@ -3077,6 +3092,7 @@ body {
 }
 
 .workstation-suggestion-chip {
+  font-family: var(--font-mono);
   padding: 0.6rem 0.8rem;
   border-radius: 999px;
   border: 1px solid rgba(255, 255, 255, 0.1);
@@ -3348,6 +3364,7 @@ body {
   font-family: var(--font-mono);
 }
 .workstation-inspector-footer {
+  font-family: var(--font-mono);
   padding: 0.6rem;
   margin-top: auto;
 }
@@ -3548,25 +3565,34 @@ body {
   cursor: not-allowed;
 }
 .session-control-icon-button.is-pause {
-  background: rgba(52, 211, 153, 0.85);
-  color: #fff;
+  background: rgba(15, 23, 42, 0.7);
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  color: var(--ink-700);
 }
 .session-control-icon-button.is-pause:hover {
-  background: rgba(52, 211, 153, 1);
+  background: rgba(15, 23, 42, 0.9);
+  border-color: rgba(148, 163, 184, 0.4);
+  color: #fff;
 }
 .session-control-icon-button.is-resume {
-  background: rgba(52, 211, 153, 0.85);
-  color: #fff;
+  background: rgba(15, 23, 42, 0.7);
+  border: 1px solid rgba(52, 211, 153, 0.35);
+  color: #34d399;
 }
 .session-control-icon-button.is-resume:hover {
-  background: rgba(52, 211, 153, 1);
+  background: rgba(52, 211, 153, 0.1);
+  border-color: rgba(52, 211, 153, 0.5);
+  color: #6ee7b7;
 }
 .session-control-icon-button.is-graceful-end {
-  background: rgba(251, 146, 60, 0.85);
-  color: #fff;
+  background: rgba(15, 23, 42, 0.7);
+  border: 1px solid rgba(251, 146, 60, 0.35);
+  color: #fb923c;
 }
 .session-control-icon-button.is-graceful-end:hover {
-  background: rgba(251, 146, 60, 1);
+  background: rgba(251, 146, 60, 0.1);
+  border-color: rgba(251, 146, 60, 0.5);
+  color: #fdba74;
 }
 
 /* Graceful End confirmation modal */

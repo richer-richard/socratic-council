@@ -4010,7 +4010,7 @@ Write the official moderator wrap-up in 4 short sentences:
 
           <div className="flex flex-wrap items-center gap-3 justify-start xl:justify-end">
             <div className="flex items-center gap-2">
-              <div className="text-sm text-ink-500">
+              <div className="text-sm text-ink-500" style={{ fontFamily: "var(--font-mono)" }}>
                 Turn {currentTurn}/{displayMaxTurns}
               </div>
               {maxTurns !== Infinity && (
@@ -4257,15 +4257,6 @@ Write the official moderator wrap-up in 4 short sentences:
                       {(isAgent || isModerator) && modelName && (
                         <span className="discord-model">({modelName})</span>
                       )}
-                      {(isAgent || isModerator) &&
-                        !message.isStreaming &&
-                        (!!message.thinking?.trim() || (message.toolEvents?.length ?? 0) > 0) && (
-                          <span className="discord-thinking-pill">
-                            {(message.toolEvents?.length ?? 0) > 0
-                              ? `Worked for ${((message.thinkingMs ?? message.latencyMs ?? 0) / 1000).toFixed(3)}s`
-                              : `Thought for ${((message.thinkingMs ?? message.latencyMs ?? 0) / 1000).toFixed(3)}s`}
-                          </span>
-                        )}
                       {(isAgent || isModerator) &&
                         (message.isStreaming || message.latencyMs != null) && (
                           <LiveStopwatch
@@ -4610,7 +4601,7 @@ Write the official moderator wrap-up in 4 short sentences:
             // Logs panel
             <div className="scale-in">
               <div className="flex items-center justify-between mb-4">
-                <h3 className="text-xs font-semibold text-ink-500 uppercase tracking-[0.24em]">
+                <h3 className="text-xs font-semibold text-ink-500 uppercase tracking-[0.24em]" style={{ fontFamily: "var(--font-mono)" }}>
                   API Logs
                 </h3>
                 <button
@@ -4666,7 +4657,7 @@ Write the official moderator wrap-up in 4 short sentences:
             />
           ) : (
             <>
-              <h3 className="text-xs font-semibold text-ink-500 uppercase tracking-[0.24em] mb-4">
+              <h3 className="text-xs font-semibold text-ink-500 uppercase tracking-[0.24em] mb-4" style={{ fontFamily: "var(--font-mono)" }}>
                 Council Members
               </h3>
 
@@ -4712,7 +4703,7 @@ Write the official moderator wrap-up in 4 short sentences:
               {/* Bidding display */}
               {showBidding && currentBidding && (
                 <div className="scale-in">
-                  <h3 className="text-xs font-semibold text-ink-500 uppercase tracking-[0.24em] mb-3">
+                  <h3 className="text-xs font-semibold text-ink-500 uppercase tracking-[0.24em] mb-3" style={{ fontFamily: "var(--font-mono)" }}>
                     Bidding Round
                   </h3>
                   <div className="panel-card p-3 space-y-2">
@@ -4756,7 +4747,7 @@ Write the official moderator wrap-up in 4 short sentences:
 
               <div className="panel-card p-4 mb-6">
                 <div className="flex items-center justify-between mb-3">
-                  <h3 className="text-xs font-semibold text-ink-500 uppercase tracking-[0.24em]">
+                  <h3 className="text-xs font-semibold text-ink-500 uppercase tracking-[0.24em]" style={{ fontFamily: "var(--font-mono)" }}>
                     Cost Ledger
                   </h3>
                   <span className="badge text-xs">
@@ -4764,7 +4755,7 @@ Write the official moderator wrap-up in 4 short sentences:
                   </span>
                 </div>
                 {costState ? (
-                  <div className="space-y-2 text-xs">
+                  <div className="space-y-2 text-xs" style={{ fontFamily: "var(--font-mono)" }}>
                     {AGENT_IDS.map((agentId) => {
                       const agent = AGENT_CONFIG[agentId];
                       const breakdown = costState.agentCosts[agentId];
@@ -4823,7 +4814,7 @@ Write the official moderator wrap-up in 4 short sentences:
               {/* Discussion stats */}
               {!isRunning && currentTurn > 0 && (
                 <div className="mt-6 scale-in">
-                  <h3 className="text-xs font-semibold text-ink-500 uppercase tracking-[0.24em] mb-3">
+                  <h3 className="text-xs font-semibold text-ink-500 uppercase tracking-[0.24em] mb-3" style={{ fontFamily: "var(--font-mono)" }}>
                     Summary
                   </h3>
                   <div className="panel-card p-4 space-y-3">
@@ -4866,7 +4857,7 @@ Write the official moderator wrap-up in 4 short sentences:
       {/* Footer - Current speaker indicator */}
       {typingAgents.length > 0 && (
         <div className="app-footer px-6 py-3">
-          <div className="flex items-center justify-center gap-3 text-sm">
+          <div className="flex items-center justify-center gap-3 text-sm" style={{ fontFamily: "var(--font-mono)" }}>
             {typingAgents.slice(0, 3).map((agentId) => (
               <span key={agentId} className="flex items-center gap-2">
                 <ProviderIcon provider={AGENT_CONFIG[agentId].provider} size={18} />
