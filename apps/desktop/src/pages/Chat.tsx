@@ -47,6 +47,13 @@ import { calculateMessageCost } from "../utils/cost";
 import { extractHandoffDirective } from "../utils/handoff";
 import { createStreamingToolCallDetector, extractActions } from "../utils/toolActions";
 import { splitIntoInlineQuoteSegments, stripQuoteTokens } from "../utils/inlineQuotes";
+import {
+  type CanvasState,
+  applyCanvasDirective,
+  createStreamingCanvasDetector,
+  extractCanvasDirectives,
+} from "../utils/canvasActions";
+import { AgentCanvas } from "../components/AgentCanvas";
 import { useObserverCircle } from "./useObserverCircle";
 import type { ObserverNoteSnapshot } from "../services/sessions";
 import { Virtuoso, type VirtuosoHandle } from "react-virtuoso";
@@ -955,6 +962,12 @@ export function Chat({ session, onNavigate, onPersistSession }: ChatProps) {
   );
   const [conflictState, setConflictState] = useState<ConflictDetection | null>(null);
   const [allConflicts, setAllConflicts] = useState<PairwiseConflict[]>([]);
+  const [canvasStates, setCanvasStates] = useState<Partial<Record<CouncilAgentId, CanvasState>>>(
+    (normalizedSession as DiscussionSession & { canvasStates?: Partial<Record<CouncilAgentId, CanvasState>> }).canvasStates ?? {},
+  );
+  const canvasStatesRef = useRef(canvasStates);
+  canvasStatesRef.current = canvasStates;
+  const [expandedCanvases, setExpandedCanvases] = useState<Partial<Record<string, boolean>>>({});
   const [duoLogue, setDuoLogue] = useState<DuoLogueState | null>(normalizedSession.duoLogue);
   const [reactionPickerTarget, setReactionPickerTarget] = useState<string | null>(null);
   const [recentlyCopiedQuote, setRecentlyCopiedQuote] = useState<string | null>(null);
@@ -1671,6 +1684,18 @@ Direct question: "${pendingHandoffRef.current.question}"
         history.push({
           role: "user",
           content: `[Private note from ${observerNote.observerName}]: ${observerNote.content}`,
+        });
+      }
+
+      // Inject persistent canvas state so the agent can see/update prior notes
+      const agentCanvas = canvasStatesRef.current[agentId];
+      if (agentCanvas && agentCanvas.sections.length > 0) {
+        const canvasSummary = agentCanvas.sections
+          .map((s) => `## ${s.label}\n${s.text}`)
+          .join("\n\n");
+        history.push({
+          role: "user",
+          content: `[Your persistent canvas from prior turns]\n${canvasSummary}\n\nUpdate your canvas as needed before responding. Build on or revise these notes.`,
         });
       }
 
@@ -2431,6 +2456,7 @@ Write the official moderator wrap-up in 4 short sentences:
           const requestController = new AbortController();
           setActiveController(requestController);
           const streamingToolDetector = createStreamingToolCallDetector();
+          const streamingCanvasDetector = createStreamingCanvasDetector();
           const streamedToolCalls: ToolCall[] = [];
           let interruptedForTools = false;
 
@@ -2454,7 +2480,6 @@ Write the official moderator wrap-up in 4 short sentences:
               if (chunk.content) {
                 if (!firstContentAt) firstContentAt = Date.now();
                 const detection = streamingToolDetector.push(chunk.content);
-                streamingContent = detection.visibleText;
                 if (detection.toolCalls.length > 0) {
                   streamedToolCalls.push(...detection.toolCalls);
                   interruptedForTools = true;
@@ -2463,13 +2488,29 @@ Write the official moderator wrap-up in 4 short sentences:
                   requestController.abort();
                   return;
                 }
+                const canvasDetection = streamingCanvasDetector.push(detection.visibleText);
+                streamingContent = canvasDetection.visibleText;
+                for (const directive of canvasDetection.directives) {
+                  setCanvasStates((prev) => ({
+                    ...prev,
+                    [agentId]: applyCanvasDirective(prev[agentId], directive, agentId, currentTurnRef.current),
+                  }));
+                }
               }
               if (chunk.thinking) {
                 streamingThinking += chunk.thinking;
               }
               if (chunk.done) {
                 if (!interruptedForTools) {
-                  streamingContent = streamingToolDetector.finish();
+                  const toolFinished = streamingToolDetector.finish();
+                  const canvasFinished = streamingCanvasDetector.finish();
+                  streamingContent = canvasFinished.visibleText || toolFinished;
+                  for (const directive of canvasFinished.directives) {
+                    setCanvasStates((prev) => ({
+                      ...prev,
+                      [agentId]: applyCanvasDirective(prev[agentId], directive, agentId, currentTurnRef.current),
+                    }));
+                  }
                 }
                 clearStreamFlushTimer();
                 flushStreamingMessage(true);
@@ -2568,7 +2609,16 @@ Write the official moderator wrap-up in 4 short sentences:
           toolIteration += 1;
         }
 
-        let parsed = extractActions(result.rawContent || result.content || "", REACTION_IDS);
+        // Strip canvas directives from the final content
+        const canvasFromFinal = extractCanvasDirectives(result.rawContent || result.content || "");
+        for (const directive of canvasFromFinal.directives) {
+          setCanvasStates((prev) => ({
+            ...prev,
+            [agentId]: applyCanvasDirective(prev[agentId], directive, agentId, currentTurnRef.current),
+          }));
+        }
+
+        let parsed = extractActions(canvasFromFinal.cleaned, REACTION_IDS);
 
         if (
           result.success &&
@@ -3872,6 +3922,7 @@ Write the official moderator wrap-up in 4 short sentences:
           endVote: endVoteRef.current,
           pendingHandoff: pendingHandoffRef.current,
         },
+        canvasStates: canvasStatesRef.current,
       });
 
       setPersistenceError(null);
@@ -4335,6 +4386,20 @@ Write the official moderator wrap-up in 4 short sentences:
                             </div>
                           </details>
                         )}
+                      {isAgent && (canvasStates[message.agentId as CouncilAgentId]?.sections?.length ?? 0) > 0 && (
+                        <AgentCanvas
+                          canvas={canvasStates[message.agentId as CouncilAgentId]!}
+                          agentColor={AGENT_CONFIG[message.agentId as CouncilAgentId]?.color ?? "var(--ink-500)"}
+                          isStreaming={!!message.isStreaming}
+                          isExpanded={expandedCanvases[message.agentId] ?? !!message.isStreaming}
+                          onToggleExpand={() =>
+                            setExpandedCanvases((prev) => ({
+                              ...prev,
+                              [message.agentId]: !(prev[message.agentId] ?? false),
+                            }))
+                          }
+                        />
+                      )}
                       {message.endVoteBoard ? (
                         <EndVoteBoardCard board={message.endVoteBoard} />
                       ) : message.endVoteBallot ? (
