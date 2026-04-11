@@ -92,6 +92,10 @@ export function getToolPrompt(): string {
     '- "Evidence Notes" — facts, citations, data, and search results worth keeping',
     "Canvas content persists across turns — you will see your prior notes. Update and refine them each turn.",
     "Draft on canvas first, then write your final response using what you organized.",
+    "",
+    "Work loop: You can interleave text, @canvas, and @tool calls freely across multiple rounds.",
+    "The system will keep you running until you emit @done() on its own line to signal you are finished.",
+    "If you output text and still need to research or draft more, the system will prompt you to continue.",
   ];
   return lines.join("\n");
 }
