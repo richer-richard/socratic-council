@@ -2457,6 +2457,7 @@ Write the official moderator wrap-up in 4 short sentences:
           const streamingToolDetector = createStreamingToolCallDetector();
           const streamedToolCalls: ToolCall[] = [];
           let interruptedForTools = false;
+          let canvasDirectivesApplied = 0;
 
           streamingContent = "";
           streamingThinking = "";
@@ -2486,12 +2487,28 @@ Write the official moderator wrap-up in 4 short sentences:
                   requestController.abort();
                   return;
                 }
-                // Strip @canvas(...) lines from display during streaming (proper parsing happens post-completion)
-                streamingContent = detection.visibleText
-                  .replace(/^[ \t]*@canvas\([^\n]*$/gm, "")
+                // Use proper brace-depth parser to strip canvas directives (handles multi-line)
+                const { cleaned: canvasCleaned, directives: canvasDirectives } =
+                  extractCanvasDirectives(detection.visibleText);
+                let displayText = canvasCleaned
                   .replace(/^[ \t]*@done\(\)[ \t]*$/gm, "")
                   .replace(/\n{3,}/g, "\n\n")
                   .trim();
+                // Hide partial @canvas( still being streamed (incomplete directive)
+                const partialIdx = displayText.lastIndexOf("@canvas(");
+                if (partialIdx >= 0 && !displayText.slice(partialIdx).includes(")")) {
+                  displayText = displayText.slice(0, partialIdx).replace(/\n{3,}/g, "\n\n").trim();
+                }
+                streamingContent = displayText;
+                // Apply only NEW canvas directives (cumulative text re-parses old ones)
+                for (let ci = canvasDirectivesApplied; ci < canvasDirectives.length; ci++) {
+                  const directive = canvasDirectives[ci]!;
+                  setCanvasStates((prev) => ({
+                    ...prev,
+                    [agentId]: applyCanvasDirective(prev[agentId], directive, agentId, currentTurnRef.current),
+                  }));
+                }
+                canvasDirectivesApplied = canvasDirectives.length;
               }
               if (chunk.thinking) {
                 streamingThinking += chunk.thinking;
@@ -2499,12 +2516,20 @@ Write the official moderator wrap-up in 4 short sentences:
               if (chunk.done) {
                 if (!interruptedForTools) {
                   const toolFinished = streamingToolDetector.finish();
-                  // Strip canvas/done directives from final streaming content
-                  streamingContent = toolFinished
-                    .replace(/^[ \t]*@canvas\([^\n]*$/gm, "")
+                  const { cleaned: finalCleaned, directives: finalDirectives } =
+                    extractCanvasDirectives(toolFinished);
+                  streamingContent = finalCleaned
                     .replace(/^[ \t]*@done\(\)[ \t]*$/gm, "")
                     .replace(/\n{3,}/g, "\n\n")
                     .trim();
+                  for (let ci = canvasDirectivesApplied; ci < finalDirectives.length; ci++) {
+                    const directive = finalDirectives[ci]!;
+                    setCanvasStates((prev) => ({
+                      ...prev,
+                      [agentId]: applyCanvasDirective(prev[agentId], directive, agentId, currentTurnRef.current),
+                    }));
+                  }
+                  canvasDirectivesApplied = finalDirectives.length;
                 }
                 clearStreamFlushTimer();
                 flushStreamingMessage(true);
