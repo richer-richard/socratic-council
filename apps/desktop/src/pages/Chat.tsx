@@ -50,7 +50,6 @@ import { splitIntoInlineQuoteSegments, stripQuoteTokens } from "../utils/inlineQ
 import {
   type CanvasState,
   applyCanvasDirective,
-  createStreamingCanvasDetector,
   extractCanvasDirectives,
 } from "../utils/canvasActions";
 import { AgentCanvas } from "../components/AgentCanvas";
@@ -2456,7 +2455,6 @@ Write the official moderator wrap-up in 4 short sentences:
           const requestController = new AbortController();
           setActiveController(requestController);
           const streamingToolDetector = createStreamingToolCallDetector();
-          const streamingCanvasDetector = createStreamingCanvasDetector();
           const streamedToolCalls: ToolCall[] = [];
           let interruptedForTools = false;
 
@@ -2488,14 +2486,12 @@ Write the official moderator wrap-up in 4 short sentences:
                   requestController.abort();
                   return;
                 }
-                const canvasDetection = streamingCanvasDetector.push(detection.visibleText);
-                streamingContent = canvasDetection.visibleText;
-                for (const directive of canvasDetection.directives) {
-                  setCanvasStates((prev) => ({
-                    ...prev,
-                    [agentId]: applyCanvasDirective(prev[agentId], directive, agentId, currentTurnRef.current),
-                  }));
-                }
+                // Strip @canvas(...) lines from display during streaming (proper parsing happens post-completion)
+                streamingContent = detection.visibleText
+                  .replace(/^[ \t]*@canvas\([^\n]*$/gm, "")
+                  .replace(/^[ \t]*@done\(\)[ \t]*$/gm, "")
+                  .replace(/\n{3,}/g, "\n\n")
+                  .trim();
               }
               if (chunk.thinking) {
                 streamingThinking += chunk.thinking;
@@ -2503,14 +2499,12 @@ Write the official moderator wrap-up in 4 short sentences:
               if (chunk.done) {
                 if (!interruptedForTools) {
                   const toolFinished = streamingToolDetector.finish();
-                  const canvasFinished = streamingCanvasDetector.finish();
-                  streamingContent = canvasFinished.visibleText || toolFinished;
-                  for (const directive of canvasFinished.directives) {
-                    setCanvasStates((prev) => ({
-                      ...prev,
-                      [agentId]: applyCanvasDirective(prev[agentId], directive, agentId, currentTurnRef.current),
-                    }));
-                  }
+                  // Strip canvas/done directives from final streaming content
+                  streamingContent = toolFinished
+                    .replace(/^[ \t]*@canvas\([^\n]*$/gm, "")
+                    .replace(/^[ \t]*@done\(\)[ \t]*$/gm, "")
+                    .replace(/\n{3,}/g, "\n\n")
+                    .trim();
                 }
                 clearStreamFlushTimer();
                 flushStreamingMessage(true);
@@ -2576,15 +2570,25 @@ Write the official moderator wrap-up in 4 short sentences:
         }
 
         while (result.success && toolIteration < MAX_TOOL_ITERATIONS) {
-          const parsedForTools = extractActions(
-            result.rawContent || result.content || "",
-            REACTION_IDS,
-          );
+          const rawForParsing = result.rawContent || result.content || "";
+          const parsedForTools = extractActions(rawForParsing, REACTION_IDS);
+          const canvasFromRound = extractCanvasDirectives(rawForParsing);
           const toolCalls =
             result.streamedToolCalls.length > 0
               ? result.streamedToolCalls
               : parsedForTools.toolCalls;
-          if (toolCalls.length === 0) break;
+
+          // Apply canvas directives from this round immediately
+          for (const directive of canvasFromRound.directives) {
+            setCanvasStates((prev) => ({
+              ...prev,
+              [agentId]: applyCanvasDirective(prev[agentId], directive, agentId, currentTurnRef.current),
+            }));
+          }
+
+          // Agent is done if it emitted @done() or @end(), or has no work indicators
+          const hasWorkIndicators = toolCalls.length > 0 || canvasFromRound.directives.length > 0;
+          if (parsedForTools.doneRequested || parsedForTools.endRequested || !hasWorkIndicators) break;
 
           const interim =
             accumulatedContent ||
@@ -2594,32 +2598,46 @@ Write the official moderator wrap-up in 4 short sentences:
             prev.map((m) => (m.id === newMessage.id ? { ...m, content: interim, toolEvents } : m)),
           );
 
-          const calls = toolCalls.slice(0, 3);
-          const results = await Promise.all(
-            calls.map((call) => runToolCall(call, buildToolRuntimeContext(agentId, interim))),
-          );
-          appendToolEvents(
-            results.map((toolResult, index) =>
-              createToolEvent(
-                toolResult.name,
-                calls[index]?.args ?? {},
-                toolResult.output,
-                toolResult.error,
+          // Execute tool calls if any
+          if (toolCalls.length > 0) {
+            const calls = toolCalls.slice(0, 3);
+            const results = await Promise.all(
+              calls.map((call) => runToolCall(call, buildToolRuntimeContext(agentId, interim))),
+            );
+            appendToolEvents(
+              results.map((toolResult, index) =>
+                createToolEvent(
+                  toolResult.name,
+                  calls[index]?.args ?? {},
+                  toolResult.output,
+                  toolResult.error,
+                ),
               ),
-            ),
-          );
+            );
 
-          // Include the agent's prior output as assistant message so it can continue naturally
-          const extraContext = buildToolContextMessages(results);
-          const priorAssistant = accumulatedContent.trim();
-          if (priorAssistant) {
-            history = buildConversationHistory(agentId, [
-              { role: "assistant", content: priorAssistant },
-              ...extraContext,
-            ]);
+            // Include the agent's prior output as assistant message so it can continue naturally
+            const extraContext = buildToolContextMessages(results);
+            const priorAssistant = accumulatedContent.trim();
+            if (priorAssistant) {
+              history = buildConversationHistory(agentId, [
+                { role: "assistant", content: priorAssistant },
+                ...extraContext,
+              ]);
+            } else {
+              history = buildConversationHistory(agentId, extraContext);
+            }
           } else {
-            history = buildConversationHistory(agentId, extraContext);
+            // Canvas-only round (no tools): continue with a continuation prompt
+            const priorAssistant = accumulatedContent.trim();
+            history = buildConversationHistory(agentId, [
+              ...(priorAssistant ? [{ role: "assistant" as const, content: priorAssistant }] : []),
+              {
+                role: "user" as const,
+                content: "Continue your response. When you are finished, emit @done() on its own line.",
+              },
+            ]);
           }
+
           result = await runCompletion(history, modelUsed);
           toolIteration += 1;
 

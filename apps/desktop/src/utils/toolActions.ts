@@ -2,6 +2,7 @@ import type { ToolCall } from "../services/tools";
 
 const TOOL_PREFIX = "@tool(";
 const END_DIRECTIVE = "@end()";
+const DONE_DIRECTIVE = "@done()";
 const VALID_TOOL_NAMES = new Set<ToolCall["name"]>([
   "oracle.search",
   "oracle.web_search",
@@ -16,6 +17,7 @@ export interface ExtractedActions {
   reactions: Array<{ targetId: string; emoji: string }>;
   toolCalls: ToolCall[];
   endRequested: boolean;
+  doneRequested: boolean;
 }
 
 interface ParsedToolDirective {
@@ -207,22 +209,30 @@ function parseStandaloneToolLine(line: string) {
 
 function stripEndDirective(raw: string) {
   let endRequested = false;
-  const cleaned = raw.replace(
+  let doneRequested = false;
+  let cleaned = raw.replace(
     /(^|\n)[ \t]*@end\(\)[ \t]*(\n|$)/g,
     (match, prefix: string, suffix: string) => {
       endRequested = true;
       return prefix && suffix && match.includes(END_DIRECTIVE) ? "\n" : "";
     },
   );
+  cleaned = cleaned.replace(
+    /(^|\n)[ \t]*@done\(\)[ \t]*(\n|$)/g,
+    (match, prefix: string, suffix: string) => {
+      doneRequested = true;
+      return prefix && suffix && match.includes(DONE_DIRECTIVE) ? "\n" : "";
+    },
+  );
 
-  return { cleaned, endRequested };
+  return { cleaned, endRequested, doneRequested };
 }
 
 export function extractActions(raw: string, allowedReactions: readonly string[]): ExtractedActions {
   const reactions: Array<{ targetId: string; emoji: string }> = [];
   const quoteTargets: string[] = [];
   const { cleaned: withoutTools, toolCalls } = extractToolCalls(raw);
-  const { cleaned: withoutEndDirective, endRequested } = stripEndDirective(withoutTools);
+  const { cleaned: withoutEndDirective, endRequested, doneRequested } = stripEndDirective(withoutTools);
 
   let cleaned = withoutEndDirective.replace(/@quote\(([^)]+)\)/g, (_, target) => {
     const targetId = String(target).trim();
@@ -246,6 +256,7 @@ export function extractActions(raw: string, allowedReactions: readonly string[])
     reactions,
     toolCalls,
     endRequested,
+    doneRequested,
   };
 }
 
@@ -266,7 +277,7 @@ export function createStreamingToolCallDetector() {
 
       if (directive?.call) {
         toolCalls.push(directive.call);
-      } else if (trimmedLine === END_DIRECTIVE) {
+      } else if (trimmedLine === END_DIRECTIVE || trimmedLine === DONE_DIRECTIVE) {
         endRequested = true;
       } else {
         committedVisible += line;
@@ -287,7 +298,7 @@ export function createStreamingToolCallDetector() {
       if (terminalDirective?.call) {
         toolCalls.push(terminalDirective.call);
         pendingLine = "";
-      } else if (pendingLine.trim() === END_DIRECTIVE) {
+      } else if (pendingLine.trim() === END_DIRECTIVE || pendingLine.trim() === DONE_DIRECTIVE) {
         pendingLine = "";
       }
 
@@ -300,7 +311,7 @@ export function createStreamingToolCallDetector() {
       const terminalDirective = parseStandaloneToolLine(pendingLine);
       if (terminalDirective?.call) {
         pendingLine = "";
-      } else if (pendingLine.trim() === END_DIRECTIVE) {
+      } else if (pendingLine.trim() === END_DIRECTIVE || pendingLine.trim() === DONE_DIRECTIVE) {
         pendingLine = "";
       } else {
         committedVisible += pendingLine;
