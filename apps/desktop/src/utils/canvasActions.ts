@@ -64,20 +64,35 @@ function parseCanvasDirectiveAt(raw: string, start: number): { directive: Canvas
       const argsText = raw.slice(start + CANVAS_PREFIX.length, cursor).trim();
       let directive: CanvasDirective | null = null;
 
+      const tryExtractDirective = (obj: unknown): CanvasDirective | null => {
+        if (!obj || typeof obj !== "object" || typeof (obj as Record<string, unknown>).op !== "string") return null;
+        const rec = obj as Record<string, unknown>;
+        const op = rec.op as string;
+        if (op !== "append" && op !== "replace" && op !== "clear") return null;
+        return {
+          op,
+          section: typeof rec.section === "string" ? rec.section : undefined,
+          text: typeof rec.text === "string" ? rec.text : undefined,
+        };
+      };
+
       try {
-        const parsed = JSON.parse(argsText);
-        if (parsed && typeof parsed === "object" && typeof parsed.op === "string") {
-          const op = parsed.op as string;
-          if (op === "append" || op === "replace" || op === "clear") {
-            directive = {
-              op,
-              section: typeof parsed.section === "string" ? parsed.section : undefined,
-              text: typeof parsed.text === "string" ? parsed.text : undefined,
-            };
+        let parsed = JSON.parse(argsText);
+        // Handle array-wrapped format: @canvas([{...}])
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          parsed = parsed[0];
+        }
+        directive = tryExtractDirective(parsed);
+      } catch {
+        // Fallback: try fixing brackets-as-braces format @canvas(["op":"append",...])
+        const trimmed = argsText.trim();
+        if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
+          try {
+            directive = tryExtractDirective(JSON.parse("{" + trimmed.slice(1, -1) + "}"));
+          } catch {
+            directive = null;
           }
         }
-      } catch {
-        directive = null;
       }
 
       return { directive, end: cursor + 1 };

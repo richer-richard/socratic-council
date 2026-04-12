@@ -4,11 +4,11 @@ import type { Page } from "../App";
 import { useConfig, PROVIDER_INFO, type Provider } from "../stores/config";
 import { callProvider, apiLogger, type ChatMessage as APIChatMessage } from "../services/api";
 import {
-  getAttachmentTransportMode,
   loadSessionAttachmentBlobs,
   type SessionAttachment,
 } from "../services/attachments";
 import {
+  type DeepResearchReportSnapshot,
   type DiscussionSession,
   type EndVoteChoice,
   type EndVoteBallotSnapshot,
@@ -23,6 +23,10 @@ import {
   type SessionToolEvent,
 } from "../services/sessions";
 import { getToolPrompt, runToolCall, type ToolCall, type ToolContext } from "../services/tools";
+import {
+  generateDeepResearchReport,
+  type TranscriptMessage as DeepResearchTranscriptMessage,
+} from "../services/deepResearch";
 import { addDossierEntry, loadProject } from "../services/projects";
 import { CouncilMark } from "../components/CouncilMark";
 import { ProviderIcon, SystemIcon, UserIcon } from "../components/icons/ProviderIcons";
@@ -45,7 +49,7 @@ import {
 } from "@socratic-council/core";
 import { calculateMessageCost } from "../utils/cost";
 import { extractHandoffDirective } from "../utils/handoff";
-import { createStreamingToolCallDetector, extractActions } from "../utils/toolActions";
+import { createStreamingToolCallDetector, extractActions, stripProviderToolSyntax } from "../utils/toolActions";
 import { splitIntoInlineQuoteSegments, stripQuoteTokens } from "../utils/inlineQuotes";
 import {
   type CanvasState,
@@ -143,6 +147,39 @@ const MODEL_DISPLAY_NAMES: Record<string, string> = {
   "glm-4.7": "GLM-4.7",
 };
 
+const MULTILINGUAL_STYLE_GUIDE = `
+Language & natural voice:
+- Match the language the user wrote the topic in. If the topic is in Chinese, respond in Chinese; if Japanese, respond in Japanese; and so on. Never silently switch to English.
+- The goal is to sound like a fluent native speaker in a group chat — not like a translated-from-English AI. Literal English sentence structure ruins this.
+- If you genuinely cannot produce natural prose in the user's language, say so briefly in English and explain what you need.
+
+Per-language guidance (follow when writing in these languages):
+
+中文 (Chinese): Write short topic-comment sentences, not translated English subordinate clauses. Drop unnecessary "的" chains. Use 就、才、还、都、其实、不过、而且、而是 naturally as discourse connectors instead of calquing English "however/moreover/actually". Minimize relative clauses — split into two sentences. End with 了、吧、呢、啊 when the mood calls for it. Avoid stilted formal register unless the topic is formal. Never literally translate English idioms ("at the end of the day", "circle back", etc.). Use measure words correctly (一个、一种、一件) and don't over-pronoun — Chinese is pro-drop.
+
+日本語 (Japanese): Use です/ます consistently in a public group chat. Drop the subject (私) when context makes it obvious — Japanese is heavily pro-drop. Use ね・よ・な sentence-final particles sparingly but where they add natural softness. Pick は vs が correctly (topic vs subject). Avoid direct-object-first English word order — Japanese is SOV. Keep sentences shorter than your English instinct suggests. For counterarguments, soften with でも、けど、とはいえ、ただ rather than blunt negation.
+
+한국어 (Korean): Use 해요체 (polite informal) by default for group chat. Don't over-translate English "the/a" — Korean has no articles. Use 는/은 for topic and 이/가 for new-information subject. Sentence-final endings like -거든요, -죠, -잖아요 feel natural for explanations and rhetorical questions. Honorific forms (-시-) matter when referring to others. Keep sentences shorter than the English equivalent; Korean punishes run-ons.
+
+العربية (Arabic): Prefer Modern Standard Arabic (فصحى) for formal debate, but allow conversational phrasing. Connective particles فـ، و، لكن، إذن carry the flow — use them instead of calqued English transitions. Sentences can be VSO (verb-first) when natural. Avoid literal translations of English idioms. Pay attention to gender agreement in adjectives and verbs.
+
+Español / Français / Português / Italiano: Use normal Romance-language conversational register. Natural connectors — pues, bueno, entonces; alors, bon, du coup; então, bem, aí; beh, allora. Use subjunctive where the grammar demands it (after esperar que, quiero que, etc.). Avoid English-style over-formality. Drop pronouns when the verb conjugation makes them obvious — these languages are pro-drop.
+
+Deutsch (German): Observe V2 word order in main clauses and verb-final in subordinate clauses (dass, weil, obwohl, ...). Use du in group chat register (group chat = informal). Avoid English-style long noun chains; use German compounds only when they exist. Connectors: denn, doch, aber, allerdings, jedoch carry nuance.
+
+Русский / Українська (Russian / Ukrainian): Take advantage of free word order for emphasis — front the word you want stressed. Use discourse particles ведь, же, то, ж naturally. Never translate English "the/a" — there are no articles. Sentences can be shorter than English instincts suggest; avoid over-translating subordinate clauses.
+
+हिन्दी / اردو (Hindi / Urdu): SOV word order. Use ही, तो, भी (or کو، بھی، ہی) as emphasis particles. Match register to the group: for Hindi-leaning register, prefer Sanskrit-derived vocabulary; for Urdu-leaning register, prefer Persian/Arabic-derived vocabulary. Polite form आप / آپ.
+
+General don't-do list:
+- Don't translate English idioms literally.
+- Don't use English punctuation/capitalization rules (e.g., don't capitalize every word in headings in languages that don't do that).
+- Don't overuse pronouns in pro-drop languages.
+- Don't mix scripts unless the discussion already does.
+- Don't default to stiff formal register — match the chat tone of the topic.
+- If you quote English text from attachments, keep the English quote verbatim but write your commentary in the conversation's language.
+`;
+
 const GROUP_CHAT_GUIDELINES = `
 You are in a real-time group chat. Keep responses short, pointed, and decision-oriented.
 
@@ -156,7 +193,9 @@ Rules:
 - If the discussion is mature, prefer synthesis and choice over novelty.
 - Include one concrete test, falsifiable criterion, or counterexample when possible.
 - If your answer depends on exact wording from attached files or current facts, research first before answering.
+- Attached PDFs, images, DOCX, XLSX, and other non-code files are NOT visible as full files. Only a compact manifest appears in your context. To see their contents, call oracle.file_search with a targeted query — that returns OCR'd or extracted snippets. Only code and plain-text files are inlined in full.
 - Proactively call oracle.file_search for attached-file evidence and oracle.web_search for current external facts when that would materially improve the answer.
+- When a tool returns new information, REVISE any earlier claims in your current turn that the new evidence contradicts. Do not leave stale assertions — treat your in-progress message as a draft you must update in light of what you just learned.
 - If you know you need a tool, emit only the @tool(name, {args}) line and stop. The app will execute it and return control to you.
 - If the room has clearly converged and more debate would be repetitive, append @end() on its own line after your visible closing message to request the closing round.
 - If you need one specific agent to answer next, append exactly one standalone line: @handoff({"to":"cathy","question":"one precise follow-up question"}). You may only hand off to an agent who has NOT already spoken this round. If the agent you want has already spoken, wait until the next round.
@@ -170,7 +209,7 @@ Markdown:
 - Markdown is supported (GFM tables, links, **bold**, \`code\`, fenced code blocks, and LaTeX math via $...$ / $$...$$).
 - Prefer plain text for normal conversations. Use Markdown only when it materially improves clarity (math, CS, structured data).
 - If you use math/code, write the *real* formula/code (not placeholders).
-
+${MULTILINGUAL_STYLE_GUIDE}
 Quoting/Reactions:
 - You MUST include @quote(MSG_ID) for a specific prior message. You can quote MULTIPLE messages from different speakers or even the same speaker: @quote(MSG_A) @quote(MSG_B).
 - NEVER fabricate or invent quotes. Only use @quote(MSG_ID) with an actual message ID visible in the conversation above. If no prior messages exist, do not quote anything.
@@ -751,6 +790,213 @@ function ModeratorConclusionCard({ conclusion }: { conclusion: ModeratorConclusi
         </div>
       )}
     </div>
+  );
+}
+
+const RESEARCH_PHASE_LABEL: Record<DeepResearchReportSnapshot["phase"], string> = {
+  planning: "Planning sub-questions",
+  research: "Reading the transcript",
+  synthesis: "Synthesizing findings",
+  formatting: "Writing the report",
+  complete: "Report ready",
+  error: "Failed",
+};
+
+function renderBodyWithCitations(
+  body: string,
+  citations: Array<{ id: string; messageId: string; quote: string }>,
+  onCite: (messageId: string) => void,
+): React.ReactNode {
+  if (!body) return null;
+  const citationById = new Map(citations.map((c) => [c.id, c]));
+  // Split on [cN] tokens, interleave citation buttons with markdown chunks.
+  const parts = body.split(/(\[c\d+\])/g);
+  return (
+    <>
+      {parts.map((part, idx) => {
+        const tokenMatch = part.match(/^\[(c\d+)\]$/);
+        if (tokenMatch) {
+          const cite = citationById.get(tokenMatch[1]);
+          if (!cite) {
+            return (
+              <span key={`cite-missing-${idx}`} className="research-cite-token is-missing">
+                {part}
+              </span>
+            );
+          }
+          return (
+            <button
+              key={`cite-${idx}-${cite.id}`}
+              type="button"
+              className="research-cite-token"
+              title={cite.quote}
+              onClick={() => onCite(cite.messageId)}
+            >
+              [{cite.id}]
+            </button>
+          );
+        }
+        if (!part) return null;
+        return (
+          <Markdown
+            key={`md-${idx}`}
+            content={part}
+            className="research-section-body-chunk"
+          />
+        );
+      })}
+    </>
+  );
+}
+
+function DeepResearchReportCard({
+  report,
+  onJumpToMessage,
+}: {
+  report: DeepResearchReportSnapshot;
+  onJumpToMessage: (messageId: string) => void;
+}) {
+  const isInProgress =
+    report.phase === "planning" ||
+    report.phase === "research" ||
+    report.phase === "synthesis" ||
+    report.phase === "formatting";
+
+  const phaseLabel = RESEARCH_PHASE_LABEL[report.phase] ?? report.phase;
+
+  return (
+    <details className={`deep-research-report-card phase-${report.phase}`}>
+      <summary className="deep-research-report-summary">
+        <div className="deep-research-report-summary-lead">
+          <span className="deep-research-report-kicker">Deep Research Report</span>
+          <span className="deep-research-report-title">
+            {report.title || (isInProgress ? "Generating report…" : "Report")}
+          </span>
+        </div>
+        <div className="deep-research-report-summary-meta">
+          <span className={`deep-research-report-status phase-${report.phase}`}>
+            {isInProgress ? (
+              <>
+                <span className="deep-research-spinner" aria-hidden="true" />
+                {phaseLabel}…
+              </>
+            ) : (
+              phaseLabel
+            )}
+          </span>
+          {!isInProgress && report.phase === "complete" && (
+            <span
+              className={`deep-research-confidence confidence-${report.confidence}`}
+              title={`Overall confidence: ${report.confidence}`}
+            >
+              {report.confidence}
+            </span>
+          )}
+          <span className="deep-research-report-expand">Expand</span>
+        </div>
+      </summary>
+
+      <div className="deep-research-report-body">
+        {report.phase === "error" && (
+          <div className="deep-research-report-error">
+            Unable to generate report.
+            {report.error ? <div className="deep-research-report-error-detail">{report.error}</div> : null}
+          </div>
+        )}
+
+        {isInProgress && (
+          <div className="deep-research-report-progress">
+            <div className="deep-research-report-progress-track">
+              {(["planning", "research", "synthesis", "formatting"] as const).map((phase) => (
+                <div
+                  key={phase}
+                  className={`deep-research-report-progress-step phase-${phase} ${
+                    phase === report.phase
+                      ? "is-active"
+                      : ["planning", "research", "synthesis", "formatting"].indexOf(phase) <
+                          ["planning", "research", "synthesis", "formatting"].indexOf(report.phase)
+                        ? "is-done"
+                        : "is-pending"
+                  }`}
+                >
+                  {RESEARCH_PHASE_LABEL[phase]}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {report.abstract && (
+          <p className="deep-research-report-abstract">{report.abstract}</p>
+        )}
+
+        {report.sections.length > 0 && (
+          <div className="deep-research-report-sections">
+            {report.sections.map((section) => (
+              <section
+                key={section.id}
+                className={`deep-research-report-section confidence-${section.confidence}`}
+              >
+                <header className="deep-research-report-section-header">
+                  <h4 className="deep-research-report-section-heading">{section.heading}</h4>
+                  <span className={`deep-research-confidence confidence-${section.confidence}`}>
+                    {section.confidence}
+                  </span>
+                </header>
+                <div className="deep-research-report-section-body">
+                  {renderBodyWithCitations(section.body, report.citations, onJumpToMessage)}
+                </div>
+              </section>
+            ))}
+          </div>
+        )}
+
+        {report.subQuestions.length > 0 && (
+          <details className="deep-research-report-subquestions">
+            <summary>Sub-questions explored ({report.subQuestions.length})</summary>
+            <ol>
+              {report.subQuestions.map((q) => (
+                <li key={q.id} className={`deep-research-report-subquestion confidence-${q.confidence}`}>
+                  <div className="deep-research-report-subquestion-header">
+                    <span className="deep-research-report-subquestion-q">{q.question}</span>
+                    <span className={`deep-research-confidence confidence-${q.confidence}`}>
+                      {q.confidence}
+                    </span>
+                  </div>
+                  {q.findings && (
+                    <div className="deep-research-report-subquestion-findings">
+                      {renderBodyWithCitations(q.findings, report.citations, onJumpToMessage)}
+                    </div>
+                  )}
+                </li>
+              ))}
+            </ol>
+          </details>
+        )}
+
+        {report.citations.length > 0 && (
+          <details className="deep-research-report-citations">
+            <summary>Citations ({report.citations.length})</summary>
+            <ol>
+              {report.citations.map((c) => (
+                <li key={c.id} className="deep-research-report-citation">
+                  <button
+                    type="button"
+                    className="deep-research-report-citation-button"
+                    onClick={() => onJumpToMessage(c.messageId)}
+                  >
+                    <span className="deep-research-report-citation-id">[{c.id}]</span>
+                    <span className="deep-research-report-citation-quote">
+                      "{c.quote || "(no excerpt)"}"
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ol>
+          </details>
+        )}
+      </div>
+    </details>
   );
 }
 
@@ -1520,40 +1766,52 @@ export function Chat({ session, onNavigate, onPersistSession }: ChatProps) {
   );
 
   const buildAttachmentContext = useCallback(
-    (provider: Provider, model: string | undefined) => {
+    (_provider: Provider, _model: string | undefined) => {
+      // Raw file uploads to providers are disabled. Only code/plain-text files
+      // are inlined in the prompt. PDFs, images, DOCX, XLSX and other binaries
+      // appear in a compact manifest — agents must use oracle.file_search to
+      // query their extracted/OCR'd content.
       const rawAttachments: APIAttachment[] = [];
-      const fallbackBlocks: string[] = [];
+      const textFileBlocks: string[] = [];
+      const manifestEntries: string[] = [];
+
+      const formatSize = (bytes: number): string => {
+        if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+        if (bytes >= 1024) return `${Math.round(bytes / 1024)} KB`;
+        return `${bytes} B`;
+      };
 
       for (const attachment of normalizedSession.attachments) {
-        const mode = model ? getAttachmentTransportMode(provider, model, attachment) : "fallback";
-        const payload = attachmentPayloads.get(attachment.id);
-
-        if (
-          mode === "raw" &&
-          payload &&
-          (attachment.kind === "image" || attachment.kind === "pdf")
-        ) {
-          rawAttachments.push(payload);
-          continue;
+        if (attachment.kind === "text") {
+          // Code / plain-text files stay inlined as today.
+          if (attachment.fallbackText.trim().length > 0) {
+            textFileBlocks.push(attachment.fallbackText);
+          }
         }
 
-        fallbackBlocks.push(attachment.fallbackText);
+        const sizeLabel = formatSize(attachment.size);
+        const dims =
+          attachment.width && attachment.height
+            ? `, ${attachment.width}×${attachment.height}px`
+            : "";
+        const indexedLabel = attachment.searchable
+          ? attachment.extractedChars
+            ? `indexed (~${Math.round(attachment.extractedChars / 1000)}k chars)`
+            : "indexed"
+          : "indexing…";
+        manifestEntries.push(
+          `- "${attachment.name}" (${attachment.kind}, ${attachment.mimeType}, ${sizeLabel}${dims}, ${indexedLabel})`,
+        );
       }
 
       const notes: string[] = [];
       if (normalizedSession.attachments.length > 0) {
         notes.push(
-          'If you need exact wording, page references, or code from attached files, call @tool(oracle.file_search, {"query":"..."}).',
+          `Attached files (query non-code files with @tool(oracle.file_search, {"query":"..."})):\n${manifestEntries.join("\n")}`,
         );
       }
-      if (rawAttachments.length > 0) {
-        const names = rawAttachments.map((attachment) => attachment.name).join(", ");
-        notes.push(
-          `Attached source material: ${names}. Use the attached files directly when relevant.`,
-        );
-      }
-      if (fallbackBlocks.length > 0) {
-        notes.push(`Attachment notes:\n${fallbackBlocks.join("\n\n")}`);
+      if (textFileBlocks.length > 0) {
+        notes.push(`Inlined code/text content:\n${textFileBlocks.join("\n\n")}`);
       }
 
       return {
@@ -1561,7 +1819,7 @@ export function Chat({ session, onNavigate, onPersistSession }: ChatProps) {
         attachmentText: notes.join("\n\n").trim(),
       };
     },
-    [attachmentPayloads, normalizedSession.attachments],
+    [normalizedSession.attachments],
   );
 
   // Outer-circle observer agents
@@ -1932,25 +2190,31 @@ ${firstRoundObjections.length > 0 ? firstRoundObjections.join("\n") : "- None. E
 
   const pickModeratorRuntime = useCallback(() => {
     if (!config.preferences.moderatorEnabled) return null;
-    const credential = config.credentials.openai;
+    const credential = config.credentials.google;
     if (!credential?.apiKey) return null;
-    // Moderator is fixed to GPT-5.3 Instant for lower-latency coordination messages.
-    return { provider: "openai" as const, credential, model: "gpt-5.3-chat-latest" as const };
-  }, [config.credentials.openai, config.preferences.moderatorEnabled]);
+    // Moderator runs on Gemini 3.1 Pro Preview (same model Grace uses).
+    return {
+      provider: "google" as const,
+      credential,
+      model: "gemini-3.1-pro-preview" as const,
+    };
+  }, [config.credentials.google, config.preferences.moderatorEnabled]);
 
   const pickFinalSummaryRuntime = useCallback(() => {
-    const openaiCredential = config.credentials.openai;
-    if (openaiCredential?.apiKey) {
+    // Prefer Google (same as moderator) so final summary + deep research report
+    // run on the same provider.
+    const googleCredential = config.credentials.google;
+    if (googleCredential?.apiKey) {
       return {
-        provider: "openai" as const,
-        credential: openaiCredential,
-        model: "gpt-5.3-chat-latest" as const,
+        provider: "google" as const,
+        credential: googleCredential,
+        model: "gemini-3.1-pro-preview" as const,
       };
     }
 
     for (const provider of [
+      "openai",
       "anthropic",
-      "google",
       "deepseek",
       "kimi",
       "qwen",
@@ -2140,7 +2404,10 @@ Write the official moderator wrap-up in 4 short sentences:
         // Moderator is instructed NOT to use @quote/@react/@tool/@end, so skip
         // extractActions to avoid accidentally stripping content that matches
         // those patterns (e.g. parenthetical asides, dollar signs, etc.).
-        let displayContent = normalizeMessageText(result.content || streamingContent || "");
+        // Still strip @canvas directives defensively (very specific pattern, no false positives).
+        let displayContent = normalizeMessageText(
+          extractCanvasDirectives(result.content || streamingContent || "").cleaned,
+        );
         let moderatorConclusion =
           options.kind === "final_summary"
             ? parseModeratorConclusionFromText(displayContent)
@@ -2198,7 +2465,9 @@ Write the official moderator wrap-up in 4 short sentences:
             return null;
           }
 
-          displayContent = normalizeMessageText(result.content || streamingContent || "");
+          displayContent = normalizeMessageText(
+            extractCanvasDirectives(result.content || streamingContent || "").cleaned,
+          );
           moderatorConclusion = parseModeratorConclusionFromText(displayContent);
         }
 
@@ -2242,6 +2511,86 @@ Write the official moderator wrap-up in 4 short sentences:
             estimatedUSD: prev.estimatedUSD + (moderatorCost ?? 0),
             pricingAvailable: prev.pricingAvailable || moderatorCost != null,
           }));
+        }
+
+        // Kick off the Deep Research Report for the final summary. This runs
+        // asynchronously and updates the message's deepResearchReport field as
+        // it progresses through planning → research → synthesis → formatting.
+        if (
+          options.kind === "final_summary" &&
+          result.success &&
+          moderatorConclusion &&
+          provider === "google"
+        ) {
+          const transcript: DeepResearchTranscriptMessage[] = messagesRef.current
+            .filter((msg) => {
+              if (msg.isStreaming) return false;
+              if (msg.endVoteBallot || msg.endVoteBoard) return false;
+              if (!isCouncilAgent(msg.agentId) && !isModeratorMessage(msg)) return false;
+              const text = (msg.content ?? "").trim();
+              return text.length > 0;
+            })
+            .map((msg) => ({
+              id: msg.id,
+              speaker: isCouncilAgent(msg.agentId)
+                ? AGENT_CONFIG[msg.agentId].name
+                : "Moderator",
+              text: msg.content ?? "",
+            }));
+
+          const updateReport = (report: DeepResearchReportSnapshot) => {
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === newMessage.id
+                  ? { ...m, deepResearchReport: report }
+                  : m,
+              ),
+            );
+          };
+
+          // Initial placeholder so UI renders a loading card immediately.
+          updateReport({
+            phase: "planning",
+            title: "",
+            abstract: "",
+            subQuestions: [],
+            sections: [],
+            citations: [],
+            confidence: "medium",
+            generatedAt: Date.now(),
+            modelId: model,
+          });
+
+          // Fire-and-forget — the moderator message is already committed.
+          void (async () => {
+            try {
+              const report = await generateDeepResearchReport({
+                provider,
+                credential,
+                model,
+                proxy,
+                topic,
+                transcript,
+                conclusion: moderatorConclusion!,
+                onPhase: (_phase, partial) => updateReport(partial),
+              });
+              updateReport(report);
+            } catch (err) {
+              const message = err instanceof Error ? err.message : String(err);
+              updateReport({
+                phase: "error",
+                title: "",
+                abstract: "",
+                subQuestions: [],
+                sections: [],
+                citations: [],
+                confidence: "low",
+                generatedAt: Date.now(),
+                modelId: model,
+                error: message,
+              });
+            }
+          })();
         }
 
         return finalMessage;
@@ -2550,9 +2899,13 @@ Write the official moderator wrap-up in 4 short sentences:
             },
           );
 
+          const rawForVisible = interruptedForTools
+            ? streamingToolDetector.getVisibleText()
+            : providerResult.content || "";
+          const { cleaned: canvasStrippedForVisible } = extractCanvasDirectives(rawForVisible);
           const parsedVisible = interruptedForTools
-            ? normalizeMessageText(streamingToolDetector.getVisibleText())
-            : extractActions(providerResult.content || "", REACTION_IDS).cleaned;
+            ? normalizeMessageText(canvasStrippedForVisible)
+            : extractActions(canvasStrippedForVisible, REACTION_IDS).cleaned;
           const visibleContent =
             parsedVisible || streamingContent || normalizeMessageText(providerResult.content || "");
 
@@ -2751,7 +3104,8 @@ Write the official moderator wrap-up in 4 short sentences:
           return null;
         }
 
-        const finalVisibleContent = normalizeMessageText(accumulatedContent || result.content || streamingContent || "");
+        const { cleaned: accCanvasCleaned } = extractCanvasDirectives(accumulatedContent || result.content || streamingContent || "");
+        const finalVisibleContent = normalizeMessageText(accCanvasCleaned);
         const resolvedQuotes = resolveQuoteTargets(agentId, parsed.quoteTargets);
         const parsedReactions = parsed.reactions.map((reaction) => ({
           targetId: reaction.targetId,
@@ -2761,13 +3115,14 @@ Write the official moderator wrap-up in 4 short sentences:
           parsedReactions.length === 0 && resolvedQuotes.length > 0
             ? [{ targetId: resolvedQuotes[0]!, emoji: DEFAULT_REACTION }]
             : parsedReactions;
-        const initialDisplayContent =
+        const initialDisplayContent = stripProviderToolSyntax(
           finalVisibleContent ||
           parsed.cleaned ||
           (parsed.endRequested ? "I think we're ready to wrap this up." : "") ||
           (toolEvents.length > 0
             ? "Research completed, but no final answer was generated."
-            : "[No response received]");
+            : "[No response received]"),
+        );
         const { cleaned: strippedDisplayContent, handoff } = extractHandoffDirective({
           raw: initialDisplayContent,
           from: agentId,
@@ -2940,9 +3295,12 @@ Write the official moderator wrap-up in 4 short sentences:
           return null;
         }
 
-        const { cleaned } = extractActions(result.content || "", REACTION_IDS);
+        const { cleaned: resCanvasCleaned } = extractCanvasDirectives(result.content || "");
+        const { cleaned } = extractActions(resCanvasCleaned, REACTION_IDS);
         const displayContent =
-          cleaned || normalizeMessageText(result.content || streamingContent || "");
+          cleaned || normalizeMessageText(
+            extractCanvasDirectives(result.content || streamingContent || "").cleaned,
+          );
 
         const finalMessage: ChatMessage = {
           ...newMessage,
@@ -3064,11 +3422,13 @@ Write the official moderator wrap-up in 4 short sentences:
         }
 
         let voteExtraction = stripLegacyEndVoteDirective(
-          result.content || streamingRawContent || "",
+          extractCanvasDirectives(result.content || streamingRawContent || "").cleaned,
         );
         let displayContent =
           voteExtraction.cleaned ||
-          normalizeMessageText(result.content || streamingRawContent || streamingContent || "");
+          normalizeMessageText(
+            extractCanvasDirectives(result.content || streamingRawContent || streamingContent || "").cleaned,
+          );
         let voteChoice =
           voteExtraction.voteChoice ?? parseVoteChoiceFromVisibleText(displayContent);
         let voteReason = extractVoteReasonFromVisibleText(voteChoice, displayContent);
@@ -3131,10 +3491,14 @@ Write the official moderator wrap-up in 4 short sentences:
             return { message: null, choice: null, reason: "" };
           }
 
-          voteExtraction = stripLegacyEndVoteDirective(result.content || streamingRawContent || "");
+          voteExtraction = stripLegacyEndVoteDirective(
+            extractCanvasDirectives(result.content || streamingRawContent || "").cleaned,
+          );
           displayContent =
             voteExtraction.cleaned ||
-            normalizeMessageText(result.content || streamingRawContent || streamingContent || "");
+            normalizeMessageText(
+              extractCanvasDirectives(result.content || streamingRawContent || streamingContent || "").cleaned,
+            );
           voteChoice = voteExtraction.voteChoice ?? parseVoteChoiceFromVisibleText(displayContent);
           voteReason = extractVoteReasonFromVisibleText(voteChoice, displayContent);
           hasReason = hasRequiredVoteReason(voteChoice, voteReason);
@@ -3350,18 +3714,8 @@ Write the official moderator wrap-up in 4 short sentences:
         upsertEndVoteBoardMessage(buildEndVoteBoard(voteState, "passed", unanimousOutcome));
         endVoteRef.current = null;
 
-        setMessages((prev) => [
-          ...prev,
-          {
-            id: `msg_${Date.now()}_end_vote_round_1_passed`,
-            agentId: "system",
-            content: `End vote passed unanimously in round 1 by ${firstRoundCount.yes}-${firstRoundCount.no}. Round 2 is unnecessary, so the council moves straight to the conclusion.`,
-            timestamp: Date.now(),
-          },
-        ]);
-
         beginClosingRound(
-          `End vote passed unanimously in round 1 by ${firstRoundCount.yes}-${firstRoundCount.no}. Round 2 was skipped, so the council moves straight to closing summaries and the Moderator's final conclusion.`,
+          `End vote passed unanimously in round 1 by ${firstRoundCount.yes}-${firstRoundCount.no}. Round 2 is unnecessary and was therefore skipped. The council moves straight to closing summaries and the Moderator's final report.`,
         );
         return;
       }
@@ -4473,7 +4827,15 @@ Write the official moderator wrap-up in 4 short sentences:
                       ) : message.endVoteBallot ? (
                         <EndVoteBallotCard ballot={message.endVoteBallot} />
                       ) : message.moderatorConclusion ? (
-                        <ModeratorConclusionCard conclusion={message.moderatorConclusion} />
+                        <>
+                          <ModeratorConclusionCard conclusion={message.moderatorConclusion} />
+                          {message.deepResearchReport && (
+                            <DeepResearchReportCard
+                              report={message.deepResearchReport}
+                              onJumpToMessage={jumpToMessage}
+                            />
+                          )}
+                        </>
                       ) : message.isStreaming ? (
                         <div className="markdown-content" style={{ whiteSpace: "pre-wrap" }}>
                           {message.content}

@@ -32,6 +32,23 @@ describe("extractCanvasDirectives", () => {
     expect(cleaned).toContain("Visible text");
   });
 
+  it("handles array-wrapped format @canvas([{...}])", () => {
+    const raw = 'Text\n@canvas([{"op":"append","section":"Key Points","text":"wrapped"}])\nMore';
+    const { cleaned, directives } = extractCanvasDirectives(raw);
+    expect(directives).toHaveLength(1);
+    expect(directives[0]).toEqual({ op: "append", section: "Key Points", text: "wrapped" });
+    expect(cleaned).toBe("Text\nMore");
+    expect(cleaned).not.toContain("@canvas");
+  });
+
+  it("handles brackets-as-braces format @canvas([key:value])", () => {
+    const raw = '@canvas(["op":"replace","section":"Draft","text":"fixed"])\nEnd';
+    const { cleaned, directives } = extractCanvasDirectives(raw);
+    expect(directives).toHaveLength(1);
+    expect(directives[0]).toEqual({ op: "replace", section: "Draft", text: "fixed" });
+    expect(cleaned).toBe("End");
+  });
+
   it("handles multiple directives interleaved with text", () => {
     const raw = [
       "Opening remark",

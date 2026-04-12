@@ -421,11 +421,33 @@ export async function runToolCall(call: ToolCall, context: ToolContext = {}): Pr
           return {
             name: call.name,
             output: "",
-            error: "No attached files are available in this session.",
+            error:
+              "NO_ATTACHMENTS: This session has no attached files. Answer from your own knowledge or use oracle.web_search.",
+          };
+        }
+
+        // Detect stuck-in-indexing state: attachments exist but none are marked searchable.
+        const anyIndexed = attachments.some(
+          (a) => a.searchable === true || (a.extractedChars ?? 0) > 0,
+        );
+        if (!anyIndexed) {
+          const names = attachments.map((a) => `"${a.name}"`).join(", ");
+          return {
+            name: call.name,
+            output: "",
+            error: `ATTACHMENTS_INDEXING: The attached files (${names}) are still being processed for search. Retry this tool call in your next turn, or continue answering from the context you already have.`,
           };
         }
 
         const matches = await withTimeout(searchFiles(query, attachments), TOOL_TIMEOUT_MS);
+        if (matches.length === 0) {
+          const names = attachments.map((a) => `"${a.name}"`).join(", ");
+          return {
+            name: call.name,
+            output: `No matches found in attached files (${names}) for query: ${query}. Try a different keyword, a partial phrase, or a broader query. The files are indexed — this query just didn't hit anything.`,
+            raw: matches,
+          };
+        }
         return { name: call.name, output: formatFileSearchResults(matches), raw: matches };
       }
       case "oracle.verify": {
