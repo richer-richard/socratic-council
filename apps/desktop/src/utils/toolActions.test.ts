@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createStreamingToolCallDetector, extractActions } from "./toolActions";
+import { createStreamingToolCallDetector, extractActions, stripProviderToolSyntax } from "./toolActions";
 
 describe("toolActions", () => {
   it("extracts tool directives and removes them from visible content", () => {
@@ -70,5 +70,27 @@ describe("toolActions", () => {
     expect(state.toolCalls).toEqual([]);
     expect(state.visibleText).toBe("We can stop here.\n");
     expect(detector.finish()).toBe("We can stop here.");
+  });
+});
+
+describe("stripProviderToolSyntax", () => {
+  it("strips [TOOL_CALL] markers", () => {
+    const input = "Some text\n[TOOL_CALL]\nMore text";
+    expect(stripProviderToolSyntax(input)).toBe("Some text\n\nMore text");
+  });
+
+  it("strips [tool → name, args] patterns", () => {
+    const input = 'Analysis here\n[tool → oracle.web_search, args = {"query":"test"}]\nConclusion';
+    expect(stripProviderToolSyntax(input)).toBe("Analysis here\n\nConclusion");
+  });
+
+  it("strips XML tool tags", () => {
+    const input = 'Before\n<tool_use>{"name":"search"}</tool_use>\nAfter';
+    expect(stripProviderToolSyntax(input)).toBe("Before\n\nAfter");
+  });
+
+  it("preserves normal content without tool syntax", () => {
+    const input = "This is a normal message with no tool syntax.";
+    expect(stripProviderToolSyntax(input)).toBe(input);
   });
 });

@@ -1162,21 +1162,16 @@ export function getProviderAttachmentSupport(
 }
 
 export function getAttachmentTransportMode(
-  provider: Provider,
-  model: string,
-  attachment: SessionAttachment,
+  _provider: Provider,
+  _model: string,
+  _attachment: SessionAttachment,
 ): AttachmentTransportMode {
-  const support = getProviderAttachmentSupport(provider, model);
-  switch (attachment.kind) {
-    case "image":
-      return support.images;
-    case "pdf":
-      return support.pdf;
-    case "text":
-      return "fallback";
-    default:
-      return "fallback";
-  }
+  // All attachments are now sent as extracted text via the fallback path.
+  // Code/plain-text files are inlined into the prompt; PDFs, images, DOCX, XLSX,
+  // and other binary formats are represented by a manifest only — agents must
+  // use oracle.file_search to query OCR/extracted content. This prevents
+  // uploading raw binaries to any provider and forces consistent file_search use.
+  return "fallback";
 }
 
 export function summarizeSessionAttachments(attachments: SessionAttachment[]): string {

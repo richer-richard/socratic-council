@@ -11,6 +11,21 @@ const VALID_TOOL_NAMES = new Set<ToolCall["name"]>([
   "oracle.cite",
 ]);
 
+/**
+ * Strip common provider-specific tool syntax that leaks into message content.
+ * Some models output their own format instead of @tool(...).
+ */
+export function stripProviderToolSyntax(text: string): string {
+  return text
+    .replace(/^\[TOOL_CALL\]\s*$/gm, "")
+    .replace(/^\[tool\s*(?:→|->)\s*[^\]]*\]\s*$/gm, "")
+    .replace(/<tool_use>[\s\S]*?<\/tool_use>/g, "")
+    .replace(/<function_call>[\s\S]*?<\/function_call>/g, "")
+    .replace(/<tool_call>[\s\S]*?<\/tool_call>/g, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
 export interface ExtractedActions {
   cleaned: string;
   quoteTargets: string[];

@@ -67,6 +67,50 @@ export interface ModeratorConclusionSnapshot {
   next?: string;
 }
 
+export type ResearchConfidence = "high" | "medium" | "low";
+
+export type ResearchReportPhase =
+  | "planning"
+  | "research"
+  | "synthesis"
+  | "formatting"
+  | "complete"
+  | "error";
+
+export interface ResearchCitation {
+  id: string; // short id like "c1"
+  messageId: string; // existing chat message id
+  quote: string; // ~200-char excerpt
+}
+
+export interface ResearchSubQuestion {
+  id: string;
+  question: string;
+  findings: string; // markdown summary of what the transcript says
+  citations: string[]; // citation ids referencing DeepResearchReportSnapshot.citations
+  confidence: ResearchConfidence;
+}
+
+export interface ResearchSection {
+  id: string;
+  heading: string;
+  body: string; // markdown, with inline citation tokens like [c1]
+  confidence: ResearchConfidence;
+}
+
+export interface DeepResearchReportSnapshot {
+  phase: ResearchReportPhase;
+  title: string; // short headline (~6-10 words)
+  abstract: string; // 3-4 sentence narrative lede
+  subQuestions: ResearchSubQuestion[];
+  sections: ResearchSection[];
+  citations: ResearchCitation[];
+  confidence: ResearchConfidence;
+  generatedAt: number;
+  modelId: string;
+  error?: string;
+}
+
 export interface HandoffSnapshot {
   from: CouncilAgentId;
   to: CouncilAgentId;
@@ -92,6 +136,7 @@ export interface SessionMessage extends SharedMessage {
   endVoteBallot?: EndVoteBallotSnapshot;
   endVoteBoard?: EndVoteBoardSnapshot;
   moderatorConclusion?: ModeratorConclusionSnapshot;
+  deepResearchReport?: DeepResearchReportSnapshot;
   observerNote?: ObserverNoteSnapshot;
   isResolution?: boolean;
 }
@@ -434,6 +479,102 @@ function normalizeModeratorConclusion(input: unknown): ModeratorConclusionSnapsh
   };
 }
 
+const RESEARCH_CONFIDENCE_VALUES = new Set<ResearchConfidence>(["high", "medium", "low"]);
+const RESEARCH_PHASE_VALUES = new Set<ResearchReportPhase>([
+  "planning",
+  "research",
+  "synthesis",
+  "formatting",
+  "complete",
+  "error",
+]);
+
+function normalizeResearchConfidence(value: unknown): ResearchConfidence {
+  return typeof value === "string" && RESEARCH_CONFIDENCE_VALUES.has(value as ResearchConfidence)
+    ? (value as ResearchConfidence)
+    : "medium";
+}
+
+function normalizeResearchPhase(value: unknown): ResearchReportPhase {
+  return typeof value === "string" && RESEARCH_PHASE_VALUES.has(value as ResearchReportPhase)
+    ? (value as ResearchReportPhase)
+    : "complete";
+}
+
+function normalizeResearchCitations(value: unknown): ResearchCitation[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((entry): ResearchCitation | null => {
+      if (!entry || typeof entry !== "object") return null;
+      const record = entry as Partial<ResearchCitation>;
+      const id = cleanText(record.id).trim();
+      const messageId = cleanText(record.messageId).trim();
+      const quote = cleanText(record.quote).trim();
+      if (!id || !messageId) return null;
+      return { id, messageId, quote };
+    })
+    .filter((entry): entry is ResearchCitation => Boolean(entry));
+}
+
+function normalizeResearchSubQuestions(value: unknown): ResearchSubQuestion[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((entry): ResearchSubQuestion | null => {
+      if (!entry || typeof entry !== "object") return null;
+      const record = entry as Partial<ResearchSubQuestion>;
+      const id = cleanText(record.id).trim();
+      const question = cleanText(record.question).trim();
+      if (!id || !question) return null;
+      return {
+        id,
+        question,
+        findings: cleanText(record.findings),
+        citations: Array.isArray(record.citations)
+          ? record.citations.filter((c): c is string => typeof c === "string")
+          : [],
+        confidence: normalizeResearchConfidence(record.confidence),
+      };
+    })
+    .filter((entry): entry is ResearchSubQuestion => Boolean(entry));
+}
+
+function normalizeResearchSections(value: unknown): ResearchSection[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((entry): ResearchSection | null => {
+      if (!entry || typeof entry !== "object") return null;
+      const record = entry as Partial<ResearchSection>;
+      const id = cleanText(record.id).trim();
+      const heading = cleanText(record.heading).trim();
+      const body = cleanText(record.body);
+      if (!id || !heading) return null;
+      return {
+        id,
+        heading,
+        body,
+        confidence: normalizeResearchConfidence(record.confidence),
+      };
+    })
+    .filter((entry): entry is ResearchSection => Boolean(entry));
+}
+
+function normalizeDeepResearchReport(input: unknown): DeepResearchReportSnapshot | undefined {
+  if (!input || typeof input !== "object") return undefined;
+  const record = input as Partial<DeepResearchReportSnapshot>;
+  return {
+    phase: normalizeResearchPhase(record.phase),
+    title: cleanText(record.title),
+    abstract: cleanText(record.abstract),
+    subQuestions: normalizeResearchSubQuestions(record.subQuestions),
+    sections: normalizeResearchSections(record.sections),
+    citations: normalizeResearchCitations(record.citations),
+    confidence: normalizeResearchConfidence(record.confidence),
+    generatedAt: clampNumber(record.generatedAt),
+    modelId: cleanText(record.modelId),
+    ...(cleanText(record.error).trim() ? { error: cleanText(record.error).trim() } : {}),
+  };
+}
+
 function normalizeMessage(input: unknown): SessionMessage | null {
   if (!input || typeof input !== "object") return null;
 
@@ -511,6 +652,9 @@ function normalizeMessage(input: unknown): SessionMessage | null {
       : {}),
     ...(normalizeModeratorConclusion(record.moderatorConclusion)
       ? { moderatorConclusion: normalizeModeratorConclusion(record.moderatorConclusion) }
+      : {}),
+    ...(normalizeDeepResearchReport(record.deepResearchReport)
+      ? { deepResearchReport: normalizeDeepResearchReport(record.deepResearchReport) }
       : {}),
     ...(normalizeReactions(record.reactions)
       ? { reactions: normalizeReactions(record.reactions) }

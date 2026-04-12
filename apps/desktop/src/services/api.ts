@@ -197,6 +197,7 @@ export async function callProvider(
     requestTimeoutMs?: number;
     signal?: AbortSignal;
     disableThinking?: boolean;
+    maxTokens?: number;
   },
 ): Promise<CompletionResult> {
   const startTime = Date.now();
@@ -227,7 +228,7 @@ export async function callProvider(
   let fullThinking = "";
 
   const streamOptions: CompletionOptions = {
-    maxTokens: agent.maxTokens,
+    maxTokens: options?.maxTokens ?? agent.maxTokens,
     temperature: agent.temperature,
     timeoutMs: options?.requestTimeoutMs,
     idleTimeoutMs: options?.idleTimeoutMs,
