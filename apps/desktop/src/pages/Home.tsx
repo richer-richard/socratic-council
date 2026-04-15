@@ -854,12 +854,8 @@ export function Home({
                                   <span style={{ fontFamily: "var(--font-mono)" }}>{formatRelativeTime(session.updatedAt)}</span>
                                 </div>
                                 <div className="workstation-thread-title">{session.title}</div>
-                                <div className="workstation-thread-preview">
-                                  {session.preview || "No messages saved yet."}
-                                </div>
                                 <div className="workstation-thread-foot">
                                   <span>{session.currentTurn} turns</span>
-                                  <span>{session.messageCount} messages</span>
                                 </div>
                               </button>
                               <button
@@ -952,12 +948,8 @@ export function Home({
                             <span style={{ fontFamily: "var(--font-mono)" }}>{formatRelativeTime(session.updatedAt)}</span>
                           </div>
                           <div className="workstation-thread-title">{session.title}</div>
-                          <div className="workstation-thread-preview">
-                            {session.preview || "No messages saved yet."}
-                          </div>
                           <div className="workstation-thread-foot">
                             <span>{session.currentTurn} turns</span>
-                            <span>{session.messageCount} messages</span>
                           </div>
                         </button>
                         <button

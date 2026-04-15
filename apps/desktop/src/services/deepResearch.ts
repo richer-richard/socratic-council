@@ -875,3 +875,103 @@ export async function generateDeepResearchReport(
   input.onPhase?.("complete", finalSnapshot);
   return finalSnapshot;
 }
+
+// ---------------------------------------------------------------------------
+// Session title generation
+// ---------------------------------------------------------------------------
+
+const SESSION_TITLE_SYSTEM = `You name a finished Socratic Council discussion that will appear as a sidebar entry.
+
+OUTPUT: just the title. Nothing else. No quotes, no preamble, no explanation.
+
+Rules — every rule is mandatory:
+- 2 to 5 words.
+- Title Case.
+- ABSOLUTELY no punctuation: no colons, dashes, em-dashes, en-dashes, periods, commas, semicolons, slashes, parentheses, brackets, quotes, ellipses, exclamation marks, question marks.
+- No leading or trailing whitespace.
+- Concrete and specific to this discussion. Avoid generic words like "Discussion", "Conversation", "Analysis", "Council".
+- Match the language of the original discussion topic.`;
+
+export interface SessionTitleInput {
+  provider: Provider;
+  credential: ProviderCredential;
+  model: string;
+  proxy?: ProxyConfig;
+  topic: string;
+  conclusionSummary: string;
+  signal?: AbortSignal;
+}
+
+function sanitizeSessionTitle(raw: string): string {
+  let title = (raw ?? "").trim();
+  // Strip surrounding quotes/backticks
+  title = title.replace(/^["'`\u201C\u201D\u2018\u2019]+|["'`\u201C\u201D\u2018\u2019]+$/g, "");
+  // Take only the first non-empty line
+  const firstLine = title.split(/\r?\n/).find((line) => line.trim().length > 0) ?? "";
+  title = firstLine.trim();
+  // Remove any disallowed punctuation
+  title = title.replace(/[:\-—–_.,;/!?"'`()[\]{}\u2026\u201C\u201D\u2018\u2019]/g, " ");
+  // Collapse whitespace
+  title = title.replace(/\s+/g, " ").trim();
+  // Cap to 5 words
+  const words = title.split(" ").filter((word) => word.length > 0).slice(0, 5);
+  title = words.join(" ");
+  // Hard cap to 60 chars
+  return title.slice(0, 60).trim();
+}
+
+export async function generateSessionTitle(input: SessionTitleInput): Promise<string> {
+  const userPrompt = [
+    `Discussion topic: "${input.topic}"`,
+    "",
+    "Conclusion the council reached:",
+    input.conclusionSummary || "(no explicit conclusion)",
+    "",
+    "Now output the title. Just the title — 2 to 5 words, Title Case, no punctuation.",
+  ].join("\n");
+
+  const messages: APIChatMessage[] = [
+    { role: "system", content: SESSION_TITLE_SYSTEM },
+    { role: "user", content: userPrompt },
+  ];
+
+  let lastSanitized = "";
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const attemptMessages =
+      attempt === 0
+        ? messages
+        : [
+            ...messages,
+            {
+              role: "user" as const,
+              content:
+                "Your last reply did not match the rules. Reply with ONLY the title now: 2 to 5 words, Title Case, no punctuation at all, no quotes, no extra text.",
+            },
+          ];
+
+    const result = await callProvider(
+      input.provider,
+      input.credential,
+      input.model,
+      attemptMessages,
+      () => {
+        /* ignore streaming chunks */
+      },
+      input.proxy,
+      {
+        signal: input.signal,
+        idleTimeoutMs: 30000,
+        requestTimeoutMs: 60000,
+        maxTokens: 64,
+      },
+    );
+
+    if (!result.success || !result.content) continue;
+    const sanitized = sanitizeSessionTitle(result.content);
+    if (sanitized.split(" ").length >= 2) return sanitized;
+    lastSanitized = sanitized;
+  }
+
+  if (lastSanitized) return lastSanitized;
+  throw new Error("session title generation failed");
+}

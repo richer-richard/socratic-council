@@ -2346,18 +2346,33 @@ details[open] > .deep-research-report-summary .deep-research-report-expand::befo
 }
 
 .message-quote {
-  border-left: 3px solid var(--line-soft);
-  background: rgba(255, 255, 255, 0.06);
-  border-radius: 10px;
-  padding: 0.6rem 0.8rem;
-  margin-bottom: 0.6rem;
+  /* Inline quote block. Use margin-bottom only so quotes stack cleanly with
+     `:has()` rules below; avoid margin-collapse surprises with preceding
+     siblings (thinking panel, other quotes, etc.). */
+  margin: 0 0 0.9rem;
+  padding: 0.45rem 0.7rem 0.5rem 0.85rem;
+  border-left: 2px solid rgba(148, 163, 184, 0.45);
+  border-radius: 0 8px 8px 0;
+  background: linear-gradient(
+    90deg,
+    rgba(148, 163, 184, 0.1) 0%,
+    rgba(148, 163, 184, 0.04) 60%,
+    rgba(148, 163, 184, 0.02) 100%
+  );
   transition:
     background 0.15s ease,
+    border-color 0.15s ease,
     box-shadow 0.15s ease;
 }
 
-.message-quote + .message-quote {
-  margin-top: -0.3rem;
+/* Consecutive quotes stack tightly — only a hairline gap separates them. */
+.message-quote:has(+ .message-quote) {
+  margin-bottom: 0.2rem;
+}
+
+/* First quote after another element gets a bit of breathing room above. */
+:not(.message-quote) + .message-quote {
+  margin-top: 0.65rem;
 }
 
 .message-quote-clickable {
@@ -2365,8 +2380,14 @@ details[open] > .deep-research-report-summary .deep-research-report-expand::befo
 }
 
 .message-quote-clickable:hover {
-  background: rgba(255, 255, 255, 0.12);
-  box-shadow: 0 0 12px 2px rgba(52, 211, 153, 0.18);
+  border-left-color: rgba(52, 211, 153, 0.55);
+  background: linear-gradient(
+    90deg,
+    rgba(52, 211, 153, 0.12) 0%,
+    rgba(52, 211, 153, 0.04) 70%,
+    rgba(52, 211, 153, 0.01) 100%
+  );
+  box-shadow: 0 0 10px 0 rgba(52, 211, 153, 0.1);
 }
 
 .message-quote-clickable:focus-visible {
@@ -2375,25 +2396,31 @@ details[open] > .deep-research-report-summary .deep-research-report-expand::befo
 }
 
 .message-quote-header {
+  display: flex;
+  align-items: baseline;
+  gap: 0.45rem;
   font-family: var(--font-mono);
-  font-size: 0.7rem;
+  font-size: 0.64rem;
   color: var(--ink-500);
   text-transform: uppercase;
-  letter-spacing: 0.08em;
-  margin-bottom: 0.3rem;
+  letter-spacing: 0.09em;
+  margin-bottom: 0.2rem;
+  opacity: 0.78;
 }
 
 .message-quote-body {
-  color: var(--ink-700);
-  font-size: 0.9rem;
-  line-height: 1.4;
+  color: var(--ink-600);
+  font-size: 0.84rem;
+  line-height: 1.48;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .message-quote-reactions {
   display: flex;
   flex-wrap: wrap;
   gap: 0.3rem;
-  margin-top: 0.4rem;
+  margin-top: 0.35rem;
 }
 
 .message-attachment-list {

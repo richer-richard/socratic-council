@@ -237,6 +237,7 @@ const AGENT_IDS: CouncilAgentId[] = [
   "kate",
   "quinn",
   "mary",
+  "zara",
 ];
 
 const EMPTY_MODERATOR_USAGE: ModeratorUsageSnapshot = {
@@ -810,6 +811,56 @@ function buildTitle(topic: string): string {
   return topic.replace(/\s+/g, " ").trim().slice(0, 80);
 }
 
+function normalizeCanvasStates(input: unknown): Record<string, unknown> | undefined {
+  if (!input || typeof input !== "object") return undefined;
+
+  const result: Record<string, unknown> = {};
+  for (const [agentId, raw] of Object.entries(input as Record<string, unknown>)) {
+    if (!isCouncilAgent(agentId)) continue;
+    if (!raw || typeof raw !== "object") continue;
+
+    const record = raw as {
+      agentId?: unknown;
+      sections?: unknown;
+      lastUpdatedTurn?: unknown;
+      lastUpdatedAt?: unknown;
+    };
+
+    if (!Array.isArray(record.sections)) continue;
+
+    const sections = record.sections
+      .map((section) => {
+        if (!section || typeof section !== "object") return null;
+        const sec = section as {
+          id?: unknown;
+          label?: unknown;
+          text?: unknown;
+          updatedAt?: unknown;
+        };
+        const id = cleanText(sec.id).trim();
+        const label = cleanText(sec.label).trim();
+        const text = cleanText(sec.text);
+        if (!id || !label) return null;
+        return {
+          id,
+          label,
+          text,
+          updatedAt: clampNumber(sec.updatedAt, Date.now()),
+        };
+      })
+      .filter((section): section is NonNullable<typeof section> => Boolean(section));
+
+    result[agentId] = {
+      agentId,
+      sections,
+      lastUpdatedTurn: clampNumber(record.lastUpdatedTurn),
+      lastUpdatedAt: clampNumber(record.lastUpdatedAt, Date.now()),
+    };
+  }
+
+  return Object.keys(result).length > 0 ? result : undefined;
+}
+
 function buildSummary(session: DiscussionSession): SessionSummary {
   return {
     id: session.id,
@@ -940,6 +991,9 @@ function normalizeDiscussionSession(input: unknown): DiscussionSession | null {
           }
         : null,
     runtime: normalizeRuntime(record.runtime, status),
+    ...(normalizeCanvasStates(record.canvasStates)
+      ? { canvasStates: normalizeCanvasStates(record.canvasStates) }
+      : {}),
   };
 }
 
