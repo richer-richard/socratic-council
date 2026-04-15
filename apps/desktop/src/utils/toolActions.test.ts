@@ -71,6 +71,39 @@ describe("toolActions", () => {
     expect(state.visibleText).toBe("We can stop here.\n");
     expect(detector.finish()).toBe("We can stop here.");
   });
+
+  it("strips a mid-prose @tool(...) directive from the cleaned content", () => {
+    // Regression: when the model writes the directive on the same line as
+    // surrounding prose, the streaming detector only catches lines that START
+    // with @tool(. The mid-line case has to be cleaned up in the post-pass.
+    const parsed = extractActions(
+      'Let me search the registry: @tool(oracle.web_search, {"query":"test"}) for context.',
+      ["👍"],
+    );
+    expect(parsed.cleaned).toBe("Let me search the registry:  for context.");
+    expect(parsed.toolCalls).toEqual([
+      { name: "oracle.web_search", args: { query: "test" } },
+    ]);
+  });
+
+  it("strips standalone @tool directives that appear after prose on earlier lines", () => {
+    const parsed = extractActions(
+      [
+        "First, some context that the council needs.",
+        "",
+        '@tool(oracle.web_search, {"query":"another"})',
+        "",
+        "Then my response.",
+      ].join("\n"),
+      ["👍"],
+    );
+    expect(parsed.cleaned).toBe(
+      ["First, some context that the council needs.", "", "Then my response."].join("\n"),
+    );
+    expect(parsed.toolCalls).toEqual([
+      { name: "oracle.web_search", args: { query: "another" } },
+    ]);
+  });
 });
 
 describe("stripProviderToolSyntax", () => {

@@ -25,6 +25,7 @@ import {
 import { getToolPrompt, runToolCall, type ToolCall, type ToolContext } from "../services/tools";
 import {
   generateDeepResearchReport,
+  generateSessionTitle,
   type TranscriptMessage as DeepResearchTranscriptMessage,
 } from "../services/deepResearch";
 import { addDossierEntry, loadProject } from "../services/projects";
@@ -454,6 +455,16 @@ function countEndVoteChoices(
 
 function getEndVoteThreshold(configuredAgentIds: readonly CouncilAgentId[]) {
   return Math.floor(configuredAgentIds.length / 2) + 1;
+}
+
+// Round 1 needs at least this many YES votes to advance to round 2.
+// Below this, round 2 is skipped and the council resumes discussion.
+// At full agreement (every agent), the session concludes immediately
+// without round 2.
+function getRoundOneAdvanceThreshold(configuredAgentIds: readonly CouncilAgentId[]) {
+  // For an 8-agent council this is 5 (the user-specified rule).
+  // For a smaller or larger council, scale to "more than half".
+  return Math.max(2, Math.floor(configuredAgentIds.length / 2) + 1);
 }
 
 function parseVoteChoiceFromVisibleText(content: string): EndVoteChoice | null {
@@ -1190,7 +1201,11 @@ export function Chat({ session, onNavigate, onPersistSession }: ChatProps) {
   const [totalTokens, setTotalTokens] = useState(normalizedSession.totalTokens);
   const [isPaused, setIsPaused] = useState(normalizedSession.status === "paused");
   const [sessionStatus, setSessionStatus] = useState<SessionStatus>(normalizedSession.status);
+  const [sessionTitle, setSessionTitle] = useState<string>(normalizedSession.title);
+  const sessionTitleRef = useRef(sessionTitle);
+  sessionTitleRef.current = sessionTitle;
   const [lastSavedAt, setLastSavedAt] = useState(normalizedSession.updatedAt);
+  const isArchived = normalizedSession.archivedAt != null;
   const [persistenceError, setPersistenceError] = useState<string | null>(null);
   const pausedRef = useRef(normalizedSession.status === "paused");
   const [errors, setErrors] = useState<string[]>(normalizedSession.errors);
@@ -1952,14 +1967,22 @@ Direct question: "${pendingHandoffRef.current.question}"
           .join("\n\n");
         history.push({
           role: "user",
-          content: `[Your persistent canvas from prior turns]\n${canvasSummary}\n\nUpdate your canvas as needed before responding. Build on or revise these notes.`,
+          content: `[Your persistent canvas — these are YOUR OWN notes from earlier turns in this same session, not someone else's]
+${canvasSummary}
+
+This canvas is yours and persists across the entire session. Edit it in place this turn:
+- Use @canvas({"op":"append","section":"<existing label>",...}) to add to a section you already started.
+- Use @canvas({"op":"replace","section":"<existing label>",...}) to refine an existing section.
+- Only create a new section (a new label) if you genuinely have a new theme.
+- Do NOT use @canvas({"op":"clear",...}) — it wipes your prior thinking.
+- Treat these notes as a continuing scratchpad: build on them, do not start over.`,
         });
       }
 
       history.push({
         role: "user",
         content:
-          "Your turn. First, draft your key points on the canvas using @canvas(...) lines. Then, if exact wording or evidence is uncertain, use @tool(...) to search — you can output text, search, and continue writing across multiple rounds. Respond directly to one specific message above and either add one new point or narrow the group toward a decision.",
+          "Your turn. First, update your canvas using @canvas(...) lines — build on the canvas above if it exists, otherwise draft new key points. Then, if exact wording or evidence is uncertain, use @tool(...) to search — you can output text, search, and continue writing across multiple rounds. Respond directly to one specific message above and either add one new point or narrow the group toward a decision.",
       });
 
       return history;
@@ -2043,6 +2066,7 @@ Direct question: "${pendingHandoffRef.current.question}"
         },
       ];
       const threshold = getEndVoteThreshold(configuredAgentIds);
+      const advanceThreshold = getRoundOneAdvanceThreshold(configuredAgentIds);
       const firstRoundCount = countEndVoteChoices(voteState.firstRoundVotes, configuredAgentIds);
       const firstRoundObjections = configuredAgentIds
         .filter((candidateId) => voteState.firstRoundVotes[candidateId] === "no")
@@ -2086,6 +2110,8 @@ Direct question: "${pendingHandoffRef.current.question}"
           voteState.round === 1
             ? `${AGENT_CONFIG[voteState.proposer].name} moved to end the session now. This is end-vote round 1 of 2.
 - The motion currently includes ${AGENT_CONFIG[voteState.proposer].name}'s YES vote, so the tally starts at YES ${firstRoundCount.yes}/${configuredAgentIds.length}, NO ${firstRoundCount.no}/${configuredAgentIds.length}.
+- How round 1 resolves: if all ${configuredAgentIds.length} agents vote YES the session ends now (no round 2). If between ${advanceThreshold} and ${configuredAgentIds.length - 1} vote YES, round 2 is held and ending requires at least ${threshold} YES there. If fewer than ${advanceThreshold} vote YES, round 2 is skipped and the council just continues the discussion.
+- Vote your honest position. Voting YES does not commit the room to end; round 2 is the binding round when round 1 is split.
 - Write 1-3 short sentences total.
 - Your first visible sentence must start exactly with Vote: YES or Vote: NO.
 - If you vote NO, you must state one concrete reason the discussion should continue.
@@ -2590,6 +2616,30 @@ Write the official moderator wrap-up in 4 short sentences:
                 error: message,
               });
             }
+
+            // Final step: ask the moderator for a short, sidebar-friendly title
+            // for this session. Runs after the deep research report regardless
+            // of whether the report itself succeeded.
+            try {
+              const title = await generateSessionTitle({
+                provider,
+                credential,
+                model,
+                proxy,
+                topic,
+                conclusionSummary: moderatorConclusion!.summary,
+              });
+              if (title) {
+                setSessionTitle(title);
+              }
+            } catch (err) {
+              apiLogger.log(
+                "warn",
+                provider,
+                "Session title generation failed; keeping topic-based title",
+                { error: err instanceof Error ? err.message : String(err) },
+              );
+            }
           })();
         }
 
@@ -2643,6 +2693,7 @@ Write the official moderator wrap-up in 4 short sentences:
   }, [config.preferences.moderatorEnabled, conflictState, generateModeratorMessage, isRunning]);
 
   const toggleUserReaction = useCallback((targetId: string, emoji: ReactionId) => {
+    if (isArchived) return;
     setMessages((prev) =>
       prev.map((message) => {
         if (message.id !== targetId) return message;
@@ -2670,7 +2721,7 @@ Write the official moderator wrap-up in 4 short sentences:
         return { ...message, reactions: nextBar };
       }),
     );
-  }, []);
+  }, [isArchived]);
 
   const copyQuoteToken = useCallback(async (messageId: string) => {
     const token = `@quote(${messageId})`;
@@ -2839,14 +2890,22 @@ Write the official moderator wrap-up in 4 short sentences:
                 // Use proper brace-depth parser to strip canvas directives (handles multi-line)
                 const { cleaned: canvasCleaned, directives: canvasDirectives } =
                   extractCanvasDirectives(detection.visibleText);
-                let displayText = canvasCleaned
+                // Also strip complete @tool(...) directives that weren't caught by
+                // the line-oriented streaming detector (e.g., mid-prose occurrences
+                // like "Let me look this up: @tool(...)"). extractActions handles
+                // mid-line tool directives via a brace-aware parser.
+                let displayText = extractActions(canvasCleaned, REACTION_IDS).cleaned
                   .replace(/^[ \t]*@done\(\)[ \t]*$/gm, "")
                   .replace(/\n{3,}/g, "\n\n")
                   .trim();
-                // Hide partial @canvas( still being streamed (incomplete directive)
-                const partialIdx = displayText.lastIndexOf("@canvas(");
-                if (partialIdx >= 0 && !displayText.slice(partialIdx).includes(")")) {
-                  displayText = displayText.slice(0, partialIdx).replace(/\n{3,}/g, "\n\n").trim();
+                // Hide partial @canvas( or @tool( still being streamed (incomplete directive)
+                const partialCanvasIdx = displayText.lastIndexOf("@canvas(");
+                if (partialCanvasIdx >= 0 && !displayText.slice(partialCanvasIdx).includes(")")) {
+                  displayText = displayText.slice(0, partialCanvasIdx).replace(/\n{3,}/g, "\n\n").trim();
+                }
+                const partialToolIdx = displayText.lastIndexOf("@tool(");
+                if (partialToolIdx >= 0 && !displayText.slice(partialToolIdx).includes(")")) {
+                  displayText = displayText.slice(0, partialToolIdx).replace(/\n{3,}/g, "\n\n").trim();
                 }
                 streamingContent = displayText;
                 // Apply only NEW canvas directives (cumulative text re-parses old ones)
@@ -2867,7 +2926,9 @@ Write the official moderator wrap-up in 4 short sentences:
                   const toolFinished = streamingToolDetector.finish();
                   const { cleaned: finalCleaned, directives: finalDirectives } =
                     extractCanvasDirectives(toolFinished);
-                  streamingContent = finalCleaned
+                  // Strip any mid-prose @tool(...) that slipped past the
+                  // line-oriented streaming detector.
+                  streamingContent = extractActions(finalCleaned, REACTION_IDS).cleaned
                     .replace(/^[ \t]*@done\(\)[ \t]*$/gm, "")
                     .replace(/\n{3,}/g, "\n\n")
                     .trim();
@@ -2903,9 +2964,12 @@ Write the official moderator wrap-up in 4 short sentences:
             ? streamingToolDetector.getVisibleText()
             : providerResult.content || "";
           const { cleaned: canvasStrippedForVisible } = extractCanvasDirectives(rawForVisible);
-          const parsedVisible = interruptedForTools
-            ? normalizeMessageText(canvasStrippedForVisible)
-            : extractActions(canvasStrippedForVisible, REACTION_IDS).cleaned;
+          // Always run extractActions here, even when interruptedForTools is true.
+          // The streaming detector only catches @tool(...) on lines that start with
+          // it; mid-prose occurrences ("Let me search: @tool(...)") slip through and
+          // need the brace-aware post-pass to be removed. streamedToolCalls are
+          // tracked separately, so throwing away extractActions' toolCalls is fine.
+          const parsedVisible = extractActions(canvasStrippedForVisible, REACTION_IDS).cleaned;
           const visibleContent =
             parsedVisible || streamingContent || normalizeMessageText(providerResult.content || "");
 
@@ -3104,8 +3168,15 @@ Write the official moderator wrap-up in 4 short sentences:
           return null;
         }
 
-        const { cleaned: accCanvasCleaned } = extractCanvasDirectives(accumulatedContent || result.content || streamingContent || "");
-        const finalVisibleContent = normalizeMessageText(accCanvasCleaned);
+        const { cleaned: accCanvasCleaned } = extractCanvasDirectives(
+          accumulatedContent || result.content || streamingContent || "",
+        );
+        // Defense-in-depth: if any @tool(...) directive slipped through the
+        // per-iteration cleaning (e.g. mid-prose on an interrupted iteration),
+        // strip it here before rendering to the user.
+        const finalVisibleContent = normalizeMessageText(
+          extractActions(accCanvasCleaned, REACTION_IDS).cleaned,
+        );
         const resolvedQuotes = resolveQuoteTargets(agentId, parsed.quoteTargets);
         const parsedReactions = parsed.reactions.map((reaction) => ({
           targetId: reaction.targetId,
@@ -3626,6 +3697,7 @@ Write the official moderator wrap-up in 4 short sentences:
   const beginEndVote = useCallback(
     (proposer: CouncilAgentId) => {
       const threshold = getEndVoteThreshold(configuredAgentIds);
+      const advanceThreshold = getRoundOneAdvanceThreshold(configuredAgentIds);
       const voteState: EndVoteState = {
         id: `end_vote_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
         proposer,
@@ -3646,7 +3718,7 @@ Write the official moderator wrap-up in 4 short sentences:
         {
           id: `msg_${Date.now()}_end_vote_round_1_notice`,
           agentId: "system",
-          content: `${AGENT_CONFIG[proposer].name} requested to end the session. End vote round 1 of 2 begins now. The other ${Math.max(configuredAgentIds.length - 1, 0)} agents must vote YES or NO, and any NO vote must state a reason. If every agent votes YES in round 1, round 2 is unnecessary and the council will move straight to the conclusion. Otherwise, round 2 will make the final decision, and ending requires at least ${threshold} YES votes.`,
+          content: `${AGENT_CONFIG[proposer].name} requested to end the session. End vote round 1 of 2 begins now. The other ${Math.max(configuredAgentIds.length - 1, 0)} agents must vote YES or NO, and any NO vote must state a reason. Outcomes: (1) if all ${configuredAgentIds.length} agents vote YES, the session concludes immediately and round 2 is skipped; (2) if between ${advanceThreshold} and ${configuredAgentIds.length - 1} agents vote YES, round 2 is held and ending requires at least ${threshold} YES votes there; (3) if fewer than ${advanceThreshold} vote YES, round 2 is skipped and the discussion simply continues.`,
           timestamp: Date.now(),
         },
       ]);
@@ -3709,6 +3781,9 @@ Write the official moderator wrap-up in 4 short sentences:
 
     if (voteState.round === 1) {
       const firstRoundCount = countEndVoteChoices(voteState.firstRoundVotes, configuredAgentIds);
+      const advanceThreshold = getRoundOneAdvanceThreshold(configuredAgentIds);
+
+      // Unanimous YES → conclude immediately, no round 2.
       if (firstRoundCount.yes === configuredAgentIds.length && firstRoundCount.no === 0) {
         const unanimousOutcome = `All ${configuredAgentIds.length} agents voted YES in round 1, so round 2 was skipped.`;
         upsertEndVoteBoardMessage(buildEndVoteBoard(voteState, "passed", unanimousOutcome));
@@ -3720,11 +3795,33 @@ Write the official moderator wrap-up in 4 short sentences:
         return;
       }
 
+      // Below the advance threshold → no round 2, council resumes the discussion.
+      if (firstRoundCount.yes < advanceThreshold) {
+        const skippedOutcome = `Round 1 closed with only ${firstRoundCount.yes}/${configuredAgentIds.length} YES votes (need at least ${advanceThreshold} to call round 2). Round 2 is skipped and the council continues the discussion.`;
+        upsertEndVoteBoardMessage(buildEndVoteBoard(voteState, "failed", skippedOutcome));
+        endVoteRef.current = null;
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: `msg_${Date.now()}_end_vote_round_1_skipped`,
+            agentId: "system",
+            content: `End vote round 1 is complete. Tally: YES ${firstRoundCount.yes}/${configuredAgentIds.length}, NO ${firstRoundCount.no}/${configuredAgentIds.length}. Fewer than ${advanceThreshold} agents wanted to end, so round 2 is skipped and the council continues the discussion.`,
+            timestamp: Date.now(),
+          },
+        ]);
+
+        if (cyclePendingRef.current.length === 0) {
+          cyclePendingRef.current = [...configuredAgentIds];
+        }
+        return;
+      }
+
+      // Mixed result with enough YES votes → run round 2 to make the final call.
       upsertEndVoteBoardMessage(
         buildEndVoteBoard(
           voteState,
           "complete",
-          "Round 2 is required because not every agent approved ending in round 1.",
+          `Round 2 is required because ${firstRoundCount.yes}/${configuredAgentIds.length} agents wanted to end (not unanimous, but at least ${advanceThreshold}).`,
         ),
       );
       const roundTwoState: EndVoteState = {
@@ -3815,6 +3912,10 @@ Write the official moderator wrap-up in 4 short sentences:
   // Main discussion loop
   const runDiscussion = useCallback(
     async (mode: "fresh" | "resume" = "resume") => {
+      if (isArchived) {
+        // Archived sessions are read-only — no further turns, votes, or moderator runs.
+        return;
+      }
       if (mode === "fresh") {
         resetRuntimeState();
 
@@ -4127,6 +4228,7 @@ Write the official moderator wrap-up in 4 short sentences:
     [
       topic,
       maxTurns,
+      isArchived,
       config.preferences.showBiddingScores,
       config.preferences.moderatorEnabled,
       generateBiddingScores,
@@ -4149,6 +4251,11 @@ Write the official moderator wrap-up in 4 short sentences:
   useEffect(() => {
     if (!attachmentsReady) return;
     if (hasStartedRef.current) return;
+    if (isArchived) {
+      // Archived sessions are read-only; never auto-start or resume.
+      hasStartedRef.current = true;
+      return;
+    }
     if (
       configuredProviders.length > 0 &&
       normalizedSession.status === "draft" &&
@@ -4170,6 +4277,7 @@ Write the official moderator wrap-up in 4 short sentences:
   }, [
     attachmentsReady,
     configuredProviders.length,
+    isArchived,
     messages.length,
     normalizedSession.messages.length,
     normalizedSession.status,
@@ -4212,6 +4320,7 @@ Write the official moderator wrap-up in 4 short sentences:
   };
 
   const handlePauseResume = () => {
+    if (isArchived) return;
     if (isPaused) {
       hasStartedRef.current = true;
       void runDiscussion("resume");
@@ -4301,6 +4410,7 @@ Write the official moderator wrap-up in 4 short sentences:
       JSON.stringify(pendingHandoffRef.current),
       messageFingerprint,
       persistedMessages.length,
+      sessionTitle,
     ].join("::");
 
     if (lastPersistSignatureRef.current === signature) {
@@ -4312,7 +4422,7 @@ Write the official moderator wrap-up in 4 short sentences:
       const persisted = onPersistSession({
         id: normalizedSession.id,
         topic,
-        title: normalizedSession.title,
+        title: sessionTitle,
         createdAt: normalizedSession.createdAt,
         updatedAt: nextUpdatedAt,
         lastOpenedAt: Math.max(normalizedSession.lastOpenedAt, normalizedSession.updatedAt),
@@ -4361,14 +4471,17 @@ Write the official moderator wrap-up in 4 short sentences:
     isRunning,
     messages,
     moderatorUsage,
+    normalizedSession.archivedAt,
     normalizedSession.createdAt,
     normalizedSession.id,
     normalizedSession.attachments,
     normalizedSession.lastOpenedAt,
-    normalizedSession.title,
+    normalizedSession.projectId,
     normalizedSession.updatedAt,
+    observerUsage,
     onPersistSession,
     sessionStatus,
+    sessionTitle,
     topic,
     totalTokens,
     duoLogue,
@@ -4452,6 +4565,19 @@ Write the official moderator wrap-up in 4 short sentences:
                         ? "Running"
                         : "Saved"}
                 </span>
+                {isArchived && (
+                  <span
+                    className="session-status"
+                    style={{
+                      background: "rgba(255,255,255,0.08)",
+                      color: "rgba(255,255,255,0.55)",
+                      letterSpacing: "0.04em",
+                    }}
+                    title="This session is archived and read only"
+                  >
+                    Archived · Read only
+                  </span>
+                )}
                 <span className="chat-autosave-pill">
                   {persistenceError
                     ? persistenceError
@@ -4564,7 +4690,8 @@ Write the official moderator wrap-up in 4 short sentences:
               </button>
             )}
 
-            {sessionStatus !== "completed" &&
+            {!isArchived &&
+              sessionStatus !== "completed" &&
               (isRunning || isPaused || sessionStatus === "paused" || currentTurn > 0) && (
                 <>
                   <button
