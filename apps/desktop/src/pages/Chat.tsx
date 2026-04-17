@@ -53,6 +53,10 @@ import { evaluateBudget, recordDailyCostDelta } from "../utils/budgetEnforcer";
 import { extractHandoffDirective } from "../utils/handoff";
 import { createStreamingToolCallDetector, extractActions, stripProviderToolSyntax } from "../utils/toolActions";
 import { splitIntoInlineQuoteSegments, stripQuoteTokens } from "../utils/inlineQuotes";
+import { CostBudgetBadge } from "../components/CostBudgetBadge";
+import { ArgumentMapPanel } from "../components/ArgumentMapPanel";
+import { BundleExportButton } from "../components/BundleActions";
+import { emptyGraph, type ArgGraph } from "@socratic-council/core";
 import {
   type CanvasState,
   applyCanvasDirective,
@@ -4541,6 +4545,11 @@ Write the official moderator wrap-up in 4 short sentences:
       ? Object.values(costState.agentCosts).some((agent) => agent.pricingAvailable)
       : false) || moderatorUsage.pricingAvailable || observerUsage.pricingAvailable;
 
+  // Live argument map (wave 2.6 UI). Toggle state; the extractor pipeline is
+  // wired separately at the orchestrator level (core/argmap.ts).
+  const [argmapOpen, setArgmapOpen] = useState(false);
+  const [argGraph] = useState<ArgGraph>(() => emptyGraph());
+
   // Cost circuit breaker (Wave 2 / 3.4). Watches the session's running cost,
   // tracks the rolling daily total via localStorage, and triggers the user's
   // configured action (warn / pause / stop) when a cap is crossed. No change
@@ -4624,6 +4633,14 @@ Write the official moderator wrap-up in 4 short sentences:
                     ? persistenceError
                     : `Autosaved locally at ${formattedLastSavedAt}`}
                 </span>
+                {/* Cost budget badge — shows running spend + cap if a
+                    budget policy is set. Hides itself when all caps are 0
+                    and nothing has been spent yet. */}
+                <CostBudgetBadge
+                  sessionUSD={totalEstimatedCostUSD}
+                  policy={config.preferences.budget}
+                  compact
+                />
               </div>
               <h1 className="chat-session-title">Socratic Council</h1>
               <div className={`chat-session-topic-shell${isTopicExpanded ? " is-expanded" : ""}`}>
@@ -4698,6 +4715,15 @@ Write the official moderator wrap-up in 4 short sentences:
               className="button-secondary text-sm"
             >
               Export
+            </button>
+
+            <button
+              onClick={() => setArgmapOpen((prev) => !prev)}
+              className="button-secondary text-sm"
+              aria-pressed={argmapOpen}
+              title="Toggle the live argument map"
+            >
+              Argument Map {argGraph.nodes.length > 0 ? `(${argGraph.nodes.length})` : ""}
             </button>
 
             {normalizedSession.projectId && normalizedSession.attachments.length > 0 && (
@@ -5313,11 +5339,17 @@ Write the official moderator wrap-up in 4 short sentences:
               onClose={() => setSidePanelView("default")}
             />
           ) : sidePanelView === "export" ? (
-            <ConversationExport
-              topic={topic}
-              messages={exportMessages}
-              onClose={() => setSidePanelView("default")}
-            />
+            <>
+              <ConversationExport
+                topic={topic}
+                messages={exportMessages}
+                onClose={() => setSidePanelView("default")}
+              />
+              {/* Portable bundle — additive, below the standard formats. */}
+              <div style={{ marginTop: "16px" }}>
+                <BundleExportButton session={normalizedSession} />
+              </div>
+            </>
           ) : (
             <>
               <h3 className="text-xs font-semibold text-ink-500 uppercase tracking-[0.24em] mb-4" style={{ fontFamily: "var(--font-mono)" }}>
@@ -5576,6 +5608,39 @@ Write the official moderator wrap-up in 4 short sentences:
             </div>
           </div>
         </div>
+      )}
+
+      {/* Argument Map overlay — right-docked floating panel. Additive layer,
+          does not modify existing sidepanel/chat layout. */}
+      {argmapOpen && (
+        <ArgumentMapPanel
+          graph={argGraph}
+          onClose={() => setArgmapOpen(false)}
+          onNavigateToMessage={jumpToMessage}
+          agentColors={Object.fromEntries(
+            AGENT_IDS.map((id) => {
+              const provider = AGENT_CONFIG[id]?.provider;
+              return [
+                id,
+                provider === "openai"
+                  ? "rgb(16, 163, 127)"
+                  : provider === "anthropic"
+                    ? "rgb(212, 165, 116)"
+                    : provider === "google"
+                      ? "rgb(66, 133, 244)"
+                      : provider === "deepseek"
+                        ? "rgb(0, 180, 216)"
+                        : provider === "kimi"
+                          ? "rgb(137, 150, 255)"
+                          : provider === "qwen"
+                            ? "rgb(124, 58, 237)"
+                            : provider === "minimax"
+                              ? "rgb(239, 120, 120)"
+                              : "rgb(6, 182, 212)",
+              ];
+            }),
+          )}
+        />
       )}
     </div>
   );
