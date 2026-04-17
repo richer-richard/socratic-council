@@ -11,6 +11,9 @@ use std::time::Duration;
 use tauri::{AppHandle, Emitter, State};
 use tokio::sync::{watch, Mutex};
 
+use crate::allowlist::{check_rate_limit, validate_body_size, validate_outbound_url};
+use crate::redact::redact_urls_in;
+
 const MAX_RESPONSE_BYTES: usize = 8 * 1024 * 1024;
 const MAX_ERROR_BODY_BYTES: usize = 64 * 1024;
 const MAX_STREAM_BYTES: usize = 16 * 1024 * 1024;
@@ -123,13 +126,16 @@ fn emit_stream_event(
 }
 
 fn format_request_error(error: reqwest::Error) -> String {
-    if error.is_connect() {
+    let raw = if error.is_connect() {
         format!("Connection failed (check proxy settings): {}", error)
     } else if error.is_timeout() {
         format!("Request timed out: {}", error)
     } else {
         format!("Request failed: {}", error)
-    }
+    };
+    // Strip any proxy/userinfo embedded in the reqwest error's URL rendering
+    // so proxy credentials never reach the frontend or the log ring buffer.
+    redact_urls_in(&raw)
 }
 
 async fn read_response_text_limited(
@@ -215,6 +221,12 @@ fn build_client(proxy_config: Option<&ProxyConfig>, timeout_ms: u64) -> Result<C
 /// Make a non-streaming HTTP request
 #[tauri::command]
 pub async fn http_request(config: HttpRequestConfig) -> Result<HttpResponse, String> {
+    // Defensive validation — same contract as the rest of the IPC surface,
+    // applied before we make any network call.
+    validate_outbound_url(&config.url)?;
+    validate_body_size(config.body.as_deref())?;
+    check_rate_limit()?;
+
     let client = build_client(config.proxy.as_ref(), config.timeout_ms.unwrap_or(120000))?;
 
     let method = config.method.to_uppercase();
@@ -237,16 +249,8 @@ pub async fn http_request(config: HttpRequestConfig) -> Result<HttpResponse, Str
         request = request.body(body);
     }
 
-    // Send request
-    let response = request.send().await.map_err(|e| {
-        if e.is_connect() {
-            format!("Connection failed (check proxy settings): {}", e)
-        } else if e.is_timeout() {
-            format!("Request timed out: {}", e)
-        } else {
-            format!("Request failed: {}", e)
-        }
-    })?;
+    // Send request (error strings pass through the same redaction helper).
+    let response = request.send().await.map_err(format_request_error)?;
 
     let status = response.status().as_u16();
     let mut headers = HashMap::new();
@@ -273,6 +277,11 @@ pub async fn http_request_stream(
     registry: State<'_, RequestRegistry>,
     config: HttpRequestConfig,
 ) -> Result<(), String> {
+    // Defensive validation — same as http_request, before any network I/O.
+    validate_outbound_url(&config.url)?;
+    validate_body_size(config.body.as_deref())?;
+    check_rate_limit()?;
+
     let request_id = config
         .request_id
         .clone()

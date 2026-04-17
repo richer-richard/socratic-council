@@ -38,7 +38,19 @@
     "macOS": {
       "entitlements": "entitlements.plist",
       "signingIdentity": null,
-      "hardenedRuntime": false
+      "hardenedRuntime": true
+    }
+  },
+  "plugins": {
+    "updater": {
+      "endpoints": [
+        "https://github.com/richer-richard/socratic-council/releases/latest/download/latest.json"
+      ],
+      "pubkey": "",
+      "dialog": false,
+      "windows": {
+        "installMode": "passive"
+      }
     }
   }
 }

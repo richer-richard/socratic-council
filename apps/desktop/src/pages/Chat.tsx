@@ -49,6 +49,7 @@ import {
   FairnessManager,
 } from "@socratic-council/core";
 import { calculateMessageCost } from "../utils/cost";
+import { evaluateBudget, recordDailyCostDelta } from "../utils/budgetEnforcer";
 import { extractHandoffDirective } from "../utils/handoff";
 import { createStreamingToolCallDetector, extractActions, stripProviderToolSyntax } from "../utils/toolActions";
 import { splitIntoInlineQuoteSegments, stripQuoteTokens } from "../utils/inlineQuotes";
@@ -4539,6 +4540,46 @@ Write the official moderator wrap-up in 4 short sentences:
     (costState
       ? Object.values(costState.agentCosts).some((agent) => agent.pricingAvailable)
       : false) || moderatorUsage.pricingAvailable || observerUsage.pricingAvailable;
+
+  // Cost circuit breaker (Wave 2 / 3.4). Watches the session's running cost,
+  // tracks the rolling daily total via localStorage, and triggers the user's
+  // configured action (warn / pause / stop) when a cap is crossed. No change
+  // to how requests are formed — only decides whether to keep making them.
+  const lastRecordedCostUSDRef = useRef(0);
+  const lastBudgetVerdictRef = useRef<string | null>(null);
+  useEffect(() => {
+    const previous = lastRecordedCostUSDRef.current;
+    if (totalEstimatedCostUSD > previous) {
+      recordDailyCostDelta(previous, totalEstimatedCostUSD);
+      lastRecordedCostUSDRef.current = totalEstimatedCostUSD;
+    }
+
+    const policy = config.preferences.budget;
+    if (!policy || (policy.perSession <= 0 && policy.perDay <= 0)) return;
+
+    const snap = evaluateBudget(totalEstimatedCostUSD, policy);
+    const signature = `${snap.verdict}:${snap.message ?? ""}`;
+    if (signature === lastBudgetVerdictRef.current) return;
+    lastBudgetVerdictRef.current = signature;
+
+    if (snap.verdict === "pause" || snap.verdict === "stop") {
+      apiLogger.log("warn", "budget", snap.message ?? "Budget cap reached", {
+        sessionUSD: snap.sessionUSD,
+        dailyUSD: snap.dailyUSD,
+      });
+      if (!pausedRef.current && sessionStatus !== "completed") {
+        stopActiveGeneration();
+        pausedRef.current = true;
+        setIsPaused(true);
+        setSessionStatus(snap.verdict === "stop" ? "completed" : "paused");
+      }
+    } else if (snap.verdict === "warn") {
+      apiLogger.log("info", "budget", snap.message ?? "Budget warning", {
+        sessionUSD: snap.sessionUSD,
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [totalEstimatedCostUSD, config.preferences.budget]);
 
   return (
     <div className="app-shell flex flex-col h-screen">

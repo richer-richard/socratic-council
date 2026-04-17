@@ -170,6 +170,13 @@ export class ConversationMemoryManager {
   private agentMentions: Record<AgentId, number>;
   private topic: string = "";
   private projectEvidence: ProjectEvidence[] = [];
+  /**
+   * Optional LLM-produced summary covering messages that have rolled off the
+   * sliding window. Populated by an external summarizer pass — see
+   * `summarize.ts`. `null` means no summary is available yet; the placeholder
+   * in `generateSummaryIfNeeded` is returned in that case.
+   */
+  private sessionSummary: string | null = null;
 
   constructor(config: Partial<MemoryConfig> = {}) {
     this.config = { ...DEFAULT_CONFIG, ...config };
@@ -422,14 +429,38 @@ export class ConversationMemoryManager {
   /**
    * Generate a summary of older messages if needed
    * (Returns placeholder - actual summarization would require LLM call)
+   *
+   * Prefers an LLM-produced summary injected via `setSessionSummary` when
+   * available (from the summarizer pass in `summarize.ts` — see wave 3.3).
+   * Falls back to a neutral placeholder when the window has overflowed and
+   * no real summary has been computed yet.
    */
   private generateSummaryIfNeeded(): string | undefined {
     if (this.messages.length <= this.config.windowSize) {
       return undefined;
     }
 
+    if (this.sessionSummary && this.sessionSummary.trim() !== "") {
+      return this.sessionSummary;
+    }
+
     const excludedCount = this.messages.length - this.config.windowSize;
     return `[${excludedCount} earlier messages summarized: Discussion has covered various perspectives on the topic, with contributions from multiple council members.]`;
+  }
+
+  /**
+   * Inject an LLM-generated summary for older messages. Driven by the
+   * summarizer pass in `summarize.ts`; stored on the memory manager so the
+   * next `buildContext()` includes it at the top of the agent's prompt.
+   * Passing an empty string clears the override.
+   */
+  setSessionSummary(summary: string | null): void {
+    this.sessionSummary = summary && summary.trim() !== "" ? summary.trim() : null;
+  }
+
+  /** Read the currently-active session summary (null when none is set). */
+  getSessionSummary(): string | null {
+    return this.sessionSummary;
   }
 
   /**

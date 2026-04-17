@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { Home } from "./pages/Home";
 import { Settings } from "./pages/Settings";
 import { Chat } from "./pages/Chat";
@@ -27,6 +27,8 @@ import {
   touchProject,
   type Project,
 } from "./services/projects";
+import { initVault } from "./services/vault";
+import { ErrorBoundary } from "./components/ErrorBoundary";
 
 export type Page = "home" | "settings" | "chat" | "project";
 
@@ -42,8 +44,28 @@ export default function App() {
     currentSessionId: null,
     currentProjectId: null,
   });
-  const [sessions, setSessions] = useState(() => stabilizeStoredSessions());
-  const [projects, setProjects] = useState(() => listProjectSummaries());
+  // Sessions and projects load after the vault init completes so encrypted
+  // records stored in localStorage can be decrypted. The brief pre-load window
+  // shows an empty sidebar — acceptable for a desktop app startup.
+  const [sessions, setSessions] = useState<ReturnType<typeof listSessionSummaries>>([]);
+  const [projects, setProjects] = useState<ReturnType<typeof listProjectSummaries>>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        await initVault();
+      } catch (error) {
+        console.error("[App] initVault failed:", error);
+      }
+      if (cancelled) return;
+      setSessions(stabilizeStoredSessions());
+      setProjects(listProjectSummaries());
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
   const [activeSession, setActiveSession] = useState<DiscussionSession | null>(null);
   const [activeProject, setActiveProject] = useState<Project | null>(null);
   const [appError, setAppError] = useState<string | null>(null);
@@ -267,51 +289,55 @@ export default function App() {
   );
 
   return (
-    <div className="h-screen flex flex-col bg-gray-900">
-      {appError ? (
-        <div className="border-b border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200">
-          {appError}
-        </div>
-      ) : null}
-      {state.currentPage === "home" && (
-        <Home
-          sessions={sessions}
-          projects={projects}
-          activeSessionId={state.currentSessionId}
-          onArchiveSession={handleArchiveSession}
-          onCreateSession={handleCreateSession}
-          onDeleteSession={handleDeleteSession}
-          onOpenSession={handleOpenSession}
-          onRestoreSession={handleRestoreSession}
-          onCreateProject={handleCreateProject}
-          onOpenProject={handleOpenProject}
-          onDeleteProject={handleDeleteProject}
-          onArchiveProject={handleArchiveProject}
-          onRestoreProject={handleRestoreProject}
-        />
-      )}
-      {state.currentPage === "settings" && <Settings onNavigate={navigate} />}
-      {state.currentPage === "chat" && activeSession && (
-        <Chat
-          key={activeSession.id}
-          session={activeSession}
-          onNavigate={navigate}
-          onPersistSession={handlePersistSession}
-        />
-      )}
-      {state.currentPage === "project" && activeProject && (
-        <ProjectDetail
-          project={activeProject}
-          sessions={sessions.filter((s) => s.projectId === activeProject.id)}
-          onNavigate={navigate}
-          onOpenSession={handleOpenSession}
-          onCreateSession={handleCreateSession}
-          onUpdateProject={(updated) => {
-            setActiveProject(updated);
-            refreshAll();
-          }}
-        />
-      )}
-    </div>
+    <ErrorBoundary label="app">
+      <div className="h-screen flex flex-col bg-gray-900">
+        {appError ? (
+          <div className="border-b border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200">
+            {appError}
+          </div>
+        ) : null}
+        {state.currentPage === "home" && (
+          <Home
+            sessions={sessions}
+            projects={projects}
+            activeSessionId={state.currentSessionId}
+            onArchiveSession={handleArchiveSession}
+            onCreateSession={handleCreateSession}
+            onDeleteSession={handleDeleteSession}
+            onOpenSession={handleOpenSession}
+            onRestoreSession={handleRestoreSession}
+            onCreateProject={handleCreateProject}
+            onOpenProject={handleOpenProject}
+            onDeleteProject={handleDeleteProject}
+            onArchiveProject={handleArchiveProject}
+            onRestoreProject={handleRestoreProject}
+          />
+        )}
+        {state.currentPage === "settings" && <Settings onNavigate={navigate} />}
+        {state.currentPage === "chat" && activeSession && (
+          <ErrorBoundary label="chat">
+            <Chat
+              key={activeSession.id}
+              session={activeSession}
+              onNavigate={navigate}
+              onPersistSession={handlePersistSession}
+            />
+          </ErrorBoundary>
+        )}
+        {state.currentPage === "project" && activeProject && (
+          <ProjectDetail
+            project={activeProject}
+            sessions={sessions.filter((s) => s.projectId === activeProject.id)}
+            onNavigate={navigate}
+            onOpenSession={handleOpenSession}
+            onCreateSession={handleCreateSession}
+            onUpdateProject={(updated) => {
+              setActiveProject(updated);
+              refreshAll();
+            }}
+          />
+        )}
+      </div>
+    </ErrorBoundary>
   );
 }

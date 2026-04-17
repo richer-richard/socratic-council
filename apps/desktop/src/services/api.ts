@@ -11,6 +11,7 @@ import type { ChatAttachment, CompletionOptions } from "@socratic-council/sdk";
 
 import type { Provider, ProxyConfig, ProviderCredential } from "../stores/config";
 import { createTauriTransport } from "./tauriTransport";
+import { redact, redactValue } from "../utils/redact";
 
 export interface ChatMessage {
   role: "system" | "user" | "assistant";
@@ -60,12 +61,17 @@ export const apiLogger = {
     message: string,
     details?: unknown,
   ) {
+    // Strip Bearer tokens, x-api-key values, proxy userinfo, and raw provider
+    // key prefixes from anything that enters the ring buffer or console.
+    const safeMessage = redact(message);
+    const safeDetails = details === undefined ? undefined : redactValue(details);
+
     const entry: LogEntry = {
       timestamp: Date.now(),
       level,
       provider,
-      message,
-      details,
+      message: safeMessage,
+      details: safeDetails,
     };
     this.logs.push(entry);
 
@@ -81,8 +87,8 @@ export const apiLogger = {
     }[level];
     const timestamp = new Date().toISOString().slice(11, 23);
     consoleMethod(
-      `[${timestamp}] [${level.toUpperCase()}] [${provider}] ${message}`,
-      details ?? "",
+      `[${timestamp}] [${level.toUpperCase()}] [${provider}] ${safeMessage}`,
+      safeDetails ?? "",
     );
   },
 

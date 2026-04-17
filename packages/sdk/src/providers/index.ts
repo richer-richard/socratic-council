@@ -25,6 +25,15 @@ export { QwenProvider } from "./qwen.js";
 export { MiniMaxProvider } from "./minimax.js";
 export { ZhipuProvider } from "./zhipu.js";
 export * from "./base.js";
+export {
+  detectOllama,
+  sendOllamaChat,
+  type OllamaChatMessage,
+  type OllamaChatOptions,
+  type OllamaChatResult,
+  type OllamaStreamCallback,
+  type OllamaStreamChunk,
+} from "./ollama.js";
 
 /**
  * Create a provider instance from a provider type and API key

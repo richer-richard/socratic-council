@@ -17,6 +17,7 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
+    "@noble/ciphers": "^2.2.0",
     "@socratic-council/core": "workspace:*",
     "@socratic-council/sdk": "workspace:*",
     "@socratic-council/shared": "workspace:*",
@@ -25,7 +26,9 @@
     "@tauri-apps/plugin-fs": "^2.4.5",
     "@tauri-apps/plugin-opener": "^2.5.3",
     "@tauri-apps/plugin-store": "^2.4.2",
+    "@tauri-apps/plugin-updater": "^2.10.1",
     "docx": "^9.5.1",
+    "fflate": "^0.8.2",
     "highlight.js": "^11.11.1",
     "jspdf": "^4.1.0",
     "katex": "^0.16.28",

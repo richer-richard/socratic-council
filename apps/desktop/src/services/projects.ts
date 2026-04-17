@@ -1,6 +1,7 @@
 import type { AttachmentKind } from "./attachments";
 import type { SessionSummary } from "./sessions";
 import { listSessionSummaries } from "./sessions";
+import { decryptString, encryptString, isEnvelopedCiphertext } from "./vault";
 
 const PROJECT_INDEX_KEY = "socratic-council-project-index-v1";
 const PROJECT_KEY_PREFIX = "socratic-council-project:";
@@ -54,6 +55,22 @@ function getStorage(): Storage | null {
     return null;
   }
   return window.localStorage;
+}
+
+function readSecureItem(storage: Storage, key: string): string | null {
+  const raw = storage.getItem(key);
+  if (raw == null) return null;
+  if (!isEnvelopedCiphertext(raw)) return raw;
+  try {
+    return decryptString(raw);
+  } catch (error) {
+    console.error(`[projects] Failed to decrypt storage key "${key}":`, error);
+    return null;
+  }
+}
+
+function writeSecureItem(storage: Storage, key: string, value: string): void {
+  storage.setItem(key, encryptString(value));
 }
 
 function createProjectStorageKey(id: string): string {
@@ -150,7 +167,7 @@ function readProjectIndex(): ProjectSummary[] {
   if (!storage) return [];
 
   try {
-    const raw = storage.getItem(PROJECT_INDEX_KEY);
+    const raw = readSecureItem(storage, PROJECT_INDEX_KEY);
     if (!raw) return [];
 
     const parsed = JSON.parse(raw);
@@ -179,7 +196,7 @@ function readProjectIndex(): ProjectSummary[] {
 function writeProjectIndex(index: ProjectSummary[]): void {
   const storage = getStorage();
   if (!storage) return;
-  storage.setItem(PROJECT_INDEX_KEY, JSON.stringify(index));
+  writeSecureItem(storage, PROJECT_INDEX_KEY, JSON.stringify(index));
 }
 
 function replaceProjectIndexEntry(
@@ -211,7 +228,11 @@ export function saveProject(project: Project): Project {
   }
 
   try {
-    storage.setItem(createProjectStorageKey(normalized.id), JSON.stringify(normalized));
+    writeSecureItem(
+      storage,
+      createProjectStorageKey(normalized.id),
+      JSON.stringify(normalized),
+    );
     writeProjectIndex(
       replaceProjectIndexEntry(readProjectIndex(), buildProjectSummary(normalized)),
     );
@@ -231,7 +252,7 @@ export function loadProject(id: string): Project | null {
   if (!storage) return null;
 
   try {
-    const raw = storage.getItem(createProjectStorageKey(id));
+    const raw = readSecureItem(storage, createProjectStorageKey(id));
     if (!raw) return null;
 
     return normalizeProject(JSON.parse(raw));
