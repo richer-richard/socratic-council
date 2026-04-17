@@ -1,0 +1,52 @@
+name: Security audit
+
+on:
+  # Gate every PR so regressions in dependencies get caught at review time.
+  pull_request:
+  # Run at ~08:00 UTC daily — catches CVEs disclosed against already-merged deps.
+  schedule:
+    - cron: "0 8 * * *"
+  # Allow a manual run from the Actions tab.
+  workflow_dispatch:
+
+concurrency:
+  group: audit-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pnpm-audit:
+    name: pnpm audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v3
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: "pnpm"
+      - run: pnpm install --frozen-lockfile
+      # --audit-level=high fails on HIGH or CRITICAL advisories. Low/moderate
+      # are surfaced as warnings but don't block — we re-evaluate those on the
+      # nightly cron rather than holding every PR.
+      - name: Run pnpm audit (high)
+        run: pnpm audit --audit-level=high --prod
+
+  cargo-audit:
+    name: cargo audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/desktop/src-tauri -> target
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked
+      - name: Run cargo audit
+        working-directory: apps/desktop/src-tauri
+        # Fail on any security advisory. Ignored advisories can be added to
+        # `audit.toml` in the src-tauri directory when justified (with a
+        # documented reason and follow-up plan).
+        run: cargo audit --deny warnings

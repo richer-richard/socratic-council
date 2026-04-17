@@ -1,6 +1,56 @@
 import pdfWorkerUrl from "pdfjs-dist/legacy/build/pdf.worker.min.mjs?url";
 
 import type { Provider } from "../stores/config";
+import { decryptBytes, encryptBytes, isVaultReady } from "./vault";
+
+const ENCRYPTED_BLOB_MIME = "application/x-socratic-council-encrypted";
+
+/**
+ * Encrypt an attachment Blob's bytes for at-rest storage. Returns the Blob
+ * plus the original MIME type so it can be restored on load. No-op when the
+ * vault isn't ready (pre-init window or non-Tauri env): returns the original
+ * Blob unchanged so attachments aren't lost.
+ */
+async function encryptAttachmentBlob(
+  blob: Blob,
+): Promise<{ blob: Blob; encrypted: boolean; originalMimeType: string }> {
+  const originalMimeType = blob.type || "application/octet-stream";
+  if (!isVaultReady()) {
+    return { blob, encrypted: false, originalMimeType };
+  }
+  try {
+    const plaintext = new Uint8Array(await blob.arrayBuffer());
+    const cipherBytes = encryptBytes(plaintext);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const cipherBlob = new Blob([cipherBytes as any], { type: ENCRYPTED_BLOB_MIME });
+    return { blob: cipherBlob, encrypted: true, originalMimeType };
+  } catch (error) {
+    console.error("[attachments] Failed to encrypt blob; storing plaintext:", error);
+    return { blob, encrypted: false, originalMimeType };
+  }
+}
+
+/**
+ * Reverse `encryptAttachmentBlob`. If the record isn't marked encrypted, the
+ * blob is returned unchanged (legacy plaintext or vault-unavailable case).
+ */
+async function decryptAttachmentBlob(record: {
+  blob: Blob;
+  encrypted?: boolean;
+  originalMimeType?: string;
+}): Promise<Blob> {
+  if (!record.encrypted) return record.blob;
+  try {
+    const cipherBytes = new Uint8Array(await record.blob.arrayBuffer());
+    const plaintext = decryptBytes(cipherBytes);
+    const mime = record.originalMimeType || "application/octet-stream";
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return new Blob([plaintext as any], { type: mime });
+  } catch (error) {
+    console.error("[attachments] Failed to decrypt blob; returning empty:", error);
+    return new Blob([], { type: record.originalMimeType || "application/octet-stream" });
+  }
+}
 
 const ATTACHMENT_DB_NAME = "socratic-council-attachments-v1";
 const ATTACHMENT_DB_VERSION = 2;
@@ -140,6 +190,10 @@ interface StoredAttachmentBlob {
   projectId?: string;
   blob: Blob;
   searchEntries?: AttachmentSearchEntry[];
+  /** True if `blob` holds vault-encrypted bytes; needs decrypt before use. */
+  encrypted?: boolean;
+  /** Original MIME type — restored into the decrypted Blob at read time. */
+  originalMimeType?: string;
 }
 
 export interface LoadedAttachmentBlob {
@@ -1024,14 +1078,26 @@ export async function persistSessionAttachments(
 ): Promise<SessionAttachment[]> {
   if (attachments.length === 0) return [];
 
-  await withStore("readwrite", async (store) => {
-    for (const attachment of attachments) {
-      store.put({
+  const prepared: Array<{ attachment: ComposerAttachment; record: StoredAttachmentBlob }> = [];
+  for (const attachment of attachments) {
+    const encResult = await encryptAttachmentBlob(attachment.blob);
+    prepared.push({
+      attachment,
+      record: {
         id: attachment.id,
         sessionId,
-        blob: attachment.blob,
+        blob: encResult.blob,
         searchEntries: attachment.searchEntries,
-      } satisfies StoredAttachmentBlob);
+        ...(encResult.encrypted
+          ? { encrypted: true, originalMimeType: encResult.originalMimeType }
+          : {}),
+      },
+    });
+  }
+
+  await withStore("readwrite", async (store) => {
+    for (const { record } of prepared) {
+      store.put(record);
     }
   });
 
@@ -1050,12 +1116,13 @@ export async function loadSessionAttachmentBlobs(
   const loaded = new Map<string, LoadedAttachmentBlob>();
 
   for (const { attachment, record } of records) {
+    const decryptedBlob = await decryptAttachmentBlob(record);
     const sanitizedEntries = sanitizeSearchEntries(record.searchEntries);
     const searchEntries =
       sanitizedEntries.length > 0
         ? sanitizedEntries
         : await extractSearchEntries(
-            record.blob,
+            decryptedBlob,
             attachment.name,
             attachment.kind,
             attachment.mimeType,
@@ -1063,7 +1130,7 @@ export async function loadSessionAttachmentBlobs(
 
     loaded.set(attachment.id, {
       attachment,
-      blob: record.blob,
+      blob: decryptedBlob,
       searchEntries,
     });
   }
@@ -1083,8 +1150,9 @@ export async function loadSessionAttachmentDocuments(
   for (const { attachment, record } of records) {
     let searchEntries = sanitizeSearchEntries(record.searchEntries);
     if (searchEntries.length === 0) {
+      const decrypted = await decryptAttachmentBlob(record);
       searchEntries = await extractSearchEntries(
-        record.blob,
+        decrypted,
         attachment.name,
         attachment.kind,
         attachment.mimeType,
@@ -1201,19 +1269,23 @@ export async function persistProjectAttachments(
   if (attachments.length === 0) return [];
 
   const saved: SessionAttachment[] = [];
+  const prepared: StoredAttachmentBlob[] = [];
+  for (const attachment of attachments) {
+    const enc = await encryptAttachmentBlob(attachment.blob);
+    prepared.push({
+      id: attachment.id,
+      sessionId: "",
+      projectId,
+      blob: enc.blob,
+      searchEntries: attachment.searchEntries,
+      ...(enc.encrypted ? { encrypted: true, originalMimeType: enc.originalMimeType } : {}),
+    });
+    const { blob: _b, previewUrl: _p, searchEntries: _s, ...meta } = attachment;
+    saved.push(meta);
+  }
+
   await withStore("readwrite", (store) => {
-    for (const attachment of attachments) {
-      const record: StoredAttachmentBlob = {
-        id: attachment.id,
-        sessionId: "",
-        projectId,
-        blob: attachment.blob,
-        searchEntries: attachment.searchEntries,
-      };
-      store.put(record);
-      const { blob: _b, previewUrl: _p, searchEntries: _s, ...meta } = attachment;
-      saved.push(meta);
-    }
+    for (const record of prepared) store.put(record);
   });
 
   return saved;
@@ -1222,15 +1294,19 @@ export async function persistProjectAttachments(
 export async function loadProjectAttachmentBlobs(
   projectId: string,
 ): Promise<LoadedAttachmentBlob[]> {
-  return withStore("readonly", async (store) => {
+  const records: StoredAttachmentBlob[] = await withStore("readonly", async (store) => {
     const index = store.index(ATTACHMENT_BY_PROJECT_INDEX);
-    const records: StoredAttachmentBlob[] = await requestToPromise(index.getAll(projectId));
-    return records.map((record) => ({
+    return (await requestToPromise(index.getAll(projectId))) as StoredAttachmentBlob[];
+  });
+  const loaded: LoadedAttachmentBlob[] = [];
+  for (const record of records) {
+    const blob = await decryptAttachmentBlob(record);
+    loaded.push({
       attachment: {
         id: record.id,
         name: "",
-        mimeType: "application/octet-stream",
-        size: record.blob.size,
+        mimeType: record.originalMimeType ?? "application/octet-stream",
+        size: blob.size,
         kind: "binary" as const,
         source: "file-picker" as const,
         addedAt: 0,
@@ -1238,10 +1314,11 @@ export async function loadProjectAttachmentBlobs(
         height: null,
         fallbackText: "",
       },
-      blob: record.blob,
+      blob,
       searchEntries: record.searchEntries ?? [],
-    }));
-  });
+    });
+  }
+  return loaded;
 }
 
 export async function deleteProjectAttachmentBlobs(projectId: string): Promise<void> {

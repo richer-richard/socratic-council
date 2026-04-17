@@ -16,27 +16,21 @@
       "identifier": "fs:allow-write-text-file",
       "allow": [
         { "path": "$DOWNLOAD/**" },
-        { "path": "$DESKTOP/**" },
-        { "path": "$DOCUMENT/**" },
-        { "path": "$HOME/**" }
+        { "path": "$DOCUMENT/SocraticCouncil/**" }
       ]
     },
     {
       "identifier": "fs:allow-write-file",
       "allow": [
         { "path": "$DOWNLOAD/**" },
-        { "path": "$DESKTOP/**" },
-        { "path": "$DOCUMENT/**" },
-        { "path": "$HOME/**" }
+        { "path": "$DOCUMENT/SocraticCouncil/**" }
       ]
     },
     {
       "identifier": "fs:allow-exists",
       "allow": [
         { "path": "$DOWNLOAD/**" },
-        { "path": "$DESKTOP/**" },
-        { "path": "$DOCUMENT/**" },
-        { "path": "$HOME/**" }
+        { "path": "$DOCUMENT/SocraticCouncil/**" }
       ]
     }
   ]

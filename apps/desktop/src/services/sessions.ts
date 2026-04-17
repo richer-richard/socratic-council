@@ -8,6 +8,7 @@ import {
   type ComposerAttachment,
   type SessionAttachment,
 } from "./attachments";
+import { decryptString, encryptString, isEnvelopedCiphertext } from "./vault";
 
 const SESSION_INDEX_KEY = "socratic-council-session-index-v1";
 const SESSION_KEY_PREFIX = "socratic-council-session:";
@@ -211,6 +212,13 @@ export interface DiscussionSession {
   duoLogue: DuoLogueSnapshot | null;
   runtime: SessionRuntimeSnapshot;
   canvasStates?: Record<string, unknown>;
+  /**
+   * Session branching (wave 2.7). When present, this session was forked from
+   * another session at a specific message. The UI surfaces a "↪ branched
+   * from …" crumb so users can navigate back to the parent.
+   */
+  parentSessionId?: string;
+  parentMessageId?: string;
 }
 
 export interface SessionSummary {
@@ -227,6 +235,8 @@ export interface SessionSummary {
   messageCount: number;
   attachmentCount: number;
   preview: string;
+  parentSessionId?: string;
+  parentMessageId?: string;
 }
 
 const AGENT_IDS: CouncilAgentId[] = [
@@ -286,6 +296,34 @@ function getStorage(): Storage | null {
     return null;
   }
   return window.localStorage;
+}
+
+/**
+ * Read an item from localStorage, transparently decrypting if the value is
+ * stored as a vault envelope. Legacy plaintext values are returned as-is so
+ * sessions saved before encryption still load. Malformed ciphertexts return
+ * null (treated as absent — caller can decide how to handle).
+ */
+function readSecureItem(storage: Storage, key: string): string | null {
+  const raw = storage.getItem(key);
+  if (raw == null) return null;
+  if (!isEnvelopedCiphertext(raw)) return raw;
+  try {
+    return decryptString(raw);
+  } catch (error) {
+    console.error(`[sessions] Failed to decrypt storage key "${key}":`, error);
+    return null;
+  }
+}
+
+/**
+ * Write an item to localStorage through the vault. If the vault isn't ready
+ * (pre-initVault or non-Tauri environment), encryptString returns the value
+ * unchanged — data is still persisted, just not encrypted yet. The next save
+ * after `initVault()` completes will encrypt it.
+ */
+function writeSecureItem(storage: Storage, key: string, value: string): void {
+  storage.setItem(key, encryptString(value));
 }
 
 function createSessionStorageKey(id: string): string {
@@ -876,7 +914,57 @@ function buildSummary(session: DiscussionSession): SessionSummary {
     messageCount: session.messages.length,
     attachmentCount: session.attachments.length,
     preview: buildPreview(session.messages, session.topic, session.attachments),
+    ...(session.parentSessionId ? { parentSessionId: session.parentSessionId } : {}),
+    ...(session.parentMessageId ? { parentMessageId: session.parentMessageId } : {}),
   };
+}
+
+/**
+ * Branch a session at a specific message (wave 2.7). The new session contains
+ * every message up to AND including the fork point; runtime state is reset so
+ * the branch can diverge freely. Returns the newly-created branch session —
+ * persisted to localStorage just like any other session.
+ *
+ * Callers decide what the branch should change (topic framing, roster, etc.)
+ * by editing the returned session BEFORE running it. Attachments are NOT
+ * cloned — the branch reuses the parent's attachment ids (IndexedDB blobs
+ * are deduplicated implicitly).
+ */
+export function branchDiscussionSession(
+  parent: DiscussionSession,
+  forkMessageId: string,
+): DiscussionSession {
+  const idx = parent.messages.findIndex((m) => m.id === forkMessageId);
+  const cutoff = idx >= 0 ? idx + 1 : parent.messages.length;
+  const messages = parent.messages.slice(0, cutoff);
+
+  const now = Date.now();
+  const branchId = `${parent.id}_br_${now.toString(36)}`;
+  const branch: DiscussionSession = {
+    ...parent,
+    id: branchId,
+    title: `${parent.title} (branch)`,
+    createdAt: now,
+    updatedAt: now,
+    lastOpenedAt: now,
+    archivedAt: null,
+    status: "paused",
+    messages,
+    errors: [],
+    runtime: {
+      ...parent.runtime,
+      phase: "discussion",
+      cyclePending: [...AGENT_IDS],
+      previousSpeaker: null,
+      recentSpeakers: [],
+      endVote: null,
+      pendingHandoff: null,
+    },
+    parentSessionId: parent.id,
+    parentMessageId: forkMessageId,
+  };
+
+  return saveDiscussionSession(branch);
 }
 
 function readIndex(): SessionSummary[] {
@@ -884,7 +972,7 @@ function readIndex(): SessionSummary[] {
   if (!storage) return [];
 
   try {
-    const raw = storage.getItem(SESSION_INDEX_KEY);
+    const raw = readSecureItem(storage, SESSION_INDEX_KEY);
     if (!raw) return [];
 
     const parsed = JSON.parse(raw);
@@ -917,7 +1005,7 @@ function readIndex(): SessionSummary[] {
 function writeIndex(index: SessionSummary[]): void {
   const storage = getStorage();
   if (!storage) return;
-  storage.setItem(SESSION_INDEX_KEY, JSON.stringify(index));
+  writeSecureItem(storage, SESSION_INDEX_KEY, JSON.stringify(index));
 }
 
 function normalizeDiscussionSession(input: unknown): DiscussionSession | null {
@@ -994,6 +1082,12 @@ function normalizeDiscussionSession(input: unknown): DiscussionSession | null {
     ...(normalizeCanvasStates(record.canvasStates)
       ? { canvasStates: normalizeCanvasStates(record.canvasStates) }
       : {}),
+    ...(typeof record.parentSessionId === "string" && record.parentSessionId.length > 0
+      ? { parentSessionId: record.parentSessionId }
+      : {}),
+    ...(typeof record.parentMessageId === "string" && record.parentMessageId.length > 0
+      ? { parentMessageId: record.parentMessageId }
+      : {}),
   };
 }
 
@@ -1038,7 +1132,11 @@ export function saveDiscussionSession(session: DiscussionSession): DiscussionSes
   };
 
   try {
-    storage.setItem(createSessionStorageKey(safeSession.id), JSON.stringify(safeSession));
+    writeSecureItem(
+      storage,
+      createSessionStorageKey(safeSession.id),
+      JSON.stringify(safeSession),
+    );
     writeIndex(replaceIndexEntry(readIndex(), buildSummary(safeSession)));
   } catch (error) {
     console.error("Failed to save session:", error);
@@ -1056,7 +1154,7 @@ export function loadDiscussionSession(id: string): DiscussionSession | null {
   if (!storage) return null;
 
   try {
-    const raw = storage.getItem(createSessionStorageKey(id));
+    const raw = readSecureItem(storage, createSessionStorageKey(id));
     if (!raw) return null;
 
     const parsed = normalizeDiscussionSession(JSON.parse(raw));

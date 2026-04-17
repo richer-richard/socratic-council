@@ -7,7 +7,14 @@
  * - Proxy is optional - if not configured, direct connection is used
  */
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
+import {
+  apiKeyAccount,
+  isKeychainAvailable,
+  secretsDelete,
+  secretsGet,
+  secretsPut,
+} from "../services/secrets";
 
 export type Provider =
   | "openai"
@@ -45,6 +52,17 @@ export interface ProviderCredential {
   lastTested?: number;
 }
 
+export type BudgetAction = "warn" | "pause" | "stop";
+
+export interface BudgetPolicy {
+  /** Hard cap per session, in USD. 0 = unlimited. */
+  perSession: number;
+  /** Rolling daily cap across all sessions, in USD. 0 = unlimited. */
+  perDay: number;
+  /** What happens when a cap is reached: toast only, pause the session, or stop. */
+  action: BudgetAction;
+}
+
 export interface DiscussionPreferences {
   defaultLength: "quick" | "standard" | "extended" | "marathon" | "custom";
   customTurns: number;
@@ -53,6 +71,13 @@ export interface DiscussionPreferences {
   soundEffects: boolean;
   moderatorEnabled: boolean;
   observersEnabled: boolean;
+  /**
+   * Cost circuit breaker. When the per-session or per-day cap is hit, the
+   * council runner fires the configured `action` — warn (toast only),
+   * pause (stop the turn loop, keep state), or stop (end the session).
+   * Setting a cap to 0 disables it.
+   */
+  budget: BudgetPolicy;
 }
 
 export interface McpConfig {
@@ -103,6 +128,11 @@ const DEFAULT_CONFIG: AppConfig = {
     soundEffects: false,
     moderatorEnabled: true,
     observersEnabled: true,
+    budget: {
+      perSession: 0,
+      perDay: 0,
+      action: "warn",
+    },
   },
   models: { ...LOCKED_MODELS },
   mcp: {
@@ -138,6 +168,23 @@ function normalizeProxyConfig(input?: Partial<ProxyConfig>): ProxyConfig {
   };
 }
 
+/**
+ * Runtime credential shape: `apiKey` is the plaintext key held only while the app runs.
+ * Persisted credential shape (in localStorage): `hasKey: true` marker instead of plaintext.
+ * The actual key lives in the OS keychain under account `apiKey:<provider>`.
+ *
+ * This sanitizer accepts BOTH shapes so upgrade-in-place works:
+ *   - Old format: `{ apiKey: "sk-..." }` — preserved, flagged for migration
+ *   - New format: `{ hasKey: true }`    — apiKey will be hydrated from keychain
+ */
+interface PersistedProviderCredential {
+  hasKey?: boolean;
+  apiKey?: string; // legacy — gets migrated to keychain on first load
+  baseUrl?: string;
+  verified?: boolean;
+  lastTested?: number;
+}
+
 function sanitizeCredentials(input: unknown): Partial<Record<Provider, ProviderCredential>> {
   if (!input || typeof input !== "object") {
     return {};
@@ -149,15 +196,20 @@ function sanitizeCredentials(input: unknown): Partial<Record<Provider, ProviderC
     if (!isProvider(rawProvider)) continue;
     if (!rawCredential || typeof rawCredential !== "object") continue;
 
-    const apiKey = (rawCredential as Partial<ProviderCredential>).apiKey;
-    if (typeof apiKey !== "string" || apiKey.trim() === "") continue;
+    const cred = rawCredential as PersistedProviderCredential;
+    const hasLegacyKey = typeof cred.apiKey === "string" && cred.apiKey.trim() !== "";
+    const hasKeychainMarker = cred.hasKey === true;
 
-    const baseUrl = (rawCredential as Partial<ProviderCredential>).baseUrl;
-    const verified = (rawCredential as Partial<ProviderCredential>).verified;
-    const lastTested = (rawCredential as Partial<ProviderCredential>).lastTested;
+    if (!hasLegacyKey && !hasKeychainMarker) continue;
+
+    const baseUrl = cred.baseUrl;
+    const verified = cred.verified;
+    const lastTested = cred.lastTested;
 
     result[rawProvider] = {
-      apiKey: apiKey.trim(),
+      // Legacy plaintext used as the starting apiKey; hydration replaces it.
+      // Otherwise empty string — hydration from keychain will populate it.
+      apiKey: hasLegacyKey ? cred.apiKey!.trim() : "",
       ...(typeof baseUrl === "string" && baseUrl.trim() !== "" ? { baseUrl: baseUrl.trim() } : {}),
       ...(typeof verified === "boolean" ? { verified } : {}),
       ...(typeof lastTested === "number" && Number.isFinite(lastTested) ? { lastTested } : {}),
@@ -165,6 +217,28 @@ function sanitizeCredentials(input: unknown): Partial<Record<Provider, ProviderC
   }
 
   return result;
+}
+
+/**
+ * Strip the runtime `apiKey` field from credentials before writing to localStorage.
+ * Replaces it with a `hasKey: true` marker if the key is non-empty so loaders know
+ * to hydrate from the keychain.
+ */
+function stripSecretsForPersistence(
+  credentials: Partial<Record<Provider, ProviderCredential>>,
+): Partial<Record<Provider, PersistedProviderCredential>> {
+  const persisted: Partial<Record<Provider, PersistedProviderCredential>> = {};
+  for (const [provider, cred] of Object.entries(credentials)) {
+    if (!isProvider(provider) || !cred) continue;
+    const hasKey = typeof cred.apiKey === "string" && cred.apiKey.trim() !== "";
+    persisted[provider] = {
+      ...(hasKey ? { hasKey: true } : {}),
+      ...(cred.baseUrl ? { baseUrl: cred.baseUrl } : {}),
+      ...(typeof cred.verified === "boolean" ? { verified: cred.verified } : {}),
+      ...(typeof cred.lastTested === "number" ? { lastTested: cred.lastTested } : {}),
+    };
+  }
+  return persisted;
 }
 
 function sanitizeModels(input: unknown): Partial<Record<Provider, string>> {
@@ -230,18 +304,163 @@ export function loadConfig(): AppConfig {
 
 export function saveConfig(config: AppConfig): void {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(config));
+    // Strip plaintext API keys before persisting — they live in the OS keychain.
+    const persistable: AppConfig & { credentials: Partial<Record<Provider, PersistedProviderCredential>> } = {
+      ...config,
+      credentials: stripSecretsForPersistence(config.credentials),
+    } as unknown as AppConfig & {
+      credentials: Partial<Record<Provider, PersistedProviderCredential>>;
+    };
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(persistable));
   } catch (error) {
     console.error("Failed to save config:", error);
   }
 }
 
+/**
+ * Diff credential maps and write changes to the keychain.
+ * - New or changed key → secretsPut
+ * - Cleared key        → secretsDelete
+ * Unchanged keys are skipped so we don't hit the keychain on every save.
+ */
+async function syncCredentialsToKeychain(
+  prev: Partial<Record<Provider, ProviderCredential>>,
+  next: Partial<Record<Provider, ProviderCredential>>,
+): Promise<void> {
+  if (!isKeychainAvailable()) return;
+  for (const provider of VALID_PROVIDERS) {
+    const prevKey = prev[provider]?.apiKey ?? "";
+    const nextKey = next[provider]?.apiKey ?? "";
+    if (prevKey === nextKey) continue;
+
+    try {
+      if (nextKey && nextKey.trim() !== "") {
+        await secretsPut(apiKeyAccount(provider), nextKey);
+      } else {
+        await secretsDelete(apiKeyAccount(provider));
+      }
+    } catch (error) {
+      console.error(`[config] Failed to sync ${provider} key to keychain:`, error);
+    }
+  }
+}
+
+/**
+ * One-time migration from the old localStorage-plaintext format to keychain-backed
+ * storage. Keys that are already in the keychain stay there; any legacy plaintext
+ * keys still in localStorage get copied to the keychain and the localStorage copy
+ * is stripped. Uses a marker key so the migration only runs once per install.
+ */
+const MIGRATION_KEY = "socratic-council-keychain-migration";
+const MIGRATION_VERSION = "v1";
+
+async function migrateCredentialsToKeychain(config: AppConfig): Promise<AppConfig> {
+  if (!isKeychainAvailable()) return config;
+  try {
+    if (localStorage.getItem(MIGRATION_KEY) === MIGRATION_VERSION) return config;
+  } catch {
+    return config;
+  }
+
+  const next: Partial<Record<Provider, ProviderCredential>> = { ...config.credentials };
+  for (const provider of VALID_PROVIDERS) {
+    const cred = next[provider];
+    if (!cred) continue;
+    const plaintext = cred.apiKey?.trim();
+    if (!plaintext) continue;
+
+    try {
+      await secretsPut(apiKeyAccount(provider), plaintext);
+    } catch (error) {
+      console.error(`[config] Migration failed for ${provider}:`, error);
+      // Leave the plaintext in place — don't lose the key.
+    }
+  }
+
+  try {
+    localStorage.setItem(MIGRATION_KEY, MIGRATION_VERSION);
+  } catch {
+    /* ignore quota errors */
+  }
+
+  return { ...config, credentials: next };
+}
+
 export function useConfig() {
   const [config, setConfigState] = useState<AppConfig>(() => loadConfig());
+  const [keychainHydrated, setKeychainHydrated] = useState(false);
+  const prevCredentialsRef = useRef<Partial<Record<Provider, ProviderCredential>>>(
+    config.credentials,
+  );
 
+  // One-time boot: migrate any legacy plaintext keys → keychain, then hydrate
+  // in-memory credentials from the keychain. Merges carefully into the LATEST
+  // state so keys the user types during the hydration window aren't clobbered.
   useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        // Migration reads localStorage, doesn't touch React state.
+        await migrateCredentialsToKeychain(config);
+
+        if (!isKeychainAvailable()) return;
+
+        // Read every provider's key from the keychain (absent ones return null).
+        const stored: Partial<Record<Provider, string>> = {};
+        for (const provider of VALID_PROVIDERS) {
+          try {
+            const value = await secretsGet(apiKeyAccount(provider));
+            if (value && value.trim() !== "") stored[provider] = value;
+          } catch (error) {
+            console.error(`[config] Keychain read failed for ${provider}:`, error);
+          }
+        }
+
+        if (cancelled) return;
+
+        // Merge into the latest state — preserve any key the user has entered
+        // during the hydration window (apiKey already non-empty).
+        setConfigState((current) => {
+          const next: Partial<Record<Provider, ProviderCredential>> = { ...current.credentials };
+          for (const provider of VALID_PROVIDERS) {
+            const keychainKey = stored[provider];
+            const existing = next[provider];
+            const hasMemoryKey =
+              !!existing && typeof existing.apiKey === "string" && existing.apiKey.trim() !== "";
+
+            if (hasMemoryKey) continue; // user-entered or legacy-loaded — keep
+
+            if (keychainKey) {
+              next[provider] = { ...(existing ?? {}), apiKey: keychainKey } as ProviderCredential;
+            } else if (existing) {
+              // Marker existed but keychain is empty — drop the stale entry.
+              delete next[provider];
+            }
+          }
+          prevCredentialsRef.current = next;
+          return { ...current, credentials: next };
+        });
+      } catch (error) {
+        console.error("[config] Keychain init failed:", error);
+      } finally {
+        if (!cancelled) setKeychainHydrated(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Save after hydration: strips plaintext from localStorage and diffs the
+  // keychain. Runs on every config change once the keychain is ready.
+  useEffect(() => {
+    if (!keychainHydrated) return;
     saveConfig(config);
-  }, [config]);
+    const prev = prevCredentialsRef.current;
+    prevCredentialsRef.current = config.credentials;
+    void syncCredentialsToKeychain(prev, config.credentials);
+  }, [config, keychainHydrated]);
 
   const setConfig = useCallback((updater: AppConfig | ((prev: AppConfig) => AppConfig)) => {
     setConfigState(updater);
@@ -341,6 +560,12 @@ export function useConfig() {
     hasAnyApiKey,
     getMaxTurns,
     getProxy,
+    /**
+     * True once the OS keychain has been checked for secrets on this mount.
+     * `false` during the small window between component mount and keychain read;
+     * consumers checking `credential?.apiKey` may see empty during this window.
+     */
+    keychainHydrated,
   };
 }
 
