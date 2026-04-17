@@ -29,6 +29,10 @@ import {
 } from "./services/projects";
 import { initVault } from "./services/vault";
 import { ErrorBoundary } from "./components/ErrorBoundary";
+import { CommandPalette, useCommandPaletteShortcut } from "./components/CommandPalette";
+import { TelemetryOptInCard } from "./components/TelemetryOptInCard";
+import { loadTelemetryConfig } from "./services/telemetry";
+import { registerCommand, resetCommandsForTests } from "./utils/commandPalette";
 
 export type Page = "home" | "settings" | "chat" | "project";
 
@@ -50,6 +54,13 @@ export default function App() {
   const [sessions, setSessions] = useState<ReturnType<typeof listSessionSummaries>>([]);
   const [projects, setProjects] = useState<ReturnType<typeof listProjectSummaries>>([]);
 
+  // Global ⌘K command palette — binding lives here so it works on any page.
+  const palette = useCommandPaletteShortcut();
+
+  // Telemetry first-launch card — shown once, then never again (acceptedAt
+  // stays set either way). Suppressed on initial mount to avoid startup noise.
+  const [showTelemetryCard, setShowTelemetryCard] = useState(false);
+
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -61,9 +72,50 @@ export default function App() {
       if (cancelled) return;
       setSessions(stabilizeStoredSessions());
       setProjects(listProjectSummaries());
+
+      // First-launch telemetry prompt: only show if the user has never
+      // recorded a choice AND has at least one session worth of activity.
+      const telemetry = loadTelemetryConfig();
+      if (telemetry.acceptedAt == null && listSessionSummaries().length > 0) {
+        setShowTelemetryCard(true);
+      }
     })();
     return () => {
       cancelled = true;
+    };
+  }, []);
+
+  // Register a baseline command set — other pages can register additional
+  // commands as they mount, and `resetCommandsForTests` guards test-only
+  // environments from stale registrations.
+  useEffect(() => {
+    resetCommandsForTests();
+    const unregisters = [
+      registerCommand({
+        id: "nav.home",
+        label: "Go to home",
+        category: "Navigate",
+        keywords: ["home", "workstation", "back"],
+        run: () => setState((p) => ({ ...p, currentPage: "home" })),
+      }),
+      registerCommand({
+        id: "nav.settings",
+        label: "Open settings",
+        category: "Navigate",
+        keywords: ["config", "api keys", "preferences"],
+        shortcut: "⌘,",
+        run: () => setState((p) => ({ ...p, currentPage: "settings" })),
+      }),
+      registerCommand({
+        id: "privacy.reopen",
+        label: "Reopen privacy / telemetry choice",
+        category: "Privacy",
+        keywords: ["telemetry", "analytics", "tracking"],
+        run: () => setShowTelemetryCard(true),
+      }),
+    ];
+    return () => {
+      for (const dispose of unregisters) dispose();
     };
   }, []);
   const [activeSession, setActiveSession] = useState<DiscussionSession | null>(null);
@@ -338,6 +390,13 @@ export default function App() {
           />
         )}
       </div>
+
+      {/* Global additive surfaces — overlay the page, don't modify its layout. */}
+      <CommandPalette open={palette.open} onClose={palette.close} />
+      <TelemetryOptInCard
+        open={showTelemetryCard}
+        onClose={() => setShowTelemetryCard(false)}
+      />
     </ErrorBoundary>
   );
 }
