@@ -4,6 +4,7 @@ import { CouncilMark } from "../components/CouncilMark";
 import { ConfigModal } from "../components/ConfigModal";
 import { Starfield } from "../components/Starfield";
 import { ProviderIcon } from "../components/icons/ProviderIcons";
+import { BundleImportButton } from "../components/BundleActions";
 import {
   buildAttachmentListLabel,
   createComposerAttachments,
@@ -33,6 +34,8 @@ interface HomeProps {
   onDeleteProject: (projectId: string) => void;
   onArchiveProject: (projectId: string) => void;
   onRestoreProject: (projectId: string) => void;
+  /** Optional — fires after a .scbundle import so the app can refresh + navigate. */
+  onBundleImported?: (sessionId: string) => void;
 }
 
 const INBOX_KEY = "__inbox__";
@@ -416,6 +419,7 @@ export function Home({
   onDeleteProject,
   onArchiveProject,
   onRestoreProject,
+  onBundleImported,
 }: HomeProps) {
   const [topic, setTopic] = useState("");
   const [showSettings, setShowSettings] = useState(false);
@@ -764,6 +768,12 @@ export function Home({
             <ArchiveIcon size={14} />
             <span>{sessions.length} saved locally</span>
           </div>
+          {/* Portable bundle import — additive below the sidebar actions. */}
+          <BundleImportButton
+            onImported={(session) => {
+              onBundleImported?.(session.id);
+            }}
+          />
         </div>
 
         <div className="workstation-sidebar-section">

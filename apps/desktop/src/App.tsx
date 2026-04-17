@@ -31,8 +31,10 @@ import { initVault } from "./services/vault";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { CommandPalette, useCommandPaletteShortcut } from "./components/CommandPalette";
 import { TelemetryOptInCard } from "./components/TelemetryOptInCard";
+import { DiagnosticsPanel } from "./components/DiagnosticsPanel";
 import { loadTelemetryConfig } from "./services/telemetry";
 import { registerCommand, resetCommandsForTests } from "./utils/commandPalette";
+import { useConfig } from "./stores/config";
 
 export type Page = "home" | "settings" | "chat" | "project";
 
@@ -60,6 +62,8 @@ export default function App() {
   // Telemetry first-launch card — shown once, then never again (acceptedAt
   // stays set either way). Suppressed on initial mount to avoid startup noise.
   const [showTelemetryCard, setShowTelemetryCard] = useState(false);
+  const [showDiagnostics, setShowDiagnostics] = useState(false);
+  const { config } = useConfig();
 
   useEffect(() => {
     let cancelled = false;
@@ -112,6 +116,13 @@ export default function App() {
         category: "Privacy",
         keywords: ["telemetry", "analytics", "tracking"],
         run: () => setShowTelemetryCard(true),
+      }),
+      registerCommand({
+        id: "diagnostics.open",
+        label: "Open diagnostics",
+        category: "Support",
+        keywords: ["logs", "health", "debug", "copy diagnostics"],
+        run: () => setShowDiagnostics(true),
       }),
     ];
     return () => {
@@ -363,6 +374,10 @@ export default function App() {
             onDeleteProject={handleDeleteProject}
             onArchiveProject={handleArchiveProject}
             onRestoreProject={handleRestoreProject}
+            onBundleImported={(sessionId) => {
+              refreshAll();
+              handleOpenSession(sessionId);
+            }}
           />
         )}
         {state.currentPage === "settings" && <Settings onNavigate={navigate} />}
@@ -396,6 +411,11 @@ export default function App() {
       <TelemetryOptInCard
         open={showTelemetryCard}
         onClose={() => setShowTelemetryCard(false)}
+      />
+      <DiagnosticsPanel
+        open={showDiagnostics}
+        onClose={() => setShowDiagnostics(false)}
+        config={config}
       />
     </ErrorBoundary>
   );

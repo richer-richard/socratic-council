@@ -12,6 +12,7 @@ import { getModelsByProvider } from "@socratic-council/shared";
 import { ProviderIcon } from "./icons/ProviderIcons";
 import { testProviderConnection } from "../services/api";
 import { clearAllAttachmentBlobs, getProviderAttachmentSupport } from "../services/attachments";
+import { LocalProviderTab } from "./LocalProviderTab";
 
 interface ConfigModalProps {
   isOpen: boolean;
@@ -31,7 +32,14 @@ interface ConfigModalProps {
   onUpdateModel: (provider: Provider, model: string) => void;
 }
 
-type TabType = "api-keys" | "models" | "proxy" | "preferences" | "about";
+type TabType =
+  | "api-keys"
+  | "models"
+  | "proxy"
+  | "preferences"
+  | "local"
+  | "diagnostics"
+  | "about";
 
 const PROVIDERS = Object.keys(PROVIDER_INFO) as Provider[];
 
@@ -101,6 +109,10 @@ export function ConfigModal({
   onUpdateModel: _onUpdateModel,
 }: ConfigModalProps) {
   const [activeTab, setActiveTab] = useState<TabType>("api-keys");
+  // Local (Ollama) endpoint — held here so the Local tab has a controlled
+  // input. Persisting globally is follow-up work when the provider wiring
+  // lands in config store.
+  const [localEndpoint, setLocalEndpoint] = useState("http://localhost:11434");
   const [editingProvider, setEditingProvider] = useState<Provider | null>(null);
   const [apiKeyInput, setApiKeyInput] = useState("");
   const [baseUrlInput, setBaseUrlInput] = useState("");
@@ -214,6 +226,7 @@ export function ConfigModal({
               { id: "models" as TabType, label: "Models", icon: "🤖" },
               { id: "proxy" as TabType, label: "Proxy", icon: "🌐" },
               { id: "preferences" as TabType, label: "Preferences", icon: "⚡" },
+              { id: "local" as TabType, label: "Local", icon: "🏠" },
               { id: "about" as TabType, label: "About", icon: "ℹ️" },
             ].map((tab) => (
               <button
@@ -794,6 +807,15 @@ export function ConfigModal({
                   </button>
                 </div>
               </div>
+            </div>
+          )}
+
+          {activeTab === "local" && (
+            <div className="scale-in">
+              <LocalProviderTab
+                endpoint={localEndpoint}
+                onChangeEndpoint={setLocalEndpoint}
+              />
             </div>
           )}
 
