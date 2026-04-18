@@ -6,7 +6,7 @@
 mod allowlist;
 mod http;
 mod redact;
-mod secrets;
+mod vault_file;
 
 #[cfg(debug_assertions)]
 use tauri::Manager;
@@ -38,9 +38,8 @@ pub fn run() {
             http::http_request,
             http::http_request_stream,
             http::http_cancel,
-            secrets::secrets_put,
-            secrets::secrets_get,
-            secrets::secrets_delete,
+            vault_file::vault_get_dek,
+            vault_file::vault_reset,
         ])
         .setup(|_app| {
             #[cfg(debug_assertions)]

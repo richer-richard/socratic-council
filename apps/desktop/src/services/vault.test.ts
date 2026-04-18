@@ -1,21 +1,29 @@
-import { describe, it, expect, afterEach, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import * as vault from "./vault";
 
-// Unit-test the vault without Tauri — we inject the DEK by reaching into the
-// non-Tauri fallback path (isTauri=false → initVault skips, leaves DEK null).
-// These tests patch the internal helpers to simulate a loaded DEK.
+// These tests exercise the pure encrypt/decrypt path by injecting a DEK
+// directly via the test hook (the real Rust-backed `initVault` is only
+// reachable inside a Tauri runtime).
+
+function fixedDek(seed: number): Uint8Array {
+  const out = new Uint8Array(32);
+  for (let i = 0; i < 32; i++) out[i] = (i * seed + 1) & 0xff;
+  return out;
+}
 
 describe("vault ciphertext envelope", () => {
+  beforeEach(() => {
+    vault.__resetVaultForTests();
+  });
   afterEach(() => {
     vault.__resetVaultForTests();
-    vi.restoreAllMocks();
   });
 
   it("leaves non-enveloped values unchanged when vault isn't ready", () => {
-    // No init — DEK null. encryptString should pass through.
     expect(vault.encryptString("hello")).toBe("hello");
     expect(vault.isEnvelopedCiphertext("hello")).toBe(false);
+    expect(vault.isVaultReady()).toBe(false);
   });
 
   it("detects the envelope prefix", () => {
@@ -24,21 +32,8 @@ describe("vault ciphertext envelope", () => {
     expect(vault.isEnvelopedCiphertext("")).toBe(false);
   });
 
-  it("round-trips string plaintext once a DEK is loaded", async () => {
-    // Simulate a keychain-backed DEK by stubbing the secrets module.
-    const secrets = await import("./secrets");
-    const dekBytes = new Uint8Array(32);
-    for (let i = 0; i < 32; i++) dekBytes[i] = (i * 7 + 1) & 0xff;
-    const b64 =
-      typeof btoa === "function"
-        ? btoa(String.fromCharCode(...dekBytes))
-        : Buffer.from(dekBytes).toString("base64");
-
-    vi.spyOn(secrets, "isKeychainAvailable").mockReturnValue(true);
-    vi.spyOn(secrets, "secretsGet").mockResolvedValue(b64);
-    vi.spyOn(secrets, "secretsPut").mockResolvedValue(undefined);
-
-    await vault.initVault();
+  it("round-trips string plaintext once a DEK is injected", () => {
+    vault.__setDekForTests(fixedDek(7));
     expect(vault.isVaultReady()).toBe(true);
 
     const plaintext = "transcript with sensitive content: sk-fake-key-value";
@@ -50,20 +45,8 @@ describe("vault ciphertext envelope", () => {
     expect(decrypted).toBe(plaintext);
   });
 
-  it("round-trips byte buffers", async () => {
-    const secrets = await import("./secrets");
-    const dekBytes = new Uint8Array(32);
-    for (let i = 0; i < 32; i++) dekBytes[i] = (i * 11 + 3) & 0xff;
-    const b64 =
-      typeof btoa === "function"
-        ? btoa(String.fromCharCode(...dekBytes))
-        : Buffer.from(dekBytes).toString("base64");
-
-    vi.spyOn(secrets, "isKeychainAvailable").mockReturnValue(true);
-    vi.spyOn(secrets, "secretsGet").mockResolvedValue(b64);
-    vi.spyOn(secrets, "secretsPut").mockResolvedValue(undefined);
-
-    await vault.initVault();
+  it("round-trips byte buffers", () => {
+    vault.__setDekForTests(fixedDek(11));
 
     const bytes = new Uint8Array([0, 1, 2, 3, 255, 128, 64, 32, 16, 8, 4, 2, 1]);
     const cipher = vault.encryptBytes(bytes);
@@ -73,20 +56,8 @@ describe("vault ciphertext envelope", () => {
     expect(Array.from(plain)).toEqual(Array.from(bytes));
   });
 
-  it("rejects malformed ciphertext during decrypt", async () => {
-    const secrets = await import("./secrets");
-    const dekBytes = new Uint8Array(32);
-    for (let i = 0; i < 32; i++) dekBytes[i] = 1;
-    const b64 =
-      typeof btoa === "function"
-        ? btoa(String.fromCharCode(...dekBytes))
-        : Buffer.from(dekBytes).toString("base64");
-
-    vi.spyOn(secrets, "isKeychainAvailable").mockReturnValue(true);
-    vi.spyOn(secrets, "secretsGet").mockResolvedValue(b64);
-    vi.spyOn(secrets, "secretsPut").mockResolvedValue(undefined);
-
-    await vault.initVault();
+  it("rejects malformed ciphertext during decrypt", () => {
+    vault.__setDekForTests(fixedDek(1));
 
     // Too short to contain nonce + tag
     expect(() => vault.decryptBytes(new Uint8Array([1, 2, 3]))).toThrow();

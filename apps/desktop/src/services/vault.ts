@@ -1,40 +1,49 @@
 /**
- * Local encryption vault — protects session data and attachments at rest.
+ * Local encryption vault — protects session data, attachments, and secrets
+ * (API keys, etc.) at rest. Zero password prompts.
  *
  * Design:
- *   1. A 32-byte data-encryption key (DEK) is generated once per install and
- *      stored in the OS keychain under account `vault:dek`.
+ *   1. A 32-byte data-encryption key (DEK) lives in a file under the app's
+ *      data directory (`~/Library/Application Support/.../vault.key` on
+ *      macOS) with 0600 permissions. Managed by the Rust `vault_get_dek`
+ *      command — see `src-tauri/src/vault_file.rs`.
  *   2. Encryption uses XChaCha20-Poly1305 via @noble/ciphers (audited, sync,
  *      zero-dep). Each ciphertext carries a fresh 24-byte nonce.
- *   3. `initVault()` must run (async) before any encrypt/decrypt call. It
- *      loads the DEK from the keychain — or creates one on first run.
- *   4. Ciphertexts are wrapped with an ASCII header so loaders can tell them
- *      apart from legacy plaintext and from future versioned formats:
+ *   3. `initVault()` runs once at app boot, fetches the DEK via IPC, and
+ *      holds it in module-level state. Encryption/decryption thereafter
+ *      is synchronous — no further IPC, no OS prompts.
+ *   4. Ciphertexts are wrapped with an ASCII header so loaders can
+ *      distinguish them from legacy plaintext:
  *        `ENC1:<base64(nonce || ciphertext || tag)>`
  *
- * This keeps the existing synchronous storage API intact (sessions.ts stays
- * synchronous) while moving transcripts, attachments, and other local state
- * off the disk in plaintext.
+ * Previous design (deleted): used the `keyring` crate to fetch the DEK
+ * from the OS keychain. On ad-hoc signed / unsigned macOS builds this
+ * triggered a login-password prompt on every read because keychain ACLs
+ * bind to a stable code signing identity the build didn't have. The
+ * file-based approach sidesteps the identity requirement entirely.
  */
 
 import { xchacha20poly1305 } from "@noble/ciphers/chacha.js";
-import { isKeychainAvailable, secretsGet, secretsPut } from "./secrets";
 
-const VAULT_ACCOUNT = "vault:dek";
 const CIPHERTEXT_PREFIX = "ENC1:";
 const NONCE_BYTES = 24;
+const DEK_LEN = 32;
 
 let dek: Uint8Array | null = null;
 let initPromise: Promise<void> | null = null;
 
-/** Base-64 encode a byte array (no dependency on Node Buffer). */
+function isTauri(): boolean {
+  return (
+    typeof window !== "undefined" && ("__TAURI__" in window || "__TAURI_INTERNALS__" in window)
+  );
+}
+
 function b64encode(bytes: Uint8Array): string {
   let binary = "";
   for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
   return typeof btoa === "function" ? btoa(binary) : Buffer.from(binary, "binary").toString("base64");
 }
 
-/** Base-64 decode. */
 function b64decode(text: string): Uint8Array {
   const binary = typeof atob === "function" ? atob(text) : Buffer.from(text, "base64").toString("binary");
   const bytes = new Uint8Array(binary.length);
@@ -47,8 +56,6 @@ function randomBytes(n: number): Uint8Array {
   if (typeof crypto !== "undefined" && typeof crypto.getRandomValues === "function") {
     crypto.getRandomValues(out);
   } else {
-    // This path should only ever run in Node-test contexts where webcrypto is absent.
-    // Throw to avoid silently using a weak RNG.
     throw new Error("vault: no secure random source available");
   }
   return out;
@@ -58,34 +65,27 @@ const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
 
 /**
- * Load the DEK from the keychain, or generate + store one on first run.
- * Idempotent and safe to call repeatedly. Callers should await this once at
- * app boot before touching persisted sessions/attachments.
+ * Fetch (or create on first run) the DEK from the Rust-managed vault file
+ * and cache it in module state. Idempotent and safe to call repeatedly.
+ * Callers must await this once at app boot before touching persisted data.
  */
 export async function initVault(): Promise<void> {
   if (dek) return;
-  if (!isKeychainAvailable()) {
-    // Non-Tauri environment (tests, dev-web): skip vault; all read/write
-    // paths fall back to plaintext.
+  if (!isTauri()) {
+    // Non-Tauri environment (tests, dev-web): no DEK available.
+    // Callers that try to encrypt will pass plaintext through unchanged.
     return;
   }
   if (initPromise) return initPromise;
 
   initPromise = (async () => {
     try {
-      const stored = await secretsGet(VAULT_ACCOUNT);
-      if (stored && stored.trim() !== "") {
-        const bytes = b64decode(stored.trim());
-        if (bytes.length === 32) {
-          dek = bytes;
-          return;
-        }
+      const { invoke } = await import("@tauri-apps/api/core");
+      const bytes = await invoke<number[]>("vault_get_dek");
+      if (!Array.isArray(bytes) || bytes.length !== DEK_LEN) {
+        throw new Error(`vault_get_dek returned unexpected payload (length ${bytes?.length})`);
       }
-
-      // First run — generate a DEK and persist.
-      const fresh = randomBytes(32);
-      await secretsPut(VAULT_ACCOUNT, b64encode(fresh));
-      dek = fresh;
+      dek = Uint8Array.from(bytes);
     } catch (error) {
       console.error("[vault] initVault failed:", error);
       // Leave dek null; callers fall back to plaintext.
@@ -175,6 +175,15 @@ export function decryptBytes(ciphertext: Uint8Array): Uint8Array {
   const body = ciphertext.subarray(NONCE_BYTES);
   const cipher = xchacha20poly1305(dek, nonce);
   return cipher.decrypt(body);
+}
+
+/**
+ * Inject a DEK manually — for tests and dev-web environments. Production
+ * code should call `initVault()` which goes through the Rust file store.
+ */
+export function __setDekForTests(bytes: Uint8Array | null): void {
+  dek = bytes;
+  initPromise = null;
 }
 
 /** Exposed for tests only. */
