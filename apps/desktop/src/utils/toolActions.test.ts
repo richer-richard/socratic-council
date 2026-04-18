@@ -127,3 +127,55 @@ describe("stripProviderToolSyntax", () => {
     expect(stripProviderToolSyntax(input)).toBe(input);
   });
 });
+
+describe("extractActions — malformed directives", () => {
+  it("drops a truncated @tool(...) with unclosed JSON up to the next newline", () => {
+    // Seen in the wild from MiniMax: the model abandons a tool call mid-emission
+    // (unclosed string literal) and continues with normal prose on a later line.
+    const raw = [
+      '@tool(oracle.web_search, {"query": "nostalgia rum',
+      "",
+      "Cathy and Zara have converged on the framework.",
+    ].join("\n");
+    const parsed = extractActions(raw, []);
+    expect(parsed.cleaned).not.toContain("@tool");
+    expect(parsed.cleaned).not.toContain('"query"');
+    expect(parsed.cleaned).toContain("Cathy and Zara");
+    expect(parsed.toolCalls).toEqual([]);
+  });
+
+  it("strips inline @end() at the end of a sentence and sets endRequested", () => {
+    const parsed = extractActions(
+      "...operationalizable cutoff. @end()",
+      [],
+    );
+    expect(parsed.cleaned).not.toContain("@end");
+    expect(parsed.cleaned).toBe("...operationalizable cutoff.");
+    expect(parsed.endRequested).toBe(true);
+  });
+
+  it("strips inline @done() anywhere in the text", () => {
+    const parsed = extractActions("First part. @done() second part.", []);
+    expect(parsed.cleaned).not.toContain("@done");
+    expect(parsed.doneRequested).toBe(true);
+    // Content on either side is preserved with a single space between.
+    expect(parsed.cleaned).toBe("First part. second part.");
+  });
+
+  it("still strips @end() on its own line (regression)", () => {
+    const parsed = extractActions("Hello.\n@end()\n", []);
+    expect(parsed.cleaned).toBe("Hello.");
+    expect(parsed.endRequested).toBe(true);
+  });
+
+  it("still parses a valid @tool(...) directive (regression)", () => {
+    const parsed = extractActions(
+      '@tool(oracle.web_search, {"query":"foo"})',
+      [],
+    );
+    expect(parsed.toolCalls).toEqual([
+      { name: "oracle.web_search", args: { query: "foo" } },
+    ]);
+    expect(parsed.cleaned).toBe("");
+  });
+});

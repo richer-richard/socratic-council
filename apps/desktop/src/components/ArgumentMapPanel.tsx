@@ -370,9 +370,9 @@ function EmptyState() {
       <div
         style={{
           fontFamily:
-            "'Cormorant Garamond', 'Iowan Old Style', Georgia, serif",
-          fontStyle: "italic",
-          fontSize: "1.15rem",
+            "'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace",
+          fontSize: "0.95rem",
+          letterSpacing: "0.02em",
           color: "rgba(232, 232, 239, 0.62)",
           marginBottom: "8px",
         }}
