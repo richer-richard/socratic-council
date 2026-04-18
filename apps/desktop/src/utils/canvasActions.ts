@@ -5,6 +5,8 @@
  * `@canvas({"op":"append|replace|clear","section":"...","text":"..."})` syntax.
  */
 
+import { extractActions } from "./toolActions";
+
 const CANVAS_PREFIX = "@canvas(";
 
 const MAX_SECTIONS = 5;
@@ -305,4 +307,51 @@ export function applyCanvasDirective(
 
 export function createEmptyCanvasState(agentId: string): CanvasState {
   return { agentId, sections: [], lastUpdatedTurn: 0, lastUpdatedAt: Date.now() };
+}
+
+// ---------------------------------------------------------------------------
+// Implicit-done detection
+// ---------------------------------------------------------------------------
+
+/**
+ * Returns true when the agent's raw response contains visible reply content
+ * after stripping every orchestration directive (@canvas, @tool, @done, @end,
+ * @react). Used by the tool-iteration loop as an "implicit @done" signal:
+ * an agent that emitted @canvas(...) plus a real reply but forgot @done()
+ * should NOT be re-prompted with a continuation round (that resets the
+ * streamed UI and makes the reply momentarily disappear).
+ */
+export function hasVisibleReplyContent(
+  rawContent: string,
+  allowedReactions: readonly string[],
+): boolean {
+  const { cleaned: canvasStripped } = extractCanvasDirectives(rawContent);
+  return extractActions(canvasStripped, allowedReactions).cleaned.length > 0;
+}
+
+export interface FinalMessageMetadata {
+  visibleText: string;
+  quoteTargets: string[];
+  reactions: Array<{ targetId: string; emoji: string }>;
+}
+
+/**
+ * Derives the final message's visible text, quote targets, and reactions
+ * from a single source (usually `accumulatedContent`). Callers MUST use
+ * this helper (or the same source) for all three fields — mixing sources
+ * causes the rendered @quote(...) tokens to drift from the message's
+ * `quotedMessageIds` metadata when a correction round replaces `result`
+ * without updating `accumulatedContent`.
+ */
+export function deriveFinalMessageMetadata(
+  rawContent: string,
+  allowedReactions: readonly string[],
+): FinalMessageMetadata {
+  const { cleaned: canvasStripped } = extractCanvasDirectives(rawContent);
+  const actions = extractActions(canvasStripped, allowedReactions);
+  return {
+    visibleText: actions.cleaned,
+    quoteTargets: actions.quoteTargets,
+    reactions: actions.reactions,
+  };
 }
