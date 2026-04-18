@@ -10,11 +10,12 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import {
   apiKeyAccount,
-  isKeychainAvailable,
+  isSecretStoreReady,
   secretsDelete,
   secretsGet,
   secretsPut,
 } from "../services/secrets";
+import { initVault } from "../services/vault";
 
 export type Provider =
   | "openai"
@@ -318,16 +319,14 @@ export function saveConfig(config: AppConfig): void {
 }
 
 /**
- * Diff credential maps and write changes to the keychain.
- * - New or changed key → secretsPut
- * - Cleared key        → secretsDelete
- * Unchanged keys are skipped so we don't hit the keychain on every save.
+ * Diff credential maps and write changes to the encrypted secret store
+ * (localStorage, behind the vault). Unchanged keys are skipped — no
+ * redundant writes on every config update.
  */
-async function syncCredentialsToKeychain(
+function syncCredentialsToStorage(
   prev: Partial<Record<Provider, ProviderCredential>>,
   next: Partial<Record<Provider, ProviderCredential>>,
-): Promise<void> {
-  if (!isKeychainAvailable()) return;
+): void {
   for (const provider of VALID_PROVIDERS) {
     const prevKey = prev[provider]?.apiKey ?? "";
     const nextKey = next[provider]?.apiKey ?? "";
@@ -335,105 +334,88 @@ async function syncCredentialsToKeychain(
 
     try {
       if (nextKey && nextKey.trim() !== "") {
-        await secretsPut(apiKeyAccount(provider), nextKey);
+        secretsPut(apiKeyAccount(provider), nextKey);
       } else {
-        await secretsDelete(apiKeyAccount(provider));
+        secretsDelete(apiKeyAccount(provider));
       }
     } catch (error) {
-      console.error(`[config] Failed to sync ${provider} key to keychain:`, error);
+      console.error(`[config] Failed to sync ${provider} key to secret store:`, error);
     }
   }
 }
 
 /**
- * One-time migration from the old localStorage-plaintext format to keychain-backed
- * storage. Keys that are already in the keychain stay there; any legacy plaintext
- * keys still in localStorage get copied to the keychain and the localStorage copy
- * is stripped. Uses a marker key so the migration only runs once per install.
+ * One-time migration: any legacy plaintext `apiKey` fields found in the
+ * persisted config blob get moved into the encrypted secret store, and the
+ * plaintext copy is dropped on the next save. Safe to run on every boot —
+ * becomes a no-op once there's no plaintext left.
  */
-const MIGRATION_KEY = "socratic-council-keychain-migration";
-const MIGRATION_VERSION = "v1";
-
-async function migrateCredentialsToKeychain(config: AppConfig): Promise<AppConfig> {
-  if (!isKeychainAvailable()) return config;
-  try {
-    if (localStorage.getItem(MIGRATION_KEY) === MIGRATION_VERSION) return config;
-  } catch {
-    return config;
-  }
-
-  const next: Partial<Record<Provider, ProviderCredential>> = { ...config.credentials };
+function migrateLegacyPlaintextKeys(config: AppConfig): void {
   for (const provider of VALID_PROVIDERS) {
-    const cred = next[provider];
+    const cred = config.credentials[provider];
     if (!cred) continue;
     const plaintext = cred.apiKey?.trim();
     if (!plaintext) continue;
-
     try {
-      await secretsPut(apiKeyAccount(provider), plaintext);
+      secretsPut(apiKeyAccount(provider), plaintext);
     } catch (error) {
       console.error(`[config] Migration failed for ${provider}:`, error);
-      // Leave the plaintext in place — don't lose the key.
     }
   }
-
-  try {
-    localStorage.setItem(MIGRATION_KEY, MIGRATION_VERSION);
-  } catch {
-    /* ignore quota errors */
-  }
-
-  return { ...config, credentials: next };
 }
 
 export function useConfig() {
   const [config, setConfigState] = useState<AppConfig>(() => loadConfig());
-  const [keychainHydrated, setKeychainHydrated] = useState(false);
+  const [vaultReady, setVaultReady] = useState(false);
   const prevCredentialsRef = useRef<Partial<Record<Provider, ProviderCredential>>>(
     config.credentials,
   );
 
-  // One-time boot: migrate any legacy plaintext keys → keychain, then hydrate
-  // in-memory credentials from the keychain. Merges carefully into the LATEST
-  // state so keys the user types during the hydration window aren't clobbered.
+  // One-time boot: fetch the vault DEK (file-based, no OS prompts), migrate
+  // any legacy plaintext keys into the encrypted secret store, then hydrate
+  // in-memory credentials from it. The hydration merge preserves keys the
+  // user typed during the brief pre-ready window.
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        // Migration reads localStorage, doesn't touch React state.
-        await migrateCredentialsToKeychain(config);
+        await initVault();
+        if (cancelled) return;
 
-        if (!isKeychainAvailable()) return;
+        if (!isSecretStoreReady()) {
+          // Vault couldn't load — bail out; keys stay as whatever loadConfig returned.
+          setVaultReady(true);
+          return;
+        }
 
-        // Read every provider's key from the keychain (absent ones return null).
+        // Read every provider's key from the encrypted store (synchronous now).
         const stored: Partial<Record<Provider, string>> = {};
         for (const provider of VALID_PROVIDERS) {
           try {
-            const value = await secretsGet(apiKeyAccount(provider));
+            const value = secretsGet(apiKeyAccount(provider));
             if (value && value.trim() !== "") stored[provider] = value;
           } catch (error) {
-            console.error(`[config] Keychain read failed for ${provider}:`, error);
+            console.error(`[config] Secret read failed for ${provider}:`, error);
           }
         }
 
-        if (cancelled) return;
-
-        // Merge into the latest state — preserve any key the user has entered
-        // during the hydration window (apiKey already non-empty).
         setConfigState((current) => {
+          // Migrate any legacy plaintext keys into the secret store.
+          migrateLegacyPlaintextKeys(current);
+
           const next: Partial<Record<Provider, ProviderCredential>> = { ...current.credentials };
           for (const provider of VALID_PROVIDERS) {
-            const keychainKey = stored[provider];
+            const storedKey = stored[provider];
             const existing = next[provider];
             const hasMemoryKey =
               !!existing && typeof existing.apiKey === "string" && existing.apiKey.trim() !== "";
 
             if (hasMemoryKey) continue; // user-entered or legacy-loaded — keep
 
-            if (keychainKey) {
-              next[provider] = { ...(existing ?? {}), apiKey: keychainKey } as ProviderCredential;
+            if (storedKey) {
+              next[provider] = { ...(existing ?? {}), apiKey: storedKey } as ProviderCredential;
             } else if (existing) {
-              // Marker existed but keychain is empty — drop the stale entry.
+              // Marker existed but no stored secret — drop the stale entry.
               delete next[provider];
             }
           }
@@ -441,9 +423,9 @@ export function useConfig() {
           return { ...current, credentials: next };
         });
       } catch (error) {
-        console.error("[config] Keychain init failed:", error);
+        console.error("[config] Vault init failed:", error);
       } finally {
-        if (!cancelled) setKeychainHydrated(true);
+        if (!cancelled) setVaultReady(true);
       }
     })();
     return () => {
@@ -453,14 +435,14 @@ export function useConfig() {
   }, []);
 
   // Save after hydration: strips plaintext from localStorage and diffs the
-  // keychain. Runs on every config change once the keychain is ready.
+  // encrypted secret store. Runs on every config change once ready.
   useEffect(() => {
-    if (!keychainHydrated) return;
+    if (!vaultReady) return;
     saveConfig(config);
     const prev = prevCredentialsRef.current;
     prevCredentialsRef.current = config.credentials;
-    void syncCredentialsToKeychain(prev, config.credentials);
-  }, [config, keychainHydrated]);
+    syncCredentialsToStorage(prev, config.credentials);
+  }, [config, vaultReady]);
 
   const setConfig = useCallback((updater: AppConfig | ((prev: AppConfig) => AppConfig)) => {
     setConfigState(updater);
@@ -561,11 +543,14 @@ export function useConfig() {
     getMaxTurns,
     getProxy,
     /**
-     * True once the OS keychain has been checked for secrets on this mount.
-     * `false` during the small window between component mount and keychain read;
-     * consumers checking `credential?.apiKey` may see empty during this window.
+     * True once the vault DEK has been loaded and any encrypted secrets
+     * have been pulled into memory. `false` during the small window between
+     * component mount and vault init; consumers checking `credential?.apiKey`
+     * may briefly see empty during this window.
      */
-    keychainHydrated,
+    vaultReady,
+    /** @deprecated kept for compatibility; same value as `vaultReady`. */
+    keychainHydrated: vaultReady,
   };
 }
 
