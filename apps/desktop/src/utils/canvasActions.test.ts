@@ -5,7 +5,9 @@ import {
   type CanvasState,
   applyCanvasDirective,
   createStreamingCanvasDetector,
+  deriveFinalMessageMetadata,
   extractCanvasDirectives,
+  hasVisibleReplyContent,
 } from "./canvasActions";
 
 describe("extractCanvasDirectives", () => {
@@ -157,5 +159,104 @@ describe("applyCanvasDirective", () => {
     };
     const result = applyCanvasDirective(state, { op: "append", section: "NewSection", text: "overflow" }, "douglas", 2);
     expect(result.sections).toHaveLength(5);
+  });
+});
+
+describe("hasVisibleReplyContent", () => {
+  const reactions = ["agree", "disagree"] as const;
+
+  it("returns true when agent emits canvas + quote + prose reply", () => {
+    const raw = [
+      '@canvas({"op":"append","section":"Plan","text":"outline"})',
+      "@quote(msg_abc)",
+      "I agree because X.",
+    ].join("\n");
+    expect(hasVisibleReplyContent(raw, reactions)).toBe(true);
+  });
+
+  it("returns false when agent emits only a canvas directive", () => {
+    const raw = '@canvas({"op":"append","section":"Plan","text":"just planning"})';
+    expect(hasVisibleReplyContent(raw, reactions)).toBe(false);
+  });
+
+  it("returns false when agent emits canvas + @done with no reply", () => {
+    const raw = [
+      '@canvas({"op":"append","section":"Plan","text":"plan"})',
+      "@done()",
+    ].join("\n");
+    expect(hasVisibleReplyContent(raw, reactions)).toBe(false);
+  });
+
+  it("returns true when reply is a @quote token alone", () => {
+    const raw = [
+      '@canvas({"op":"append","section":"X","text":"x"})',
+      "@quote(msg_abc)",
+    ].join("\n");
+    expect(hasVisibleReplyContent(raw, reactions)).toBe(true);
+  });
+
+  it("returns false for an empty string", () => {
+    expect(hasVisibleReplyContent("", reactions)).toBe(false);
+  });
+
+  it("returns false when only a @tool directive is present", () => {
+    const raw = '@tool(oracle.search, {"query":"x"})';
+    expect(hasVisibleReplyContent(raw, reactions)).toBe(false);
+  });
+
+  it("returns false when canvas is followed only by whitespace", () => {
+    const raw = '@canvas({"op":"append","section":"P","text":"p"})\n   \n\n';
+    expect(hasVisibleReplyContent(raw, reactions)).toBe(false);
+  });
+});
+
+describe("deriveFinalMessageMetadata", () => {
+  const reactions = ["agree", "disagree"] as const;
+
+  it("returns quotes and visible text from the SAME source", () => {
+    const raw = [
+      '@canvas({"op":"append","section":"P","text":"p"})',
+      "@quote(msg_a) @quote(msg_b)",
+      "Reply text here.",
+    ].join("\n");
+    const result = deriveFinalMessageMetadata(raw, reactions);
+    expect(result.quoteTargets).toEqual(["msg_a", "msg_b"]);
+    expect(result.visibleText).toContain("Reply text here");
+    expect(result.visibleText).toContain("@quote(msg_a)");
+    expect(result.reactions).toEqual([]);
+  });
+
+  it("returns reactions alongside visible text", () => {
+    const raw = [
+      "Thanks for the clarification.",
+      "@react(msg_a, agree)",
+    ].join("\n");
+    const result = deriveFinalMessageMetadata(raw, reactions);
+    expect(result.reactions).toEqual([{ targetId: "msg_a", emoji: "agree" }]);
+    expect(result.visibleText).toContain("Thanks");
+  });
+
+  it("returns empty metadata when only a canvas directive is present", () => {
+    const raw = '@canvas({"op":"append","section":"P","text":"plan"})';
+    const result = deriveFinalMessageMetadata(raw, reactions);
+    expect(result.visibleText).toBe("");
+    expect(result.quoteTargets).toEqual([]);
+    expect(result.reactions).toEqual([]);
+  });
+
+  it("returns quotes from the raw content even when @done follows", () => {
+    // Regression: previously the final message pulled quoteTargets from
+    // `parsed` (built off the latest correction-round result, which may
+    // contain only @done()), losing the quote targets present in the full
+    // accumulated content.
+    const raw = [
+      '@canvas({"op":"append","section":"P","text":"p"})',
+      "@quote(msg_mod)",
+      "Responding directly.",
+      "@done()",
+    ].join("\n");
+    const result = deriveFinalMessageMetadata(raw, reactions);
+    expect(result.quoteTargets).toEqual(["msg_mod"]);
+    expect(result.visibleText).not.toContain("@done");
   });
 });

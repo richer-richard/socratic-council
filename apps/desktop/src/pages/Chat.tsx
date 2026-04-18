@@ -60,7 +60,9 @@ import { emptyGraph, type ArgGraph } from "@socratic-council/core";
 import {
   type CanvasState,
   applyCanvasDirective,
+  deriveFinalMessageMetadata,
   extractCanvasDirectives,
+  hasVisibleReplyContent,
 } from "../utils/canvasActions";
 import { AgentCanvas } from "../components/AgentCanvas";
 import { useObserverCircle } from "./useObserverCircle";
@@ -3035,7 +3037,20 @@ Write the official moderator wrap-up in 4 short sentences:
 
           // Agent is done if it emitted @done() or @end(), or has no work indicators
           const hasWorkIndicators = toolCalls.length > 0 || canvasFromRound.directives.length > 0;
-          if (parsedForTools.doneRequested || parsedForTools.endRequested || !hasWorkIndicators) break;
+          // Implicit @done(): agent emitted @canvas(...) + visible reply but forgot
+          // @done(). Re-prompting in that case resets the streamed UI content via
+          // runCompletion's setMessages({ content: "" }) and makes the reply
+          // visibly disappear. If there's already a visible reply and no pending
+          // tools, treat the response as complete.
+          const hasImplicitDone =
+            toolCalls.length === 0 && hasVisibleReplyContent(rawForParsing, REACTION_IDS);
+          if (
+            parsedForTools.doneRequested ||
+            parsedForTools.endRequested ||
+            !hasWorkIndicators ||
+            hasImplicitDone
+          )
+            break;
 
           const interim =
             accumulatedContent ||
@@ -3173,17 +3188,17 @@ Write the official moderator wrap-up in 4 short sentences:
           return null;
         }
 
-        const { cleaned: accCanvasCleaned } = extractCanvasDirectives(
+        // Derive visible content, quote targets, and reactions from the
+        // SAME source (accumulatedContent) — using `parsed` here would read
+        // from the latest correction round's rawContent, which may have
+        // lost @quote/@react tokens present in the accumulated reply.
+        const finalMetadata = deriveFinalMessageMetadata(
           accumulatedContent || result.content || streamingContent || "",
+          REACTION_IDS,
         );
-        // Defense-in-depth: if any @tool(...) directive slipped through the
-        // per-iteration cleaning (e.g. mid-prose on an interrupted iteration),
-        // strip it here before rendering to the user.
-        const finalVisibleContent = normalizeMessageText(
-          extractActions(accCanvasCleaned, REACTION_IDS).cleaned,
-        );
-        const resolvedQuotes = resolveQuoteTargets(agentId, parsed.quoteTargets);
-        const parsedReactions = parsed.reactions.map((reaction) => ({
+        const finalVisibleContent = normalizeMessageText(finalMetadata.visibleText);
+        const resolvedQuotes = resolveQuoteTargets(agentId, finalMetadata.quoteTargets);
+        const parsedReactions = finalMetadata.reactions.map((reaction) => ({
           targetId: reaction.targetId,
           emoji: reaction.emoji as ReactionId,
         }));
