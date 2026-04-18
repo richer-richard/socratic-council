@@ -56,7 +56,13 @@ import { splitIntoInlineQuoteSegments, stripQuoteTokens } from "../utils/inlineQ
 import { CostBudgetBadge } from "../components/CostBudgetBadge";
 import { ArgumentMapPanel } from "../components/ArgumentMapPanel";
 import { BundleExportButton } from "../components/BundleActions";
-import { emptyGraph, type ArgGraph } from "@socratic-council/core";
+import {
+  emptyGraph,
+  buildExtractPrompt,
+  parseExtractResponse,
+  updateArgumentMap,
+  type ArgGraph,
+} from "@socratic-council/core";
 import {
   type CanvasState,
   applyCanvasDirective,
@@ -2242,6 +2248,19 @@ ${firstRoundObjections.length > 0 ? firstRoundObjections.join("\n") : "- None. E
       model: "gemini-3.1-pro-preview" as const,
     };
   }, [config.credentials.google, config.preferences.moderatorEnabled]);
+
+  // Argument-map extractor runs on Gemini 3 Flash Preview — the task is a
+  // small structured-JSON emit, so we use the cheaper/faster sibling of the
+  // moderator's Pro model.
+  const pickExtractorRuntime = useCallback(() => {
+    const credential = config.credentials.google;
+    if (!credential?.apiKey) return null;
+    return {
+      provider: "google" as const,
+      credential,
+      model: "gemini-3-flash-preview" as const,
+    };
+  }, [config.credentials.google]);
 
   const pickFinalSummaryRuntime = useCallback(() => {
     // Prefer Google (same as moderator) so final summary + deep research report
@@ -4575,7 +4594,104 @@ Write the official moderator wrap-up in 4 short sentences:
   // Live argument map (wave 2.6 UI). Toggle state; the extractor pipeline is
   // wired separately at the orchestrator level (core/argmap.ts).
   const [argmapOpen, setArgmapOpen] = useState(false);
-  const [argGraph] = useState<ArgGraph>(() => emptyGraph());
+  const [argGraph, setArgGraph] = useState<ArgGraph>(() => emptyGraph());
+  const argGraphRef = useRef(argGraph);
+  argGraphRef.current = argGraph;
+  const argmapBusyRef = useRef(false);
+  const argmapExtractedIdsRef = useRef(new Set<string>());
+
+  // Runs argument-map extraction for a single completed council message.
+  // Uses the `ExtractorCompletionFn` contract from @socratic-council/core:
+  // call the provider once, return the final content string. Fragments are
+  // parsed and merged into the live graph via updateArgumentMap.
+  const runArgumentMapExtraction = useCallback(
+    async (messageId: string, agentId: CouncilAgentId) => {
+      const runtime = pickExtractorRuntime();
+      if (!runtime) return;
+      const currentMessages = messagesRef.current;
+      const message = currentMessages.find((m) => m.id === messageId);
+      if (!message || !message.content) return;
+      const agentName = AGENT_CONFIG[agentId]?.name ?? agentId;
+      const graph = argGraphRef.current;
+      const priorAgentNames = Array.from(
+        new Set(
+          currentMessages
+            .filter((m) => isCouncilAgent(m.agentId))
+            .map((m) => AGENT_CONFIG[m.agentId as CouncilAgentId]?.name ?? m.agentId),
+        ),
+      );
+      const priorClaims = graph.nodes
+        .filter((n) => n.kind === "claim")
+        .slice(-12)
+        .map((n) => ({ id: n.id, text: n.text }));
+      const cleanedText = stripQuoteTokens(message.content).slice(0, 4000);
+      if (!cleanedText.trim()) return;
+
+      const prompt = buildExtractPrompt({
+        topic,
+        messageId,
+        agentName,
+        agentId,
+        messageText: cleanedText,
+        priorAgentNames,
+        priorClaims,
+      });
+
+      try {
+        const result = await callProvider(
+          runtime.provider,
+          runtime.credential,
+          runtime.model,
+          [
+            { role: "system", content: prompt.system },
+            { role: "user", content: prompt.user },
+          ],
+          () => {
+            // We don't need streaming chunks for extraction; await the final
+            // result.content below.
+          },
+          getProxy(),
+          { requestTimeoutMs: 30000, idleTimeoutMs: 20000, maxTokens: 1024 },
+        );
+        if (!result.success) return;
+        const fragments = parseExtractResponse(result.content);
+        if (fragments.length === 0) {
+          // Still mark the message as processed so we don't re-extract.
+          setArgGraph((prev) => ({ ...prev, lastMessageId: messageId }));
+          return;
+        }
+        setArgGraph((prev) => updateArgumentMap(prev, fragments, { messageId, agentId }));
+      } catch (error) {
+        apiLogger.log("warn", runtime.provider, "argmap extraction failed", {
+          error: error instanceof Error ? error.message : String(error),
+          messageId,
+        });
+      }
+    },
+    [pickExtractorRuntime, getProxy, topic],
+  );
+
+  // Drives the extraction queue: whenever messages change (or we finish an
+  // extraction), find the oldest completed council message that hasn't been
+  // processed yet and run the extractor for it. One at a time.
+  useEffect(() => {
+    if (argmapBusyRef.current) return;
+    if (!pickExtractorRuntime()) return;
+    const pending = messages.find(
+      (m) =>
+        !m.isStreaming &&
+        !m.error &&
+        isCouncilAgent(m.agentId) &&
+        (m.content ?? "").trim().length > 0 &&
+        !argmapExtractedIdsRef.current.has(m.id),
+    );
+    if (!pending) return;
+    argmapExtractedIdsRef.current.add(pending.id);
+    argmapBusyRef.current = true;
+    void runArgumentMapExtraction(pending.id, pending.agentId as CouncilAgentId).finally(() => {
+      argmapBusyRef.current = false;
+    });
+  }, [messages, argGraph.lastMessageId, pickExtractorRuntime, runArgumentMapExtraction]);
 
   // Cost circuit breaker (Wave 2 / 3.4). Watches the session's running cost,
   // tracks the rolling daily total via localStorage, and triggers the user's
