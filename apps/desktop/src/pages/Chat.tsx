@@ -827,43 +827,42 @@ function renderBodyWithCitations(
 ): React.ReactNode {
   if (!body) return null;
   const citationById = new Map(citations.map((c) => [c.id, c]));
-  // Split on [cN] tokens, interleave citation buttons with markdown chunks.
-  const parts = body.split(/(\[c\d+\])/g);
+  // Rewrite [cN] tokens as markdown links (e.g. "[c1](#cite-c1)") so
+  // ReactMarkdown treats them as INLINE elements inside the surrounding
+  // paragraph. Unknown ids keep the bracket form and render as plain text.
+  const withLinks = body.replace(/\[(c\d+)\]/g, (match, id: string) =>
+    citationById.has(id) ? `[${match}](#cite-${id})` : match,
+  );
   return (
-    <>
-      {parts.map((part, idx) => {
-        const tokenMatch = part.match(/^\[(c\d+)\]$/);
-        if (tokenMatch) {
-          const cite = citationById.get(tokenMatch[1]);
-          if (!cite) {
+    <Markdown
+      content={withLinks}
+      className="research-section-body-chunk"
+      components={{
+        a: ({ href, children }) => {
+          const m =
+            typeof href === "string" ? href.match(/^#cite-(c\d+)$/) : null;
+          const cite = m ? citationById.get(m[1]!) : undefined;
+          if (cite) {
             return (
-              <span key={`cite-missing-${idx}`} className="research-cite-token is-missing">
-                {part}
-              </span>
+              <button
+                type="button"
+                className="research-cite-token"
+                title={cite.quote}
+                onClick={() => onCite(cite.messageId)}
+              >
+                {children}
+              </button>
             );
           }
+          const safeHref = typeof href === "string" ? href : undefined;
           return (
-            <button
-              key={`cite-${idx}-${cite.id}`}
-              type="button"
-              className="research-cite-token"
-              title={cite.quote}
-              onClick={() => onCite(cite.messageId)}
-            >
-              [{cite.id}]
-            </button>
+            <a href={safeHref} target="_blank" rel="noreferrer">
+              {children}
+            </a>
           );
-        }
-        if (!part) return null;
-        return (
-          <Markdown
-            key={`md-${idx}`}
-            content={part}
-            className="research-section-body-chunk"
-          />
-        );
-      })}
-    </>
+        },
+      }}
+    />
   );
 }
 
@@ -882,8 +881,19 @@ function DeepResearchReportCard({
 
   const phaseLabel = RESEARCH_PHASE_LABEL[report.phase] ?? report.phase;
 
+  // Auto-expand during generation and when the report is ready; still allow
+  // the user to collapse manually via the native <details> toggle.
+  const [isOpen, setIsOpen] = useState(report.phase !== "error");
+  useEffect(() => {
+    if (report.phase === "complete" || isInProgress) setIsOpen(true);
+  }, [report.phase, isInProgress]);
+
   return (
-    <details className={`deep-research-report-card phase-${report.phase}`}>
+    <details
+      className={`deep-research-report-card phase-${report.phase}`}
+      open={isOpen}
+      onToggle={(e) => setIsOpen((e.currentTarget as HTMLDetailsElement).open)}
+    >
       <summary className="deep-research-report-summary">
         <div className="deep-research-report-summary-lead">
           <span className="deep-research-report-kicker">Deep Research Report</span>
@@ -910,7 +920,7 @@ function DeepResearchReportCard({
               {report.confidence}
             </span>
           )}
-          <span className="deep-research-report-expand">Expand</span>
+          <span className="deep-research-report-expand" aria-hidden="true" />
         </div>
       </summary>
 
@@ -3794,8 +3804,10 @@ Write the official moderator wrap-up in 4 short sentences:
       previousSpeakerRef.current = nextAgent;
       fairnessManagerRef.current.recordSpeaker(nextAgent);
       recentSpeakersRef.current = [...recentSpeakersRef.current.slice(-5), nextAgent];
-      currentTurnRef.current += 1;
-      setCurrentTurn(currentTurnRef.current);
+      // End-vote turns are NOT counted against the discussion turn budget —
+      // voting is a procedural step, not a debate contribution. The outer
+      // loop's termination is already gated on endVoteRef.current staying
+      // truthy, so we don't need the counter to advance here.
       return;
     }
 
@@ -5055,7 +5067,25 @@ Write the official moderator wrap-up in 4 short sentences:
                           className="markdown-content"
                         />
                       ) : (
-                        splitIntoInlineQuoteSegments(message.content).map((segment, idx) => {
+                        (() => {
+                          const rawSegments = splitIntoInlineQuoteSegments(
+                            message.content,
+                          );
+                          // Drop whitespace-only text segments sandwiched
+                          // between two quote segments so consecutive quotes
+                          // stack tightly (the existing .message-quote :has(+
+                          // .message-quote) CSS rule kicks in). Whitespace
+                          // segments adjacent to prose are preserved.
+                          const segments = rawSegments.filter((seg, i) => {
+                            if (seg.type !== "text") return true;
+                            if (seg.text.trim().length > 0) return true;
+                            const prev = rawSegments[i - 1];
+                            const next = rawSegments[i + 1];
+                            return !(
+                              prev?.type === "quote" && next?.type === "quote"
+                            );
+                          });
+                          return segments.map((segment, idx) => {
                           if (segment.type === "quote") {
                             const qm = messageById.get(segment.id);
                             if (!qm) {
@@ -5152,7 +5182,8 @@ Write the official moderator wrap-up in 4 short sentences:
                               className="markdown-content"
                             />
                           );
-                        })
+                          });
+                        })()
                       )}
                       {messageAttachments.length > 0 && (
                         <div className="message-attachment-list">

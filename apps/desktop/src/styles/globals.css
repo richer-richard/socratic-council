@@ -1938,21 +1938,18 @@ body {
   text-transform: uppercase;
   color: #93c5fd;
   padding-left: 0.2rem;
+  /* Reserve enough width for the wider label ("Collapse") so the ::before
+     pseudo can't extend past the parent and overlap the preceding status
+     badge. */
+  min-width: 5.2rem;
+  text-align: right;
+}
+
+.deep-research-report-expand::before {
+  content: "Expand";
 }
 
 details[open] > .deep-research-report-summary .deep-research-report-expand::before {
-  content: "Collapse";
-}
-
-details[open] > .deep-research-report-summary .deep-research-report-expand {
-  visibility: hidden;
-  position: relative;
-}
-
-details[open] > .deep-research-report-summary .deep-research-report-expand::before {
-  visibility: visible;
-  position: absolute;
-  right: 0;
   content: "Collapse";
 }
 

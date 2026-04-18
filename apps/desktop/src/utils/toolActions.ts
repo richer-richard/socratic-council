@@ -173,8 +173,13 @@ function extractToolCalls(raw: string) {
 
     const directive = parseToolDirectiveAt(raw, start);
     if (!directive) {
-      cleaned += raw.slice(cursor, start + TOOL_PREFIX.length);
-      cursor = start + TOOL_PREFIX.length;
+      // Malformed / truncated @tool(...) — the model abandoned the directive
+      // mid-emission (e.g. unclosed string literal). Drop the prefix AND the
+      // rest of the current line so JSON-like garbage doesn't leak into the
+      // user-visible message.
+      cleaned += raw.slice(cursor, start);
+      const nextNewline = raw.indexOf("\n", start);
+      cursor = nextNewline === -1 ? raw.length : nextNewline;
       continue;
     }
 
@@ -239,6 +244,20 @@ function stripEndDirective(raw: string) {
       return prefix && suffix && match.includes(DONE_DIRECTIVE) ? "\n" : "";
     },
   );
+  // Inline directives (e.g. "...cutoff. @end()" mid-sentence). The line-level
+  // pass above preserves line structure; this pass cleans up stragglers. We
+  // consume any leading/trailing inline whitespace around the token and emit
+  // a single space so "one @end() two" doesn't glue into "onetwo". Doesn't
+  // touch double-spaces elsewhere in the input (regression for mid-prose
+  // @tool stripping which preserves the surrounding gap).
+  cleaned = cleaned.replace(/[ \t]*@end\(\)[ \t]*/g, () => {
+    endRequested = true;
+    return " ";
+  });
+  cleaned = cleaned.replace(/[ \t]*@done\(\)[ \t]*/g, () => {
+    doneRequested = true;
+    return " ";
+  });
 
   return { cleaned, endRequested, doneRequested };
 }
