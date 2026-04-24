@@ -118,8 +118,16 @@ function supportsExtendedThinking(model: AnthropicModel): boolean {
   return model.includes("opus-4") || model.includes("sonnet-4") || model.includes("haiku-4");
 }
 
-function isClaudeOpus46(model: AnthropicModel): boolean {
-  return model === "claude-opus-4-6";
+function supportsAdaptiveThinking(model: AnthropicModel): boolean {
+  // Claude Opus 4.6 introduced adaptive thinking; Opus 4.7 made it the ONLY
+  // thinking-on mode (extended thinking budgets removed → 400 error).
+  return model === "claude-opus-4-6" || model === "claude-opus-4-7";
+}
+
+function prohibitsSamplingParams(model: AnthropicModel): boolean {
+  // Starting with Opus 4.7, setting temperature/top_p/top_k to any non-default
+  // value returns a 400 error. Safest path is to omit them entirely.
+  return model === "claude-opus-4-7";
 }
 
 function buildThinkingConfig(
@@ -136,8 +144,7 @@ function buildThinkingConfig(
   | undefined {
   if (!supportsExtendedThinking(model)) return undefined;
 
-  // Claude Opus 4.6 supports adaptive thinking mode.
-  if (isClaudeOpus46(model)) {
+  if (supportsAdaptiveThinking(model)) {
     return { type: "adaptive" };
   }
 
@@ -399,8 +406,9 @@ export class AnthropicProvider implements BaseProvider {
       : buildThinkingConfig(model, request.max_tokens);
     if (thinking) {
       request.thinking = thinking;
-    } else {
+    } else if (!prohibitsSamplingParams(model)) {
       // Anthropic thinking mode is not compatible with temperature overrides.
+      // Opus 4.7 rejects sampling params at any non-default value.
       const temp = options?.temperature ?? agent.temperature ?? 1;
       request.temperature = Math.min(1, Math.max(0, temp));
     }

@@ -11,10 +11,26 @@ import type { AgentConfig, AgentId, ModelInfo, ObserverId, Provider } from "../t
 export const MODEL_REGISTRY: ModelInfo[] = [
   // OpenAI Models (latest first)
   {
+    id: "gpt-5.5",
+    provider: "openai",
+    name: "GPT-5.5",
+    description:
+      "Latest flagship GPT-5 model; first ground-up retrain since GPT-4.5 with 1M context",
+    contextWindow: 1_000_000,
+    maxOutputTokens: 128000,
+    supportsThinking: true,
+    supportsVision: true,
+    supportsStreaming: true,
+    pricing: {
+      inputCostPer1M: 5.0,
+      outputCostPer1M: 30.0,
+    },
+  },
+  {
     id: "gpt-5.4",
     provider: "openai",
     name: "GPT-5.4",
-    description: "Default GPT-5 model with frontier reasoning, instruction following, and coding",
+    description: "GPT-5.4 with frontier reasoning, instruction following, and coding",
     contextWindow: 1_050_000,
     maxOutputTokens: 128000,
     supportsThinking: true,
@@ -214,12 +230,28 @@ export const MODEL_REGISTRY: ModelInfo[] = [
   },
 
   // Anthropic Models (latest first) - Using full model IDs for reliability
-  // Pricing from https://docs.anthropic.com/en/docs/about-claude/models (Feb 2026)
+  // Pricing from https://docs.anthropic.com/en/docs/about-claude/models (Apr 2026)
+  {
+    id: "claude-opus-4-7",
+    provider: "anthropic",
+    name: "Claude Opus 4.7",
+    description:
+      "Most capable Claude model; 1M context, adaptive thinking only, hi-res vision (3.75MP)",
+    contextWindow: 1_000_000,
+    maxOutputTokens: 128000,
+    supportsThinking: true,
+    supportsVision: true,
+    supportsStreaming: true,
+    pricing: {
+      inputCostPer1M: 5.0,
+      outputCostPer1M: 25.0,
+    },
+  },
   {
     id: "claude-opus-4-6",
     provider: "anthropic",
     name: "Claude Opus 4.6",
-    description: "Latest premium model, adaptive thinking, 128K output",
+    description: "Premium model with adaptive thinking, 128K output",
     contextWindow: 200000,
     maxOutputTokens: 128000,
     supportsThinking: true,
@@ -505,6 +537,37 @@ export const MODEL_REGISTRY: ModelInfo[] = [
 
   // DeepSeek Models (latest first)
   {
+    id: "deepseek-v4-pro",
+    provider: "deepseek",
+    name: "DeepSeek V4 Pro",
+    description: "V4 flagship, 1M context, 384K output, dual thinking/non-thinking modes",
+    contextWindow: 1_000_000,
+    maxOutputTokens: 384000,
+    supportsThinking: true,
+    supportsVision: false,
+    supportsStreaming: true,
+    pricing: {
+      inputCostPer1M: 1.74,
+      outputCostPer1M: 3.48,
+      reasoningCostPer1M: 3.48,
+    },
+  },
+  {
+    id: "deepseek-v4-flash",
+    provider: "deepseek",
+    name: "DeepSeek V4 Flash",
+    description: "V4 fast variant, 1M context, dual thinking/non-thinking modes",
+    contextWindow: 1_000_000,
+    maxOutputTokens: 128000,
+    supportsThinking: true,
+    supportsVision: false,
+    supportsStreaming: true,
+    pricing: {
+      inputCostPer1M: 0.27,
+      outputCostPer1M: 1.1,
+    },
+  },
+  {
     id: "deepseek-reasoner",
     provider: "deepseek",
     name: "DeepSeek Reasoner",
@@ -538,10 +601,26 @@ export const MODEL_REGISTRY: ModelInfo[] = [
 
   // Kimi/Moonshot Models (latest first)
   {
+    id: "kimi-k2.6",
+    provider: "kimi",
+    name: "Kimi K2.6",
+    description:
+      "Latest flagship K2.6 — long-horizon agentic coding, agent-swarm scaling, multimodal",
+    contextWindow: 262144,
+    maxOutputTokens: 8192,
+    supportsThinking: true,
+    supportsVision: true,
+    supportsStreaming: true,
+    pricing: {
+      inputCostPer1M: 0.9,
+      outputCostPer1M: 3.6,
+    },
+  },
+  {
     id: "kimi-k2.5",
     provider: "kimi",
     name: "Kimi K2.5",
-    description: "Most intelligent, multimodal, SoTA",
+    description: "Previous flagship, multimodal",
     contextWindow: 256000,
     maxOutputTokens: 8192,
     supportsThinking: false,
@@ -720,10 +799,26 @@ export const MODEL_REGISTRY: ModelInfo[] = [
 
   // Qwen models (Alibaba Cloud Bailian / DashScope compatible mode)
   {
+    id: "qwen3.6-max-preview",
+    provider: "qwen",
+    name: "Qwen 3.6 Max Preview",
+    description:
+      "Flagship Qwen Max tier — top SWE-Bench / Terminal-Bench scores, 1M context, thinking",
+    contextWindow: 1_000_000,
+    maxOutputTokens: 32768,
+    supportsThinking: true,
+    supportsVision: false,
+    supportsStreaming: true,
+    pricing: {
+      inputCostPer1M: 1.6,
+      outputCostPer1M: 6.4,
+    },
+  },
+  {
     id: "qwen3.6-plus",
     provider: "qwen",
     name: "Qwen 3.6 Plus",
-    description: "Latest general-purpose high-capability model",
+    description: "General-purpose high-capability model",
     contextWindow: 131072,
     maxOutputTokens: 8192,
     supportsThinking: true,
@@ -877,7 +972,7 @@ export const DEFAULT_AGENTS: Record<AgentId, AgentConfig> = {
     id: "george",
     name: "George",
     provider: "openai",
-    model: "gpt-5.4",
+    model: "gpt-5.5",
     systemPrompt: baseSystemPrompt("George"),
     temperature: 1,
     maxTokens: 4096,
@@ -886,7 +981,7 @@ export const DEFAULT_AGENTS: Record<AgentId, AgentConfig> = {
     id: "cathy",
     name: "Cathy",
     provider: "anthropic",
-    model: "claude-opus-4-6",
+    model: "claude-opus-4-7",
     systemPrompt: baseSystemPrompt("Cathy"),
     temperature: 1,
     maxTokens: 8192,
@@ -904,7 +999,7 @@ export const DEFAULT_AGENTS: Record<AgentId, AgentConfig> = {
     id: "douglas",
     name: "Douglas",
     provider: "deepseek",
-    model: "deepseek-reasoner",
+    model: "deepseek-v4-pro",
     systemPrompt: baseSystemPrompt("Douglas"),
     temperature: 1,
     maxTokens: 4096,
@@ -913,7 +1008,7 @@ export const DEFAULT_AGENTS: Record<AgentId, AgentConfig> = {
     id: "kate",
     name: "Kate",
     provider: "kimi",
-    model: "kimi-k2.5",
+    model: "kimi-k2.6",
     systemPrompt: baseSystemPrompt("Kate"),
     temperature: 1,
     maxTokens: 4096,
@@ -922,7 +1017,7 @@ export const DEFAULT_AGENTS: Record<AgentId, AgentConfig> = {
     id: "quinn",
     name: "Quinn",
     provider: "qwen",
-    model: "qwen3.6-plus",
+    model: "qwen3.6-max-preview",
     systemPrompt: baseSystemPrompt("Quinn"),
     temperature: 1,
     maxTokens: 4096,

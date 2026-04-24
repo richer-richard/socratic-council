@@ -97,12 +97,12 @@ export interface AppConfig {
 
 // Each character is locked to one model.
 export const LOCKED_MODELS: Record<Provider, string> = {
-  openai: "gpt-5.4",
-  anthropic: "claude-opus-4-6",
+  openai: "gpt-5.5",
+  anthropic: "claude-opus-4-7",
   google: "gemini-3.1-pro-preview",
-  deepseek: "deepseek-reasoner",
-  kimi: "kimi-k2.5",
-  qwen: "qwen3.6-plus",
+  deepseek: "deepseek-v4-pro",
+  kimi: "kimi-k2.6",
+  qwen: "qwen3.6-max-preview",
   minimax: "minimax-m2.7-highspeed",
   zhipu: "glm-5.1",
 };
@@ -111,8 +111,8 @@ export function isProvider(value: unknown): value is Provider {
   return typeof value === "string" && VALID_PROVIDERS.includes(value as Provider);
 }
 
-// Claude Opus 4.6 - default for Cathy
-const CLAUDE_OPUS_4_6_MODEL_ID = "claude-opus-4-6";
+// Claude Opus 4.7 - default for Cathy
+const CLAUDE_OPUS_DEFAULT_MODEL_ID = "claude-opus-4-7";
 
 const DEFAULT_CONFIG: AppConfig = {
   credentials: {},
@@ -274,18 +274,19 @@ export function loadConfig(): AppConfig {
         mcp: { ...DEFAULT_CONFIG.mcp, ...parsed.mcp },
       };
 
-      // Migrate old model IDs to Claude Opus 4.6
+      // Migrate old model IDs to the current Anthropic default
       const currentAnthropicModel = merged.models.anthropic;
       const needsMigration =
         !currentAnthropicModel ||
         currentAnthropicModel === "claude-opus-4-5" ||
         currentAnthropicModel === "claude-opus-4-5-20251101" ||
+        currentAnthropicModel === "claude-opus-4-6" ||
         currentAnthropicModel === "claude-sonnet-4-5" ||
         currentAnthropicModel === "claude-3-5-sonnet-20241022" ||
         currentAnthropicModel.includes("3-5-sonnet");
 
       if (needsMigration) {
-        merged.models = { ...merged.models, anthropic: CLAUDE_OPUS_4_6_MODEL_ID };
+        merged.models = { ...merged.models, anthropic: CLAUDE_OPUS_DEFAULT_MODEL_ID };
       }
       merged.models = { ...LOCKED_MODELS };
 
