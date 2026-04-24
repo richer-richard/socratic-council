@@ -24,6 +24,7 @@ export type Provider =
 // =============================================================================
 
 export const OpenAIModels = [
+  "gpt-5.5",
   "gpt-5.4",
   "gpt-5.3-chat-latest",
   "gpt-5.3-codex",
@@ -85,6 +86,8 @@ export interface OpenAIRequest {
 // =============================================================================
 
 export const AnthropicModels = [
+  // Claude 4.7 model
+  "claude-opus-4-7",
   // Claude 4.6 model
   "claude-opus-4-6",
   // Claude 4.5 models with full dated IDs (recommended for production)
@@ -211,7 +214,12 @@ export interface GeminiRequest {
 // DEEPSEEK MODELS & PARAMETERS
 // =============================================================================
 
-export const DeepSeekModels = ["deepseek-reasoner", "deepseek-chat"] as const;
+export const DeepSeekModels = [
+  "deepseek-v4-pro",
+  "deepseek-v4-flash",
+  "deepseek-reasoner",
+  "deepseek-chat",
+] as const;
 
 export type DeepSeekModel = (typeof DeepSeekModels)[number];
 
@@ -247,6 +255,7 @@ export interface DeepSeekRequest {
 // =============================================================================
 
 export const KimiModels = [
+  "kimi-k2.6",
   "kimi-k2.5",
   "kimi-k2-thinking",
   "kimi-k2-thinking-turbo",
@@ -314,7 +323,7 @@ export interface KimiRequest {
 // QWEN MODELS & PARAMETERS
 // =============================================================================
 
-export const QwenModels = ["qwen3.6-plus", "qwen3.5-plus"] as const;
+export const QwenModels = ["qwen3.6-max-preview", "qwen3.6-plus", "qwen3.5-plus"] as const;
 
 export type QwenModel = (typeof QwenModels)[number];
 

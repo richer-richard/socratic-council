@@ -58,9 +58,10 @@ export class QwenProvider implements BaseProvider {
   }
 
   private normalizeModel(model: string): QwenModel {
+    if (model === "qwen3.6-max-preview") return "qwen3.6-max-preview";
     if (model === "qwen3.6-plus") return "qwen3.6-plus";
     if (model === "qwen3.5-plus") return "qwen3.5-plus";
-    return "qwen3.6-plus";
+    return "qwen3.6-max-preview";
   }
 
   private buildRequestBody(
@@ -253,7 +254,7 @@ export class QwenProvider implements BaseProvider {
         method: "POST",
         headers: createHeaders("qwen", this.apiKey),
         body: JSON.stringify({
-          model: "qwen3.6-plus",
+          model: "qwen3.6-max-preview",
           messages: [{ role: "user", content: "Hello" }],
           max_tokens: 10,
         }),

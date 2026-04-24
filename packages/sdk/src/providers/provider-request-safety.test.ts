@@ -63,6 +63,53 @@ describe("provider request safety", () => {
     expect(request.temperature).toBeUndefined();
   });
 
+  it("uses adaptive thinking and omits temperature for Claude Opus 4.7", () => {
+    const provider = new AnthropicProvider("test-key");
+    const request = (
+      provider as unknown as {
+        buildRequestBody: (...args: unknown[]) => Record<string, unknown>;
+      }
+    ).buildRequestBody(
+      createAgent({
+        id: "cathy",
+        name: "Cathy",
+        provider: "anthropic",
+        model: "claude-opus-4-7",
+        maxTokens: 8192,
+      }),
+      messages,
+      "claude-opus-4-7",
+      { stream: false },
+    );
+
+    expect(request.thinking).toEqual({ type: "adaptive" });
+    expect(request.temperature).toBeUndefined();
+    expect(request.top_p).toBeUndefined();
+  });
+
+  it("omits temperature for Opus 4.7 even when thinking is disabled", () => {
+    const provider = new AnthropicProvider("test-key");
+    const request = (
+      provider as unknown as {
+        buildRequestBody: (...args: unknown[]) => Record<string, unknown>;
+      }
+    ).buildRequestBody(
+      createAgent({
+        id: "cathy",
+        name: "Cathy",
+        provider: "anthropic",
+        model: "claude-opus-4-7",
+        maxTokens: 8192,
+      }),
+      messages,
+      "claude-opus-4-7",
+      { stream: false, disableThinking: true },
+    );
+
+    expect(request.thinking).toBeUndefined();
+    expect(request.temperature).toBeUndefined();
+  });
+
   it("can disable Anthropic thinking for forced final-answer retries", () => {
     const provider = new AnthropicProvider("test-key");
     const request = (

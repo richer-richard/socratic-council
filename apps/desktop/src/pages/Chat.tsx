@@ -113,6 +113,7 @@ type PendingHandoffState = HandoffSnapshot;
 // Model display names mapping - includes both full dated IDs and aliases
 const MODEL_DISPLAY_NAMES: Record<string, string> = {
   // OpenAI
+  "gpt-5.5": "GPT-5.5",
   "gpt-5.4": "GPT-5.4",
   "gpt-5.3-chat-latest": "GPT-5.3 Instant",
   "gpt-5.3-codex": "GPT-5.3 Codex",
@@ -123,6 +124,7 @@ const MODEL_DISPLAY_NAMES: Record<string, string> = {
   "o4-mini": "o4-mini",
   "gpt-4o": "GPT-4o",
   // Anthropic - Full dated IDs (recommended for production)
+  "claude-opus-4-7": "Claude Opus 4.7",
   "claude-opus-4-6": "Claude Opus 4.6",
   "claude-opus-4-5-20251101": "Claude Opus 4.5",
   "claude-sonnet-4-5-20250929": "Claude Sonnet 4.5",
@@ -143,13 +145,17 @@ const MODEL_DISPLAY_NAMES: Record<string, string> = {
   "gemini-2.5-pro": "Gemini 2.5 Pro",
   "gemini-2.5-flash": "Gemini 2.5 Flash",
   // DeepSeek
+  "deepseek-v4-pro": "DeepSeek V4 Pro",
+  "deepseek-v4-flash": "DeepSeek V4 Flash",
   "deepseek-reasoner": "DeepSeek Reasoner",
   "deepseek-chat": "DeepSeek Chat",
   // Kimi
+  "kimi-k2.6": "Kimi K2.6",
   "kimi-k2.5": "Kimi K2.5",
   "kimi-k2-thinking": "Kimi K2 Thinking",
   "moonshot-v1-128k": "Moonshot V1 128K",
   // Qwen
+  "qwen3.6-max-preview": "Qwen 3.6 Max",
   "qwen3.6-plus": "Qwen 3.6 Plus",
   "qwen3.5-plus": "Qwen 3.5 Plus",
   // MiniMax
@@ -3030,7 +3036,7 @@ Write the official moderator wrap-up in 4 short sentences:
         let accumulatedContent = "";
 
         if (!result.success && agentConfig.provider === "anthropic" && model.includes("opus")) {
-          // If the full dated model ID fails, try the alias as fallback
+          // If the primary Opus model fails, fall back to the prior stable Opus ID.
           const fallbackModel = "claude-opus-4-6";
           if (modelUsed !== fallbackModel) {
             apiLogger.log("warn", "anthropic", "Primary model failed; retrying with fallback", {
