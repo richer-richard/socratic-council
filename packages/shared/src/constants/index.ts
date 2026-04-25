@@ -395,8 +395,8 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     supportsVision: true,
     supportsStreaming: true,
     pricing: {
-      inputCostPer1M: 1.25,
-      outputCostPer1M: 5.0,
+      inputCostPer1M: 2.0,
+      outputCostPer1M: 12.0,
     },
   },
   {
@@ -612,8 +612,8 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     supportsVision: true,
     supportsStreaming: true,
     pricing: {
-      inputCostPer1M: 0.9,
-      outputCostPer1M: 3.6,
+      inputCostPer1M: 0.95,
+      outputCostPer1M: 4.0,
     },
   },
   {
@@ -810,8 +810,8 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     supportsVision: false,
     supportsStreaming: true,
     pricing: {
-      inputCostPer1M: 1.6,
-      outputCostPer1M: 6.4,
+      inputCostPer1M: 1.3,
+      outputCostPer1M: 7.8,
     },
   },
   {
@@ -889,8 +889,8 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     supportsVision: true,
     supportsStreaming: true,
     pricing: {
-      inputCostPer1M: 0.5,
-      outputCostPer1M: 2.0,
+      inputCostPer1M: 1.4,
+      outputCostPer1M: 4.4,
     },
   },
   {

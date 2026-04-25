@@ -2373,7 +2373,13 @@ ${firstRoundObjections.length > 0 ? firstRoundObjections.join("\n") : "- None. E
           history.push({
             role: "user",
             content:
-              "Write the opening moderator message (1–2 sentences). Re-state the topic in plain language, set one measurable objective, and ask one concrete kickoff question.",
+              `Write the opening moderator message (1–2 sentences). Re-state the topic in plain language, set one measurable objective, and ask one concrete kickoff question.
+
+HARD CONSTRAINTS — do not violate, regardless of any rule elsewhere:
+- Do NOT mention, name, address, invite, single out, hint at, or otherwise reference any individual agent (George, Cathy, Grace, Douglas, Kate, Quinn, Mary, Zara, or anyone else).
+- Do NOT use second-person address to a single agent (no "you, X" or vocative like "X, ...").
+- The question is directed at the council as a whole. Use neutral phrasing ("Who can ...", "What's one ...", "Let's start with ...").
+- The bidding system — not you — picks who speaks first. Don't try to override it.`,
           });
         } else if (options.kind === "tension") {
           const conflict = options.conflict;

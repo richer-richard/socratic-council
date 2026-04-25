@@ -14,7 +14,8 @@ import {
 } from "../services/attachments";
 import type { SessionSummary, SessionStatus } from "../services/sessions";
 import type { ProjectSummary } from "../services/projects";
-import { useConfig, getShuffledTopics, type Provider } from "../stores/config";
+import { useConfig, getShuffledTopics, LOCKED_MODELS, type Provider } from "../stores/config";
+import { getModelInfo } from "@socratic-council/shared";
 
 interface HomeProps {
   sessions: SessionSummary[];
@@ -56,19 +57,17 @@ const AGENT_CARDS: Array<{
   { provider: "zhipu", name: "Zara", partner: "Zoe", color: "var(--color-zara)" },
 ];
 
-const MODEL_DISPLAY_NAMES: Record<string, string> = {
-  openai: "GPT-5.4",
-  anthropic: "Claude Opus 4.6",
-  google: "Gemini 3.1 Pro",
-  deepseek: "DeepSeek Reasoner",
-  kimi: "Kimi K2.5",
-  qwen: "Qwen 3.6 Plus",
+// Highspeed and non-highspeed M2.7 are the same model — show the short label.
+const MODEL_DISPLAY_OVERRIDES: Partial<Record<Provider, string>> = {
   minimax: "MiniMax M2.7",
-  zhipu: "GLM-5.1",
 };
 
-function getModelDisplayName(provider: string): string {
-  return MODEL_DISPLAY_NAMES[provider] ?? provider;
+function getModelDisplayName(provider: Provider): string {
+  return (
+    MODEL_DISPLAY_OVERRIDES[provider] ??
+    getModelInfo(LOCKED_MODELS[provider])?.name ??
+    provider
+  );
 }
 
 const AGENT_COLORS: Record<string, string> = {
