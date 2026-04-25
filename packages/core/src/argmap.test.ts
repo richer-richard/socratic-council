@@ -115,13 +115,15 @@ describe("updateArgumentMap", () => {
     expect(g.edges[0]?.relation).toBe("supports");
   });
 
-  it("drops evidence/rebuttals that can't be anchored", () => {
+  it("promotes unanchored evidence/rebuttals to free-standing claims", () => {
     const g = updateArgumentMap(
       emptyGraph(),
       [{ kind: "evidence", text: "stray", targetClaim: "nonexistent" }],
       { messageId: "m1", agentId: "douglas" },
     );
-    expect(g.nodes).toHaveLength(0);
+    expect(g.nodes).toHaveLength(1);
+    expect(g.nodes[0]?.kind).toBe("claim");
+    expect(g.nodes[0]?.text).toBe("stray");
     expect(g.edges).toHaveLength(0);
   });
 
