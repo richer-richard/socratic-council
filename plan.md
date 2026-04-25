@@ -8,82 +8,15 @@ This feature replaces the current home page layout, overhauls the in-discussion 
 
 ### 1.1 Agent Roster (16 Agents, 8 Pairs)
 
-Each pair shares the same provider and model, and both names begin with the same initial (matching the model's initial). Inner agents retain their current names. Outer agents are new additions.
-
-| Pair | Inner Agent | Outer Agent | Provider | Model | Initial |
-|------|-------------|-------------|----------|-------|---------|
-| 1 | George | Gavin | OpenAI | GPT-5.4 | G |
-| 2 | Cathy | Celeste | Anthropic | Claude Opus 4.6 | C |
-| 3 | Grace | Gideon | Google | Gemini 3.1 Pro | G |
-| 4 | Douglas | Diana | DeepSeek | DeepSeek Reasoner | D |
-| 5 | Kate | Kira | Kimi | Kimi K2.5 | K |
-| 6 | Quinn | Quentin | Qwen | Qwen 3.5 Plus | Q |
-| 7 | Mary | Marcus | MiniMax | MiniMax M2.5 | M |
-| 8 | Zara | Zane | Z.AI | GLM-5 | Z |
-
-The optional Moderator (GPT-5.3 Instant) continues to exist independently — it is not part of the inner/outer pairing system and operates outside the circle.
-
-**Implementation touchpoints:**
-- Expand `DEFAULT_AGENTS` in `packages/shared/src/constants/index.ts` to include 8 new outer agents, each referencing the same provider and model as their inner partner
-- Extend `AgentId` union type in `packages/shared/src/types/index.ts` to include outer agent names
-- Add a `role` field to `AgentConfig` (`"inner" | "outer"`) and a `pairedWith` field linking each outer agent to its inner partner
-- Outer agents get a distinct system prompt: they are instructed to observe the public discussion and send secret notes when they have strategic advice, counterarguments, additional evidence, or warnings for their inner partner
+[Completed]
 
 ### 1.2 Roles and Visibility Rules
 
-**Inner agents (public speakers):**
-- See all public messages from all other inner agents
-- Participate in bidding, turn-taking, reactions, and quoting (existing mechanics)
-- Receive secret notes from their outer partner (and only their outer partner)
-- Do NOT see secret notes sent to other inner agents
-- Do NOT know that other pairs are exchanging notes — the note-passing mechanic is invisible between pairs
-
-**Outer agents (silent advisors):**
-- See the full public discussion (all inner agent messages, all public actions)
-- Do NOT see other outer agents' notes
-- Can send a secret note to their paired inner agent at any time, independent of the turn-taking system
-- Never speak publicly — they communicate exclusively through private notes
-- Act as strategic counsel, devil's advocate, or second-opinion source for their partner
-
-**Users (full observability):**
-- The complete transcript shows all messages AND all secret notes
-- Notes are labeled with sender, recipient, and timestamp
-- Users see everything; agents see only what the visibility rules permit
-
-**Implementation touchpoints:**
-- Modify the context-building logic in `packages/core/src/council.ts` to enforce per-agent visibility: each inner agent's prompt/context only includes public messages + their own received notes
-- Each outer agent's context only includes public messages — they don't see other outer agents' notes or their inner agent's private reactions to notes
-- Add a new message type `"secret-note"` to `SessionMessage` in `apps/desktop/src/services/sessions.ts` with `fromAgentId` (outer) and `toAgentId` (inner)
-- Outer agents are NOT eligible for the bidding system — they bypass it entirely. Their notes can arrive at any time as async injections
+[Completed]
 
 ### 1.3 Home Page Redesign
 
-The current home page (`apps/desktop/src/pages/Home.tsx`) centers on a hero section with "COUNCIL CHAMBER", "Let the council work." text, suggestion chips, and a right-side Council Rack showing the 8 agents. This layout is replaced.
-
-**New home page layout (top to bottom in the main content area):**
-
-1. **"COUNCIL CHAMBER"** heading — retains the current small-caps style, moves to the top of the main content area (no longer vertically centered)
-2. **App logo** (the CouncilMark component) — moves up, positioned slightly below the Council Chamber heading. Smaller than current placement — it's a brand mark, not the hero
-3. **The Circle** — the primary visual centerpiece. All 16 agents are arranged in two concentric rings:
-   - **Inner ring:** 8 agent avatars (George, Cathy, Grace, Douglas, Kate, Quinn, Mary, Zara) arranged in a circle, evenly spaced at 45-degree intervals. Full-size, full-opacity avatars with provider-colored border glow
-   - **Outer ring:** 8 agent avatars (Gavin, Celeste, Gideon, Diana, Kira, Quentin, Marcus, Zane) arranged in a larger concentric circle. Each outer agent is positioned directly behind (radially outward from) its paired inner agent. Slightly smaller (80%) and reduced opacity (70%) to visually distinguish their advisory role
-   - Agent name labels appear below each avatar. Provider name appears below the agent name in smaller, muted text
-   - The circle is static on the home page — a roster display, not yet animated
-4. **Input area** — the topic input box, attachment button ("+" icon), and "Open Session" button remain at the bottom of the main content area. Suggestion chips remain below the input
-
-**Removed from the home page:**
-- "Let the council work." hero heading and "Every thread is autosaved locally..." subtitle text
-- The right-side "Council Rack" sidebar panel — the circle visualization replaces it entirely as the agent roster display
-
-**Unchanged:**
-- Left sidebar (projects, sessions list, settings) remains as-is
-- Top-right status bar (Providers Ready, Autosave status) remains as-is
-
-**Implementation touchpoints:**
-- Rewrite the main content area of `Home.tsx` — remove the hero section and Council Rack, replace with the new stacked layout (heading → logo → circle → input)
-- Create a new `CouncilCircle` component (e.g., `apps/desktop/src/components/CouncilCircle.tsx`) that renders the concentric ring layout. This component will be reused (in animated form) during discussions
-- Agent avatars in the circle use the existing `ProviderIcons` from `apps/desktop/src/components/icons/ProviderIcons.tsx`
-- The circle needs to be responsive — scale down proportionally on smaller windows while keeping avatars identifiable
+[Completed]
 
 ### 1.4 Discussion Start Animation
 
@@ -390,15 +323,8 @@ This feature touches every layer of the app:
 
 ## 2. Structured Debate Formats
 
-Move beyond free-form discussion. Add debate modes that impose structure on how agents take turns and interact:
-
-- **Oxford-style** — proposition vs. opposition, timed rounds, formal vote at the end
-- **Red Team / Blue Team** — adversarial split with defined roles (attack/defend)
-- **Round Robin** — every agent speaks exactly once per round before anyone repeats
-- **Bracket** — pairwise elimination (agents argue head-to-head, losers eliminated by vote)
-- **Socratic Questioning** — one agent only asks probing questions, others must justify their positions
-
-These formats pair naturally with the inner/outer circle system. In Red Team / Blue Team, inner agents on opposite sides argue while their outer advisors feed them tactical notes. In Oxford-style, outer agents can coach their inner partners between rounds. The debate format shapes the public discussion; the secret note channel adds a strategic layer beneath it.
+[Deleted]
+Unnecessary, ignore it.
 
 ## 3. Structured Decision Artifacts
 
@@ -417,6 +343,8 @@ After a debate ends, the app generates a suite of structured artifacts:
 
 Each artifact is generated by a synthesis pass over the full transcript — including secret notes — using a capable model. Users can choose which artifacts to generate and export them individually or as a bundle. The artifacts become first-class objects in the session, not just export formatting options.
 
+**Note that I have added a deep research functionality. I will still, however, keep it here.**
+
 ## 4. RAG-Powered Debates (Knowledge Base Integration)
 
 Let users upload a document corpus that agents reference during debate. Instead of just DuckDuckGo search, agents query a local vector index of user-provided documents — research papers, company docs, legal texts, internal wikis, prior debate transcripts.
@@ -426,6 +354,8 @@ This makes debates grounded in specific evidence rather than general model knowl
 Use an embedded vector DB (SQLite-vec, LanceDB, or similar) to keep everything local-first. The knowledge base is per-project, so different research areas maintain separate corpora. Agents cite sources with page numbers and quotes, and those citations link back to the original documents.
 
 Both inner and outer agents have access to the knowledge base. Outer agents can surface relevant documents in their secret notes that inner agents might have missed.
+
+**Agents can do research and reference uploaded artifacts if there are any. However, the problem is that most discussion topics are just one sentence long and agents need to do their own research. Consider editing this.**
 
 ## 5. Evaluation and Replay Lab
 
@@ -463,6 +393,8 @@ TTS output with distinct voices per agent. Each agent speaks in a different voic
 
 This opens a completely different UX modality — "listen to 16 AI experts debate your question while you commute." Inner agents have confident, forward-facing voices. Outer agents could have quieter, more measured tones (since their notes are whispered asides). Audio output can also be exported as a podcast-style file for sharing.
 
+**You need to clarify this. Is it local or does it require calling a specific API?**
+
 ## 9. Advanced Research Tooling
 
 Upgrade from DuckDuckGo to a proper research stack:
@@ -491,17 +423,8 @@ Unlike the Evaluation Lab (#5), which compares controlled reruns of the same sce
 
 ## 11. Queued and Background Councils
 
-The current flow is entirely manual: create session, open chat, watch it run. With the inner/outer system, structured outputs, and automation focus, background execution becomes very high leverage.
-
-Core capabilities:
-
-- **Batch queue** — line up multiple topics and run them sequentially or in parallel with a shared budget cap ("run these 10 topics overnight, spend at most $20 total")
-- **Budget-gated execution** — set per-session and per-batch cost limits; the council stops gracefully when the budget is hit. Budget includes both inner and outer agent costs
-- **Watch-folder workflow** — drop a file (PDF, DOCX, URL list) into a designated folder, and a council automatically spins up to debate/analyze it using a configured preset
-- **Scheduled runs** — "every Monday, rerun this market analysis with the latest data" or "re-evaluate this architecture decision quarterly"
-- **Background notifications** — councils run in the background and notify the user when complete (system notification, summary email, or webhook)
-
-This turns Socratic Council from a tool you sit in front of into one that works for you while you do other things. Pair with decision artifacts (#3) so each background run produces a clean deliverable waiting in your inbox.
+[Deleted]
+This is not necessary. Ignore it.
 
 ---
 
@@ -519,145 +442,4 @@ This turns Socratic Council from a tool you sit in front of into one that works 
 
 # Upgrade Proposal — Security, Features, Engine, QoL (April 2026)
 
-This section is the upgrade proposal complementing the roadmap above. Four parts: security hardening (minus CSP), new features beyond the roadmap, core engine upgrades, and reliability/QoL. All new UI surfaces are designed via the `frontend-design:frontend-design` skill; existing UI and existing API-request behavior are not modified.
-
-## Part 1 — Critical Security Hardening (CSP skipped)
-
-### 1.1 Migrate API keys to the OS keychain
-Replace `credentials.apiKey` plaintext in localStorage (`apps/desktop/src/stores/config.ts`) with `credentials.apiKeyRef` — opaque handle. New Rust commands `secrets_put / secrets_get / secrets_delete` via the `keyring` crate (macOS Keychain / Linux libsecret / Windows Credential Manager). Frontend fetches the key just-in-time for each provider call; no long-lived in-memory copy. Migration on first launch reads the old plaintext, writes to keychain, zeros the localStorage field. No change to how requests go out.
-
-### 1.2 Encrypt sessions and attachments at rest
-Derive a 32-byte data-encryption key per install (stored in OS keychain alongside 1.1). Encrypt session JSON blobs (`apps/desktop/src/services/sessions.ts`) and IndexedDB attachments (`services/attachments.ts`) with chacha20poly1305 on save; decrypt on load. New `src-tauri/src/crypto.rs` + two IPC commands `vault_encrypt` / `vault_decrypt`.
-
-### 1.3 Harden the Rust IPC surface
-Defensive validation only — no change to request shape, headers, or semantics. Allowlist outbound hostnames (8 provider hosts + user-registered MCP/Ollama endpoints). Cap request body at 4MB. Token-bucket rate limit (200 req/min per process). `https://` required for external, `http://` only for localhost. Files: `src-tauri/src/http.rs`, new `src-tauri/src/allowlist.rs`.
-
-### 1.4 Redact secrets from logs and errors
-Redact helper in Rust strips `userinfo@` from URLs in reqwest error strings. In `apiLogger.log`, redact `Authorization: Bearer …`, `x-api-key: …`, `x-goog-api-key: …`, proxy userinfo from every payload. Files: `src-tauri/src/http.rs`, `apps/desktop/src/services/api.ts`, new `apps/desktop/src/utils/redact.ts`.
-
-### 1.5 Re-enable the macOS sandbox and narrow fs scope
-Flip `com.apple.security.app-sandbox` to true in `entitlements.plist`. Keep only `com.apple.security.network.client` + `files.user-selected.read-write`. Narrow `capabilities.json` fs write scope to `$DOCUMENT/SocraticCouncil/**` + `$DOWNLOAD/**`.
-
-### 1.6 Code signing, notarization, and Tauri auto-updater
-Apple Developer ID signing + hardened runtime + notarization in CI. Windows Authenticode. `tauri-plugin-updater` with ed25519 keypair; signed GitHub Releases manifests; non-blocking toast on launch.
-
-### 1.7 Dependency audit in CI
-New `.github/workflows/audit.yml` running `cargo audit --deny warnings` + `pnpm audit --audit-level=high` on every PR and nightly.
-
-## Part 2 — Major Feature Additions
-
-Every new UI surface is designed via the `frontend-design:frontend-design` skill. Existing UI is untouched.
-
-### 2.1 Local LLM agents (Ollama / LM Studio)
-New provider `packages/sdk/src/providers/ollama.ts` speaking Ollama `/api/chat` JSON-lines streaming. Model registry entries in `packages/shared/src/constants/index.ts` with `costPer1M = 0`. Settings → Local tab (new UI via skill). Agents can be assigned to the local provider like any other. Existing provider code untouched; this is additive.
-
-### 2.2 Custom personas — user-defined agents
-Settings → Agents persona library UI (new via skill): name, provider, model, system prompt, expertise keywords, paired outer persona, color/initial, temperature, maxTokens. Stored encrypted (via 1.2). Council preset picker at session launch. New `apps/desktop/src/services/personas.ts`; extend `AgentConfig` with `source: "default" | "custom"`.
-
-### 2.3 Human-in-the-loop interjection
-Cmd+I opens a floating composer (new UI via skill) mid-debate. Injection becomes a `user`-role message; next bidding round treats it as most recent. Patch `packages/core/src/memory.ts:buildContext` to prioritize user messages. Hooks into existing pause/resume.
-
-### 2.4 Agent self-reflection (draft → critique → revise)
-Gated per-agent (`reflectionMode: "off" | "light" | "deep"`). Silent draft pass, critique-with-rubric pass, then stream the revised final. Uses the same provider API contract — no request-shape changes. File: `packages/core/src/council.ts:generateAgentResponse`.
-
-### 2.5 Inline fact-check sidecar
-Cheap verifier (Haiku 4.5 / gpt-5-mini) runs in parallel with the next bid round. Extracts claims, fires `oracle.verify`, attaches badges (✓ / ⚠ / ✗). Low-confidence claims flagged for outer-agent note material. New `packages/core/src/factcheck.ts` + new `verificationBadges` message field + additive superscript UI via skill.
-
-### 2.6 Live argument map during debate
-Side panel (new UI via skill) rendering a directed graph of claims / evidence / rebuttals. Incremental LLM extraction after each message. Click node → scroll history. New `packages/core/src/argmap.ts`, new `apps/desktop/src/components/ArgumentMap.tsx`. Session gains `argumentMap: ArgGraph`.
-
-### 2.7 Session branching
-"Branch from here" on any history message (additive action via skill). Creates new session with `parentSessionId` + `parentMessageId`. Sidebar renders branches as nested children. Both show "↪ branched from …" crumb.
-
-### 2.8 Portable session bundles (pulled forward from §7)
-"Export as Bundle" — versioned zip with `session.json + attachments/ + artifacts/`. "Import Bundle" on home. Additive menu entries (no existing UI redesign).
-
-## Part 3 — Core Engine Upgrades
-
-Backend-only. No UI changes. No API-request shape changes.
-
-### 3.1 Embedding-based bidding
-New `packages/core/src/embed.ts` with ONNX/WASM embedder (`all-MiniLM-L6-v2`). Per-agent interest embedding (system prompt + expertise blurb). Each turn: embed context, cosine similarity → confidence. Keyword match remains fallback. Update `bidding.ts:analyzeBidContext`. Weights blend unchanged.
-
-### 3.2 Semantic conflict detection
-After existing regex threshold at 40/100, run NLI-style check with the same local embedder. Reduces false positives on quoted / nested-negation patterns. File: `packages/core/src/conflict.ts`.
-
-### 3.3 LLM summarization for long-session memory
-When working transcript exceeds token threshold, background summarization of oldest third produces a ~200-word "so far" paragraph + premise bullets. Populates `buildContext().summary`. Uses cheap model. Secret notes never visible to summarizer.
-
-### 3.4 Cost circuit breaker + budget enforcement
-`budgetPolicy: { perSession, perDay, action: "warn" | "pause" | "stop" }` in config. Council checks after every turn. Doesn't change requests — decides whether to make the next one. Small additive cost-header badge (new UI via skill); existing header unchanged.
-
-### 3.5 Context-isolation tests for inner/outer visibility
-New `packages/core/src/__tests__/contextIsolation.test.ts`: synthesized sessions with notes from every outer → every inner; assert each agent's context contains exactly allowed messages and never another pair's note. CI-enforced.
-
-## Part 4 — Reliability & Quality-of-Life
-
-### 4.1 React error boundaries + crash recovery
-Wrap (not modify) `App.tsx` children with `<AppErrorBoundary>`; second boundary around `<ChatPage>`. Recovery panel UI via skill. Startup scan: `status === "running"` + `updatedAt` older than 90s → Resume / Completed / Delete.
-
-### 4.2 Command palette (Cmd+K)
-New floating palette (via skill). Fuzzy search over registered commands. Reuse `ConversationSearch.tsx` ranking. Existing menus unchanged.
-
-### 4.3 Provider health / diagnostics page
-New Settings → Diagnostics tab (via skill): reachability, last success/error, latency, rate-limit state, last 50 redacted log entries, "Copy diagnostics" button.
-
-### 4.4 Telemetry opt-in (strict local-first default)
-Off by default. Reports only app version, platform, redacted error class. Single HTTPS endpoint. First-launch card via skill.
-
-## TODO — live task tracking
-
-Tracked via the built-in task system (24 tasks, IDs 1–24). Use `TaskList` to see current state. Waves:
-
-### Wave 1 — Security floor
-- [ ] #1 1.1 Keychain
-- [ ] #2 1.2 Encrypt at rest
-- [ ] #3 1.3 IPC hardening
-- [ ] #4 1.4 Log redaction
-- [ ] #5 1.5 macOS sandbox
-- [ ] #6 1.6 Signing + updater
-- [ ] #7 1.7 Dep audit CI
-
-### Wave 2 — Reliability wins
-- [ ] #8 3.4 Cost circuit breaker
-- [ ] #9 4.1 Error boundaries
-- [ ] #10 2.3 Cmd+I interject
-- [ ] #11 2.8 Bundles
-- [ ] #12 3.5 Isolation tests
-
-### Wave 3 — Quality lift
-- [ ] #13 2.4 Reflection
-- [ ] #14 2.5 Fact-check sidecar
-- [ ] #15 3.3 Summarization
-
-### Wave 4 — Major expansion
-- [ ] #16 2.1 Local LLM (Ollama)
-- [ ] #17 2.2 Custom personas
-
-### Wave 5 — Intelligence layer
-- [ ] #18 3.1 Embedding bidding
-- [ ] #19 3.2 Semantic conflict
-- [ ] #20 2.6 Argument map
-- [ ] #21 2.7 Session branching
-
-### Wave 6 — Polish
-- [ ] #22 4.2 Command palette
-- [ ] #23 4.3 Diagnostics
-- [ ] #24 4.4 Telemetry opt-in
-
-## Skill usage plan
-
-| Skill | When |
-|-------|------|
-| `frontend-design:frontend-design` | Every new UI surface (2.1, 2.2, 2.3, 2.5 badges, 2.6, 2.7, 2.8, 3.4, 4.1, 4.2, 4.3, 4.4) |
-| `claude-api` | 2.4 reflection, 2.5 fact-check, 3.3 summarizer |
-| `superpowers:test-driven-development` | 3.5 context-isolation tests, any new core module |
-| `superpowers:verification-before-completion` | End of every wave before marking items done |
-| `superpowers:systematic-debugging` | Any bug mid-implementation |
-
-## Explicit non-goals (per direction)
-
-- **No change to existing UI.** Existing components, layouts, styles, animations untouched. All new UI is additive, designed via the `frontend-design:frontend-design` skill.
-- **No change to existing API-request behavior.** No retry/backoff retrofits, no stream-resume, no provider-call refactors. Adding new providers (Ollama, fact-check model) is additive, not modification.
-- **No CSP work.** Deferred.
-- **No structural refactor.** Chat.tsx (5541 lines) stays. Monorepo layout stays.
+[Requires re-generating proposal due to edits in previous planning sections]
