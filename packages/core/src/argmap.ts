@@ -71,18 +71,26 @@ export type ExtractorCompletionFn = (prompt: {
 
 const SYSTEM_PROMPT = `You extract structured argument-map fragments from a single message in a multi-agent debate.
 
-Produce a JSON array where each element is one of:
-  {"kind":"claim","text":"..."}
-  {"kind":"evidence","text":"...","targetClaim":"<existing claim text or id>"}
-  {"kind":"rebuttal","text":"...","targetClaim":"<existing claim text or id>"}
+Output a JSON array. Each element is one of:
+  {"kind":"claim","text":"the stance, position, criterion, or framing the speaker commits to (one sentence)"}
+  {"kind":"evidence","text":"a concrete example, number, citation, or case","targetClaim":"<exact existing claim id, e.g. c_0>"}
+  {"kind":"rebuttal","text":"the counter-argument or pushback","targetClaim":"<exact existing claim id, e.g. c_0>"}
 
-Rules:
-- A claim is an assertion the speaker stakes.
-- Evidence supports a prior claim (cite the exact prior claim text or id).
-- A rebuttal pushes back against a prior claim.
-- Skip pleasantries, questions, and purely rhetorical moves.
-- Return [] if there is nothing worth mapping.
-- Output MUST be a JSON array, nothing else, no code fences.`;
+EXTRACTION DEPTH:
+- A substantive message typically contains 2-5 distinct fragments. Extract them all — do not be lazy.
+- Treat reframings, sharp distinctions, proposed criteria, agreements/refinements, and concessions as CLAIMS — they all stake a position.
+- A claim phrased as a rhetorical question is still a claim. ("Doesn't enforcement matter?" → claim that enforcement matters.)
+- Evidence is anything concrete: a price, a named law, a specific service, a statistic, a case.
+- A rebuttal explicitly pushes back, denies, or proposes an alternative to a prior claim.
+
+CRITICAL RULE for evidence and rebuttals:
+- targetClaim MUST be the EXACT id of one of the EXISTING CLAIMS listed in the user message (e.g. "c_0", "c_3"). Do NOT paraphrase the claim's text. Do NOT invent ids. The system cannot resolve paraphrased targets and will drop them.
+- If you cannot identify the precise existing claim id to anchor to, emit the fragment as a "claim" instead. Never invent a target.
+
+WHEN TO RETURN []:
+- ONLY for messages that are pure greetings, jokes, off-topic chitchat, or empty rhetorical filler. If the message advances the debate at all — even slightly — extract at least one fragment.
+
+Output MUST be a JSON array, nothing else, no code fences.`;
 
 export function buildExtractPrompt(input: ExtractInput): { system: string; user: string } {
   const user = [
@@ -190,7 +198,27 @@ export function updateArgumentMap(
       });
     } else {
       const target = findClaimByReference(next, frag.targetClaim);
-      if (!target) continue; // can't anchor — drop
+      if (!target) {
+        // Can't anchor — promote to a free-standing claim so the content
+        // survives in the UI instead of disappearing. The semantic label
+        // (evidence/rebuttal) is lost, but losing the text entirely is worse.
+        const duplicate = next.nodes.some(
+          (n) =>
+            n.kind === "claim" &&
+            n.sourceAgentId === source.agentId &&
+            n.text.toLowerCase() === frag.text.toLowerCase(),
+        );
+        if (duplicate) continue;
+        const claimId = generateNodeId(next, "c");
+        next.nodes.push({
+          id: claimId,
+          kind: "claim",
+          text: frag.text,
+          sourceMessageId: source.messageId,
+          sourceAgentId: source.agentId,
+        });
+        continue;
+      }
       const id = generateNodeId(next, frag.kind === "evidence" ? "e" : "r");
       next.nodes.push({
         id,
