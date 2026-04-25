@@ -496,13 +496,17 @@ async function researchPhase(
       }
       localIdToGlobal.set(c.id, globalId);
     }
-    // Rewrite local [c1] tokens in findings to the global ids
-    let findings = result.subQuestion.findings;
-    for (const [localId, globalId] of localIdToGlobal) {
-      if (localId === globalId) continue;
-      const pattern = new RegExp(`\\[${localId}\\]`, "g");
-      findings = findings.replace(pattern, `[${globalId}]`);
-    }
+    // Rewrite local [cN] and [cN, cM, ...] tokens in findings to global ids.
+    // Single regex pass; each id inside a multi-citation bracket is mapped
+    // independently. Unknown local ids pass through untouched.
+    const findings = result.subQuestion.findings.replace(
+      /\[(c\d+(?:\s*,\s*c\d+)*)\]/g,
+      (_match, body: string) => {
+        const ids = body.split(",").map((s) => s.trim());
+        const mapped = ids.map((id) => localIdToGlobal.get(id) ?? id);
+        return `[${mapped.join(", ")}]`;
+      },
+    );
     subQuestions.push({
       ...result.subQuestion,
       findings,

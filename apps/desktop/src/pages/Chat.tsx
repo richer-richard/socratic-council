@@ -839,11 +839,17 @@ function renderBodyWithCitations(
 ): React.ReactNode {
   if (!body) return null;
   const citationById = new Map(citations.map((c) => [c.id, c]));
-  // Rewrite [cN] tokens as markdown links (e.g. "[c1](#cite-c1)") so
-  // ReactMarkdown treats them as INLINE elements inside the surrounding
-  // paragraph. Unknown ids keep the bracket form and render as plain text.
-  const withLinks = body.replace(/\[(c\d+)\]/g, (match, id: string) =>
-    citationById.has(id) ? `[${match}](#cite-${id})` : match,
+  // Rewrite [cN] and [cN, cM, ...] tokens as markdown links so ReactMarkdown
+  // treats them as INLINE elements. Multi-citation brackets become adjacent
+  // pills separated by a comma. Unknown ids keep the original bracket form.
+  const withLinks = body.replace(
+    /\[(c\d+(?:\s*,\s*c\d+)*)\]/g,
+    (match, ids: string) => {
+      const idList = ids.split(",").map((s) => s.trim());
+      if (!idList.every((id) => citationById.has(id))) return match;
+      if (idList.length === 1) return `[${match}](#cite-${idList[0]})`;
+      return idList.map((id) => `[[${id}]](#cite-${id})`).join(", ");
+    },
   );
   return (
     <Markdown
