@@ -96,6 +96,24 @@ export function createTauriTransport(
       throw toTransportFailure("FETCH_REQUEST_FAILED", "Not running in Tauri environment");
     }
 
+    // Fix 4.8 / 7.7: pair non-streaming requests with a registered
+    // request_id so an aborted JS-side timeout / signal can call
+    // http_cancel and actually terminate the Rust task instead of leaking
+    // a pending HTTP connection to the provider.
+    const requestId = `req_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+    let cancelled = false;
+    const onAbort = () => {
+      if (cancelled) return;
+      cancelled = true;
+      void cancelTauriStream(requestId, logger);
+    };
+    if (req.signal) {
+      if (req.signal.aborted) {
+        throw toTransportFailure("ABORTED", "Request aborted");
+      }
+      req.signal.addEventListener("abort", onAbort, { once: true });
+    }
+
     try {
       const result = await tauriInvoke<TauriHttpResponse>(
         "http_request",
@@ -107,6 +125,7 @@ export function createTauriTransport(
             body: req.body,
             proxy: buildProxyConfig(proxy),
             timeout_ms: req.timeoutMs ?? 180000,
+            request_id: requestId,
           },
         },
         (req.timeoutMs ?? 180000) + 5000,
@@ -118,8 +137,16 @@ export function createTauriTransport(
 
       return { status: result.status, headers: result.headers, body: result.body };
     } catch (error) {
+      // If the caller's signal aborted, surface the abort cleanly.
+      if (req.signal?.aborted) {
+        throw toTransportFailure("ABORTED", "Request aborted", error);
+      }
       logger?.("error", "Tauri request failed", error);
       throw toTransportFailure("FETCH_REQUEST_FAILED", "Tauri request failed", error);
+    } finally {
+      if (req.signal) {
+        req.signal.removeEventListener("abort", onAbort);
+      }
     }
   };
 
@@ -220,7 +247,19 @@ export function createTauriTransport(
           pendingStreamFailure = toTransportFailure("FETCH_STREAM_FAILED", chunk.error);
           if (chunk.done) {
             finishError(pendingStreamFailure);
+            return;
           }
+          // Fix 4.15: if a 'done' event doesn't follow the error within a
+          // few seconds, surface the failure rather than silently waiting
+          // for the hard timeout. Most well-behaved Rust paths emit done
+          // immediately after error, but if they don't this prevents a
+          // confusing UI stall.
+          setTimeout(() => {
+            if (finished) return;
+            if (pendingStreamFailure) {
+              finishError(pendingStreamFailure);
+            }
+          }, 3000);
           return;
         }
 
@@ -265,8 +304,14 @@ export function createTauriTransport(
     } catch (error) {
       if (finished) return;
 
-      const failure =
-        error instanceof TransportFailure
+      // Fix 4.6: detect rate-limit messages (from allowlist.rs) and surface
+      // a typed RATE_LIMITED error so the UI can render an actionable
+      // "wait and retry" message instead of "Tauri stream failed".
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      const isRateLimited = /rate[\s\-_]?limit/i.test(errorMessage);
+      const failure = isRateLimited
+        ? toTransportFailure("RATE_LIMITED", errorMessage, error)
+        : error instanceof TransportFailure
           ? error
           : (pendingStreamFailure ??
             toTransportFailure("FETCH_STREAM_FAILED", "Tauri stream failed", error));

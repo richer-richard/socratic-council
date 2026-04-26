@@ -6,7 +6,7 @@
 
 import { DEFAULT_AGENTS } from "@socratic-council/shared";
 import type { AgentConfig, AgentId, ModelId, ProviderCredentials } from "@socratic-council/shared";
-import { ProviderManager } from "@socratic-council/sdk";
+import { ProviderManager, TransportFailure, replayBufferedStream } from "@socratic-council/sdk";
 import type { ChatAttachment, CompletionOptions } from "@socratic-council/sdk";
 
 import type { Provider, ProxyConfig, ProviderCredential } from "../stores/config";
@@ -75,8 +75,11 @@ export const apiLogger = {
     };
     this.logs.push(entry);
 
-    if (this.logs.length > 200) {
-      this.logs = this.logs.slice(-200);
+    // Fix 4.11: 1000-entry ring buffer — long debates with retries and tool
+    // calls fill the previous 200-entry buffer in minutes, losing the early
+    // request logs that explain auth/model errors.
+    if (this.logs.length > 1000) {
+      this.logs = this.logs.slice(-1000);
     }
 
     const consoleMethod = {
@@ -134,6 +137,35 @@ function buildAgentConfig(provider: Provider, model: string): AgentConfig {
   };
 }
 
+// Fix 4.10: memoize ProviderManager + provider instances per
+// (provider, baseUrl) so we don't allocate a new manager on every call.
+// Provider instances may want to cache per-instance state (HTTP keep-alive
+// pools, prompt-cache identifiers); the previous "new on every call" defeated
+// any of that.
+const providerInstanceCache = new Map<string, ReturnType<ProviderManager["getProvider"]>>();
+
+function getProviderInstance(
+  provider: Provider,
+  credential: ProviderCredential,
+  proxy: ProxyConfig | undefined,
+) {
+  // Cache key includes the proxy because different proxy configs may need
+  // different transport instances (token bucket, agent, etc.).
+  const proxyKey = proxy ? `${proxy.type}:${proxy.host}:${proxy.port}` : "none";
+  const cacheKey = `${provider}::${credential.baseUrl ?? ""}::${proxyKey}`;
+  const cached = providerInstanceCache.get(cacheKey);
+  if (cached) return cached;
+
+  const transport = createTauriTransport({
+    proxy,
+    logger: (level, message, details) => apiLogger.log(level, provider, message, details),
+  });
+  const manager = new ProviderManager(buildCredentials(provider, credential), { transport });
+  const instance = manager.getProvider(provider);
+  providerInstanceCache.set(cacheKey, instance);
+  return instance;
+}
+
 function buildCredentials(provider: Provider, credential: ProviderCredential): ProviderCredentials {
   return {
     [provider]: {
@@ -143,12 +175,30 @@ function buildCredentials(provider: Provider, credential: ProviderCredential): P
   } as ProviderCredentials;
 }
 
-function isTimeoutError(message: string): boolean {
-  return message.includes("STREAM_TIMEOUT") || message.includes("STREAM_IDLE_TIMEOUT");
+// Fix 4.1: classify errors via the typed `code` field on TransportFailure
+// rather than scanning the human-readable message. The previous helpers
+// looked for "STREAM_TIMEOUT" / "ABORTED" substrings inside e.g. "Request
+// timed out after 180000ms" or "Request aborted" — neither contains the
+// code substring, so every abort/timeout was misclassified as a generic
+// failure and the wrong recovery path ran.
+function isTransportFailure(error: unknown): error is TransportFailure {
+  return error instanceof TransportFailure;
 }
 
-function isAbortError(message: string): boolean {
-  return message.includes("ABORTED");
+function isTimeoutError(error: unknown): boolean {
+  return (
+    isTransportFailure(error) &&
+    (error.code === "STREAM_TIMEOUT" || error.code === "STREAM_IDLE_TIMEOUT")
+  );
+}
+
+function isAbortError(error: unknown): boolean {
+  if (isTransportFailure(error)) return error.code === "ABORTED";
+  // The legacy fallback — a plain Error whose message somehow contains
+  // ABORTED. Keeps any pre-fix wrappers that still fly under the radar
+  // from breaking abort semantics during the transition.
+  if (error instanceof Error) return error.message.includes("ABORTED");
+  return false;
 }
 
 export async function makeHttpRequest(
@@ -179,6 +229,10 @@ export async function testProviderConnection(
   provider: Provider,
   credential: ProviderCredential,
   proxy?: ProxyConfig,
+  /** Optional model id to use for the smoke test — typically the user's
+   * LOCKED_MODELS[provider] so the test exercises the production-config
+   * model rather than a stale hardcoded id (fix 6.2). */
+  model?: string,
 ): Promise<boolean> {
   const transport = createTauriTransport({
     proxy,
@@ -188,7 +242,7 @@ export async function testProviderConnection(
   const manager = new ProviderManager(buildCredentials(provider, credential), { transport });
   const instance = manager.getProvider(provider);
   if (!instance) return false;
-  return instance.testConnection();
+  return instance.testConnection(model);
 }
 
 export async function callProvider(
@@ -208,12 +262,7 @@ export async function callProvider(
 ): Promise<CompletionResult> {
   const startTime = Date.now();
   const agent = buildAgentConfig(provider, model);
-  const transport = createTauriTransport({
-    proxy,
-    logger: (level, message, details) => apiLogger.log(level, provider, message, details),
-  });
-  const manager = new ProviderManager(buildCredentials(provider, credential), { transport });
-  const instance = manager.getProvider(provider);
+  const instance = getProviderInstance(provider, credential, proxy);
 
   apiLogger.log("info", provider, "Starting request", {
     model,
@@ -259,21 +308,47 @@ export async function callProvider(
       streamOptions,
     );
 
+    const finalContent = result.content || fullContent;
+    // Fix 4.4: a 200 OK that produced no content and no tokens is most
+    // likely content moderation / a silent provider-side rejection rather
+    // than a meaningful "agent intentionally said nothing" turn. Treat as
+    // failure so the caller can retry / penalize bidding next round.
+    if (
+      finalContent.trim() === "" &&
+      result.tokens.input === 0 &&
+      result.tokens.output === 0
+    ) {
+      return {
+        content: "",
+        thinking: result.thinking || fullThinking || undefined,
+        tokens: result.tokens,
+        latencyMs: result.latencyMs,
+        success: false,
+        error: "Provider returned empty content (likely content filter or moderation).",
+      };
+    }
+
     return {
-      content: result.content || fullContent,
+      content: finalContent,
       thinking: result.thinking || fullThinking || undefined,
       tokens: result.tokens,
       latencyMs: result.latencyMs,
       success: true,
     };
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Unknown error";
-    const timedOut = isTimeoutError(message);
-    const aborted = isAbortError(message);
+    const aborted = isAbortError(error);
+    const timedOut = isTimeoutError(error);
+    // Surface a stable string for downstream error rendering. Use the typed
+    // failure's message when available — TransportFailure messages already
+    // carry useful context like timeout values and HTTP statuses.
+    const message =
+      error instanceof Error ? error.message : "Unknown error";
 
     apiLogger.log("error", provider, "Request failed", { error: message });
 
-    if ((provider === "minimax" || provider === "zhipu") && !aborted) {
+    // Fix 4.3: if the call was already aborted by the caller, don't burn
+    // tokens on the minimax/zhipu non-stream retry. Just surface the abort.
+    if ((provider === "minimax" || provider === "zhipu") && !aborted && !options?.signal?.aborted) {
       apiLogger.log("warn", provider, "Retrying with non-stream completion after stream failure", {
         model,
         error: message,
@@ -281,6 +356,33 @@ export async function callProvider(
 
       try {
         const retry = await instance.complete(agent, messages, streamOptions);
+        // Fix 4.2: replay the buffered retry result through onChunk so the
+        // streaming UI continues to update instead of going dark for the
+        // duration of the retry. Without this the typing indicator dies and
+        // the message lands as a wall of text after a confusing pause.
+        if (retry.content) {
+          try {
+            await replayBufferedStream(retry.content, (chunk) => {
+              fullContent += chunk;
+              onChunk({ content: chunk, done: false });
+            }, options?.signal);
+          } catch (replayError) {
+            // Replay aborted by caller — surface as abort below.
+            if (options?.signal?.aborted) {
+              return {
+                content: fullContent,
+                thinking: fullThinking || undefined,
+                tokens: { input: 0, output: 0 },
+                latencyMs: Date.now() - startTime,
+                success: false,
+                error: "Request aborted",
+              };
+            }
+            console.warn("[api] replay buffered stream failed", replayError);
+          }
+          // Final done event so the UI stops the typing indicator.
+          onChunk({ content: "", done: true });
+        }
         return {
           content: retry.content,
           thinking: retry.thinking,

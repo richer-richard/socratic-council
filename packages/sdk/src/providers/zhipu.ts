@@ -64,7 +64,9 @@ export class ZhipuProvider implements BaseProvider {
     };
 
     const temperature = options.temperature ?? agent.temperature ?? 0.7;
-    request.temperature = Math.max(0, Math.min(1, temperature));
+    // Fix 6.3: GLM accepts temperature up to 2; the previous Math.min(1) clamp
+    // silently capped users' configured higher-temperature setups.
+    request.temperature = Math.max(0, Math.min(2, temperature));
 
     if (options.maxTokens) {
       request.max_tokens = options.maxTokens;
@@ -190,7 +192,9 @@ export class ZhipuProvider implements BaseProvider {
             parser.flush();
             resolve();
           },
-          onError: (error) => reject(new Error(`${error.code}: ${error.message}`)),
+          // Fix 6.1: forward the typed TransportFailure so api.ts can
+          // classify abort/timeout via .code (see fix 4.1).
+          onError: (error) => reject(error),
         },
       );
     });
@@ -222,14 +226,14 @@ export class ZhipuProvider implements BaseProvider {
     }
   }
 
-  async testConnection(): Promise<boolean> {
+  async testConnection(model?: string): Promise<boolean> {
     try {
       const { status } = await this.transport.request({
         url: this.endpoint,
         method: "POST",
         headers: createHeaders("zhipu", this.apiKey),
         body: JSON.stringify({
-          model: "glm-5.1",
+          model: model ?? "glm-5.1",
           messages: [{ role: "user", content: "Hello" }],
           max_tokens: 10,
         }),

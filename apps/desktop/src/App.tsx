@@ -27,7 +27,12 @@ import {
   touchProject,
   type Project,
 } from "./services/projects";
-import { initVault } from "./services/vault";
+import {
+  getDecryptFailureCount,
+  getQuarantinePath,
+  getVaultStatus,
+  initVault,
+} from "./services/vault";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { CommandPalette, useCommandPaletteShortcut } from "./components/CommandPalette";
 import { TelemetryOptInCard } from "./components/TelemetryOptInCard";
@@ -63,6 +68,15 @@ export default function App() {
   // stays set either way). Suppressed on initial mount to avoid startup noise.
   const [showTelemetryCard, setShowTelemetryCard] = useState(false);
   const [showDiagnostics, setShowDiagnostics] = useState(false);
+  /**
+   * Boot-time warning when the vault DEK file was quarantined and there's
+   * pre-existing encrypted data on disk that probably can't be decrypted
+   * with the new DEK (fix 1.1). Null when the vault is healthy.
+   */
+  const [vaultRecoveryNotice, setVaultRecoveryNotice] = useState<{
+    quarantinePath: string | null;
+    failedDecrypts: number;
+  } | null>(null);
   const { config } = useConfig();
 
   useEffect(() => {
@@ -74,8 +88,23 @@ export default function App() {
         console.error("[App] initVault failed:", error);
       }
       if (cancelled) return;
-      setSessions(stabilizeStoredSessions());
+
+      // Surface a boot-time banner when the DEK was quarantined and there's
+      // pre-existing encrypted data on disk that the new DEK can't decrypt
+      // (fix 1.1). We trigger stabilizeStoredSessions BEFORE the check so
+      // any decrypt failures from the load loop count toward the tally.
+      const sessionSummaries = stabilizeStoredSessions();
+      setSessions(sessionSummaries);
       setProjects(listProjectSummaries());
+
+      const status = getVaultStatus();
+      const failedDecrypts = getDecryptFailureCount();
+      if (status === "quarantined" || failedDecrypts > 0) {
+        setVaultRecoveryNotice({
+          quarantinePath: getQuarantinePath(),
+          failedDecrypts,
+        });
+      }
 
       // First-launch telemetry prompt: only show if the user has never
       // recorded a choice AND has at least one session worth of activity.
@@ -357,6 +386,40 @@ export default function App() {
         {appError ? (
           <div className="border-b border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200">
             {appError}
+          </div>
+        ) : null}
+        {vaultRecoveryNotice ? (
+          <div className="border-b border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-100 flex items-start gap-3">
+            <div style={{ flex: 1 }}>
+              <strong>Encrypted data may be unrecoverable.</strong>{" "}
+              The vault DEK file was unreadable on this boot
+              {vaultRecoveryNotice.quarantinePath ? (
+                <>
+                  {" "}and was quarantined to{" "}
+                  <code style={{ wordBreak: "break-all" }}>
+                    {vaultRecoveryNotice.quarantinePath}
+                  </code>
+                </>
+              ) : null}
+              . A fresh key was generated.{" "}
+              {vaultRecoveryNotice.failedDecrypts > 0 ? (
+                <>
+                  {vaultRecoveryNotice.failedDecrypts} encrypted entr
+                  {vaultRecoveryNotice.failedDecrypts === 1 ? "y" : "ies"} failed to decrypt
+                  during startup.
+                </>
+              ) : null}{" "}
+              If you have a backup of the original{" "}
+              <code>vault.key</code> file, restoring it should recover your data.
+            </div>
+            <button
+              type="button"
+              onClick={() => setVaultRecoveryNotice(null)}
+              className="text-amber-200 hover:text-amber-50"
+              style={{ background: "none", border: "none", cursor: "pointer" }}
+            >
+              Dismiss
+            </button>
           </div>
         ) : null}
         {state.currentPage === "home" && (

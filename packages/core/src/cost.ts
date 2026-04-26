@@ -25,9 +25,15 @@ function estimateUsd(
     return { usd: 0, pricingAvailable: false };
   }
 
+  // Fix 5.15: when reasoningCostPer1M isn't published for a model that does
+  // emit reasoning tokens (older Anthropic, some OpenAI configs), bill them
+  // at the output rate as a conservative approximation. The previous
+  // behavior silently ignored reasoning tokens whenever the rate field was
+  // missing, undercounting the displayed session total.
+  const reasoningRate = pricing?.reasoningCostPer1M ?? pricing?.outputCostPer1M ?? 0;
   const inputCost = ((usage.input || 0) / 1_000_000) * (pricing?.inputCostPer1M ?? 0);
   const outputCost = ((usage.output || 0) / 1_000_000) * (pricing?.outputCostPer1M ?? 0);
-  const reasoningCost = ((usage.reasoning || 0) / 1_000_000) * (pricing?.reasoningCostPer1M ?? 0);
+  const reasoningCost = ((usage.reasoning || 0) / 1_000_000) * reasoningRate;
 
   return { usd: inputCost + outputCost + reasoningCost, pricingAvailable: true };
 }

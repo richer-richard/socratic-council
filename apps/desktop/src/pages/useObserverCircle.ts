@@ -55,9 +55,12 @@ interface ObserverCircleConfig {
     credentials: Partial<Record<Provider, ProviderCredential>>;
     models: Partial<Record<Provider, string>>;
     proxy: { type: string; host?: string; port?: number };
-    preferences: { observersEnabled?: boolean };
+    preferences: { observersEnabled?: boolean; observerInterval?: number };
   }>;
   abortRef: React.MutableRefObject<boolean>;
+  /** When true, the observer pass is suspended (fix 3.3) — paired with the
+   * Chat-side pause flag so paused sessions don't keep firing observers. */
+  pausedRef?: React.MutableRefObject<boolean>;
   buildAttachmentContext: (
     provider: Provider,
     model: string | undefined,
@@ -71,8 +74,10 @@ interface ObserverCircleConfig {
 // ---------------------------------------------------------------------------
 
 const MAX_OBSERVER_CONTEXT = 16;
-// Observers fire after every single turn — they pass notes freely anytime
-const OBSERVER_INTERVAL = 1;
+// Default observer interval (turns). Configurable via
+// `preferences.observerInterval`; 0 disables. Default 2 (fix 3.3) so a
+// fast-firing debate doesn't burn 8 parallel LLM calls every single turn.
+const DEFAULT_OBSERVER_INTERVAL = 2;
 
 function buildObserverSystemPrompt(observerName: string, partnerName: string): string {
   return `You are ${observerName}, the outer-circle partner of ${partnerName} in the Socratic Council.
@@ -102,11 +107,16 @@ export function useObserverCircle({
   messagesRef,
   configRef,
   abortRef,
+  pausedRef,
   buildAttachmentContext,
   agentConfig,
 }: ObserverCircleConfig) {
   const observerNotesRef = useRef<ObserverNote[]>([]);
   const observerPassInFlightRef = useRef(false);
+  // Active AbortController per observer — drained by abortObserverControllers
+  // when the chat enters stopActiveGeneration so the in-flight LLM calls
+  // actually terminate (fix 3.3).
+  const observerControllersRef = useRef<Set<AbortController>>(new Set());
   const [observerUsage, setObserverUsage] = useState<ModeratorUsageSnapshot>({
     inputTokens: 0,
     outputTokens: 0,
@@ -198,6 +208,11 @@ export function useObserverCircle({
       const proxy = getProxy();
       const partnerConfig = agentConfig[cfg.partnerId];
 
+      // Fix 3.3: pass a per-observer AbortController so stopActiveGeneration
+      // / pause from the Chat side actually terminates the in-flight call
+      // instead of letting it run to completion (and bill).
+      const controller = new AbortController();
+      observerControllersRef.current.add(controller);
       try {
         const result = await callProvider(
           cfg.provider,
@@ -209,6 +224,7 @@ export function useObserverCircle({
           {
             requestTimeoutMs: 60000,
             idleTimeoutMs: 30000,
+            signal: controller.signal,
           },
         );
 
@@ -248,10 +264,24 @@ export function useObserverCircle({
           { error: error instanceof Error ? error.message : String(error) },
         );
         return null;
+      } finally {
+        observerControllersRef.current.delete(controller);
       }
     },
     [buildObserverHistory, configRef, getProxy, agentConfig],
   );
+
+  /**
+   * Abort every in-flight observer LLM call — called from Chat.tsx's
+   * stopActiveGeneration so a paused / stopped session doesn't keep
+   * burning tokens through the observer pipeline (fix 3.3).
+   */
+  const abortObserverControllers = useCallback(() => {
+    for (const controller of observerControllersRef.current) {
+      controller.abort();
+    }
+    observerControllersRef.current.clear();
+  }, []);
 
   // Run a full observer pass — all 8 in parallel
   const runObserverPass = useCallback(
@@ -261,6 +291,10 @@ export function useObserverCircle({
     ) => {
       if (observerPassInFlightRef.current) return;
       if (abortRef.current) return;
+      // Fix 3.3: skip observers when the session is paused. Without this gate
+      // the chat would keep firing 8 parallel observer calls per turn even
+      // after the user clicked pause.
+      if (pausedRef?.current) return;
 
       const currentConfig = configRef.current;
       const configuredObservers = OBSERVER_IDS.filter((id) => {
@@ -307,20 +341,23 @@ export function useObserverCircle({
         }
       });
     },
-    [abortRef, configRef, generateObserverNote],
+    [abortRef, configRef, generateObserverNote, pausedRef],
   );
 
-  // Get the latest unconsumed note for an inner-circle agent
+  // Fix 3.11: separate read from consumption. The previous getLatestNoteFor
+  // mutated `note.consumed = true` as a side effect, which silently breaks
+  // any caller that invokes the reader from a render path or memoization
+  // (StrictMode double-render skips the second call). Callers must now
+  // explicitly call `markNoteConsumed(note.id)` once they've actually used
+  // the note in a prompt.
   const getLatestNoteFor = useCallback(
     (agentId: CouncilAgentId): ObserverNote | null => {
       const observerId = PARTNER_TO_OBSERVER[agentId];
       if (!observerId) return null;
-
       const notes = observerNotesRef.current;
       for (let i = notes.length - 1; i >= 0; i--) {
         const note = notes[i]!;
         if (note.observerId === observerId && !note.consumed) {
-          note.consumed = true;
           return note;
         }
       }
@@ -329,11 +366,25 @@ export function useObserverCircle({
     [],
   );
 
+  const markNoteConsumed = useCallback((noteId: string) => {
+    const notes = observerNotesRef.current;
+    for (const note of notes) {
+      if (note.id === noteId) {
+        note.consumed = true;
+        return;
+      }
+    }
+  }, []);
+
   // Check if it's time for an observer pass
   const shouldRunObserverPass = useCallback(
     (turn: number): boolean => {
-      if (!configRef.current.preferences.observersEnabled) return false;
-      return turn > 0 && turn % OBSERVER_INTERVAL === 0;
+      const prefs = configRef.current.preferences;
+      if (!prefs.observersEnabled) return false;
+      const interval = Math.max(0, prefs.observerInterval ?? DEFAULT_OBSERVER_INTERVAL);
+      // 0 disables (covers users who explicitly want a quiet observer pipeline).
+      if (interval === 0) return false;
+      return turn > 0 && turn % interval === 0;
     },
     [configRef],
   );
@@ -343,7 +394,9 @@ export function useObserverCircle({
     observerUsage,
     runObserverPass,
     getLatestNoteFor,
+    markNoteConsumed,
     shouldRunObserverPass,
-    OBSERVER_INTERVAL,
+    abortObserverControllers,
+    DEFAULT_OBSERVER_INTERVAL,
   };
 }

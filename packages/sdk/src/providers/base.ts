@@ -79,9 +79,14 @@ export interface BaseProvider {
   ): Promise<CompletionResult>;
 
   /**
-   * Test the connection to the provider
+   * Test the connection to the provider. The optional `model` lets callers
+   * pin the test to a specific model id — typically the user's locked
+   * `LOCKED_MODELS[provider]` so the test exercises the same model the
+   * council will actually use, rather than a stale hardcoded id.
+   * Implementations should fall back to a known-stable test model when
+   * the parameter is omitted.
    */
-  testConnection(): Promise<boolean>;
+  testConnection(model?: string): Promise<boolean>;
 }
 
 /**
@@ -99,10 +104,15 @@ export function createHeaders(provider: Provider, apiKey: string): Record<string
         Authorization: `Bearer ${apiKey}`,
       };
     case "anthropic":
+      // Fix 4.5: include the prompt-caching beta header so `cacheControl: "ephemeral"`
+      // on user messages actually engages the cache. Without this header
+      // Anthropic ignores cache_control and bills every request as a full
+      // re-prompt (5-10× cost overhead on long debates).
       return {
         ...baseHeaders,
         "x-api-key": apiKey,
         "anthropic-version": "2023-06-01",
+        "anthropic-beta": "prompt-caching-2024-07-31",
       };
     case "google":
       return {
@@ -125,6 +135,8 @@ export function createHeaders(provider: Provider, apiKey: string): Record<string
         Authorization: `Bearer ${apiKey}`,
       };
     case "minimax":
+      // MiniMax exposes an Anthropic-compatible endpoint, so it needs the
+      // same headers (sans the caching beta — MiniMax doesn't honor it).
       return {
         ...baseHeaders,
         "x-api-key": apiKey,

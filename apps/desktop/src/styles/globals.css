@@ -711,6 +711,14 @@ body {
   }
 }
 
+/* Fix 8.3: generic loading spinner used by the Start button and other
+   pre-vault-hydration affordances. */
+@keyframes sc-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .bidding-bar {
   animation: fillBar 0.5s ease-out;
 }

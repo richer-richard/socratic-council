@@ -110,20 +110,36 @@ function mentionsAgent(content: string, agentId: AgentId): boolean {
 }
 
 /**
- * Check if a message contains a direct question
+ * Check if a message contains a direct question to a specific target agent.
+ *
+ * Fix 5.5: tightened from "any '?' anywhere" to "agent name on the same line
+ * as a question token". The previous predicate fired on every parenthetical
+ * "?" or rhetorical aside, distorting bidding via spurious priority-90 debts.
  */
-function containsDirectQuestion(content: string): boolean {
-  // Check for question marks and question-like patterns
-  return (
-    content.includes("?") ||
-    /\b(what|how|why|when|where|who|which|would|could|should|do you|does|is it|are you)\b/i.test(
-      content,
-    )
-  );
+function containsDirectQuestion(content: string, targetAgent: AgentId): boolean {
+  const name = AGENT_NAMES[targetAgent];
+  if (!name) return false;
+  // Must mention the agent.
+  const nameRe = new RegExp(`\\b${name}\\b`, "i");
+  if (!nameRe.test(content)) return false;
+  // And the same line should look like a direct question — either a vocative
+  // address ("George, what about ...") or a wh-/aux question pattern within
+  // ~120 chars of the name.
+  const lines = content.split(/\r?\n/);
+  const QUESTION = /\b(what|how|why|when|where|who|which|would|could|should|do you|does|is it|are you|isn't|aren't|won't|can you)\b/i;
+  for (const line of lines) {
+    if (!nameRe.test(line)) continue;
+    if (line.includes("?")) return true;
+    if (QUESTION.test(line)) return true;
+    // Vocative form: "George, ..." or "George:" at start of line.
+    if (new RegExp(`^\\s*${name}\\s*[,:-]`, "i").test(line)) return true;
+  }
+  return false;
 }
 
 /**
- * Check if a message challenges another agent
+ * Check if a message challenges another agent. Fix 5.8: broadened to catch
+ * common natural-language pushback that the old narrow regex set missed.
  */
 function containsChallenge(content: string, targetAgent: AgentId): boolean {
   const name = AGENT_NAMES[targetAgent];
@@ -131,9 +147,16 @@ function containsChallenge(content: string, targetAgent: AgentId): boolean {
 
   const challengePatterns = [
     new RegExp(`disagree\\s+with\\s+${name}`, "i"),
-    new RegExp(`${name}['s]*\\s+(argument|point|claim).*(?:weak|wrong|flawed)`, "i"),
+    new RegExp(`${name}['s]*\\s+(argument|point|claim).*(?:weak|wrong|flawed|mistaken|misguided)`, "i"),
     new RegExp(`challenge\\s+${name}`, "i"),
-    new RegExp(`${name}.*mistaken`, "i"),
+    new RegExp(`${name}.*\\b(?:mistaken|wrong|flawed|misguided|missed)\\b`, "i"),
+    // "you're wrong, X" / "X, you're wrong" / "no, X, ..."
+    new RegExp(`\\byou(?:'re| are)\\s+(?:wrong|mistaken|missing)\\b.*\\b${name}\\b`, "i"),
+    new RegExp(`\\b${name}\\b.*\\byou(?:'re| are)\\s+(?:wrong|mistaken|missing)\\b`, "i"),
+    new RegExp(`^\\s*no[,.]?\\s*${name}\\b`, "im"),
+    // "X is wrong about Y" / "X has it backwards"
+    new RegExp(`\\b${name}\\b\\s+(?:is|was)\\s+(?:wrong|mistaken)`, "i"),
+    new RegExp(`\\b${name}\\b\\s+(?:has|got)\\s+(?:it|that)\\s+backwards`, "i"),
   ];
 
   return challengePatterns.some((pattern) => pattern.test(content));
@@ -232,9 +255,48 @@ export class ConversationMemoryManager {
       this.agentMentions[message.agentId as AgentId]++;
     }
 
+    // Fix 5.3: when an agent speaks AT ALL, clear debts they owe to anyone
+    // they mention by name in this message. Previously the only clearing
+    // path was `recordQuote` (i.e. requiring a literal @quote token), so a
+    // verbal response carried a debt forward indefinitely.
+    if (
+      message.agentId !== "system" &&
+      message.agentId !== "user" &&
+      message.agentId !== "tool"
+    ) {
+      const speaker = message.agentId as AgentId;
+      const remaining: EngagementDebt[] = [];
+      for (const debt of this.engagementDebts) {
+        if (
+          debt.debtor === speaker &&
+          mentionsAgent(message.content, debt.creditor)
+        ) {
+          continue; // resolved by this verbal response
+        }
+        remaining.push(debt);
+      }
+      this.engagementDebts = remaining;
+    }
+
     // Update engagement debts
     if (this.config.trackEngagementDebt) {
       this.updateEngagementDebts(enhancedMessage);
+    }
+
+    // Fix 5.6: cap the debt list and apply mild priority decay so old
+    // entries age out instead of accumulating forever across long sessions.
+    if (this.engagementDebts.length > 0) {
+      // Decay by 1 priority per added message — generous enough that a
+      // direct-question debt (priority 90) survives ~50 messages, but
+      // a stale "mentioned by name" (priority 60) fades within ~40.
+      this.engagementDebts = this.engagementDebts
+        .map((d) => ({ ...d, priority: Math.max(0, d.priority - 1) }))
+        .filter((d) => d.priority > 0);
+      if (this.engagementDebts.length > 64) {
+        this.engagementDebts = this.engagementDebts
+          .sort((a, b) => b.priority - a.priority)
+          .slice(0, 64);
+      }
     }
   }
 
@@ -297,7 +359,7 @@ export class ConversationMemoryManager {
       let priority = 50;
 
       if (mentionsAgent(message.content, targetAgent)) {
-        if (containsDirectQuestion(message.content)) {
+        if (containsDirectQuestion(message.content, targetAgent)) {
           debtReason = "direct_question";
           priority = 90;
         } else if (containsChallenge(message.content, targetAgent)) {
@@ -387,40 +449,76 @@ export class ConversationMemoryManager {
       return recentMessages;
     }
 
-    // Score older messages by relevance to current agent
-    const scoredOlder = olderMessages.map((msg) => {
-      let score = 0;
-
-      // Boost messages that mention this agent
-      if (this.config.prioritizeAgentMentions && mentionsAgent(msg.content, currentAgent)) {
-        score += 50;
+    // Fix 5.7: reserve at least one slot per other council agent that has
+    // no recent presence in `recentMessages`. This prevents the prompt from
+    // referring to "George said" when George has been silent for the last
+    // 14 messages (and isn't in the visible window).
+    const reservedMessages: MessageWithContext[] = [];
+    const reservedSet = new Set<string>();
+    const recentSpeakers = new Set(recentMessages.map((m) => m.agentId));
+    const allCouncilIds: AgentId[] = [
+      "george",
+      "cathy",
+      "grace",
+      "douglas",
+      "kate",
+      "quinn",
+      "mary",
+      "zara",
+    ];
+    for (const id of allCouncilIds) {
+      if (id === currentAgent) continue;
+      if (recentSpeakers.has(id)) continue;
+      // Find the LATEST older message from this agent.
+      for (let i = olderMessages.length - 1; i >= 0; i -= 1) {
+        const m = olderMessages[i]!;
+        if (m.agentId === id) {
+          reservedMessages.push(m);
+          reservedSet.add(m.id);
+          break;
+        }
       }
+      // Don't blow the priority budget; reserve up to half of the slots.
+      if (reservedMessages.length >= Math.floor(priorityCount / 2)) break;
+    }
 
-      // Boost messages from agents this agent hasn't responded to
-      const hasResponseFromAgent = recentMessages.some(
-        (m) => m.agentId === currentAgent && m.quotedBy.includes(msg.agentId as AgentId),
-      );
-      if (
-        !hasResponseFromAgent &&
-        msg.agentId !== "system" &&
-        msg.agentId !== "user" &&
-        msg.agentId !== "tool"
-      ) {
-        score += 30;
-      }
+    // Score older messages by relevance to current agent (skip already-reserved).
+    const scoredOlder = olderMessages
+      .filter((m) => !reservedSet.has(m.id))
+      .map((msg) => {
+        let score = 0;
 
-      // Boost highly engaged messages
-      score += msg.engagementScore * 0.3;
+        // Boost messages that mention this agent
+        if (this.config.prioritizeAgentMentions && mentionsAgent(msg.content, currentAgent)) {
+          score += 50;
+        }
 
-      return { message: msg, score };
-    });
+        // Boost messages from agents this agent hasn't responded to
+        const hasResponseFromAgent = recentMessages.some(
+          (m) => m.agentId === currentAgent && m.quotedBy.includes(msg.agentId as AgentId),
+        );
+        if (
+          !hasResponseFromAgent &&
+          msg.agentId !== "system" &&
+          msg.agentId !== "user" &&
+          msg.agentId !== "tool"
+        ) {
+          score += 30;
+        }
 
-    // Sort by score and take top priority messages
+        // Boost highly engaged messages
+        score += msg.engagementScore * 0.3;
+
+        return { message: msg, score };
+      });
+
+    // Sort by score and take remaining priority slots after reservation.
+    const remainingBudget = Math.max(0, priorityCount - reservedMessages.length);
     scoredOlder.sort((a, b) => b.score - a.score);
-    const priorityMessages = scoredOlder.slice(0, priorityCount).map((s) => s.message);
+    const scoredPicks = scoredOlder.slice(0, remainingBudget).map((s) => s.message);
 
     // Combine and sort by timestamp
-    const combined = [...priorityMessages, ...recentMessages];
+    const combined = [...reservedMessages, ...scoredPicks, ...recentMessages];
     combined.sort((a, b) => a.timestamp - b.timestamp);
 
     return combined;
@@ -444,8 +542,13 @@ export class ConversationMemoryManager {
       return this.sessionSummary;
     }
 
+    // Fix 5.4: language-neutral placeholder. The previous English-only
+    // sentence leaked into non-English debates' prompts (Chinese, Japanese,
+    // Arabic, …) and broke the language-matching cue. The proper long-term
+    // fix is wiring `summarizeOlderMessages` (5.1a); until then a minimal
+    // count is the safest hint.
     const excludedCount = this.messages.length - this.config.windowSize;
-    return `[${excludedCount} earlier messages summarized: Discussion has covered various perspectives on the topic, with contributions from multiple council members.]`;
+    return `[${excludedCount} earlier messages omitted from this window.]`;
   }
 
   /**

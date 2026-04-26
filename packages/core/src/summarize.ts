@@ -63,17 +63,20 @@ Rules:
 - Prefer specificity over generality.`;
 
 /**
- * Predicate: a message is eligible for summarization. Council agents +
- * moderator-role system messages pass; user injections pass; everything else
- * (tool results, error placeholders, private observer notes) is skipped.
+ * Predicate: a message is eligible for summarization.
+ *
+ * Fix 5.14: dropped user-role messages from the summarization input. The
+ * previous policy included them, so any private instructions in the user's
+ * topic — which can be quite specific — would re-leak into the summarized
+ * "earlier context" the agents see. The system topic is already part of
+ * the prompt the summarizer reads, so user content isn't lost; we just
+ * don't replay it through a second LLM hop.
  */
 export function isSummarizable(msg: Message): boolean {
   if (!msg.content || msg.content.trim().length === 0) return false;
-  // Private observer notes are rendered as `system`-agentId messages with
-  // a `displayName` of the form `{observer} → {partner}`. The pattern we
-  // filter on is that the content doesn't carry private advisor material.
-  // Callers should also upstream-filter before passing messages here.
-  return msg.agentId !== "tool";
+  if (msg.agentId === "tool") return false;
+  if (msg.agentId === "user") return false;
+  return true;
 }
 
 /** Build the user-role prompt that feeds the summarizer. */

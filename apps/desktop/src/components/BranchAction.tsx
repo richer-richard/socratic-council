@@ -24,11 +24,11 @@ export interface BranchActionProps {
 export function BranchAction({ session, messageId, onBranched, disabled }: BranchActionProps) {
   const [busy, setBusy] = useState(false);
 
-  const handleClick = () => {
+  const handleClick = async () => {
     if (busy || disabled) return;
     setBusy(true);
     try {
-      const branch = branchDiscussionSession(session, messageId);
+      const branch = await branchDiscussionSession(session, messageId);
       onBranched(branch);
     } catch (error) {
       console.error("[BranchAction] failed:", error);

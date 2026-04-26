@@ -147,19 +147,20 @@ export async function factCheckMessage(
   const claims = parseClaims(raw, opts.maxClaims);
   if (claims.length === 0) return [];
 
-  const badges: VerificationBadge[] = [];
-  for (const claim of claims) {
-    const oracleResult = await oracle.verify(claim);
+  // Fix 5.12: verify all claims in parallel. With maxClaims=5 and a
+  // 1-2s oracle this is 5x faster on the same call budget.
+  const oracleResults = await Promise.all(claims.map((c) => oracle.verify(c)));
+  const badges: VerificationBadge[] = claims.map((claim, idx) => {
+    const oracleResult = oracleResults[idx];
     if (!oracleResult) {
-      badges.push({ claim, verdict: "unverified", confidence: 0 });
-      continue;
+      return { claim, verdict: "unverified", confidence: 0 };
     }
-    badges.push({
+    return {
       claim,
       verdict: verdictFromOracle(oracleResult.verdict, oracleResult.confidence, opts.warnBelow),
       confidence: Math.max(0, Math.min(1, oracleResult.confidence)),
       ...(oracleResult.evidence ? { evidence: oracleResult.evidence } : {}),
-    });
-  }
+    };
+  });
   return badges;
 }

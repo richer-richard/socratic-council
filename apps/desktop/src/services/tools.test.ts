@@ -16,7 +16,7 @@ vi.mock("./api", () => ({
 }));
 
 vi.mock("../stores/config", () => ({
-  loadConfig: () => ({
+  getStoreConfig: () => ({
     proxy: { type: "none" },
   }),
 }));

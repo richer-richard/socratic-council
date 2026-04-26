@@ -16,7 +16,11 @@ use crate::redact::redact_urls_in;
 
 const MAX_RESPONSE_BYTES: usize = 8 * 1024 * 1024;
 const MAX_ERROR_BODY_BYTES: usize = 64 * 1024;
-const MAX_STREAM_BYTES: usize = 16 * 1024 * 1024;
+// Fix 7.3: bumped from 16 MiB → 64 MiB. Long-form structured outputs
+// (Deep Research reports, large tool-call iterations) can plausibly cross
+// the original cap and the only visible failure mode is "stream killed
+// mid-response" with the agent's reply lost.
+const MAX_STREAM_BYTES: usize = 64 * 1024 * 1024;
 
 #[derive(Default)]
 pub struct RequestRegistry {
@@ -218,9 +222,19 @@ fn build_client(proxy_config: Option<&ProxyConfig>, timeout_ms: u64) -> Result<C
         .map_err(|e| format!("Failed to build HTTP client: {}", e))
 }
 
-/// Make a non-streaming HTTP request
+/// Make a non-streaming HTTP request.
+///
+/// Fix 4.8 / 7.7: when `config.request_id` is supplied the request can be
+/// aborted via `http_cancel` (the same registry the streaming variant
+/// uses). JS-side timeouts that race the underlying `reqwest::send` no
+/// longer leak HTTP connections to providers that take their time
+/// responding — the JS caller can call `http_cancel(request_id)` in its
+/// timeout handler to actually abort.
 #[tauri::command]
-pub async fn http_request(config: HttpRequestConfig) -> Result<HttpResponse, String> {
+pub async fn http_request(
+    registry: State<'_, RequestRegistry>,
+    config: HttpRequestConfig,
+) -> Result<HttpResponse, String> {
     // Defensive validation — same contract as the rest of the IPC surface,
     // applied before we make any network call.
     validate_outbound_url(&config.url)?;
@@ -249,25 +263,50 @@ pub async fn http_request(config: HttpRequestConfig) -> Result<HttpResponse, Str
         request = request.body(body);
     }
 
-    // Send request (error strings pass through the same redaction helper).
-    let response = request.send().await.map_err(format_request_error)?;
+    // If the caller supplied a request_id, register it so http_cancel can
+    // race the request to a clean abort.
+    let request_id = config.request_id.clone();
+    let cancel_rx = match request_id.as_deref() {
+        Some(id) if !id.is_empty() => Some(registry.register(id).await),
+        _ => None,
+    };
 
-    let status = response.status().as_u16();
-    let mut headers = HashMap::new();
-    for (key, value) in response.headers() {
-        if let Ok(v) = value.to_str() {
-            headers.insert(key.to_string(), v.to_string());
+    let result: Result<HttpResponse, String> = async {
+        let response = if let Some(mut rx) = cancel_rx {
+            tokio::select! {
+                _ = rx.changed() => return Err("Request aborted".to_string()),
+                response = request.send() => response.map_err(format_request_error)?,
+            }
+        } else {
+            request.send().await.map_err(format_request_error)?
+        };
+
+        let status = response.status().as_u16();
+        let mut headers = HashMap::new();
+        for (key, value) in response.headers() {
+            if let Ok(v) = value.to_str() {
+                headers.insert(key.to_string(), v.to_string());
+            }
+        }
+
+        let body = read_response_text_limited(response, MAX_RESPONSE_BYTES).await?;
+
+        Ok(HttpResponse {
+            status,
+            headers,
+            body,
+            error: None,
+        })
+    }
+    .await;
+
+    if let Some(id) = request_id.as_deref() {
+        if !id.is_empty() {
+            registry.unregister(id).await;
         }
     }
 
-    let body = read_response_text_limited(response, MAX_RESPONSE_BYTES).await?;
-
-    Ok(HttpResponse {
-        status,
-        headers,
-        body,
-        error: None,
-    })
+    result
 }
 
 /// Make a streaming HTTP request - emits chunks via events

@@ -332,7 +332,9 @@ export class AnthropicProvider implements BaseProvider {
             parser.flush();
             resolve();
           },
-          onError: (error) => reject(new Error(`${error.code}: ${error.message}`)),
+          // Fix 6.1: forward the typed TransportFailure so api.ts can
+          // classify abort/timeout via .code (see fix 4.1).
+          onError: (error) => reject(error),
         },
       );
     });
@@ -353,14 +355,16 @@ export class AnthropicProvider implements BaseProvider {
     };
   }
 
-  async testConnection(): Promise<boolean> {
+  async testConnection(model?: string): Promise<boolean> {
     try {
       const { status } = await this.transport.request({
         url: this.endpoint,
         method: "POST",
         headers: createHeaders("anthropic", this.apiKey),
         body: JSON.stringify({
-          model: "claude-haiku-4-5-20251001",
+          // Fix 6.2: prefer the caller's pinned model (typically LOCKED_MODELS).
+          // Fall back to Haiku so the test still works when no model is supplied.
+          model: model ?? "claude-haiku-4-5-20251001",
           messages: [{ role: "user", content: "Say 'ok'" }],
           max_tokens: 10,
         }),

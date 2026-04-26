@@ -265,7 +265,9 @@ export class GoogleProvider implements BaseProvider {
             parser.flush();
             resolve();
           },
-          onError: (error) => reject(new Error(`${error.code}: ${error.message}`)),
+          // Fix 6.1: forward the typed TransportFailure so api.ts can
+          // classify abort/timeout via .code (see fix 4.1).
+          onError: (error) => reject(error),
         },
       );
     });
@@ -306,10 +308,11 @@ export class GoogleProvider implements BaseProvider {
   /**
    * Test the connection to Google API
    */
-  async testConnection(): Promise<boolean> {
+  async testConnection(model?: string): Promise<boolean> {
     try {
-      // Use a simple request to test the API key
-      const url = `${this.baseUrl}/gemini-2.0-flash-lite:generateContent`;
+      // Fix 6.2: prefer the caller's model (typically LOCKED_MODELS[google]).
+      // Fall back to a known-stable lite model for the smoke test.
+      const url = `${this.baseUrl}/${model ?? "gemini-2.0-flash-lite"}:generateContent`;
       const { status } = await this.transport.request({
         url,
         method: "POST",

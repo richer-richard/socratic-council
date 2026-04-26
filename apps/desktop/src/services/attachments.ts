@@ -6,15 +6,70 @@ import { decryptBytes, encryptBytes, isVaultReady } from "./vault";
 const ENCRYPTED_BLOB_MIME = "application/x-socratic-council-encrypted";
 
 /**
+ * Hard ceiling on a single attachment's size. The encrypt/decrypt pipeline
+ * reads the entire blob into memory (XChaCha20-Poly1305 is one-shot, no
+ * streaming variant), so very large files OOM the renderer (fix 2.7).
+ *
+ * 100 MiB covers typical PDFs, screenshots, code dumps, and even large
+ * scanned-book PDFs while keeping the JS heap allocation bounded. Larger
+ * files should be split up by the user or handled out-of-band.
+ */
+export const MAX_ATTACHMENT_BYTES = 100 * 1024 * 1024;
+
+/** Thrown when a decrypt-with-vault attempt fails. Lets callers distinguish
+ * "blob legitimately missing" from "couldn't decrypt with the current DEK"
+ * so the UI can surface a wrong-DEK warning instead of empty thumbnails
+ * (fix 2.2). */
+export class AttachmentDecryptError extends Error {
+  readonly id: string;
+
+  constructor(id: string, cause: unknown) {
+    super(`attachments: failed to decrypt blob for "${id}"`);
+    this.name = "AttachmentDecryptError";
+    this.id = id;
+    if (cause instanceof Error) {
+      this.cause = cause;
+    }
+  }
+}
+
+/** Thrown when an attachment exceeds MAX_ATTACHMENT_BYTES (fix 2.7). */
+export class AttachmentTooLargeError extends Error {
+  readonly name_: string;
+  readonly size: number;
+  readonly limit: number;
+
+  constructor(name: string, size: number) {
+    super(
+      `Attachment "${name}" is ${formatBytes(size)} which exceeds the ${formatBytes(
+        MAX_ATTACHMENT_BYTES,
+      )} limit. Split the file or compress it before attaching.`,
+    );
+    this.name = "AttachmentTooLargeError";
+    this.name_ = name;
+    this.size = size;
+    this.limit = MAX_ATTACHMENT_BYTES;
+  }
+}
+
+/**
  * Encrypt an attachment Blob's bytes for at-rest storage. Returns the Blob
  * plus the original MIME type so it can be restored on load. No-op when the
  * vault isn't ready (pre-init window or non-Tauri env): returns the original
  * Blob unchanged so attachments aren't lost.
+ *
+ * Throws `AttachmentTooLargeError` (fix 2.7) when the blob exceeds the
+ * `MAX_ATTACHMENT_BYTES` ceiling so the caller can surface the failure
+ * without OOM-ing the renderer.
  */
 async function encryptAttachmentBlob(
   blob: Blob,
+  attachmentName = "(unknown)",
 ): Promise<{ blob: Blob; encrypted: boolean; originalMimeType: string }> {
   const originalMimeType = blob.type || "application/octet-stream";
+  if (blob.size > MAX_ATTACHMENT_BYTES) {
+    throw new AttachmentTooLargeError(attachmentName, blob.size);
+  }
   if (!isVaultReady()) {
     return { blob, encrypted: false, originalMimeType };
   }
@@ -33,8 +88,13 @@ async function encryptAttachmentBlob(
 /**
  * Reverse `encryptAttachmentBlob`. If the record isn't marked encrypted, the
  * blob is returned unchanged (legacy plaintext or vault-unavailable case).
+ *
+ * Throws `AttachmentDecryptError` on cipher failure rather than returning an
+ * empty blob (fix 2.2). Callers that previously relied on the silent
+ * empty-blob behavior must catch the error and decide how to surface it.
  */
 async function decryptAttachmentBlob(record: {
+  id: string;
   blob: Blob;
   encrypted?: boolean;
   originalMimeType?: string;
@@ -47,16 +107,21 @@ async function decryptAttachmentBlob(record: {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     return new Blob([plaintext as any], { type: mime });
   } catch (error) {
-    console.error("[attachments] Failed to decrypt blob; returning empty:", error);
-    return new Blob([], { type: record.originalMimeType || "application/octet-stream" });
+    throw new AttachmentDecryptError(record.id, error);
   }
 }
 
 const ATTACHMENT_DB_NAME = "socratic-council-attachments-v1";
-const ATTACHMENT_DB_VERSION = 2;
+// Schema v3 (fix 2.1): adds `sessionIds: string[]` and `projectIds: string[]`
+// fields plus matching multi-entry indexes so a single attachment record can
+// be owned by multiple sessions (e.g. a session and its branches). Older
+// records get migrated by `onupgradeneeded` so existing data keeps working.
+const ATTACHMENT_DB_VERSION = 3;
 const ATTACHMENT_STORE = "session-attachments";
 const ATTACHMENT_BY_SESSION_INDEX = "by-session-id";
 const ATTACHMENT_BY_PROJECT_INDEX = "by-project-id";
+const ATTACHMENT_BY_SESSION_IDS_INDEX = "by-session-ids";
+const ATTACHMENT_BY_PROJECT_IDS_INDEX = "by-project-ids";
 
 const IMAGE_MAX_DIMENSION = 1440;
 const IMAGE_TARGET_BYTES = 1_800_000;
@@ -151,10 +216,11 @@ const RAW_IMAGE_MODEL_SUPPORT: Partial<Record<Provider, string[]>> = {
   ],
 };
 
-const RAW_PDF_MODEL_SUPPORT: Partial<Record<Provider, string[]>> = {
-  openai: [],
-  google: [],
-};
+// Fix 2.18: the previous RAW_PDF_MODEL_SUPPORT constant had empty arrays
+// for every provider. The transport layer always falls back to the
+// extracted-text path (see `getAttachmentTransportMode` below), so the
+// constant was effectively dead-by-default. Removed to avoid misleading
+// future readers.
 
 export type AttachmentSource = "file-picker" | "photo-picker" | "camera";
 export type AttachmentKind = "image" | "pdf" | "text" | "binary";
@@ -188,7 +254,20 @@ export interface ComposerAttachment extends SessionAttachment {
 
 interface StoredAttachmentBlob {
   id: string;
-  sessionId: string;
+  /**
+   * Session ids that own / reference this blob. A blob is only deleted
+   * when this list becomes empty, so a session and its branches can share
+   * a single record (fix 2.1). The legacy scalar `sessionId` field is
+   * kept for back-compat — readers should fall back to it when the array
+   * is missing, and writers should set it to `sessionIds[0]` so the v2
+   * index keeps working during a partial migration.
+   */
+  sessionIds?: string[];
+  /** @deprecated kept for backwards compatibility with v2 records. */
+  sessionId?: string;
+  /** Same multi-owner pattern for project-attached blobs. */
+  projectIds?: string[];
+  /** @deprecated kept for backwards compatibility with v2 records. */
   projectId?: string;
   blob: Blob;
   searchEntries?: AttachmentSearchEntry[];
@@ -196,6 +275,42 @@ interface StoredAttachmentBlob {
   encrypted?: boolean;
   /** Original MIME type — restored into the decrypted Blob at read time. */
   originalMimeType?: string;
+}
+
+function readSessionIds(record: StoredAttachmentBlob): string[] {
+  if (Array.isArray(record.sessionIds)) {
+    return record.sessionIds.filter((id): id is string => typeof id === "string" && id.length > 0);
+  }
+  return record.sessionId ? [record.sessionId] : [];
+}
+
+function readProjectIds(record: StoredAttachmentBlob): string[] {
+  if (Array.isArray(record.projectIds)) {
+    return record.projectIds.filter((id): id is string => typeof id === "string" && id.length > 0);
+  }
+  return record.projectId ? [record.projectId] : [];
+}
+
+function withSessionIds(
+  record: StoredAttachmentBlob,
+  sessionIds: string[],
+): StoredAttachmentBlob {
+  return {
+    ...record,
+    sessionIds,
+    sessionId: sessionIds[0] ?? "",
+  };
+}
+
+function withProjectIds(
+  record: StoredAttachmentBlob,
+  projectIds: string[],
+): StoredAttachmentBlob {
+  return {
+    ...record,
+    projectIds,
+    projectId: projectIds[0],
+  };
 }
 
 export interface LoadedAttachmentBlob {
@@ -218,11 +333,33 @@ export interface ProviderAttachmentSupport {
 
 interface OcrWorker {
   recognize(image: Blob): Promise<{ data: { text: string } }>;
+  terminate?(): Promise<unknown>;
 }
 
 let ocrWorkerPromise: Promise<OcrWorker> | null = null;
 let pdfJsPromise: Promise<unknown> | null = null;
 let mammothPromise: Promise<unknown> | null = null;
+
+// Fix 2.2 surface: bumped whenever decryptAttachmentBlob throws so the UI
+// (DiagnosticsPanel, vault-recovery banner) can detect a wrong-DEK
+// situation without each caller threading per-call status flags. Mirrors
+// `vault.getDecryptFailureCount` for IndexedDB-stored binaries.
+let attachmentDecryptFailureCount = 0;
+
+/**
+ * Number of attachment-blob decrypt failures since boot. Combined with
+ * `vault.getDecryptFailureCount()`, a non-zero value is a strong signal
+ * that the user's encrypted data is incompatible with the current DEK
+ * (e.g. after a quarantine recovery boot).
+ */
+export function getAttachmentDecryptFailureCount(): number {
+  return attachmentDecryptFailureCount;
+}
+
+/** Test-only reset hook. */
+export function __resetAttachmentDecryptFailureCountForTests(): void {
+  attachmentDecryptFailureCount = 0;
+}
 
 function createAttachmentId(): string {
   return `att_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
@@ -459,11 +596,56 @@ function buildCompactedAttachmentBlob(
   });
 }
 
+/**
+ * Tesseract languages loaded by default. Fix 2.4: the previous "eng"-only
+ * worker silently produced mojibake on non-Latin attachments and broke the
+ * advertised multilingual support. Tesseract.js downloads each language
+ * model on demand the first time it sees one, so the cost is only paid
+ * for users who actually upload non-English content.
+ *
+ * Languages picked to cover the script families documented in Chat.tsx's
+ * MULTILINGUAL_STYLE_GUIDE: Latin (eng), Chinese (chi_sim/chi_tra),
+ * Japanese (jpn), Korean (kor), Arabic (ara), Cyrillic (rus), Devanagari
+ * (hin), Hebrew (heb). Adding more languages slows worker init slightly
+ * but each is a one-time download.
+ */
+const TESSERACT_LANGS = "eng+chi_sim+chi_tra+jpn+kor+ara+rus+hin+heb";
+
 async function getOcrWorker(): Promise<OcrWorker> {
-  if (!ocrWorkerPromise) {
-    ocrWorkerPromise = import("tesseract.js").then(({ createWorker }) => createWorker("eng"));
+  let promise = ocrWorkerPromise;
+  if (!promise) {
+    // Fix 2.14: clear the cached promise on failure so a transient bundle
+    // load error doesn't permanently disable OCR until app restart.
+    promise = import("tesseract.js").then(({ createWorker }) =>
+      createWorker(TESSERACT_LANGS) as unknown as OcrWorker,
+    );
+    ocrWorkerPromise = promise;
+    const tracked = promise;
+    tracked.catch(() => {
+      if (ocrWorkerPromise === tracked) {
+        ocrWorkerPromise = null;
+      }
+    });
   }
-  return ocrWorkerPromise;
+  return promise;
+}
+
+/**
+ * Tear down the OCR worker (fix 2.13). Called from the chat unmount path
+ * so a long-running app session doesn't accumulate leaked WASM runtimes.
+ * Safe to call repeatedly; if the worker hasn't been initialized this is
+ * a no-op.
+ */
+export async function terminateOcrWorker(): Promise<void> {
+  const promise = ocrWorkerPromise;
+  if (!promise) return;
+  ocrWorkerPromise = null;
+  try {
+    const worker = await promise;
+    await worker.terminate?.();
+  } catch (error) {
+    console.warn("[attachments] OCR worker terminate failed", error);
+  }
 }
 
 async function recognizeImageText(file: Blob): Promise<string> {
@@ -474,7 +656,7 @@ async function recognizeImageText(file: Blob): Promise<string> {
 
 async function getPdfJs() {
   if (!pdfJsPromise) {
-    pdfJsPromise = import("pdfjs-dist/legacy/build/pdf.mjs").then((module) => {
+    const promise = import("pdfjs-dist/legacy/build/pdf.mjs").then((module) => {
       const workerConfig = module as {
         GlobalWorkerOptions?: {
           workerSrc?: string;
@@ -486,6 +668,14 @@ async function getPdfJs() {
       }
 
       return module;
+    });
+    pdfJsPromise = promise;
+    // Fix 2.14: clear the cached promise on failure so subsequent attachments
+    // can retry the dynamic import instead of hitting a stuck rejected promise.
+    promise.catch(() => {
+      if (pdfJsPromise === promise) {
+        pdfJsPromise = null;
+      }
     });
   }
   return pdfJsPromise as Promise<{
@@ -514,7 +704,14 @@ async function getPdfJs() {
 
 async function getMammoth() {
   if (!mammothPromise) {
-    mammothPromise = import("mammoth");
+    const promise = import("mammoth");
+    mammothPromise = promise;
+    // Fix 2.14: clear cached rejected promise so retries work.
+    promise.catch(() => {
+      if (mammothPromise === promise) {
+        mammothPromise = null;
+      }
+    });
   }
   return mammothPromise as Promise<{
     extractRawText: (input: { arrayBuffer: ArrayBuffer }) => Promise<{ value: string }>;
@@ -644,6 +841,8 @@ async function extractPdfSearchEntries(file: Blob): Promise<AttachmentSearchEntr
     const entries: AttachmentSearchEntry[] = [];
     let totalChars = 0;
     let ocrPages = 0;
+    let ocrEligiblePages = 0;
+    const totalPages = pdf.numPages;
 
     for (
       let pageNumber = 1;
@@ -655,20 +854,23 @@ async function extractPdfSearchEntries(file: Blob): Promise<AttachmentSearchEntr
       const rawText = textContent.items.map((item) => item.str ?? "").join(" ");
       let text = normalizeSearchText(rawText);
 
-      if (text.length < PDF_MIN_TEXT_CHARS_FOR_SKIP_OCR && ocrPages < PDF_OCR_PAGE_LIMIT) {
-        try {
-          const pageBlob = await renderPdfPageToBlob(page);
-          if (pageBlob) {
-            const ocrText = await recognizeImageText(pageBlob);
-            if (ocrText.length > text.length) {
-              text = normalizeSearchText(ocrText);
+      if (text.length < PDF_MIN_TEXT_CHARS_FOR_SKIP_OCR) {
+        ocrEligiblePages += 1;
+        if (ocrPages < PDF_OCR_PAGE_LIMIT) {
+          try {
+            const pageBlob = await renderPdfPageToBlob(page);
+            if (pageBlob) {
+              const ocrText = await recognizeImageText(pageBlob);
+              if (ocrText.length > text.length) {
+                text = normalizeSearchText(ocrText);
+              }
+              if (ocrText) {
+                ocrPages += 1;
+              }
             }
-            if (ocrText) {
-              ocrPages += 1;
-            }
+          } catch {
+            // Ignore page OCR failures; page text fallback is still usable.
           }
-        } catch {
-          // Ignore page OCR failures; page text fallback is still usable.
         }
       }
 
@@ -682,6 +884,19 @@ async function extractPdfSearchEntries(file: Blob): Promise<AttachmentSearchEntr
         });
         totalChars += entry.text.length;
       }
+    }
+
+    // Fix 2.9: surface OCR coverage so the user (and downstream prompts)
+    // know when the cap was hit. We prepend a summary entry with the
+    // counts; agents looking through search results will see it as a
+    // first-class indexed entry.
+    if (ocrEligiblePages > 0) {
+      const skipped = Math.max(0, ocrEligiblePages - ocrPages);
+      const summary =
+        skipped > 0
+          ? `OCR coverage: ${ocrPages} of ${ocrEligiblePages} image-only pages processed (skipped ${skipped} due to ${PDF_OCR_PAGE_LIMIT}-page cap). PDF has ${totalPages} pages total.`
+          : `OCR coverage: ${ocrPages} of ${totalPages} pages processed via OCR; the rest had directly-extractable text.`;
+      entries.unshift({ label: "OCR summary", text: summary });
     }
 
     return entries;
@@ -876,6 +1091,13 @@ async function buildComposerAttachment(
   file: File,
   source: AttachmentSource,
 ): Promise<ComposerAttachment> {
+  // Reject oversize files before doing any expensive processing
+  // (image bitmap, OCR, PDF parsing). Same cap as encryptAttachmentBlob —
+  // see fix 2.7 / fix 8.4.
+  if (file.size > MAX_ATTACHMENT_BYTES) {
+    throw new AttachmentTooLargeError(file.name, file.size);
+  }
+
   const addedAt = Date.now();
   const kind = detectAttachmentKind(file, file.name);
   const id = createAttachmentId();
@@ -932,17 +1154,70 @@ function openAttachmentDb(): Promise<IDBDatabase> {
     const request = window.indexedDB.open(ATTACHMENT_DB_NAME, ATTACHMENT_DB_VERSION);
     request.onerror = () =>
       reject(request.error ?? new Error("Failed to open attachment database"));
-    request.onupgradeneeded = () => {
+    request.onupgradeneeded = (event) => {
       const db = request.result;
       const store = db.objectStoreNames.contains(ATTACHMENT_STORE)
         ? request.transaction?.objectStore(ATTACHMENT_STORE)
         : db.createObjectStore(ATTACHMENT_STORE, { keyPath: "id" });
 
-      if (store && !store.indexNames.contains(ATTACHMENT_BY_SESSION_INDEX)) {
+      if (!store) return;
+
+      if (!store.indexNames.contains(ATTACHMENT_BY_SESSION_INDEX)) {
         store.createIndex(ATTACHMENT_BY_SESSION_INDEX, "sessionId", { unique: false });
       }
-      if (store && !store.indexNames.contains(ATTACHMENT_BY_PROJECT_INDEX)) {
+      if (!store.indexNames.contains(ATTACHMENT_BY_PROJECT_INDEX)) {
         store.createIndex(ATTACHMENT_BY_PROJECT_INDEX, "projectId", { unique: false });
+      }
+
+      // v3 migration: add multi-entry indexes for sessionIds / projectIds
+      // and backfill those fields from the legacy scalar columns. Existing
+      // v2 records are walked once and rewritten with the new fields.
+      const oldVersion = (event as IDBVersionChangeEvent).oldVersion ?? 0;
+      if (oldVersion < 3) {
+        if (!store.indexNames.contains(ATTACHMENT_BY_SESSION_IDS_INDEX)) {
+          store.createIndex(ATTACHMENT_BY_SESSION_IDS_INDEX, "sessionIds", {
+            unique: false,
+            multiEntry: true,
+          });
+        }
+        if (!store.indexNames.contains(ATTACHMENT_BY_PROJECT_IDS_INDEX)) {
+          store.createIndex(ATTACHMENT_BY_PROJECT_IDS_INDEX, "projectIds", {
+            unique: false,
+            multiEntry: true,
+          });
+        }
+
+        // Backfill: walk every existing record. The cursor walk runs inside
+        // the upgrade transaction, so writes are atomic with the schema
+        // change. Guard with `typeof openCursor === "function"` so test
+        // doubles that don't implement the method don't crash the open;
+        // they'll naturally be skipped because they have no v2 records.
+        if (typeof (store as { openCursor?: unknown }).openCursor === "function") {
+          const cursorRequest = store.openCursor();
+          cursorRequest.onsuccess = () => {
+            const cursor = cursorRequest.result;
+            if (!cursor) return;
+            const record = cursor.value as StoredAttachmentBlob;
+            const sessionIds =
+              Array.isArray(record.sessionIds) && record.sessionIds.length > 0
+                ? record.sessionIds
+                : record.sessionId
+                  ? [record.sessionId]
+                  : [];
+            const projectIds =
+              Array.isArray(record.projectIds) && record.projectIds.length > 0
+                ? record.projectIds
+                : record.projectId
+                  ? [record.projectId]
+                  : [];
+            cursor.update({
+              ...record,
+              sessionIds,
+              projectIds,
+            } satisfies StoredAttachmentBlob);
+            cursor.continue();
+          };
+        }
       }
     };
     request.onsuccess = () => resolve(request.result);
@@ -1050,28 +1325,47 @@ export function revokeComposerAttachmentPreviews(
   }
 }
 
+export interface ComposerAttachmentBuildResult {
+  attachments: ComposerAttachment[];
+  /** Per-file failure messages so callers can surface partial-failure
+   * UX (fix 2.8). Empty when every file succeeded. */
+  failures: Array<{ name: string; message: string }>;
+}
+
+/**
+ * Build composer attachments from raw File handles. Returns both the
+ * successfully-built attachments and any per-file failures so the caller
+ * can render a partial-failure toast (fix 2.8). Previously failures were
+ * silently swallowed when at least one file succeeded.
+ *
+ * Throws only when EVERY file failed (preserves the previous "all-or-nothing"
+ * error path for the case where the caller needs a hard signal).
+ */
 export async function createComposerAttachments(
   files: File[],
   source: AttachmentSource,
-): Promise<ComposerAttachment[]> {
+): Promise<ComposerAttachmentBuildResult> {
   const attachments: ComposerAttachment[] = [];
-  const failures: string[] = [];
+  const failures: Array<{ name: string; message: string }> = [];
 
   for (const file of files) {
     try {
       attachments.push(await buildComposerAttachment(file, source));
     } catch (error) {
-      failures.push(
-        `${file.name}: ${error instanceof Error ? error.message : "Failed to prepare attachment."}`,
-      );
+      failures.push({
+        name: file.name,
+        message: error instanceof Error ? error.message : "Failed to prepare attachment.",
+      });
     }
   }
 
   if (attachments.length === 0 && failures.length > 0) {
-    throw new Error(failures.join("\n"));
+    throw new Error(
+      failures.map((f) => `${f.name}: ${f.message}`).join("\n"),
+    );
   }
 
-  return attachments;
+  return { attachments, failures };
 }
 
 export async function persistSessionAttachments(
@@ -1082,12 +1376,16 @@ export async function persistSessionAttachments(
 
   const prepared: Array<{ attachment: ComposerAttachment; record: StoredAttachmentBlob }> = [];
   for (const attachment of attachments) {
-    const encResult = await encryptAttachmentBlob(attachment.blob);
+    // Pass the attachment name so a too-large failure carries a useful
+    // error message (fix 2.7).
+    const encResult = await encryptAttachmentBlob(attachment.blob, attachment.name);
     prepared.push({
       attachment,
       record: {
         id: attachment.id,
+        // Both legacy scalar and the new array — see schema v3 migration.
         sessionId,
+        sessionIds: [sessionId],
         blob: encResult.blob,
         searchEntries: attachment.searchEntries,
         ...(encResult.encrypted
@@ -1109,6 +1407,118 @@ export async function persistSessionAttachments(
   );
 }
 
+/**
+ * Add `projectId` to the project owners list of an attachment record.
+ * Used by `addDossierEntry` so the project becomes a co-owner of the
+ * blob (fix 2.10). When the originating session is later deleted, the
+ * record stays alive as long as the project still references it.
+ *
+ * Idempotent: re-adding an existing project is a no-op. Records that
+ * don't exist (the source session already deleted) are silently skipped.
+ */
+export async function aliasAttachmentRecordToProject(
+  attachmentId: string,
+  projectId: string,
+): Promise<void> {
+  await withStore("readwrite", async (store) => {
+    const record = (await requestToPromise(
+      store.get(attachmentId) as IDBRequest<StoredAttachmentBlob | undefined>,
+    )) as StoredAttachmentBlob | undefined;
+    if (!record) return;
+    const projectIds = readProjectIds(record);
+    if (projectIds.includes(projectId)) return;
+    projectIds.push(projectId);
+    store.put(withProjectIds(record, projectIds));
+  });
+}
+
+/**
+ * Write a set of (id, name, mimeType, bytes) tuples into IndexedDB under
+ * the given sessionId, applying vault encryption if available. Used by
+ * the bundle-import path (fix 10.2) so attachments restored from a
+ * `.scbundle` actually land in IndexedDB instead of leaving the imported
+ * session pointing at missing blobs.
+ *
+ * Each tuple becomes a single attachment record; if the same id already
+ * exists from a prior import it's overwritten. Search entries default to
+ * empty — the indexer will rebuild them on demand via
+ * `loadSessionAttachmentDocuments`.
+ */
+export async function persistRawAttachmentsForSession(
+  sessionId: string,
+  attachments: Array<{
+    id: string;
+    name: string;
+    mimeType: string;
+    bytes: Uint8Array;
+  }>,
+): Promise<void> {
+  if (attachments.length === 0) return;
+
+  const prepared: StoredAttachmentBlob[] = [];
+  for (const attachment of attachments) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const sourceBlob = new Blob([attachment.bytes as any], {
+      type: attachment.mimeType || "application/octet-stream",
+    });
+    const enc = await encryptAttachmentBlob(sourceBlob, attachment.name);
+    prepared.push({
+      id: attachment.id,
+      sessionId,
+      sessionIds: [sessionId],
+      blob: enc.blob,
+      ...(enc.encrypted
+        ? { encrypted: true, originalMimeType: enc.originalMimeType }
+        : {}),
+    });
+  }
+
+  await withStore("readwrite", async (store) => {
+    for (const record of prepared) store.put(record);
+  });
+}
+
+/**
+ * Add `targetSessionId` to the owner list of each attachment record so
+ * the records survive deletion of any single owner (fix 2.1). Called by
+ * `branchDiscussionSession` to make a branch session a co-owner of the
+ * parent's attachment blobs.
+ *
+ * Idempotent: re-aliasing the same target is a no-op. Records that don't
+ * exist (e.g. parent attachments were already deleted) are silently
+ * skipped — the caller already showed them to the user.
+ */
+export async function aliasAttachmentRecordsForSession(
+  sourceSessionId: string,
+  targetSessionId: string,
+  attachmentIds: string[],
+): Promise<void> {
+  if (attachmentIds.length === 0) return;
+  if (sourceSessionId === targetSessionId) return;
+
+  await withStore("readwrite", async (store) => {
+    // Fire all reads synchronously, then await — keeps the transaction
+    // alive across the lookups (fix 2.12 pattern).
+    const requests = attachmentIds.map((id) => ({
+      id,
+      request: store.get(id) as IDBRequest<StoredAttachmentBlob | undefined>,
+    }));
+    const results = await Promise.all(
+      requests.map(async ({ id, request }) => ({
+        id,
+        record: await requestToPromise(request),
+      })),
+    );
+    for (const { record } of results) {
+      if (!record) continue;
+      const sessionIds = readSessionIds(record);
+      if (sessionIds.includes(targetSessionId)) continue;
+      sessionIds.push(targetSessionId);
+      store.put(withSessionIds(record, sessionIds));
+    }
+  });
+}
+
 export async function loadSessionAttachmentBlobs(
   attachments: SessionAttachment[],
 ): Promise<Map<string, LoadedAttachmentBlob>> {
@@ -1118,7 +1528,22 @@ export async function loadSessionAttachmentBlobs(
   const loaded = new Map<string, LoadedAttachmentBlob>();
 
   for (const { attachment, record } of records) {
-    const decryptedBlob = await decryptAttachmentBlob(record);
+    let decryptedBlob: Blob;
+    try {
+      decryptedBlob = await decryptAttachmentBlob({ ...record, id: attachment.id });
+    } catch (error) {
+      // Fix 2.2: count failures and skip the attachment so the UI sees a
+      // missing attachment (which it already handles gracefully) rather
+      // than a 0-byte broken blob (which looks like file corruption).
+      // The failure tally is exposed via getAttachmentDecryptFailureCount()
+      // so DiagnosticsPanel / vault recovery banner can surface it.
+      attachmentDecryptFailureCount += 1;
+      console.error(
+        `[attachments] Failed to decrypt blob for "${attachment.name}" (${attachment.id})`,
+        error,
+      );
+      continue;
+    }
     const sanitizedEntries = sanitizeSearchEntries(record.searchEntries);
     const searchEntries =
       sanitizedEntries.length > 0
@@ -1152,17 +1577,28 @@ export async function loadSessionAttachmentDocuments(
   for (const { attachment, record } of records) {
     let searchEntries = sanitizeSearchEntries(record.searchEntries);
     if (searchEntries.length === 0) {
-      const decrypted = await decryptAttachmentBlob(record);
-      searchEntries = await extractSearchEntries(
-        decrypted,
-        attachment.name,
-        attachment.kind,
-        attachment.mimeType,
-      );
-      updates.push({
-        ...record,
-        searchEntries,
-      } satisfies StoredAttachmentBlob);
+      try {
+        const decrypted = await decryptAttachmentBlob({ ...record, id: attachment.id });
+        searchEntries = await extractSearchEntries(
+          decrypted,
+          attachment.name,
+          attachment.kind,
+          attachment.mimeType,
+        );
+        updates.push({
+          ...record,
+          searchEntries,
+        } satisfies StoredAttachmentBlob);
+      } catch (error) {
+        // Fix 2.2: skip undecryptable attachments rather than feed the
+        // tool layer a 0-byte blob masquerading as the user's file.
+        attachmentDecryptFailureCount += 1;
+        console.error(
+          `[attachments] Failed to decrypt blob for "${attachment.name}" (${attachment.id}) during document load`,
+          error,
+        );
+        continue;
+      }
     }
 
     documents.push({
@@ -1186,24 +1622,80 @@ async function loadStoredAttachmentRecords(
   attachments: SessionAttachment[],
 ): Promise<Array<{ attachment: SessionAttachment; record: StoredAttachmentBlob }>> {
   return withStore("readonly", async (store) => {
-    const records: Array<{ attachment: SessionAttachment; record: StoredAttachmentBlob }> = [];
-    for (const attachment of attachments) {
-      const record = await requestToPromise(
-        store.get(attachment.id) as IDBRequest<StoredAttachmentBlob | undefined>,
-      );
-      if (!record?.blob) continue;
-      records.push({ attachment, record });
-    }
-    return records;
+    // Fix 2.12: fire all store.get() calls synchronously to keep them
+    // inside the same IDB transaction tick, then await them all together.
+    // Awaiting one-at-a-time inside the loop would let the microtask queue
+    // drain between iterations, which strict implementations interpret as
+    // the transaction completing — subsequent gets would throw
+    // TransactionInactiveError.
+    const lookups = attachments.map((attachment) => ({
+      attachment,
+      request: store.get(attachment.id) as IDBRequest<StoredAttachmentBlob | undefined>,
+    }));
+    const settled = await Promise.all(
+      lookups.map(async ({ attachment, request }) => ({
+        attachment,
+        record: await requestToPromise(request),
+      })),
+    );
+    return settled
+      .filter(
+        (entry): entry is { attachment: SessionAttachment; record: StoredAttachmentBlob } =>
+          Boolean(entry.record?.blob),
+      )
+      .map(({ attachment, record }) => ({ attachment, record }));
   });
 }
 
+/**
+ * Remove `sessionId` from the owner list of every attachment that
+ * references it. Records whose owner list becomes empty are deleted
+ * (their data is unreachable). Records still owned by another session
+ * (typically a branch — fix 2.1) survive.
+ *
+ * Walks BOTH the new multi-entry sessionIds index AND the legacy
+ * sessionId scalar index so partially-migrated databases still clean
+ * up correctly. After v3 every record has both, so the lookups are
+ * redundant — left in place for safety.
+ */
 export async function deleteSessionAttachmentBlobs(sessionId: string): Promise<void> {
   await withStore("readwrite", async (store) => {
-    const index = store.index(ATTACHMENT_BY_SESSION_INDEX);
-    const keys = await requestToPromise(index.getAllKeys(sessionId));
-    for (const key of keys) {
-      store.delete(key);
+    const seen = new Set<string>();
+
+    // Pull all candidate records via both indexes.
+    const newIndexHasIt = Array.from(store.indexNames).includes(
+      ATTACHMENT_BY_SESSION_IDS_INDEX,
+    );
+    const lookups: Array<Promise<StoredAttachmentBlob[]>> = [];
+    if (newIndexHasIt) {
+      lookups.push(
+        requestToPromise(
+          store
+            .index(ATTACHMENT_BY_SESSION_IDS_INDEX)
+            .getAll(sessionId) as IDBRequest<StoredAttachmentBlob[]>,
+        ),
+      );
+    }
+    lookups.push(
+      requestToPromise(
+        store
+          .index(ATTACHMENT_BY_SESSION_INDEX)
+          .getAll(sessionId) as IDBRequest<StoredAttachmentBlob[]>,
+      ),
+    );
+
+    const records = (await Promise.all(lookups)).flat();
+
+    for (const record of records) {
+      if (seen.has(record.id)) continue;
+      seen.add(record.id);
+
+      const remaining = readSessionIds(record).filter((id) => id !== sessionId);
+      if (remaining.length === 0) {
+        store.delete(record.id);
+      } else {
+        store.put(withSessionIds(record, remaining));
+      }
     }
   });
 }
@@ -1225,7 +1717,9 @@ export function getProviderAttachmentSupport(
 ): ProviderAttachmentSupport {
   return {
     images: (RAW_IMAGE_MODEL_SUPPORT[provider] ?? []).includes(model) ? "raw" : "fallback",
-    pdf: (RAW_PDF_MODEL_SUPPORT[provider] ?? []).includes(model) ? "raw" : "fallback",
+    // PDFs are always sent as extracted text — see fix 2.18 / the
+    // `getAttachmentTransportMode` comment below.
+    pdf: "fallback",
     text: "text",
     binary: "fallback",
   };
@@ -1273,11 +1767,13 @@ export async function persistProjectAttachments(
   const saved: SessionAttachment[] = [];
   const prepared: StoredAttachmentBlob[] = [];
   for (const attachment of attachments) {
-    const enc = await encryptAttachmentBlob(attachment.blob);
+    const enc = await encryptAttachmentBlob(attachment.blob, attachment.name);
     prepared.push({
       id: attachment.id,
       sessionId: "",
+      sessionIds: [],
       projectId,
+      projectIds: [projectId],
       blob: enc.blob,
       searchEntries: attachment.searchEntries,
       ...(enc.encrypted ? { encrypted: true, originalMimeType: enc.originalMimeType } : {}),
@@ -1293,29 +1789,49 @@ export async function persistProjectAttachments(
   return saved;
 }
 
+/**
+ * Load all attachment blobs owned by a project. Caller must supply the
+ * SessionAttachment metadata up front (typically from a project's dossier
+ * or session record); we look up only the binary blobs by id.
+ *
+ * Fix 2.15: the previous implementation invented synthetic metadata
+ * (name: "", addedAt: 0, kind: "binary") regardless of the stored
+ * attachment's actual type, which would have rendered as empty rows in
+ * any UI that called it. We now require the caller to pass the metadata
+ * (it always has it via dossier entries or session attachments anyway)
+ * so the returned blobs come paired with truthful metadata.
+ */
 export async function loadProjectAttachmentBlobs(
   projectId: string,
+  knownAttachments: SessionAttachment[],
 ): Promise<LoadedAttachmentBlob[]> {
-  const records: StoredAttachmentBlob[] = await withStore("readonly", async (store) => {
-    const index = store.index(ATTACHMENT_BY_PROJECT_INDEX);
+  const projectRecords: StoredAttachmentBlob[] = await withStore("readonly", async (store) => {
+    // Prefer the v3 multi-entry index; fall back to legacy if absent.
+    const indexName = Array.from(store.indexNames).includes(ATTACHMENT_BY_PROJECT_IDS_INDEX)
+      ? ATTACHMENT_BY_PROJECT_IDS_INDEX
+      : ATTACHMENT_BY_PROJECT_INDEX;
+    const index = store.index(indexName);
     return (await requestToPromise(index.getAll(projectId))) as StoredAttachmentBlob[];
   });
+  const recordById = new Map(projectRecords.map((r) => [r.id, r]));
+
   const loaded: LoadedAttachmentBlob[] = [];
-  for (const record of records) {
-    const blob = await decryptAttachmentBlob(record);
+  for (const attachment of knownAttachments) {
+    const record = recordById.get(attachment.id);
+    if (!record) continue;
+    let blob: Blob;
+    try {
+      blob = await decryptAttachmentBlob({ ...record, id: attachment.id });
+    } catch (error) {
+      attachmentDecryptFailureCount += 1;
+      console.error(
+        `[attachments] Failed to decrypt project blob "${attachment.name}" (${attachment.id})`,
+        error,
+      );
+      continue;
+    }
     loaded.push({
-      attachment: {
-        id: record.id,
-        name: "",
-        mimeType: record.originalMimeType ?? "application/octet-stream",
-        size: blob.size,
-        kind: "binary" as const,
-        source: "file-picker" as const,
-        addedAt: 0,
-        width: null,
-        height: null,
-        fallbackText: "",
-      },
+      attachment,
       blob,
       searchEntries: record.searchEntries ?? [],
     });
@@ -1325,10 +1841,44 @@ export async function loadProjectAttachmentBlobs(
 
 export async function deleteProjectAttachmentBlobs(projectId: string): Promise<void> {
   await withStore("readwrite", async (store) => {
-    const index = store.index(ATTACHMENT_BY_PROJECT_INDEX);
-    const keys = await requestToPromise(index.getAllKeys(projectId));
-    for (const key of keys) {
-      store.delete(key);
+    const seen = new Set<string>();
+    const newIndexHasIt = Array.from(store.indexNames).includes(
+      ATTACHMENT_BY_PROJECT_IDS_INDEX,
+    );
+    const lookups: Array<Promise<StoredAttachmentBlob[]>> = [];
+    if (newIndexHasIt) {
+      lookups.push(
+        requestToPromise(
+          store
+            .index(ATTACHMENT_BY_PROJECT_IDS_INDEX)
+            .getAll(projectId) as IDBRequest<StoredAttachmentBlob[]>,
+        ),
+      );
+    }
+    lookups.push(
+      requestToPromise(
+        store
+          .index(ATTACHMENT_BY_PROJECT_INDEX)
+          .getAll(projectId) as IDBRequest<StoredAttachmentBlob[]>,
+      ),
+    );
+
+    const records = (await Promise.all(lookups)).flat();
+
+    for (const record of records) {
+      if (seen.has(record.id)) continue;
+      seen.add(record.id);
+
+      const remaining = readProjectIds(record).filter((id) => id !== projectId);
+      // If the record still has sessions referencing it, demote project
+      // ownership but keep the blob alive. If it had ONLY project ownership
+      // and that's now empty, drop it entirely.
+      const sessions = readSessionIds(record);
+      if (remaining.length === 0 && sessions.length === 0) {
+        store.delete(record.id);
+      } else {
+        store.put(withProjectIds(record, remaining));
+      }
     }
   });
 }

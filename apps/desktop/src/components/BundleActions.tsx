@@ -7,7 +7,10 @@ import {
   parseBundle,
   type BundleAttachment,
 } from "../services/bundle";
-import { loadSessionAttachmentBlobs } from "../services/attachments";
+import {
+  loadSessionAttachmentBlobs,
+  persistRawAttachmentsForSession,
+} from "../services/attachments";
 import type { DiscussionSession } from "../services/sessions";
 
 /**
@@ -104,6 +107,28 @@ export function BundleImportButton({ onImported }: BundleImportButtonProps) {
       const bytes = new Uint8Array(await file.arrayBuffer());
       const parsed = parseBundle(bytes);
       const saved = importBundleSession(parsed);
+      // Fix 10.2: write the parsed attachment blobs into IndexedDB under
+      // the imported session's id. Without this, the imported session
+      // would render with attachment chips but every blob lookup would
+      // miss because nothing wrote them to disk.
+      if (parsed.attachments.length > 0) {
+        try {
+          await persistRawAttachmentsForSession(
+            saved.id,
+            parsed.attachments.map((a) => ({
+              id: a.id,
+              name: a.name,
+              mimeType: a.mimeType,
+              bytes: a.bytes,
+            })),
+          );
+        } catch (attachmentError) {
+          console.warn(
+            "[BundleImportButton] attachment persistence failed; session imported but blobs missing",
+            attachmentError,
+          );
+        }
+      }
       onImported(saved);
     } catch (err) {
       const message =

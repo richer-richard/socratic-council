@@ -1,13 +1,19 @@
 import { useState, useEffect, useRef, useCallback, useMemo, forwardRef } from "react";
 import type { CSSProperties, HTMLAttributes } from "react";
 import type { Page } from "../App";
-import { useConfig, PROVIDER_INFO, type Provider } from "../stores/config";
+import {
+  useConfig,
+  PROVIDER_INFO,
+  ANTHROPIC_OPUS_FALLBACK_MODEL,
+  type Provider,
+} from "../stores/config";
 import { callProvider, apiLogger, type ChatMessage as APIChatMessage } from "../services/api";
 import {
   loadSessionAttachmentBlobs,
   type SessionAttachment,
 } from "../services/attachments";
 import {
+  loadDiscussionSession,
   type DeepResearchReportSnapshot,
   type DiscussionSession,
   type EndVoteChoice,
@@ -47,6 +53,15 @@ import {
   ConversationMemoryManager,
   createMemoryManager,
   FairnessManager,
+  SEMANTIC_CHECK_REGEX_FLOOR,
+  assessVerification,
+  factCheckMessage,
+  reflectAndRevise,
+  scoreAgentsRelevance,
+  semanticConflictCheck,
+  summarizeOlderMessages,
+  type RelevanceScores,
+  type VerificationBadge,
 } from "@socratic-council/core";
 import { calculateMessageCost } from "../utils/cost";
 import { evaluateBudget, recordDailyCostDelta } from "../utils/budgetEnforcer";
@@ -56,6 +71,8 @@ import { splitIntoInlineQuoteSegments, stripQuoteTokens } from "../utils/inlineQ
 import { CostBudgetBadge } from "../components/CostBudgetBadge";
 import { ArgumentMapPanel } from "../components/ArgumentMapPanel";
 import { BundleExportButton } from "../components/BundleActions";
+import { BranchAction, BranchCrumb } from "../components/BranchAction";
+import { FactCheckStrip } from "../components/FactCheckBadge";
 import {
   emptyGraph,
   buildExtractPrompt,
@@ -1271,6 +1288,20 @@ export function Chat({ session, onNavigate, onPersistSession }: ChatProps) {
   const [topicOverflowing, setTopicOverflowing] = useState(false);
   const [isGracefullyEnding, setIsGracefullyEnding] = useState(false);
   const [showGracefulEndConfirm, setShowGracefulEndConfirm] = useState(false);
+  // Fix 3.6: cache the parent session's title for the BranchCrumb. Loaded
+  // once when the chat mounts; null when this isn't a branch session.
+  const [parentSessionTitle, setParentSessionTitle] = useState<string | null>(
+    null,
+  );
+
+  useEffect(() => {
+    if (!normalizedSession.parentSessionId) {
+      setParentSessionTitle(null);
+      return;
+    }
+    const parent = loadDiscussionSession(normalizedSession.parentSessionId);
+    setParentSessionTitle(parent?.title ?? null);
+  }, [normalizedSession.parentSessionId]);
 
   const virtuosoRef = useRef<VirtuosoHandle>(null);
   const topicBodyRef = useRef<HTMLDivElement | null>(null);
@@ -1614,6 +1645,27 @@ export function Chat({ session, onNavigate, onPersistSession }: ChatProps) {
     setShowScrollButton(false);
   }, []);
 
+  // Fix 5.1c: track which message pair we last NLI-checked so we don't burn
+  // tokens re-checking the same conflict every render.
+  const lastSemanticCheckKeyRef = useRef<string | null>(null);
+  // Fix 5.1d: cached LLM-derived relevance scores per agent, populated by a
+  // background pass every few turns. generateBiddingScores blends these
+  // into its weighted formula in place of the random-30 confidence noise.
+  // Falls back to 0 when no semantic score is available, which preserves
+  // the prior bidding behavior.
+  const relevanceScoresRef = useRef<Partial<RelevanceScores>>({});
+  const relevanceLastTurnRef = useRef(-Infinity);
+  const relevanceBusyRef = useRef(false);
+  // The conflict useEffect needs access to pickExtractorRuntime and getProxy,
+  // both of which are declared later in the component. Refs let us late-bind
+  // those without juggling effect ordering.
+  const pickExtractorRuntimeRef = useRef<
+    null | (() => { provider: Provider; credential: import("../stores/config").ProviderCredential; model: string } | null)
+  >(null);
+  const getProxyRef = useRef<null | (() => import("../stores/config").ProxyConfig | undefined)>(
+    null,
+  );
+
   useEffect(() => {
     const agentMessages = messages.filter((m) => isCouncilAgent(m.agentId) && !m.isStreaming);
 
@@ -1627,18 +1679,153 @@ export function Chat({ session, onNavigate, onPersistSession }: ChatProps) {
       agentMessages,
       AGENT_IDS,
     );
-    setAllConflicts(pairs);
-    setConflictState(conflict);
 
-    if (phaseRef.current === "discussion" && conflict && !duoLogueRef.current) {
-      const newDuo: DuoLogueState = {
-        participants: conflict.agentPair,
-        remainingTurns: 3,
-      };
-      setDuoLogue(newDuo);
-      duoLogueRef.current = newDuo;
-    }
-  }, [messages]);
+    // Fix 5.1c + 5.2: when the regex-based conflict score is in the
+    // SEMANTIC_CHECK_REGEX_FLOOR..threshold band — i.e. "maybe a conflict
+    // but the cue match might be a false positive (quoted disagreement
+    // about a third party, sarcasm, multilingual phrasing the cue list
+    // doesn't cover)" — fire a Gemini Flash NLI pass to confirm or
+    // dampen the regex score. The pass is fire-and-forget; on success
+    // we either escalate to the strongest-pair state (when "contradicts")
+    // or suppress the noisy pair (when "entails"/"neutral").
+    void (async () => {
+      const runtime = pickExtractorRuntimeRef.current?.() ?? null;
+      if (!runtime) {
+        setAllConflicts(pairs);
+        setConflictState(conflict);
+        if (phaseRef.current === "discussion" && conflict && !duoLogueRef.current) {
+          const newDuo: DuoLogueState = {
+            participants: conflict.agentPair,
+            remainingTurns: 3,
+          };
+          setDuoLogue(newDuo);
+          duoLogueRef.current = newDuo;
+        }
+        return;
+      }
+      // The strongest pair below the regex threshold is a candidate for the
+      // semantic dial-up. The strongest pair AT/above the threshold is a
+      // candidate for the dial-down (in case the cue match is misleading).
+      const strongestRaw = pairs.reduce<typeof pairs[number] | null>((best, p) => {
+        if (!best) return p;
+        return p.score > best.score ? p : best;
+      }, null);
+      if (!strongestRaw) {
+        setAllConflicts(pairs);
+        setConflictState(conflict);
+        return;
+      }
+      const rawScore100 = strongestRaw.score * 100;
+      // Only run NLI when the score is in the "interesting" band — too low
+      // and there's nothing to confirm, too high and the regex is already
+      // confident.
+      if (rawScore100 < SEMANTIC_CHECK_REGEX_FLOOR) {
+        setAllConflicts(pairs);
+        setConflictState(conflict);
+        return;
+      }
+      const [a, b] = strongestRaw.agents;
+      const lastByA = [...agentMessages].reverse().find((m) => m.agentId === a);
+      const lastByB = [...agentMessages].reverse().find((m) => m.agentId === b);
+      if (!lastByA || !lastByB) {
+        setAllConflicts(pairs);
+        setConflictState(conflict);
+        return;
+      }
+      // Order pair so the second message is the more recent of the two —
+      // the NLI prompt asks whether the SECOND contradicts the FIRST.
+      const [first, second] =
+        lastByA.timestamp <= lastByB.timestamp ? [lastByA, lastByB] : [lastByB, lastByA];
+      const pairKey = `${first.id}::${second.id}`;
+      if (lastSemanticCheckKeyRef.current === pairKey) {
+        setAllConflicts(pairs);
+        setConflictState(conflict);
+        return;
+      }
+      lastSemanticCheckKeyRef.current = pairKey;
+
+      // Render the regex-derived state immediately so the UI doesn't wait
+      // on the NLI pass; we'll override below if the verdict says otherwise.
+      setAllConflicts(pairs);
+      setConflictState(conflict);
+      if (phaseRef.current === "discussion" && conflict && !duoLogueRef.current) {
+        const newDuo: DuoLogueState = {
+          participants: conflict.agentPair,
+          remainingTurns: 3,
+        };
+        setDuoLogue(newDuo);
+        duoLogueRef.current = newDuo;
+      }
+
+      try {
+        const verdict = await semanticConflictCheck(
+          {
+            topic,
+            agentAName: AGENT_CONFIG[first.agentId as CouncilAgentId].name,
+            agentAMessage: first.content,
+            agentBName: AGENT_CONFIG[second.agentId as CouncilAgentId].name,
+            agentBMessage: second.content,
+          },
+          async ({ system, user }) => {
+            try {
+              const result = await callProvider(
+                runtime.provider,
+                runtime.credential,
+                runtime.model,
+                [
+                  { role: "system", content: system },
+                  { role: "user", content: user },
+                ],
+                () => undefined,
+                getProxyRef.current?.(),
+                { requestTimeoutMs: 20000, idleTimeoutMs: 12000, maxTokens: 256 },
+              );
+              return result.success && result.content ? result.content : null;
+            } catch {
+              return null;
+            }
+          },
+        );
+        if (!verdict) return;
+        const adjusted100 = Math.max(0, Math.min(100, rawScore100 + verdict.scoreAdjustment));
+        // Reapply the threshold: if the adjusted score crosses the
+        // detector's threshold and the regex didn't already produce a
+        // strongest pair, escalate. If the verdict says "entails" and the
+        // regex-based pair was just barely above threshold, dampen.
+        const detectorThreshold = 60;
+        if (adjusted100 >= detectorThreshold) {
+          setConflictState({
+            agentPair: [first.agentId as CouncilAgentId, second.agentId as CouncilAgentId],
+            conflictScore: adjusted100,
+            threshold: detectorThreshold,
+            lastUpdated: Date.now(),
+          });
+          if (phaseRef.current === "discussion" && !duoLogueRef.current) {
+            const newDuo: DuoLogueState = {
+              participants: [
+                first.agentId as CouncilAgentId,
+                second.agentId as CouncilAgentId,
+              ],
+              remainingTurns: 3,
+            };
+            setDuoLogue(newDuo);
+            duoLogueRef.current = newDuo;
+          }
+        } else if (
+          conflict &&
+          conflict.agentPair[0] === first.agentId &&
+          conflict.agentPair[1] === second.agentId
+        ) {
+          // Regex flagged this pair, NLI says no — clear it.
+          setConflictState(null);
+        }
+      } catch (error) {
+        apiLogger.log("warn", "conflict", "semantic check failed", {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    })();
+  }, [messages, topic]);
 
   useEffect(() => {
     if (phaseRef.current !== "discussion") return;
@@ -1705,8 +1892,14 @@ export function Chat({ session, onNavigate, onPersistSession }: ChatProps) {
           continue;
         }
 
-        // Generate score based on various factors
-        const baseScore = 50 + Math.random() * 30;
+        // Generate score based on various factors. Fix 5.1d: when a fresh
+        // LLM-relevance score is available for this agent, use it as a more
+        // grounded confidence signal than the random-30 jitter.
+        const llmRelevance = relevanceScoresRef.current[agentId];
+        const baseScore =
+          typeof llmRelevance === "number"
+            ? 30 + Math.min(70, Math.max(0, llmRelevance) * 0.7)
+            : 50 + Math.random() * 30;
         const whisperBonus = whisperBonusesRef.current[agentId] ?? 0;
 
         // Add engagement debt bonus (agents with pending debts get priority)
@@ -1877,12 +2070,15 @@ export function Chat({ session, onNavigate, onPersistSession }: ChatProps) {
     observerUsage,
     runObserverPass,
     getLatestNoteFor,
+    markNoteConsumed,
     shouldRunObserverPass,
+    abortObserverControllers,
   } = useObserverCircle({
     topic,
     messagesRef,
     configRef: configRef as React.MutableRefObject<typeof config>,
     abortRef,
+    pausedRef,
     buildAttachmentContext,
     agentConfig: AGENT_CONFIG,
   });
@@ -1985,13 +2181,16 @@ Direct question: "${pendingHandoffRef.current.question}"
         });
       }
 
-      // Inject latest observer note (private advice from outer-circle partner)
+      // Inject latest observer note (private advice from outer-circle partner).
+      // Fix 3.11: read here, mark consumed only after we've actually placed
+      // it in the prompt — separating the side-effect from the lookup.
       const observerNote = getLatestNoteFor(agentId);
       if (observerNote) {
         history.push({
           role: "user",
           content: `[Private note from ${observerNote.observerName}]: ${observerNote.content}`,
         });
+        markNoteConsumed(observerNote.id);
       }
 
       // Inject persistent canvas state so the agent can see/update prior notes
@@ -2251,15 +2450,34 @@ ${firstRoundObjections.length > 0 ? firstRoundObjections.join("\n") : "- None. E
 
   const pickModeratorRuntime = useCallback(() => {
     if (!config.preferences.moderatorEnabled) return null;
-    const credential = config.credentials.google;
-    if (!credential?.apiKey) return null;
-    // Moderator runs on Gemini 3.1 Pro Preview (same model Grace uses).
-    return {
-      provider: "google" as const,
-      credential,
-      model: "gemini-3.1-pro-preview" as const,
-    };
-  }, [config.credentials.google, config.preferences.moderatorEnabled]);
+    const googleCredential = config.credentials.google;
+    if (googleCredential?.apiKey) {
+      // Moderator runs on Gemini 3.1 Pro Preview by default (same model Grace uses).
+      return {
+        provider: "google" as const,
+        credential: googleCredential,
+        model: "gemini-3.1-pro-preview" as const,
+      };
+    }
+    // Fix 3.19: fall back to other providers when Google isn't configured
+    // so a council with OpenAI/Anthropic/etc. but no Gemini still gets a
+    // moderator. Mirrors pickFinalSummaryRuntime's chain.
+    for (const provider of [
+      "anthropic",
+      "openai",
+      "deepseek",
+      "kimi",
+      "qwen",
+      "minimax",
+      "zhipu",
+    ] as const) {
+      const credential = config.credentials[provider];
+      const model = config.models[provider];
+      if (!credential?.apiKey || !model) continue;
+      return { provider, credential, model };
+    }
+    return null;
+  }, [config.credentials, config.models, config.preferences.moderatorEnabled]);
 
   // Argument-map extractor runs on Gemini 3 Flash Preview — the task is a
   // small structured-JSON emit, so we use the cheaper/faster sibling of the
@@ -2273,6 +2491,9 @@ ${firstRoundObjections.length > 0 ? firstRoundObjections.join("\n") : "- None. E
       model: "gemini-3-flash-preview" as const,
     };
   }, [config.credentials.google]);
+  // Late-bind for the conflict useEffect (declared earlier in the component).
+  pickExtractorRuntimeRef.current = pickExtractorRuntime;
+  getProxyRef.current = getProxy;
 
   const pickFinalSummaryRuntime = useCallback(() => {
     // Prefer Google (same as moderator) so final summary + deep research report
@@ -2286,6 +2507,8 @@ ${firstRoundObjections.length > 0 ? firstRoundObjections.join("\n") : "- None. E
       };
     }
 
+    // Fix 3.18: include zhipu so a Zhipu-only configuration still gets
+    // a final summary instead of silently falling through to the null path.
     for (const provider of [
       "openai",
       "anthropic",
@@ -2293,6 +2516,7 @@ ${firstRoundObjections.length > 0 ? firstRoundObjections.join("\n") : "- None. E
       "kimi",
       "qwen",
       "minimax",
+      "zhipu",
     ] as const) {
       const credential = config.credentials[provider];
       const model = config.models[provider];
@@ -2329,7 +2553,9 @@ ${firstRoundObjections.length > 0 ? firstRoundObjections.join("\n") : "- None. E
 
       const { provider, credential, model } = runtime;
       const newMessage: ChatMessage = {
-        id: `msg_${Date.now()}_moderator_${Math.random().toString(36).slice(2, 7)}`,
+        // Fix 3.23: widen the random suffix so two moderator messages created
+        // in the same millisecond don't collide in Virtuoso's computeItemKey.
+        id: `msg_${Date.now()}_moderator_${Math.random().toString(36).slice(2, 10)}`,
         agentId: "system",
         displayName: "Moderator",
         displayProvider: provider,
@@ -2733,6 +2959,12 @@ Write the official moderator wrap-up in 4 short sentences:
     ],
   );
 
+  // Fix 3.10: track which turn the moderator last fired a tension intervention,
+  // and gate new tension messages on a minimum spacing so the moderator
+  // doesn't monologue every other turn through a fast back-and-forth.
+  const lastModeratorTensionTurnRef = useRef(-Infinity);
+  const MODERATOR_TENSION_MIN_TURN_GAP = 3;
+
   useEffect(() => {
     if (!isRunning) return;
     if (phaseRef.current !== "discussion") return;
@@ -2741,7 +2973,18 @@ Write the official moderator wrap-up in 4 short sentences:
 
     const key = conflictState.agentPair.join("-");
     if (lastModeratorKeyRef.current === key) return;
+
+    // Time-based cooldown on top of the per-pair memoization so cycling
+    // pairs (A↔B → B↔C → A↔B) don't fire three back-to-back interventions.
+    if (
+      currentTurnRef.current - lastModeratorTensionTurnRef.current <
+      MODERATOR_TENSION_MIN_TURN_GAP
+    ) {
+      return;
+    }
+
     lastModeratorKeyRef.current = key;
+    lastModeratorTensionTurnRef.current = currentTurnRef.current;
 
     void generateModeratorMessage({ kind: "tension", conflict: conflictState });
   }, [config.preferences.moderatorEnabled, conflictState, generateModeratorMessage, isRunning]);
@@ -2938,6 +3181,31 @@ Write the official moderator wrap-up in 4 short sentences:
                   interruptedForTools = true;
                   clearStreamFlushTimer();
                   flushStreamingMessage(true);
+                  // Fix 3.20: when we abort the stream mid-flight to run
+                  // tools, surface a "looking up sources..." indicator so
+                  // the user understands the pause is intentional rather
+                  // than a stream failure.
+                  setMessages((prev) =>
+                    prev.map((m) =>
+                      m.id === newMessage.id
+                        ? {
+                            ...m,
+                            toolEvents:
+                              toolEvents.length > 0
+                                ? toolEvents
+                                : [
+                                    {
+                                      id: `tool_pending_${Date.now()}`,
+                                      name: detection.toolCalls[0]?.name ?? "oracle.search",
+                                      summary: "Looking up sources…",
+                                      output: "",
+                                      timestamp: Date.now(),
+                                    },
+                                  ],
+                          }
+                        : m,
+                    ),
+                  );
                   requestController.abort();
                   return;
                 }
@@ -2980,12 +3248,26 @@ Write the official moderator wrap-up in 4 short sentences:
                   const toolFinished = streamingToolDetector.finish();
                   const { cleaned: finalCleaned, directives: finalDirectives } =
                     extractCanvasDirectives(toolFinished);
-                  // Strip any mid-prose @tool(...) that slipped past the
-                  // line-oriented streaming detector.
-                  streamingContent = extractActions(finalCleaned, REACTION_IDS).cleaned
+                  // Fix 3.9: apply the SAME final cleanup as the per-chunk
+                  // path — including the partial @canvas( / @tool( strip —
+                  // so the streamingContent doesn't visibly jump when the
+                  // done frame lands. At end-of-stream there shouldn't be
+                  // any partials, but if a malformed directive made it to
+                  // the finish, this keeps the UI from flickering between
+                  // a partially-rendered and fully-cleaned state.
+                  let displayText = extractActions(finalCleaned, REACTION_IDS).cleaned
                     .replace(/^[ \t]*@done\(\)[ \t]*$/gm, "")
                     .replace(/\n{3,}/g, "\n\n")
                     .trim();
+                  const pcIdx = displayText.lastIndexOf("@canvas(");
+                  if (pcIdx >= 0 && !displayText.slice(pcIdx).includes(")")) {
+                    displayText = displayText.slice(0, pcIdx).replace(/\n{3,}/g, "\n\n").trim();
+                  }
+                  const ptIdx = displayText.lastIndexOf("@tool(");
+                  if (ptIdx >= 0 && !displayText.slice(ptIdx).includes(")")) {
+                    displayText = displayText.slice(0, ptIdx).replace(/\n{3,}/g, "\n\n").trim();
+                  }
+                  streamingContent = displayText;
                   for (let ci = canvasDirectivesApplied; ci < finalDirectives.length; ci++) {
                     const directive = finalDirectives[ci]!;
                     setCanvasStates((prev) => ({
@@ -3043,13 +3325,22 @@ Write the official moderator wrap-up in 4 short sentences:
           };
         };
 
-        let history = buildConversationHistory(agentId);
+        // Fix 3.14: capture the initial conversation history once and reuse it
+        // as the stable prefix for every tool-iteration. Anthropic's prompt
+        // cache (and OpenAI's prefix-cache, where supported) keys on the
+        // prefix up to the first divergence — appending new turns is the
+        // cache-friendly pattern; rebuilding from scratch each iteration
+        // (with potentially-shifting memory selections) defeats it.
+        const baseHistory = buildConversationHistory(agentId);
+        let history = baseHistory;
         let result = await runCompletion(history, modelUsed);
         let accumulatedContent = "";
 
         if (!result.success && agentConfig.provider === "anthropic" && model.includes("opus")) {
-          // If the primary Opus model fails, fall back to the prior stable Opus ID.
-          const fallbackModel = "claude-opus-4-6";
+          // Fix 3.17: fallback model id is centralized in stores/config.ts so a
+          // model rotation updates one constant instead of multiple hardcoded
+          // strings across the codebase.
+          const fallbackModel = ANTHROPIC_OPUS_FALLBACK_MODEL;
           if (modelUsed !== fallbackModel) {
             apiLogger.log("warn", "anthropic", "Primary model failed; retrying with fallback", {
               primary: model,
@@ -3124,27 +3415,25 @@ Write the official moderator wrap-up in 4 short sentences:
               ),
             );
 
-            // Include the agent's prior output as assistant message so it can continue naturally
+            // Fix 3.14: append to the cached baseHistory rather than re-running
+            // buildConversationHistory (which would re-walk memory and produce
+            // a slightly different prefix every iteration, busting prompt cache).
             const extraContext = buildToolContextMessages(results);
             const priorAssistant = accumulatedContent.trim();
-            if (priorAssistant) {
-              history = buildConversationHistory(agentId, [
-                { role: "assistant", content: priorAssistant },
-                ...extraContext,
-              ]);
-            } else {
-              history = buildConversationHistory(agentId, extraContext);
-            }
+            history = priorAssistant
+              ? [...baseHistory, { role: "assistant", content: priorAssistant }, ...extraContext]
+              : [...baseHistory, ...extraContext];
           } else {
             // Canvas-only round (no tools): continue with a continuation prompt
             const priorAssistant = accumulatedContent.trim();
-            history = buildConversationHistory(agentId, [
+            history = [
+              ...baseHistory,
               ...(priorAssistant ? [{ role: "assistant" as const, content: priorAssistant }] : []),
               {
                 role: "user" as const,
                 content: "Continue your response. When you are finished, emit @done() on its own line.",
               },
-            ]);
+            ];
           }
 
           result = await runCompletion(history, modelUsed);
@@ -3305,6 +3594,102 @@ Write the official moderator wrap-up in 4 short sentences:
           const updated = prev.map((m) => (m.id === newMessage.id ? finalMessage : m));
           return applyReactions(updated, resolvedReactions, agentId);
         });
+
+        // Fix 5.1b: optional reflection pass — draft → critique/revise.
+        // Fires after the streamed message is already on-screen so the user
+        // sees the original land, then watches it refine. Skipped when
+        // reflection is "off" (default) to preserve the prior cost profile.
+        const reflectionMode = configRef.current.preferences.reflection;
+        if (
+          reflectionMode &&
+          reflectionMode !== "off" &&
+          result.success &&
+          displayContent.trim().length > 0 &&
+          !parsed.endRequested
+        ) {
+          void (async () => {
+            try {
+              // Build a "situation" excerpt from the most recent council
+              // turns so the rubric has context for what the agent was
+              // responding to.
+              const situation = messagesRef.current
+                .filter(
+                  (m) =>
+                    m.id !== newMessage.id &&
+                    (isCouncilAgent(m.agentId) || isModeratorMessage(m)) &&
+                    !m.isStreaming &&
+                    (m.content ?? "").trim().length > 0,
+                )
+                .slice(-6)
+                .map((m) => {
+                  const speaker = isCouncilAgent(m.agentId)
+                    ? AGENT_CONFIG[m.agentId].name
+                    : "Moderator";
+                  return `${speaker}: ${m.content}`;
+                })
+                .join("\n\n");
+
+              const revised = await reflectAndRevise(
+                {
+                  systemPrompt: agentConfig.systemPrompt,
+                  draft: displayContent,
+                  currentSpeakerSituation: situation || "(opening turn)",
+                  agentName: AGENT_CONFIG[agentId].name,
+                },
+                reflectionMode,
+                async ({ system, user }) => {
+                  try {
+                    const revRes = await callProvider(
+                      agentConfig.provider,
+                      credential,
+                      modelUsed,
+                      [
+                        { role: "system", content: system },
+                        { role: "user", content: user },
+                      ],
+                      () => undefined,
+                      proxy,
+                      {
+                        idleTimeoutMs,
+                        requestTimeoutMs,
+                        signal: AbortSignal.timeout(requestTimeoutMs),
+                        disableThinking: true,
+                      },
+                    );
+                    return revRes.success && revRes.content
+                      ? revRes.content
+                      : null;
+                  } catch {
+                    return null;
+                  }
+                },
+              );
+              if (revised && revised.trim() !== displayContent.trim()) {
+                const revisedNormalized = normalizeMessageText(revised);
+                setMessages((prev) =>
+                  prev.map((m) =>
+                    m.id === newMessage.id
+                      ? { ...m, content: revisedNormalized, fullResponse: revisedNormalized }
+                      : m,
+                  ),
+                );
+                if (memoryManagerRef.current) {
+                  // Replace the memory entry with the revised content so
+                  // downstream agents see the polished version.
+                  const allMessages = memoryManagerRef.current.getAllMessages();
+                  const target = allMessages.find((m) => m.id === newMessage.id);
+                  if (target) {
+                    target.content = revisedNormalized;
+                  }
+                }
+              }
+            } catch (error) {
+              apiLogger.log("warn", "reflection", "reflectAndRevise failed", {
+                error: error instanceof Error ? error.message : String(error),
+              });
+            }
+          })();
+        }
 
         if (handoffForNextTurn) {
           pendingHandoffRef.current = handoffForNextTurn;
@@ -4138,8 +4523,39 @@ Write the official moderator wrap-up in 4 short sentences:
         }
 
         let response = await generateAgentResponse(selectedSpeaker);
+        // Fix 3.7: only retry on transient errors. Permanent errors (auth,
+        // model-not-found, content moderation) won't succeed on a re-attempt
+        // and just double-bill. Heuristic: retry when there's no response at
+        // all (network drop) or when the error message looks transient.
         if ((!response || response.error) && !abortRef.current) {
-          response = await generateAgentResponse(selectedSpeaker);
+          const errMsg = response?.error?.toLowerCase() ?? "";
+          const looksTransient =
+            !response ||
+            !errMsg ||
+            errMsg.includes("timeout") ||
+            errMsg.includes("timed out") ||
+            errMsg.includes("network") ||
+            errMsg.includes("stream") ||
+            errMsg.includes("ratelimit") ||
+            errMsg.includes("rate limit") ||
+            errMsg.includes("rate_limit") ||
+            errMsg.includes("503") ||
+            errMsg.includes("502") ||
+            errMsg.includes("500") ||
+            errMsg.includes("connection") ||
+            errMsg.includes("aborted");
+          const looksPermanent =
+            errMsg.includes("invalid api key") ||
+            errMsg.includes("unauthorized") ||
+            errMsg.includes("forbidden") ||
+            errMsg.includes("model not found") ||
+            errMsg.includes("model_not_found") ||
+            errMsg.includes("content moderation") ||
+            errMsg.includes("content_filter") ||
+            errMsg.includes("billing");
+          if (looksTransient && !looksPermanent) {
+            response = await generateAgentResponse(selectedSpeaker);
+          }
         }
         if (
           consumedHandoff &&
@@ -4147,6 +4563,13 @@ Write the official moderator wrap-up in 4 short sentences:
         ) {
           pendingHandoffRef.current = null;
         }
+        // Fix 3.4: when the user paused mid-stream, do NOT commit any of
+        // the turn-cycle state changes (currentTurnRef++, cyclePending
+        // pop, recentSpeakers update). The turn is effectively discarded.
+        // The previous behavior advanced the turn counter even though the
+        // streaming message had been wiped from the transcript by
+        // stopActiveGeneration, leaving a phantom "Turn N+1" with nothing
+        // visible at that turn.
         if (abortRef.current) break;
 
         const actualSpeaker: CouncilAgentId | null =
@@ -4156,6 +4579,11 @@ Write the official moderator wrap-up in 4 short sentences:
           await new Promise((resolve) => setTimeout(resolve, 300));
           continue;
         }
+
+        // If the response landed but pause raced in right at the end —
+        // before we'd committed turn state — also bail rather than
+        // committing into a session that's already paused.
+        if (pausedRef.current) break;
 
         cyclePendingRef.current = cyclePendingRef.current.filter((id) => id !== selectedSpeaker);
         if (actualSpeaker) {
@@ -4271,19 +4699,27 @@ Write the official moderator wrap-up in 4 short sentences:
           if (summaryMessage) {
             moderatorFinalSummaryPostedRef.current = true;
           } else {
-            const fallbackSummary: ChatMessage = {
-              id: `msg_${Date.now()}_moderator_fallback_summary`,
-              agentId: "system",
-              displayName: "Moderator",
-              content:
-                "Moderator summary unavailable because no summary provider is configured. Review the closing round above for the final agent summaries and goodbyes.",
-              timestamp: Date.now(),
-            };
-            moderatorFinalSummaryPostedRef.current = true;
-            setMessages((prev) => [...prev, fallbackSummary]);
-            if (memoryManagerRef.current) {
-              memoryManagerRef.current.addMessage(fallbackSummary);
+            // Fix 3.16: only post the fallback if the discussion actually had
+            // turns — otherwise the message is misleading ("summary unavailable"
+            // implies an attempt was made, when really the session never ran).
+            const hadDiscussion =
+              currentTurnRef.current > 0 ||
+              messagesRef.current.some((m) => isCouncilAgent(m.agentId));
+            if (hadDiscussion) {
+              const fallbackSummary: ChatMessage = {
+                id: `msg_${Date.now()}_moderator_fallback_summary`,
+                agentId: "system",
+                displayName: "Moderator",
+                content:
+                  "Moderator summary unavailable because no summary provider is configured. Review the closing round above for the final agent summaries and goodbyes.",
+                timestamp: Date.now(),
+              };
+              setMessages((prev) => [...prev, fallbackSummary]);
+              if (memoryManagerRef.current) {
+                memoryManagerRef.current.addMessage(fallbackSummary);
+              }
             }
+            moderatorFinalSummaryPostedRef.current = true;
           }
         }
 
@@ -4325,10 +4761,18 @@ Write the official moderator wrap-up in 4 short sentences:
       hasStartedRef.current = true;
       return;
     }
+    // Fix 3.1: only auto-start on the very first mount of a freshly-created
+    // session (lastOpenedAt === createdAt). Reopening an unstarted draft from
+    // the sidebar should NOT auto-debate — that surprised users who created
+    // a session, didn't start it, and later browsed back to read the topic
+    // only to have eight agents fire off a real-money debate unprompted.
+    const isFreshlyCreated =
+      normalizedSession.lastOpenedAt === normalizedSession.createdAt;
     if (
       configuredProviders.length > 0 &&
       normalizedSession.status === "draft" &&
-      normalizedSession.messages.length === 0
+      normalizedSession.messages.length === 0 &&
+      isFreshlyCreated
     ) {
       hasStartedRef.current = true;
       void runDiscussion("fresh");
@@ -4374,12 +4818,16 @@ Write the official moderator wrap-up in 4 short sentences:
     activeRequestsRef.current.clear();
     moderatorAbortRef.current?.abort();
     moderatorAbortRef.current = null;
+    // Fix 3.3: terminate any in-flight observer LLM calls so a pause /
+    // stop actually halts the entire pipeline instead of letting the
+    // observers run to completion (and bill).
+    abortObserverControllers();
     setIsRunning(false);
     setTypingAgents([]);
     setCurrentBidding(null);
     setShowBidding(false);
     setMessages((prev) => prev.filter((message) => !message.isStreaming));
-  }, []);
+  }, [abortObserverControllers]);
 
   const handlePause = () => {
     stopActiveGeneration();
@@ -4466,12 +4914,40 @@ Write the official moderator wrap-up in 4 short sentences:
         2147483647
       );
     }, 7);
+    // Fix 3.2: include moderatorUsage / observerUsage / canvasStates in the
+    // signature so updates to those fields actually persist. Previously the
+    // useEffect would fire when moderatorUsage changed (because the
+    // callback's dep list includes it) but persistSessionSnapshot bailed out
+    // on the unchanged signature, so the new usage data was silently lost
+    // until something else in the message stream forced a re-save.
+    //
+    // The canvas hash is a coarse digest — number of agents touched plus the
+    // total length of all section text. It's enough to detect "an agent
+    // updated their canvas" without serializing the full structure on every
+    // turn.
+    const canvasFingerprint = (() => {
+      const states = canvasStatesRef.current;
+      let total = 0;
+      let agents = 0;
+      for (const agentId of Object.keys(states) as CouncilAgentId[]) {
+        const s = states[agentId];
+        if (!s) continue;
+        agents += 1;
+        for (const section of s.sections) total += section.text.length;
+      }
+      return `${agents}:${total}`;
+    })();
     const signature = [
       nextStatus,
       phaseRef.current,
       currentTurnRef.current,
       totalTokens.input,
       totalTokens.output,
+      moderatorUsage.outputTokens,
+      moderatorUsage.estimatedUSD,
+      observerUsage.outputTokens,
+      observerUsage.estimatedUSD,
+      canvasFingerprint,
       errors.join("|"),
       duoLogue?.remainingTurns ?? 0,
       resolutionQueueRef.current.join(","),
@@ -4556,8 +5032,41 @@ Write the official moderator wrap-up in 4 short sentences:
     duoLogue,
   ]);
 
+  // Fix 3.8: debounce persistSessionSnapshot during streaming so we don't
+  // walk the full transcript fingerprint on every chunk. Saves are still
+  // immediate when the session is paused/idle (the agentStreaming flag
+  // tracks whether any message is currently mid-stream); during streaming
+  // the save is throttled to ~700ms which is plenty for crash recovery
+  // without blocking the main thread on long debates.
+  const persistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
-    persistSessionSnapshot();
+    const isStreaming = messagesRef.current.some((m) => m.isStreaming);
+    if (!isStreaming) {
+      // Idle path — save immediately.
+      if (persistTimerRef.current) {
+        clearTimeout(persistTimerRef.current);
+        persistTimerRef.current = null;
+      }
+      persistSessionSnapshot();
+      return;
+    }
+    if (persistTimerRef.current) return; // already scheduled
+    persistTimerRef.current = setTimeout(() => {
+      persistTimerRef.current = null;
+      persistSessionSnapshot();
+    }, 700);
+  }, [persistSessionSnapshot]);
+
+  // Always flush on unmount so an in-flight stream that the user navigates
+  // away from doesn't lose the latest pre-pause state.
+  useEffect(() => {
+    return () => {
+      if (persistTimerRef.current) {
+        clearTimeout(persistTimerRef.current);
+        persistTimerRef.current = null;
+        persistSessionSnapshot();
+      }
+    };
   }, [persistSessionSnapshot]);
 
   const displayMaxTurns = maxTurns === Infinity ? "\u221E" : maxTurns;
@@ -4711,6 +5220,285 @@ Write the official moderator wrap-up in 4 short sentences:
     });
   }, [messages, argGraph.lastMessageId, pickExtractorRuntime, runArgumentMapExtraction]);
 
+  // Fix 5.1d: background semantic-relevance scoring pass. Fires every few
+  // turns to refresh the LLM-derived relevance signal that bidding blends
+  // into baseScore. Best-effort; falls back to random scoring when no
+  // extractor runtime is available.
+  useEffect(() => {
+    if (relevanceBusyRef.current) return;
+    if (!isRunning) return;
+    if (currentTurnRef.current - relevanceLastTurnRef.current < 4) return;
+    const runtime = pickExtractorRuntime();
+    if (!runtime) return;
+    if (configuredAgentIds.length === 0) return;
+
+    relevanceBusyRef.current = true;
+    relevanceLastTurnRef.current = currentTurnRef.current;
+
+    void (async () => {
+      try {
+        const recentTail = messagesRef.current
+          .filter(
+            (m) =>
+              !m.isStreaming &&
+              (m.content ?? "").trim().length > 0 &&
+              (isCouncilAgent(m.agentId) || isModeratorMessage(m)),
+          )
+          .slice(-8)
+          .map((m) => {
+            const speaker = isCouncilAgent(m.agentId)
+              ? AGENT_CONFIG[m.agentId].name
+              : "Moderator";
+            return `${speaker}: ${m.content.slice(0, 320)}`;
+          })
+          .join("\n\n");
+
+        const scores = await scoreAgentsRelevance(
+          { topic, recentText: recentTail },
+          configuredAgentIds.map((id) => ({
+            id,
+            name: AGENT_CONFIG[id].name,
+            blurb: PROVIDER_INFO[AGENT_CONFIG[id].provider].description,
+          })),
+          async ({ system, user }) => {
+            try {
+              const result = await callProvider(
+                runtime.provider,
+                runtime.credential,
+                runtime.model,
+                [
+                  { role: "system", content: system },
+                  { role: "user", content: user },
+                ],
+                () => undefined,
+                getProxy(),
+                { requestTimeoutMs: 18000, idleTimeoutMs: 12000, maxTokens: 256 },
+              );
+              return result.success && result.content ? result.content : null;
+            } catch {
+              return null;
+            }
+          },
+        );
+        relevanceScoresRef.current = scores;
+      } catch (error) {
+        apiLogger.log("warn", "bidding", "scoreAgentsRelevance failed", {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      } finally {
+        relevanceBusyRef.current = false;
+      }
+    })();
+  }, [messages, isRunning, configuredAgentIds, pickExtractorRuntime, getProxy, topic]);
+
+  // Fix 5.1e: background fact-check pipeline. After each completed council
+  // message lands, run factCheckMessage with the extractor (Gemini Flash)
+  // and DuckDuckGo verifier. Badges attach to the message metadata and
+  // render via FactCheckBadge. One at a time to bound concurrency, similar
+  // to the argmap queue.
+  const factCheckBusyRef = useRef(false);
+  const factCheckProcessedIdsRef = useRef(new Set<string>());
+  useEffect(() => {
+    if (factCheckBusyRef.current) return;
+    const runtime = pickExtractorRuntime();
+    if (!runtime) return;
+    const pending = messages.find(
+      (m) =>
+        !m.isStreaming &&
+        !m.error &&
+        isCouncilAgent(m.agentId) &&
+        (m.content ?? "").trim().length > 0 &&
+        !factCheckProcessedIdsRef.current.has(m.id) &&
+        // Skip messages that already have badges (loaded from disk).
+        !m.factCheckBadges,
+    );
+    if (!pending) return;
+
+    factCheckProcessedIdsRef.current.add(pending.id);
+    factCheckBusyRef.current = true;
+
+    void (async () => {
+      try {
+        const speakerName = AGENT_CONFIG[pending.agentId as CouncilAgentId]?.name ?? "Agent";
+        const proxy = getProxy();
+        const badges = await factCheckMessage(
+          {
+            topic,
+            speakerName,
+            messageText: pending.content,
+          },
+          async ({ system, user }) => {
+            try {
+              const result = await callProvider(
+                runtime.provider,
+                runtime.credential,
+                runtime.model,
+                [
+                  { role: "system", content: system },
+                  { role: "user", content: user },
+                ],
+                () => undefined,
+                proxy,
+                { requestTimeoutMs: 30000, idleTimeoutMs: 18000, maxTokens: 512 },
+              );
+              return result.success && result.content ? result.content : null;
+            } catch {
+              return null;
+            }
+          },
+          {
+            // Plug the existing DDG search (via tools.ts's runToolCall path
+            // would be heavier; use assessVerification with a one-shot
+            // search instead — same as oracle.verify in tools.ts).
+            verify: async (claim) => {
+              try {
+                const tooled = await runToolCall(
+                  { name: "oracle.verify", args: { claim } },
+                  buildToolRuntimeContext(pending.agentId as CouncilAgentId),
+                );
+                if (tooled.error || !tooled.raw) return null;
+                const raw = tooled.raw as {
+                  verdict?: "true" | "false" | "uncertain";
+                  confidence?: number;
+                  evidence?: Array<{ title: string; url: string; snippet: string }>;
+                };
+                if (
+                  raw.verdict !== "true" &&
+                  raw.verdict !== "false" &&
+                  raw.verdict !== "uncertain"
+                ) {
+                  return null;
+                }
+                return {
+                  verdict: raw.verdict,
+                  confidence: typeof raw.confidence === "number" ? raw.confidence : 0,
+                  ...(raw.evidence && raw.evidence.length > 0
+                    ? {
+                        evidence:
+                          raw.evidence[0]!.snippet ||
+                          raw.evidence[0]!.title ||
+                          raw.evidence[0]!.url,
+                      }
+                    : {}),
+                };
+              } catch {
+                return null;
+              }
+            },
+          },
+          { maxClaims: 4, warnBelow: 0.55 },
+        );
+
+        if (badges.length > 0) {
+          // Persist into message state so the badges survive a session save/load.
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === pending.id
+                ? {
+                    ...m,
+                    factCheckBadges: badges.map((b) => ({
+                      claim: b.claim,
+                      verdict: b.verdict,
+                      confidence: b.confidence,
+                      ...(b.evidence ? { evidence: b.evidence } : {}),
+                    })),
+                  }
+                : m,
+            ),
+          );
+        }
+      } catch (error) {
+        apiLogger.log("warn", "factcheck", "factCheckMessage failed", {
+          error: error instanceof Error ? error.message : String(error),
+          messageId: pending.id,
+        });
+      } finally {
+        factCheckBusyRef.current = false;
+      }
+    })();
+    // assessVerification import below is reserved for a future direct
+    // oracle.verify replacement that doesn't go through runToolCall; left
+    // imported so that future call site doesn't need a separate import.
+    void assessVerification;
+  }, [
+    messages,
+    pickExtractorRuntime,
+    getProxy,
+    topic,
+    buildToolRuntimeContext,
+  ]);
+
+  // Fix 5.1a: wire LLM-driven memory summarization. Long debates overflow
+  // the sliding window inside ConversationMemoryManager; without this pass,
+  // agents see a literal English "[N earlier messages omitted]" placeholder
+  // and lose all context older than the window. Once we cross the
+  // threshold, the summarizer condenses the oldest third of the transcript
+  // into a "SO FAR + PREMISES" block that gets injected at the top of every
+  // future agent prompt.
+  //
+  // Triggers: every 20 messages once we've passed the minimum message
+  // threshold (40, set in summarize.ts). Best-effort; failures are logged.
+  const lastSummarizedAtCountRef = useRef(0);
+  const summarizerBusyRef = useRef(false);
+  useEffect(() => {
+    if (summarizerBusyRef.current) return;
+    const memory = memoryManagerRef.current;
+    if (!memory) return;
+    const total = memory.getAllMessages().length;
+    if (total < 40) return;
+    // Re-summarize every 20 new messages so the summary stays current
+    // with the conversation arc.
+    if (total - lastSummarizedAtCountRef.current < 20) return;
+
+    const runtime = pickExtractorRuntime();
+    if (!runtime) return;
+
+    summarizerBusyRef.current = true;
+    lastSummarizedAtCountRef.current = total;
+
+    void (async () => {
+      try {
+        const summary = await summarizeOlderMessages(
+          topic,
+          memory.getAllMessages().map((m) => ({
+            id: m.id,
+            agentId: m.agentId,
+            content: m.content,
+            timestamp: m.timestamp,
+          })),
+          async ({ system, user }): Promise<string | null> => {
+            try {
+              const result = await callProvider(
+                runtime.provider,
+                runtime.credential,
+                runtime.model,
+                [
+                  { role: "system", content: system },
+                  { role: "user", content: user },
+                ],
+                () => undefined,
+                getProxy(),
+                { requestTimeoutMs: 45000, idleTimeoutMs: 25000, maxTokens: 2048 },
+              );
+              return result.success && result.content ? result.content : null;
+            } catch {
+              return null;
+            }
+          },
+        );
+        if (summary) {
+          memory.setSessionSummary(summary);
+        }
+      } catch (error) {
+        apiLogger.log("warn", "memory", "summarizer failed", {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      } finally {
+        summarizerBusyRef.current = false;
+      }
+    })();
+  }, [messages, pickExtractorRuntime, getProxy, topic]);
+
   // Cost circuit breaker (Wave 2 / 3.4). Watches the session's running cost,
   // tracks the rolling daily total via localStorage, and triggers the user's
   // configured action (warn / pause / stop) when a cap is crossed. No change
@@ -4742,6 +5530,21 @@ Write the official moderator wrap-up in 4 short sentences:
         pausedRef.current = true;
         setIsPaused(true);
         setSessionStatus(snap.verdict === "stop" ? "completed" : "paused");
+        // Fix 3.13: surface a system message so the user understands WHY
+        // the session ended/paused instead of just seeing it become
+        // "completed" with no closing summary or final report.
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: `msg_${Date.now()}_budget_${snap.verdict}`,
+            agentId: "system",
+            content:
+              snap.verdict === "stop"
+                ? `Session stopped due to budget cap${snap.message ? ` (${snap.message})` : ""}. No closing summary or final report was generated.`
+                : `Session paused due to budget cap${snap.message ? ` (${snap.message})` : ""}. Raise the cap in Settings or end the discussion to continue.`,
+            timestamp: Date.now(),
+          },
+        ]);
       }
     } else if (snap.verdict === "warn") {
       apiLogger.log("info", "budget", snap.message ?? "Budget warning", {
@@ -4804,6 +5607,18 @@ Write the official moderator wrap-up in 4 short sentences:
                 />
               </div>
               <h1 className="chat-session-title">Socratic Council</h1>
+              {/* Fix 3.6: render BranchCrumb when this session was forked from
+                  another so the user can navigate back to the parent. */}
+              {normalizedSession.parentSessionId ? (
+                <div style={{ marginTop: "0.4rem" }}>
+                  <BranchCrumb
+                    parentSessionTitle={parentSessionTitle ?? "previous session"}
+                    onOpenParent={() =>
+                      onNavigate("chat", normalizedSession.parentSessionId!)
+                    }
+                  />
+                </div>
+              ) : null}
               <div className={`chat-session-topic-shell${isTopicExpanded ? " is-expanded" : ""}`}>
                 <div className={`chat-session-topic-body${isTopicExpanded ? " is-expanded" : ""}`}>
                   <p
@@ -5319,6 +6134,13 @@ Write the official moderator wrap-up in 4 short sentences:
                           });
                         })()
                       )}
+                      {message.factCheckBadges && message.factCheckBadges.length > 0 ? (
+                        <div style={{ marginTop: "0.4rem" }}>
+                          <FactCheckStrip
+                            badges={message.factCheckBadges as VerificationBadge[]}
+                          />
+                        </div>
+                      ) : null}
                       {messageAttachments.length > 0 && (
                         <div className="message-attachment-list">
                           {messageAttachments.map((attachment) => {
@@ -5381,6 +6203,19 @@ Write the official moderator wrap-up in 4 short sentences:
                         >
                           React
                         </button>
+                        {/* Fix 3.6: wire BranchAction so users can fork a session
+                            at this message. Hidden on archived sessions and
+                            on messages without an established conversation
+                            history (system topic, ephemeral notices). */}
+                        {!isArchived && isCouncilAgent(message.agentId) && !message.isStreaming ? (
+                          <BranchAction
+                            session={normalizedSession}
+                            messageId={message.id}
+                            onBranched={(branch) => {
+                              onNavigate("chat", branch.id);
+                            }}
+                          />
+                        ) : null}
                       </div>
                     )}
 
