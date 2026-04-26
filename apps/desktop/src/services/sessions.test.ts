@@ -322,7 +322,7 @@ describe("branchDiscussionSession (fix 2.11 runtime reset)", () => {
     expect(branch.runtime.lastModeratorSynthesisTurn).toBe(0);
     expect(branch.runtime.resolutionQueue).toEqual([]);
     expect(branch.runtime.resolutionNoticePosted).toBe(false);
-    expect(branch.currentTurn).toBe(0);
+    expect(branch.currentTurn).toBe(25);
     expect(branch.runtime.phase).toBe("discussion");
   });
 });

@@ -13,7 +13,6 @@ import {
   type SessionAttachment,
 } from "../services/attachments";
 import {
-  loadDiscussionSession,
   type DeepResearchReportSnapshot,
   type DiscussionSession,
   type EndVoteChoice,
@@ -71,7 +70,7 @@ import { splitIntoInlineQuoteSegments, stripQuoteTokens } from "../utils/inlineQ
 import { CostBudgetBadge } from "../components/CostBudgetBadge";
 import { ArgumentMapPanel } from "../components/ArgumentMapPanel";
 import { BundleExportButton } from "../components/BundleActions";
-import { BranchAction, BranchCrumb } from "../components/BranchAction";
+import { BranchAction, BranchLineage } from "../components/BranchAction";
 import { FactCheckStrip } from "../components/FactCheckBadge";
 import {
   emptyGraph,
@@ -1289,20 +1288,6 @@ export function Chat({ session, onNavigate, onPersistSession }: ChatProps) {
   const [topicOverflowing, setTopicOverflowing] = useState(false);
   const [isGracefullyEnding, setIsGracefullyEnding] = useState(false);
   const [showGracefulEndConfirm, setShowGracefulEndConfirm] = useState(false);
-  // Fix 3.6: cache the parent session's title for the BranchCrumb. Loaded
-  // once when the chat mounts; null when this isn't a branch session.
-  const [parentSessionTitle, setParentSessionTitle] = useState<string | null>(
-    null,
-  );
-
-  useEffect(() => {
-    if (!normalizedSession.parentSessionId) {
-      setParentSessionTitle(null);
-      return;
-    }
-    const parent = loadDiscussionSession(normalizedSession.parentSessionId);
-    setParentSessionTitle(parent?.title ?? null);
-  }, [normalizedSession.parentSessionId]);
 
   const virtuosoRef = useRef<VirtuosoHandle>(null);
   const topicBodyRef = useRef<HTMLDivElement | null>(null);
@@ -5692,18 +5677,17 @@ Write the official moderator wrap-up in 4 short sentences:
                 />
               </div>
               <h1 className="chat-session-title">Socratic Council</h1>
-              {/* Fix 3.6: render BranchCrumb when this session was forked from
-                  another so the user can navigate back to the parent. */}
-              {normalizedSession.parentSessionId ? (
-                <div style={{ marginTop: "0.4rem" }}>
-                  <BranchCrumb
-                    parentSessionTitle={parentSessionTitle ?? "previous session"}
-                    onOpenParent={() =>
-                      onNavigate("chat", normalizedSession.parentSessionId!)
-                    }
-                  />
-                </div>
-              ) : null}
+              {/* Branch lineage — replaces the single-parent crumb. Renders
+                  the full ancestor chain back to root and exposes a
+                  popover with sibling/child branches so the user can
+                  navigate the whole local family tree from one control. */}
+              <div style={{ marginTop: "0.4rem" }}>
+                <BranchLineage
+                  sessionId={normalizedSession.id}
+                  refreshKey={lastSavedAt}
+                  onNavigate={(id) => onNavigate("chat", id)}
+                />
+              </div>
               <div className={`chat-session-topic-shell${isTopicExpanded ? " is-expanded" : ""}`}>
                 <div className={`chat-session-topic-body${isTopicExpanded ? " is-expanded" : ""}`}>
                   <p
