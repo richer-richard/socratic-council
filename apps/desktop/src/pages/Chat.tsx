@@ -225,10 +225,10 @@ Rules:
 - Be assertive: challenge weak claims directly and name the specific assumption you reject.
 - Avoid headings and long bullet lists (keep it chatty). Use them only if plain text is clearly insufficient.
 - Directly address a specific point from someone else by name.
-- Push the discussion forward by doing one primary thing: add one new claim/example/counterpoint, or narrow the group toward a recommendation using evidence or decision criteria.
+- Push the discussion forward by doing one primary thing: add one new point or counterpoint, or help the group narrow toward a recommendation by getting concrete about what the call hinges on.
 - Do not reopen settled points unless you have new evidence or a better standard.
 - If the discussion is mature, prefer synthesis and choice over novelty.
-- Include one concrete test, falsifiable criterion, or counterexample when possible.
+- When you make a strong claim, name something specific that would change your mind, or a concrete case where it would fail.
 - If your answer depends on exact wording from attached files or current facts, research first before answering.
 - Attached PDFs, images, DOCX, XLSX, and other non-code files are NOT visible as full files. Only a compact manifest appears in your context. To see their contents, call oracle.file_search with a targeted query — that returns OCR'd or extracted snippets. Only code and plain-text files are inlined in full.
 - Proactively call oracle.file_search for attached-file evidence and oracle.web_search for current external facts when that would materially improve the answer.
@@ -250,6 +250,7 @@ ${MULTILINGUAL_STYLE_GUIDE}
 Quoting/Reactions:
 - You MUST include @quote(MSG_ID) for a specific prior message. You can quote MULTIPLE messages from different speakers or even the same speaker: @quote(MSG_A) @quote(MSG_B).
 - NEVER fabricate or invent quotes. Only use @quote(MSG_ID) with an actual message ID visible in the conversation above. If no prior messages exist, do not quote anything.
+- NEVER @quote(...) a "[Private note from …]" line. Private notes are invisible to the other agents and have no shareable message id. Reference your partner's idea in your own words instead.
 - If it fits, include @react(MSG_ID, 👍|👎|❤️|😂|😮|😢|😡|✨|🎉).
 
 ${getToolPrompt()}
@@ -266,7 +267,7 @@ const BASE_SYSTEM_PROMPT = (
 ) => {
   const partnerName = AGENT_NAME_TO_PARTNER[name];
   const partnerLine = partnerName
-    ? `\nOuter-circle partner: You have a silent partner named ${partnerName} who observes the discussion and may send you private notes marked "[Private note from ${partnerName}]". When ${partnerName} raises a substantive point worth sharing, naturally weave it into your argument — e.g. "my partner ${partnerName} points out…" or "as ${partnerName} noted…". If the note is only about your delivery or strategy (not a new argument), follow the advice silently without mentioning it.\n`
+    ? `\nOuter-circle partner: You have a silent partner named ${partnerName} who observes the discussion and may send you private notes marked "[Private note from ${partnerName}]". When ${partnerName} raises a substantive point worth sharing, naturally weave it into your argument — e.g. "my partner ${partnerName} points out…" or "as ${partnerName} noted…". If the note is only about your delivery or strategy (not a new argument), follow the advice silently without mentioning it. Reference your partner's idea by paraphrase only — NEVER use @quote(...) on a private note. Those notes are invisible to the other agents and have no shareable id; quoting one would either fail or leak its content publicly.\n`
     : "";
 
   return `You are ${name} in a group chat with George, Cathy, Grace, Douglas, Kate, Quinn, Mary, and Zara.
@@ -275,7 +276,7 @@ Do NOT adopt a persona or specialty. Speak as yourself, and keep the tone natura
 Do NOT fabricate facts, invent sources, or hallucinate quotes. Only reference messages you can actually see above.
 ${partnerLine}
 Proactive behavior requirements:
-- If someone is vague, force precision by asking for a measurable claim.
+- If someone is vague, push for a specific example or number.
 - If someone makes a strong claim, pressure-test it with one concrete challenge.
 - If the room is converging too quickly without enough evidence, introduce one serious dissenting angle.
 - Once the evidence is good enough, help the group converge on a defensible recommendation instead of reopening settled points.
@@ -297,15 +298,15 @@ Rules:
   1) kickoff framing with one measurable objective,
   2) periodic synthesis (agreed/disputed/unresolved),
   3) participation balancing (invite underrepresented voices),
-  4) evidence-quality checks (claim vs evidence),
+  4) pressing someone for specifics when their claim is sweeping or hand-wavy,
   5) drift correction back to topic,
   6) contradiction spotlighting with a clarifying question,
-  7) near-end transition into resolution with clear decision criteria,
+  7) near-end transition into resolution by asking what the call actually hinges on,
   8) final outcome publication after the closing round, with a score/10 and explanation.
 - Keep interventions sparse and high-signal to avoid unnecessary cost.
 - You may suggest who should respond next by name.
 - At the end, publish the official closing result with a score/10 and explanation instead of leaving the room with another open question.
-- Be a harsh, honest grader. A score of 7+ requires concrete evidence cited, falsifiable criteria, and genuine disagreement resolved with clear reasoning. Most discussions deserve 4–6. Give 8+ only if the group produced a defensible, evidence-backed recommendation. Discussions that stayed abstract, repetitive, or hand-wavy should score 3–5.
+- Be a harsh, honest grader. A score of 7+ requires the group to have backed their claims with specifics, named what would change their minds, and resolved real disagreement with clear reasoning. Most discussions deserve 4–6. Give 8+ only if the group landed a concrete, well-supported recommendation. Discussions that stayed abstract, repetitive, or hand-wavy should score 3–5.
 - Do NOT include @quote(...), @react(...), @tool(...), @vote(...), or @end() unless the specific prompt explicitly asks for it.
 - Do NOT impersonate any agent.`;
 
@@ -2636,7 +2637,7 @@ HARD CONSTRAINTS — do not violate, regardless of any rule elsewhere:
             content: `Provide a short synthesis for turn ${options.turn ?? "current"}:
 - One clause: what the group currently agrees on.
 - One clause: the sharpest unresolved disagreement.
-- Ask exactly one question that can move the discussion toward evidence or decision criteria.`,
+- Ask exactly one question that pushes the group toward a concrete answer or names what would actually settle this.`,
           });
         } else if (options.kind === "balance") {
           history.push({
@@ -5125,7 +5126,13 @@ Write the official moderator wrap-up in 4 short sentences:
   const argGraphRef = useRef(argGraph);
   argGraphRef.current = argGraph;
   const argmapBusyRef = useRef(false);
+  const [argmapBusy, setArgmapBusy] = useState(false);
   const argmapExtractedIdsRef = useRef(new Set<string>());
+  const argmapInFlightRef = useRef(new Set<string>());
+  const argmapAttemptsByIdRef = useRef(new Map<string, number>());
+  const [argmapLastError, setArgmapLastError] = useState<string | null>(null);
+  const [argmapRetryNonce, setArgmapRetryNonce] = useState(0);
+  const ARGMAP_MAX_ATTEMPTS = 3;
 
   // Runs argument-map extraction for a single completed council message.
   // Uses the `ExtractorCompletionFn` contract from @socratic-council/core:
@@ -5164,6 +5171,7 @@ Write the official moderator wrap-up in 4 short sentences:
         priorClaims,
       });
 
+      const startedAt = Date.now();
       try {
         const result = await callProvider(
           runtime.provider,
@@ -5180,19 +5188,50 @@ Write the official moderator wrap-up in 4 short sentences:
           getProxy(),
           { requestTimeoutMs: 30000, idleTimeoutMs: 20000, maxTokens: 1024 },
         );
-        if (!result.success) return;
-        const fragments = parseExtractResponse(result.content);
-        if (fragments.length === 0) {
-          // Still mark the message as processed so we don't re-extract.
-          setArgGraph((prev) => ({ ...prev, lastMessageId: messageId }));
+        if (!result.success) {
+          const attempts = (argmapAttemptsByIdRef.current.get(messageId) ?? 0) + 1;
+          argmapAttemptsByIdRef.current.set(messageId, attempts);
+          if (attempts >= ARGMAP_MAX_ATTEMPTS) {
+            argmapExtractedIdsRef.current.add(messageId);
+            apiLogger.log("warn", runtime.provider, "argmap extraction giving up", {
+              messageId,
+              attempts,
+            });
+          }
+          setArgmapLastError(`extractor returned no result (attempt ${attempts}/${ARGMAP_MAX_ATTEMPTS})`);
           return;
         }
-        setArgGraph((prev) => updateArgumentMap(prev, fragments, { messageId, agentId }));
+        const fragments = parseExtractResponse(result.content);
+        const elapsedMs = Date.now() - startedAt;
+        apiLogger.log(
+          "info",
+          runtime.provider,
+          fragments.length === 0 ? "argmap extraction empty" : "argmap extraction ok",
+          { messageId, fragments: fragments.length, elapsedMs },
+        );
+        // Either way we accept the result — no fragments means the model
+        // judged this message non-substantive. Don't retry that decision.
+        argmapExtractedIdsRef.current.add(messageId);
+        argmapAttemptsByIdRef.current.delete(messageId);
+        if (fragments.length === 0) {
+          setArgGraph((prev) => ({ ...prev, lastMessageId: messageId }));
+        } else {
+          setArgGraph((prev) => updateArgumentMap(prev, fragments, { messageId, agentId }));
+        }
+        setArgmapLastError(null);
       } catch (error) {
+        const attempts = (argmapAttemptsByIdRef.current.get(messageId) ?? 0) + 1;
+        argmapAttemptsByIdRef.current.set(messageId, attempts);
+        const errMsg = error instanceof Error ? error.message : String(error);
         apiLogger.log("warn", runtime.provider, "argmap extraction failed", {
-          error: error instanceof Error ? error.message : String(error),
+          error: errMsg,
           messageId,
+          attempts,
         });
+        if (attempts >= ARGMAP_MAX_ATTEMPTS) {
+          argmapExtractedIdsRef.current.add(messageId);
+        }
+        setArgmapLastError(errMsg);
       }
     },
     [pickExtractorRuntime, getProxy, topic],
@@ -5201,6 +5240,13 @@ Write the official moderator wrap-up in 4 short sentences:
   // Drives the extraction queue: whenever messages change (or we finish an
   // extraction), find the oldest completed council message that hasn't been
   // processed yet and run the extractor for it. One at a time.
+  //
+  // Reliability invariant: a message id is added to `argmapExtractedIdsRef`
+  // only AFTER the extractor either succeeds or exhausts its retry budget.
+  // Transient failures (network, parse error, model hiccup) leave the id
+  // pending; the next message arrival re-fires this effect and we retry.
+  // The retry-now button bumps `argmapRetryNonce` to force re-fire even
+  // when no new messages have arrived.
   useEffect(() => {
     if (argmapBusyRef.current) return;
     if (!pickExtractorRuntime()) return;
@@ -5210,15 +5256,54 @@ Write the official moderator wrap-up in 4 short sentences:
         !m.error &&
         isCouncilAgent(m.agentId) &&
         (m.content ?? "").trim().length > 0 &&
-        !argmapExtractedIdsRef.current.has(m.id),
+        !argmapExtractedIdsRef.current.has(m.id) &&
+        !argmapInFlightRef.current.has(m.id),
     );
     if (!pending) return;
-    argmapExtractedIdsRef.current.add(pending.id);
+    argmapInFlightRef.current.add(pending.id);
     argmapBusyRef.current = true;
+    setArgmapBusy(true);
     void runArgumentMapExtraction(pending.id, pending.agentId as CouncilAgentId).finally(() => {
+      argmapInFlightRef.current.delete(pending.id);
       argmapBusyRef.current = false;
+      setArgmapBusy(false);
     });
-  }, [messages, argGraph.lastMessageId, pickExtractorRuntime, runArgumentMapExtraction]);
+  }, [
+    messages,
+    argGraph.lastMessageId,
+    pickExtractorRuntime,
+    runArgumentMapExtraction,
+    argmapRetryNonce,
+  ]);
+
+  // Reset argmap state whenever we switch sessions, so a stale extractedIds
+  // set from a prior session can't suppress extraction on the new one's
+  // messages (their ids never collide, but the graph carrying over would
+  // surface old claims under a new topic).
+  useEffect(() => {
+    setArgGraph(emptyGraph());
+    argmapExtractedIdsRef.current = new Set();
+    argmapInFlightRef.current = new Set();
+    argmapAttemptsByIdRef.current = new Map();
+    setArgmapLastError(null);
+    setArgmapBusy(false);
+    argmapBusyRef.current = false;
+  }, [normalizedSession.id]);
+
+  const argmapStatus: "no-credential" | "extracting" | "empty" | "failed" =
+    !pickExtractorRuntime()
+      ? "no-credential"
+      : argmapBusy
+        ? "extracting"
+        : argmapLastError
+          ? "failed"
+          : "empty";
+
+  const retryArgmap = useCallback(() => {
+    argmapAttemptsByIdRef.current = new Map();
+    setArgmapLastError(null);
+    setArgmapRetryNonce((n) => n + 1);
+  }, []);
 
   // Fix 5.1d: background semantic-relevance scoring pass. Fires every few
   // turns to refresh the LLM-derived relevance signal that bidding blends
@@ -6047,6 +6132,25 @@ Write the official moderator wrap-up in 4 short sentences:
                                 </div>
                               );
                             }
+                            // Defense in depth for the private-note rule in the
+                            // system prompt: if an agent ever @quote()s a real
+                            // observer-note message id, refuse to render its
+                            // content into the public transcript.
+                            if (
+                              (qm as ChatMessage & { observerNote?: ObserverNoteSnapshot })
+                                .observerNote
+                            ) {
+                              return (
+                                <div key={`${message.id}-quote-${idx}`} className="message-quote">
+                                  <div className="message-quote-header">
+                                    Missing quote · @quote({segment.id})
+                                  </div>
+                                  <div className="message-quote-body">
+                                    Private note — not shareable.
+                                  </div>
+                                </div>
+                              );
+                            }
 
                             const qReactions = qm.reactions
                               ? (
@@ -6630,6 +6734,9 @@ Write the official moderator wrap-up in 4 short sentences:
       {argmapOpen && (
         <ArgumentMapPanel
           graph={argGraph}
+          status={argmapStatus}
+          lastError={argmapLastError}
+          onRetry={retryArgmap}
           onClose={() => setArgmapOpen(false)}
           onNavigateToMessage={jumpToMessage}
           agentColors={Object.fromEntries(

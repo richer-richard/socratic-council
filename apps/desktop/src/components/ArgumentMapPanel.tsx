@@ -15,6 +15,8 @@ import type { ArgEdge, ArgGraph, ArgNode } from "@socratic-council/core";
  * `@socratic-council/core/argmap`. Feed it a graph and it draws.
  */
 
+export type ArgumentMapStatus = "no-credential" | "extracting" | "empty" | "failed";
+
 export interface ArgumentMapPanelProps {
   graph: ArgGraph;
   /** Close the side panel. */
@@ -23,6 +25,12 @@ export interface ArgumentMapPanelProps {
   onNavigateToMessage?: (messageId: string) => void;
   /** Optional map of agentId → display color. If absent, uses neutral ink. */
   agentColors?: Record<string, string>;
+  /** Diagnostic status for the empty state. */
+  status?: ArgumentMapStatus;
+  /** Most recent extractor error message, surfaced when status === "failed". */
+  lastError?: string | null;
+  /** Re-run the extractor on the oldest unprocessed message. */
+  onRetry?: () => void;
 }
 
 export function ArgumentMapPanel({
@@ -30,6 +38,9 @@ export function ArgumentMapPanel({
   onClose,
   onNavigateToMessage,
   agentColors = {},
+  status = "empty",
+  lastError = null,
+  onRetry,
 }: ArgumentMapPanelProps) {
   const [hoveredNode, setHoveredNode] = useState<string | null>(null);
 
@@ -143,7 +154,7 @@ export function ArgumentMapPanel({
         }}
       >
         {claims.length === 0 ? (
-          <EmptyState />
+          <EmptyState status={status} lastError={lastError} onRetry={onRetry} />
         ) : (
           claims.map((claim) => {
             const connections = claimConnections.get(claim.id) ?? [];
@@ -358,7 +369,41 @@ function ConnectionRow({
   );
 }
 
-function EmptyState() {
+function EmptyState({
+  status,
+  lastError,
+  onRetry,
+}: {
+  status: ArgumentMapStatus;
+  lastError: string | null;
+  onRetry?: () => void;
+}) {
+  const headline = (() => {
+    switch (status) {
+      case "no-credential":
+        return "Add a Google API key to enable the live argument map.";
+      case "extracting":
+        return "Reading the latest message…";
+      case "failed":
+        return "The extractor stumbled.";
+      default:
+        return "The debate has not yet forked a claim.";
+    }
+  })();
+  const sub = (() => {
+    switch (status) {
+      case "no-credential":
+        return "The extractor uses Gemini 3 Flash. Open Settings → Providers → Google to plug one in.";
+      case "extracting":
+        return "Claims, evidence, and rebuttals appear here as the council speaks.";
+      case "failed":
+        return lastError
+          ? `Last error: ${lastError}. The next council turn will retry automatically — or click Retry now below.`
+          : "The next council turn will retry automatically — or click Retry now below.";
+      default:
+        return "Claims, evidence, and rebuttals appear here as the council speaks.";
+    }
+  })();
   return (
     <div
       style={{
@@ -377,11 +422,54 @@ function EmptyState() {
           marginBottom: "8px",
         }}
       >
-        The debate has not yet forked a claim.
+        {status === "extracting" ? (
+          <span style={{ display: "inline-flex", alignItems: "center", gap: "8px" }}>
+            <span
+              aria-hidden="true"
+              style={{
+                width: "6px",
+                height: "6px",
+                borderRadius: "50%",
+                background: "rgba(245, 197, 66, 0.78)",
+                animation: "argmap-pulse 1.4s ease-in-out infinite",
+              }}
+            />
+            {headline}
+          </span>
+        ) : (
+          headline
+        )}
       </div>
-      <div style={{ fontSize: "0.8rem" }}>
-        Claims, evidence, and rebuttals appear here as the council speaks.
-      </div>
+      <div style={{ fontSize: "0.8rem", maxWidth: "32ch", margin: "0 auto" }}>{sub}</div>
+      {status === "failed" && onRetry && (
+        <button
+          type="button"
+          onClick={onRetry}
+          style={{
+            marginTop: "16px",
+            padding: "6px 14px",
+            border: "1px solid rgba(245, 197, 66, 0.35)",
+            background: "rgba(245, 197, 66, 0.08)",
+            color: "rgba(245, 197, 66, 0.92)",
+            borderRadius: "6px",
+            cursor: "pointer",
+            fontSize: "0.78rem",
+            fontFamily: "'JetBrains Mono', ui-monospace, monospace",
+            letterSpacing: "0.04em",
+          }}
+        >
+          Retry now
+        </button>
+      )}
+      <style>{`
+        @keyframes argmap-pulse {
+          0%, 100% { opacity: 0.4; transform: scale(1); }
+          50% { opacity: 1; transform: scale(1.3); }
+        }
+        @media (prefers-reduced-motion: reduce) {
+          [aria-hidden="true"] { animation: none !important; }
+        }
+      `}</style>
     </div>
   );
 }
