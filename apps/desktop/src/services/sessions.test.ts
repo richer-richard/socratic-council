@@ -252,6 +252,71 @@ describe("session round-trip (fix 2.17)", () => {
     expect(loaded?.messages).toHaveLength(2);
   });
 
+  it("round-trips argGraph + argmapExtractedIds through save/load", () => {
+    installInMemoryStorage();
+    const original = createSessionFixture({
+      id: "session_argmap",
+      argGraph: {
+        nodes: [
+          {
+            id: "c0",
+            kind: "claim",
+            text: "Severity is the dominant deterrent.",
+            sourceMessageId: "msg_2",
+            sourceAgentId: "george",
+          },
+          {
+            id: "e0",
+            kind: "evidence",
+            text: "Helland & Tabarrok 2007.",
+            sourceMessageId: "msg_2",
+            sourceAgentId: "george",
+          },
+        ],
+        edges: [{ from: "e0", to: "c0", relation: "supports" }],
+        lastMessageId: "msg_2",
+      },
+      argmapExtractedIds: ["msg_1", "msg_2"],
+    });
+
+    saveDiscussionSession(original);
+    const loaded = loadDiscussionSession(original.id);
+
+    expect(loaded?.argGraph?.nodes).toHaveLength(2);
+    expect(loaded?.argGraph?.edges).toEqual([
+      { from: "e0", to: "c0", relation: "supports" },
+    ]);
+    expect(loaded?.argGraph?.lastMessageId).toBe("msg_2");
+    expect(loaded?.argmapExtractedIds).toEqual(["msg_1", "msg_2"]);
+  });
+
+  it("drops argGraph edges that point at unknown nodes", () => {
+    installInMemoryStorage();
+    const original = createSessionFixture({
+      id: "session_argmap_corrupt",
+      argGraph: {
+        nodes: [
+          {
+            id: "c0",
+            kind: "claim",
+            text: "Anchor claim.",
+            sourceMessageId: "msg_2",
+            sourceAgentId: "george",
+          },
+        ],
+        // Edge points at a non-existent node id; must be filtered on load.
+        edges: [{ from: "ghost", to: "c0", relation: "supports" }],
+        lastMessageId: "msg_2",
+      },
+    });
+
+    saveDiscussionSession(original);
+    const loaded = loadDiscussionSession(original.id);
+
+    expect(loaded?.argGraph?.nodes).toHaveLength(1);
+    expect(loaded?.argGraph?.edges).toEqual([]);
+  });
+
   it("returns null and counts the failure when the blob is corrupt", () => {
     const original = createSessionFixture({ id: "session_corrupt" });
     saveDiscussionSession(original);

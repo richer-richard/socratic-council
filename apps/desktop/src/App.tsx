@@ -108,8 +108,16 @@ export default function App() {
 
       // First-launch telemetry prompt: only show if the user has never
       // recorded a choice AND has at least one session worth of activity.
+      // Gated off until the maintainer deploys an ingest endpoint — the
+      // services/telemetry.ts plumbing and the card component stay intact
+      // so flipping this flag back to true is the only step required.
+      const TELEMETRY_PROMPT_ENABLED = false;
       const telemetry = loadTelemetryConfig();
-      if (telemetry.acceptedAt == null && listSessionSummaries().length > 0) {
+      if (
+        TELEMETRY_PROMPT_ENABLED &&
+        telemetry.acceptedAt == null &&
+        listSessionSummaries().length > 0
+      ) {
         setShowTelemetryCard(true);
       }
     })();
