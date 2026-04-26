@@ -22,7 +22,55 @@ const LOW_SIGNAL_HOST_PATTERNS = [
 ];
 const LOW_SIGNAL_PATH_PATTERNS = [/\/signin/i, /\/login/i, /\/gallery/i, /\/categories/i];
 
+/**
+ * Detect whether the query contains characters outside the basic ASCII
+ * letter/digit set — a cheap proxy for "this is a non-Latin query that
+ * the regex-split tokenizer below will produce zero terms for". When true
+ * we fall back to character-bigram terms so search ranking still works
+ * for Chinese, Japanese, Arabic, Cyrillic, Hebrew, etc. (fix 11.6).
+ */
+function looksNonLatin(text: string): boolean {
+  for (let i = 0; i < text.length; i++) {
+    const c = text.charCodeAt(i);
+    // Anything above the ASCII letters/digits range that isn't whitespace
+    // counts as "non-Latin enough" to trigger the bigram path.
+    if (c > 127) return true;
+  }
+  return false;
+}
+
+function extractCharBigrams(text: string): string[] {
+  const cleaned = text
+    .replace(/[\s\p{P}\p{S}]+/gu, " ")
+    .trim()
+    .toLowerCase();
+  if (!cleaned) return [];
+  const tokens = cleaned.split(/\s+/);
+  const bigrams = new Set<string>();
+  for (const token of tokens) {
+    if (token.length === 0) continue;
+    if (token.length === 1) {
+      bigrams.add(token);
+      continue;
+    }
+    // Use Array.from so surrogate pairs (emoji etc.) count as a single
+    // grapheme rather than splitting in the middle of a code point.
+    const chars = Array.from(token);
+    for (let i = 0; i < chars.length - 1; i++) {
+      bigrams.add(chars[i]! + chars[i + 1]!);
+    }
+  }
+  return Array.from(bigrams);
+}
+
 function extractTerms(text: string) {
+  // Fix 11.6: when the query has non-Latin content, ASCII-only tokenization
+  // returns zero terms and the ranker silently returns whatever DDG/Bing
+  // gave us in the order they came in. Bigrams give the ranker something
+  // to score against in CJK / Arabic / Cyrillic / etc.
+  if (looksNonLatin(text)) {
+    return extractCharBigrams(text);
+  }
   return Array.from(
     new Set(
       text

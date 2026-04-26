@@ -175,8 +175,26 @@ function sliceBalancedJson(raw: string, start: number): string | null {
  * - Unterminated strings at the very end (caused by token truncation).
  *
  * This is best-effort; returns the input unchanged if no repair helps.
+ *
+ * Fix 10.6: callers can read `lastJsonRepairWasApplied` after calling
+ * extractJson to detect when the repair path was used (vs. a clean parse).
+ * Subtle errors in the repair (e.g. closing a brace early on a truncated
+ * payload) can produce parseable-but-wrong data; surfacing the repair
+ * lets downstream rendering tag low-fidelity reports instead of treating
+ * them as authoritative.
  */
+let lastJsonRepairWasApplied = false;
+
+export function wasLastJsonRepaired(): boolean {
+  return lastJsonRepairWasApplied;
+}
+
+export function __resetJsonRepairFlagForTests(): void {
+  lastJsonRepairWasApplied = false;
+}
+
 function repairJsonString(candidate: string): string {
+  lastJsonRepairWasApplied = true;
   let fixed = candidate;
 
   // 1. Strip trailing commas before `]` or `}`.
@@ -272,6 +290,10 @@ function repairJsonString(candidate: string): string {
 export function extractJson(raw: string): unknown {
   if (!raw) throw new Error("Empty response");
 
+  // Reset repair flag at the start of every parse attempt so callers can
+  // observe whether THIS call needed repair (fix 10.6).
+  lastJsonRepairWasApplied = false;
+
   // Strip markdown code fences if present
   const fenced = raw.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
   const candidate = fenced ? fenced[1] : raw;
@@ -284,7 +306,9 @@ export function extractJson(raw: string): unknown {
   const balanced = sliceBalancedJson(candidate, firstBrace);
   if (balanced) {
     try {
-      return JSON.parse(balanced);
+      const parsed = JSON.parse(balanced);
+      lastJsonRepairWasApplied = false;
+      return parsed;
     } catch {
       // fall through to repair attempt on the balanced slice
       try {

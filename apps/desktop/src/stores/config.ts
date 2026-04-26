@@ -1,13 +1,33 @@
 /**
- * Configuration store for managing API keys, proxy settings, and preferences
+ * Shared configuration store for API keys, proxy settings, and preferences.
  *
- * Proxy Logic:
- * - Single global proxy configuration applies to ALL providers
- * - No per-provider proxy overrides (removed for simplicity)
- * - Proxy is optional - if not configured, direct connection is used
+ * Architecture (fix 1.3):
+ *   The store lives at MODULE scope — there is exactly one in-memory copy
+ *   regardless of how many components call `useConfig()`. App, Home, and
+ *   Chat (and anyone else) all share the same state. Updates from any
+ *   call site re-render every subscriber via `useSyncExternalStore`.
+ *
+ *   Previously each `useConfig` invocation had its own `useState` +
+ *   `useEffect`, which produced staleness when, e.g., DiagnosticsPanel
+ *   (rendered from App) showed "0 providers" while Home had just saved
+ *   a key.
+ *
+ * Persistence layout:
+ *   - `socratic-council-config` (localStorage) — non-secret config blob
+ *     plus a `hasKey` marker per provider.
+ *   - `socratic-council-secret:apiKey:<provider>` (localStorage, encrypted) —
+ *     each provider's API key, behind the file vault. See `services/secrets.ts`.
+ *   - Proxy passwords live under `socratic-council-secret:proxy:password`.
+ *
+ * Initialization:
+ *   The first call to `useConfig()` triggers `ensureInit()`, which
+ *   awaits `initVault()` and hydrates encrypted credentials. While the
+ *   vault is loading, `vaultReady` is false; the UI should disable
+ *   key-saving surfaces (per fix 8.1) so users don't trigger the
+ *   `secretsPut` throw from fix 1.2.
  */
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useCallback, useSyncExternalStore } from "react";
 import {
   apiKeyAccount,
   isSecretStoreReady,
@@ -27,6 +47,7 @@ export type Provider =
   | "minimax"
   | "zhipu";
 export type ProxyType = "none" | "http" | "https" | "socks5" | "socks5h";
+
 const VALID_PROVIDERS = [
   "openai",
   "anthropic",
@@ -64,6 +85,8 @@ export interface BudgetPolicy {
   action: BudgetAction;
 }
 
+export type ReflectionMode = "off" | "light" | "deep";
+
 export interface DiscussionPreferences {
   defaultLength: "quick" | "standard" | "extended" | "marathon" | "custom";
   customTurns: number;
@@ -72,13 +95,17 @@ export interface DiscussionPreferences {
   soundEffects: boolean;
   moderatorEnabled: boolean;
   observersEnabled: boolean;
-  /**
-   * Cost circuit breaker. When the per-session or per-day cap is hit, the
-   * council runner fires the configured `action` — warn (toast only),
-   * pause (stop the turn loop, keep state), or stop (end the session).
-   * Setting a cap to 0 disables it.
-   */
+  /** Cost circuit breaker. See `utils/budgetEnforcer.ts`. 0 caps disable. */
   budget: BudgetPolicy;
+  /**
+   * Self-reflection / draft-then-revise mode (wave 2.4 wiring, fix 5.1b).
+   *  - "off"   — single-pass turns (default; preserves prior cost profile).
+   *  - "light" — one revise pass with a short rubric.
+   *  - "deep"  — critique then revise with an explicit checklist.
+   */
+  reflection: ReflectionMode;
+  /** Observer interval in turns; 0 disables (fix 3.3). */
+  observerInterval: number;
 }
 
 export interface McpConfig {
@@ -107,12 +134,16 @@ export const LOCKED_MODELS: Record<Provider, string> = {
   zhipu: "glm-5.1",
 };
 
+/**
+ * Anthropic Opus fallback model — used by Chat.tsx when the primary Opus
+ * model fails. Centralized here (per fix 3.17) so model rotations update
+ * the fallback alongside `LOCKED_MODELS`.
+ */
+export const ANTHROPIC_OPUS_FALLBACK_MODEL = "claude-opus-4-6";
+
 export function isProvider(value: unknown): value is Provider {
   return typeof value === "string" && VALID_PROVIDERS.includes(value as Provider);
 }
-
-// Claude Opus 4.7 - default for Cathy
-const CLAUDE_OPUS_DEFAULT_MODEL_ID = "claude-opus-4-7";
 
 const DEFAULT_CONFIG: AppConfig = {
   credentials: {},
@@ -134,6 +165,8 @@ const DEFAULT_CONFIG: AppConfig = {
       perDay: 0,
       action: "warn",
     },
+    reflection: "off",
+    observerInterval: 2,
   },
   models: { ...LOCKED_MODELS },
   mcp: {
@@ -170,17 +203,16 @@ function normalizeProxyConfig(input?: Partial<ProxyConfig>): ProxyConfig {
 }
 
 /**
- * Runtime credential shape: `apiKey` is the plaintext key held only while the app runs.
- * Persisted credential shape (in localStorage): `hasKey: true` marker instead of plaintext.
- * The actual key lives in the OS keychain under account `apiKey:<provider>`.
- *
- * This sanitizer accepts BOTH shapes so upgrade-in-place works:
- *   - Old format: `{ apiKey: "sk-..." }` — preserved, flagged for migration
- *   - New format: `{ hasKey: true }`    — apiKey will be hydrated from keychain
+ * Persisted credential shape on disk (in `socratic-council-config`):
+ *   - `hasKey: true` — marker that the actual key lives in the encrypted
+ *     secret store (`services/secrets.ts`). This is the modern shape.
+ *   - `apiKey: string` — legacy plaintext from older builds. Migrated into
+ *     the secret store on the first vault-ready boot, then dropped on next save.
  */
 interface PersistedProviderCredential {
   hasKey?: boolean;
-  apiKey?: string; // legacy — gets migrated to keychain on first load
+  /** Legacy plaintext — gets migrated to the encrypted secret store on first ready boot. */
+  apiKey?: string;
   baseUrl?: string;
   verified?: boolean;
   lastTested?: number;
@@ -208,8 +240,6 @@ function sanitizeCredentials(input: unknown): Partial<Record<Provider, ProviderC
     const lastTested = cred.lastTested;
 
     result[rawProvider] = {
-      // Legacy plaintext used as the starting apiKey; hydration replaces it.
-      // Otherwise empty string — hydration from keychain will populate it.
       apiKey: hasLegacyKey ? cred.apiKey!.trim() : "",
       ...(typeof baseUrl === "string" && baseUrl.trim() !== "" ? { baseUrl: baseUrl.trim() } : {}),
       ...(typeof verified === "boolean" ? { verified } : {}),
@@ -221,9 +251,9 @@ function sanitizeCredentials(input: unknown): Partial<Record<Provider, ProviderC
 }
 
 /**
- * Strip the runtime `apiKey` field from credentials before writing to localStorage.
- * Replaces it with a `hasKey: true` marker if the key is non-empty so loaders know
- * to hydrate from the keychain.
+ * Strip plaintext API keys from credentials before writing to localStorage.
+ * Replaces them with a `hasKey: true` marker so the loader knows to hydrate
+ * from the encrypted secret store.
  */
 function stripSecretsForPersistence(
   credentials: Partial<Record<Provider, ProviderCredential>>,
@@ -242,76 +272,98 @@ function stripSecretsForPersistence(
   return persisted;
 }
 
-function sanitizeModels(input: unknown): Partial<Record<Provider, string>> {
+function sanitizeModels(_input: unknown): Partial<Record<Provider, string>> {
   // Model selection is locked per character, so persisted values are ignored.
-  void input;
   return { ...LOCKED_MODELS };
 }
 
 const STORAGE_KEY = "socratic-council-config";
 
-// Discussion length presets (in turns)
 export const DISCUSSION_LENGTHS = {
   quick: 20,
   standard: 50,
   extended: 200,
   marathon: 500,
-  custom: 0, // 0 means unlimited or use customTurns
+  custom: 0,
 } as const;
 
-export function loadConfig(): AppConfig {
-  try {
-    const stored = localStorage.getItem(STORAGE_KEY);
-    if (stored) {
-      const parsed = JSON.parse(stored);
-
-      // Merge with defaults, removing deprecated fields
-      const merged: AppConfig = {
-        credentials: sanitizeCredentials(parsed.credentials),
-        proxy: normalizeProxyConfig({ ...DEFAULT_CONFIG.proxy, ...parsed.proxy }),
-        preferences: { ...DEFAULT_CONFIG.preferences, ...parsed.preferences },
-        models: { ...LOCKED_MODELS, ...sanitizeModels(parsed.models) },
-        mcp: { ...DEFAULT_CONFIG.mcp, ...parsed.mcp },
-      };
-
-      // Migrate old model IDs to the current Anthropic default
-      const currentAnthropicModel = merged.models.anthropic;
-      const needsMigration =
-        !currentAnthropicModel ||
-        currentAnthropicModel === "claude-opus-4-5" ||
-        currentAnthropicModel === "claude-opus-4-5-20251101" ||
-        currentAnthropicModel === "claude-opus-4-6" ||
-        currentAnthropicModel === "claude-sonnet-4-5" ||
-        currentAnthropicModel === "claude-3-5-sonnet-20241022" ||
-        currentAnthropicModel.includes("3-5-sonnet");
-
-      if (needsMigration) {
-        merged.models = { ...merged.models, anthropic: CLAUDE_OPUS_DEFAULT_MODEL_ID };
-      }
-      merged.models = { ...LOCKED_MODELS };
-
-      // Clean up deprecated proxyOverrides if it exists
-      if ("proxyOverrides" in parsed) {
-        console.log("[config] Removing deprecated proxyOverrides field");
-        // It's not in our type anymore, so it will be dropped on save
-      }
-
-      return merged;
-    }
-  } catch (error) {
-    console.error("Failed to load config:", error);
-  }
-  return DEFAULT_CONFIG;
+function safeBoolean(value: unknown, fallback: boolean): boolean {
+  return typeof value === "boolean" ? value : fallback;
 }
 
-export function saveConfig(config: AppConfig): void {
+function safeNumber(value: unknown, fallback: number): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+}
+
+function loadConfig(): AppConfig {
   try {
-    // Strip plaintext API keys before persisting — they live in the OS keychain.
-    const persistable: AppConfig & { credentials: Partial<Record<Provider, PersistedProviderCredential>> } = {
+    const stored = localStorage.getItem(STORAGE_KEY);
+    if (!stored) return DEFAULT_CONFIG;
+
+    const parsed = JSON.parse(stored);
+    const merged: AppConfig = {
+      credentials: sanitizeCredentials(parsed.credentials),
+      proxy: normalizeProxyConfig({ ...DEFAULT_CONFIG.proxy, ...parsed.proxy }),
+      preferences: {
+        ...DEFAULT_CONFIG.preferences,
+        ...parsed.preferences,
+        // Defensive merge of the budget object so a missing field doesn't
+        // wipe the defaults from above.
+        budget: {
+          ...DEFAULT_CONFIG.preferences.budget,
+          ...(parsed.preferences?.budget ?? {}),
+        },
+        // Reflection / observerInterval defaults survive a missing key.
+        reflection:
+          parsed.preferences?.reflection === "off" ||
+          parsed.preferences?.reflection === "light" ||
+          parsed.preferences?.reflection === "deep"
+            ? parsed.preferences.reflection
+            : DEFAULT_CONFIG.preferences.reflection,
+        observerInterval: Math.max(
+          0,
+          Math.min(20, safeNumber(parsed.preferences?.observerInterval, 2)),
+        ),
+        showBiddingScores: safeBoolean(
+          parsed.preferences?.showBiddingScores,
+          DEFAULT_CONFIG.preferences.showBiddingScores,
+        ),
+        autoScroll: safeBoolean(
+          parsed.preferences?.autoScroll,
+          DEFAULT_CONFIG.preferences.autoScroll,
+        ),
+        soundEffects: safeBoolean(
+          parsed.preferences?.soundEffects,
+          DEFAULT_CONFIG.preferences.soundEffects,
+        ),
+        moderatorEnabled: safeBoolean(
+          parsed.preferences?.moderatorEnabled,
+          DEFAULT_CONFIG.preferences.moderatorEnabled,
+        ),
+        observersEnabled: safeBoolean(
+          parsed.preferences?.observersEnabled,
+          DEFAULT_CONFIG.preferences.observersEnabled,
+        ),
+      },
+      // Models are always locked to LOCKED_MODELS regardless of what's
+      // persisted (fix 1.6 — the previous needsMigration branch was dead
+      // code because of the unconditional reset that followed it).
+      models: { ...LOCKED_MODELS, ...sanitizeModels(parsed.models) },
+      mcp: { ...DEFAULT_CONFIG.mcp, ...parsed.mcp },
+    };
+
+    return merged;
+  } catch (error) {
+    console.error("Failed to load config:", error);
+    return DEFAULT_CONFIG;
+  }
+}
+
+function saveConfig(config: AppConfig): void {
+  try {
+    const persistable = {
       ...config,
       credentials: stripSecretsForPersistence(config.credentials),
-    } as unknown as AppConfig & {
-      credentials: Partial<Record<Provider, PersistedProviderCredential>>;
     };
     localStorage.setItem(STORAGE_KEY, JSON.stringify(persistable));
   } catch (error) {
@@ -320,9 +372,11 @@ export function saveConfig(config: AppConfig): void {
 }
 
 /**
- * Diff credential maps and write changes to the encrypted secret store
- * (localStorage, behind the vault). Unchanged keys are skipped — no
- * redundant writes on every config update.
+ * Diff credential maps and write changes to the encrypted secret store.
+ * Skips no-op writes. Errors here are logged and ignored — the caller's
+ * config update still succeeds, but the new key won't survive a reload
+ * (a typical cause is the vault not being ready yet, which is now caught
+ * upstream by the `vaultReady` gate in the UI).
  */
 function syncCredentialsToStorage(
   prev: Partial<Record<Provider, ProviderCredential>>,
@@ -346,16 +400,16 @@ function syncCredentialsToStorage(
 }
 
 /**
- * One-time migration: any legacy plaintext `apiKey` fields found in the
- * persisted config blob get moved into the encrypted secret store, and the
- * plaintext copy is dropped on the next save. Safe to run on every boot —
- * becomes a no-op once there's no plaintext left.
+ * One-time migration: any legacy plaintext `apiKey` field in the persisted
+ * config blob gets moved into the encrypted secret store. Safe to run on
+ * every boot — becomes a no-op once there's no plaintext left.
  */
-function migrateLegacyPlaintextKeys(config: AppConfig): void {
+function migrateLegacyPlaintextKeys(
+  credentials: Partial<Record<Provider, ProviderCredential>>,
+): void {
   for (const provider of VALID_PROVIDERS) {
-    const cred = config.credentials[provider];
-    if (!cred) continue;
-    const plaintext = cred.apiKey?.trim();
+    const cred = credentials[provider];
+    const plaintext = cred?.apiKey?.trim();
     if (!plaintext) continue;
     try {
       secretsPut(apiKeyAccount(provider), plaintext);
@@ -365,139 +419,207 @@ function migrateLegacyPlaintextKeys(config: AppConfig): void {
   }
 }
 
-export function useConfig() {
-  const [config, setConfigState] = useState<AppConfig>(() => loadConfig());
-  const [vaultReady, setVaultReady] = useState(false);
-  const prevCredentialsRef = useRef<Partial<Record<Provider, ProviderCredential>>>(
-    config.credentials,
-  );
+// =============================================================================
+// Module-level store
+// =============================================================================
 
-  // One-time boot: fetch the vault DEK (file-based, no OS prompts), migrate
-  // any legacy plaintext keys into the encrypted secret store, then hydrate
-  // in-memory credentials from it. The hydration merge preserves keys the
-  // user typed during the brief pre-ready window.
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        await initVault();
-        if (cancelled) return;
+interface StoreSnapshot {
+  config: AppConfig;
+  vaultReady: boolean;
+}
 
-        if (!isSecretStoreReady()) {
-          // Vault couldn't load — bail out; keys stay as whatever loadConfig returned.
-          setVaultReady(true);
-          return;
-        }
+let storeSnapshot: StoreSnapshot = {
+  config: typeof window !== "undefined" ? loadConfig() : DEFAULT_CONFIG,
+  vaultReady: false,
+};
 
-        // Read every provider's key from the encrypted store (synchronous now).
-        const stored: Partial<Record<Provider, string>> = {};
-        for (const provider of VALID_PROVIDERS) {
-          try {
-            const value = secretsGet(apiKeyAccount(provider));
-            if (value && value.trim() !== "") stored[provider] = value;
-          } catch (error) {
-            console.error(`[config] Secret read failed for ${provider}:`, error);
-          }
-        }
+const listeners = new Set<() => void>();
 
-        setConfigState((current) => {
-          // Migrate any legacy plaintext keys into the secret store.
-          migrateLegacyPlaintextKeys(current);
+function notify(): void {
+  for (const listener of listeners) {
+    listener();
+  }
+}
 
-          const next: Partial<Record<Provider, ProviderCredential>> = { ...current.credentials };
-          for (const provider of VALID_PROVIDERS) {
-            const storedKey = stored[provider];
-            const existing = next[provider];
-            const hasMemoryKey =
-              !!existing && typeof existing.apiKey === "string" && existing.apiKey.trim() !== "";
+function setSnapshot(updater: (prev: StoreSnapshot) => StoreSnapshot): void {
+  const next = updater(storeSnapshot);
+  if (next === storeSnapshot) return;
 
-            if (hasMemoryKey) continue; // user-entered or legacy-loaded — keep
+  // Persist non-secret config + sync credentials to encrypted secret store
+  // whenever the config field actually changed.
+  if (next.config !== storeSnapshot.config) {
+    saveConfig(next.config);
+    if (next.vaultReady) {
+      syncCredentialsToStorage(storeSnapshot.config.credentials, next.config.credentials);
+    }
+  }
 
-            if (storedKey) {
-              next[provider] = { ...(existing ?? {}), apiKey: storedKey } as ProviderCredential;
-            } else if (existing) {
-              // Marker existed but no stored secret — drop the stale entry.
-              delete next[provider];
-            }
-          }
-          prevCredentialsRef.current = next;
-          return { ...current, credentials: next };
-        });
-      } catch (error) {
-        console.error("[config] Vault init failed:", error);
-      } finally {
-        if (!cancelled) setVaultReady(true);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  storeSnapshot = next;
+  notify();
+}
 
-  // Save after hydration: strips plaintext from localStorage and diffs the
-  // encrypted secret store. Runs on every config change once ready.
-  useEffect(() => {
-    if (!vaultReady) return;
-    saveConfig(config);
-    const prev = prevCredentialsRef.current;
-    prevCredentialsRef.current = config.credentials;
-    syncCredentialsToStorage(prev, config.credentials);
-  }, [config, vaultReady]);
+let initStarted = false;
 
-  const setConfig = useCallback((updater: AppConfig | ((prev: AppConfig) => AppConfig)) => {
-    setConfigState(updater);
-  }, []);
+function ensureInit(): void {
+  if (initStarted) return;
+  initStarted = true;
 
-  const updateCredential = useCallback(
-    (provider: Provider, credential: ProviderCredential | null) => {
-      if (!isProvider(provider)) {
+  void (async () => {
+    try {
+      await initVault();
+
+      if (!isSecretStoreReady()) {
+        // Vault couldn't load — UI surfaces will gate on vaultReady.
+        setSnapshot((prev) => ({ ...prev, vaultReady: true }));
         return;
       }
 
-      setConfigState((prev) => {
-        const newCredentials = { ...prev.credentials };
+      // Migrate any legacy plaintext keys into the encrypted store.
+      migrateLegacyPlaintextKeys(storeSnapshot.config.credentials);
+
+      // Read every provider's key from the encrypted store.
+      const stored: Partial<Record<Provider, string>> = {};
+      for (const provider of VALID_PROVIDERS) {
+        try {
+          const value = secretsGet(apiKeyAccount(provider));
+          if (value && value.trim() !== "") stored[provider] = value;
+        } catch (error) {
+          console.error(`[config] Secret read failed for ${provider}:`, error);
+        }
+      }
+
+      // Build hydrated credentials. User-typed keys (from before vault was
+      // ready) are preserved; everything else gets the value from secrets.
+      setSnapshot((prev) => {
+        const next: Partial<Record<Provider, ProviderCredential>> = { ...prev.config.credentials };
+
+        for (const provider of VALID_PROVIDERS) {
+          const storedKey = stored[provider];
+          const existing = next[provider];
+          const hasMemoryKey =
+            !!existing && typeof existing.apiKey === "string" && existing.apiKey.trim() !== "";
+
+          if (hasMemoryKey) continue;
+
+          if (storedKey) {
+            next[provider] = { ...(existing ?? {}), apiKey: storedKey } as ProviderCredential;
+          } else if (existing) {
+            // Marker existed but no stored secret — drop the stale entry.
+            delete next[provider];
+          }
+        }
+
+        return {
+          ...prev,
+          config: { ...prev.config, credentials: next },
+          vaultReady: true,
+        };
+      });
+    } catch (error) {
+      console.error("[config] Vault init failed:", error);
+      setSnapshot((prev) => ({ ...prev, vaultReady: true }));
+    }
+  })();
+}
+
+function subscribe(callback: () => void): () => void {
+  ensureInit();
+  listeners.add(callback);
+  return () => {
+    listeners.delete(callback);
+  };
+}
+
+function getSnapshot(): StoreSnapshot {
+  return storeSnapshot;
+}
+
+// Test hook — lets us reset the module-level state between test cases.
+export function __resetConfigStoreForTests(): void {
+  storeSnapshot = { config: DEFAULT_CONFIG, vaultReady: false };
+  initStarted = false;
+  listeners.clear();
+}
+
+/**
+ * Read the current config snapshot from outside React. Useful for non-hook
+ * consumers (services, utilities) that need access to the user's proxy
+ * settings or preferences without the per-render plumbing of `useConfig`.
+ *
+ * Always returns the latest mutation-applied snapshot; never blocks on
+ * `vaultReady` — if hydration hasn't finished, the credentials field is
+ * empty rather than incorrect.
+ */
+export function getStoreConfig(): AppConfig {
+  return storeSnapshot.config;
+}
+
+// =============================================================================
+// Hook surface
+// =============================================================================
+
+export function useConfig() {
+  const snapshot = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+  const { config, vaultReady } = snapshot;
+
+  const setConfig = useCallback(
+    (updater: AppConfig | ((prev: AppConfig) => AppConfig)) => {
+      setSnapshot((prev) => ({
+        ...prev,
+        config: typeof updater === "function" ? updater(prev.config) : updater,
+      }));
+    },
+    [],
+  );
+
+  const updateCredential = useCallback(
+    (provider: Provider, credential: ProviderCredential | null) => {
+      if (!isProvider(provider)) return;
+      setSnapshot((prev) => {
+        const newCredentials = { ...prev.config.credentials };
         if (credential === null) {
           delete newCredentials[provider];
         } else {
           newCredentials[provider] = credential;
         }
-        return { ...prev, credentials: newCredentials };
+        return { ...prev, config: { ...prev.config, credentials: newCredentials } };
       });
     },
     [],
   );
 
   const updateProxy = useCallback((proxy: ProxyConfig) => {
-    setConfigState((prev) => ({ ...prev, proxy: normalizeProxyConfig(proxy) }));
-  }, []);
-
-  const updatePreferences = useCallback((preferences: Partial<DiscussionPreferences>) => {
-    setConfigState((prev) => ({
+    setSnapshot((prev) => ({
       ...prev,
-      preferences: { ...prev.preferences, ...preferences },
+      config: { ...prev.config, proxy: normalizeProxyConfig(proxy) },
     }));
   }, []);
 
-  const updateModel = useCallback((provider: Provider, model: string) => {
-    if (!isProvider(provider)) {
-      return;
-    }
-    void model;
-
-    setConfigState((prev) => ({
+  const updatePreferences = useCallback((preferences: Partial<DiscussionPreferences>) => {
+    setSnapshot((prev) => ({
       ...prev,
-      models: {
-        ...prev.models,
-        [provider]: LOCKED_MODELS[provider],
+      config: {
+        ...prev.config,
+        preferences: { ...prev.config.preferences, ...preferences },
+      },
+    }));
+  }, []);
+
+  const updateModel = useCallback((provider: Provider, _model: string) => {
+    if (!isProvider(provider)) return;
+    setSnapshot((prev) => ({
+      ...prev,
+      config: {
+        ...prev.config,
+        models: { ...prev.config.models, [provider]: LOCKED_MODELS[provider] },
       },
     }));
   }, []);
 
   const updateMcp = useCallback((mcp: Partial<McpConfig>) => {
-    setConfigState((prev) => ({
+    setSnapshot((prev) => ({
       ...prev,
-      mcp: { ...prev.mcp, ...mcp },
+      config: { ...prev.config, mcp: { ...prev.config.mcp, ...mcp } },
     }));
   }, []);
 
@@ -519,10 +641,6 @@ export function useConfig() {
     return DISCUSSION_LENGTHS[defaultLength];
   }, [config.preferences]);
 
-  /**
-   * Get the proxy configuration
-   * Returns the global proxy config, or undefined if proxy is disabled
-   */
   const getProxy = useCallback((): ProxyConfig | undefined => {
     const normalized = normalizeProxyConfig(config.proxy);
     if (normalized.type === "none" || !normalized.host || normalized.port <= 0) {
@@ -545,9 +663,8 @@ export function useConfig() {
     getProxy,
     /**
      * True once the vault DEK has been loaded and any encrypted secrets
-     * have been pulled into memory. `false` during the small window between
-     * component mount and vault init; consumers checking `credential?.apiKey`
-     * may briefly see empty during this window.
+     * have been pulled into memory. UI surfaces that save/load secrets
+     * (Settings, Composer "Start" button) should gate on this.
      */
     vaultReady,
     /** @deprecated kept for compatibility; same value as `vaultReady`. */

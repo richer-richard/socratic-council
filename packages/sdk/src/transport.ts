@@ -34,7 +34,10 @@ export type TransportErrorCode =
   | "FETCH_STREAM_FAILED"
   | "STREAM_TIMEOUT"
   | "STREAM_IDLE_TIMEOUT"
-  | "ABORTED";
+  | "ABORTED"
+  // Fix 4.6: typed rate-limit code so the UI can render "wait Ns" instead
+  // of a generic "Tauri stream failed" when the IPC token bucket is full.
+  | "RATE_LIMITED";
 
 export class TransportFailure extends Error {
   readonly code: TransportErrorCode;

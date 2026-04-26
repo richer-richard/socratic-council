@@ -473,7 +473,9 @@ export class OpenAIProvider implements BaseProvider {
             parser.flush();
             resolve();
           },
-          onError: (error) => reject(new Error(`${error.code}: ${error.message}`)),
+          // Fix 6.1: forward the typed TransportFailure so api.ts can
+          // classify abort/timeout via .code (see fix 4.1).
+          onError: (error) => reject(error),
         },
       );
     });
@@ -494,7 +496,7 @@ export class OpenAIProvider implements BaseProvider {
     };
   }
 
-  async testConnection(): Promise<boolean> {
+  async testConnection(model?: string): Promise<boolean> {
     try {
       // Use a simple test with gpt-5-nano (cheapest model)
       const { status } = await this.transport.request({
@@ -502,7 +504,7 @@ export class OpenAIProvider implements BaseProvider {
         method: "POST",
         headers: createHeaders("openai", this.apiKey),
         body: JSON.stringify({
-          model: "gpt-5-nano",
+          model: model ?? "gpt-5-nano",
           input: "Say 'ok'",
           max_output_tokens: 10,
         }),

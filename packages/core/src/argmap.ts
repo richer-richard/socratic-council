@@ -155,15 +155,24 @@ function findClaimByReference(graph: ArgGraph, ref: string | undefined): ArgNode
   const idCandidate = ref.replace(/^\[|\]$/g, "").trim();
   const byId = graph.nodes.find((n) => n.kind === "claim" && n.id === idCandidate);
   if (byId) return byId;
-  // Fallback: case-insensitive substring match on claim text.
+
+  // Fix 5.13: fall back to substring matching ONLY when there's exactly one
+  // claim that contains the reference text and that claim is a strong match
+  // (≥40% character overlap of the shorter string). The previous "either
+  // direction substring" rule eagerly attached evidence/rebuttal nodes to
+  // whatever claim happened to share a few words, producing wrong-target
+  // edges in the argument map.
   const needle = ref.toLowerCase();
-  return (
-    graph.nodes.find(
-      (n) =>
-        n.kind === "claim" &&
-        (n.text.toLowerCase().includes(needle) || needle.includes(n.text.toLowerCase())),
-    ) ?? null
+  const candidates = graph.nodes.filter(
+    (n) => n.kind === "claim" && n.text.toLowerCase().includes(needle),
   );
+  if (candidates.length === 1) {
+    const cand = candidates[0]!;
+    const shorter = Math.min(cand.text.length, needle.length);
+    const longer = Math.max(cand.text.length, needle.length);
+    if (longer === 0 || shorter / longer >= 0.4) return cand;
+  }
+  return null;
 }
 
 export function updateArgumentMap(

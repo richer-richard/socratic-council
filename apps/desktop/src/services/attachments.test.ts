@@ -334,7 +334,9 @@ describe("attachment transport support", () => {
     const originalText = `${"Large attachment body.\n".repeat(160000)}Final line.`;
     const file = new File([originalText], "notes.txt", { type: "text/plain" });
 
-    const [attachment] = await createComposerAttachments([file], "file-picker");
+    const { attachments, failures } = await createComposerAttachments([file], "file-picker");
+    expect(failures).toHaveLength(0);
+    const [attachment] = attachments;
 
     expect(attachment).toBeDefined();
     expect(attachment.kind).toBe("text");

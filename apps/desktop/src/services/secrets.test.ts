@@ -1,8 +1,9 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import {
+  MAX_SECRET_VALUE_BYTES,
+  SecretStoreError,
   apiKeyAccount,
-  isKeychainAvailable,
   isSecretStoreReady,
   secretsDelete,
   secretsGet,
@@ -76,12 +77,35 @@ describe("secrets — localStorage + vault", () => {
     expect(secretsGet(apiKeyAccount("kimi"))).toBeNull();
   });
 
-  it("falls back to plaintext passthrough when the vault isn't ready", () => {
+  it("THROWS when the vault isn't ready instead of writing plaintext (fix 1.2)", () => {
     // initVault never called — dek null.
-    secretsPut(apiKeyAccount("qwen"), "sk-qwen-plain");
-    const raw = localStorage.getItem("socratic-council-secret:apiKey:qwen");
-    expect(raw).toBe("sk-qwen-plain"); // no ENC1 envelope
+    expect(() => secretsPut(apiKeyAccount("qwen"), "sk-qwen-plain"))
+      .toThrowError(SecretStoreError);
+    expect(localStorage.getItem("socratic-council-secret:apiKey:qwen")).toBeNull();
+  });
+
+  it("returns plaintext for legacy values from earlier builds (read path is permissive)", () => {
+    // Plant a legacy plaintext entry as if migrated from an older app version.
+    localStorage.setItem("socratic-council-secret:apiKey:qwen", "sk-qwen-plain");
+    vault.__setDekForTests(fixedDek());
     expect(secretsGet(apiKeyAccount("qwen"))).toBe("sk-qwen-plain");
+  });
+
+  it("re-encrypts legacy plaintext on the next save (fix 1.10)", () => {
+    // Vault not ready, plaintext written by a legacy build.
+    localStorage.setItem("socratic-council-secret:apiKey:legacy", "sk-legacy-12345");
+    expect(localStorage.getItem("socratic-council-secret:apiKey:legacy")).toBe("sk-legacy-12345");
+
+    // Vault becomes ready, caller saves the secret again (the value can be
+    // the same string — what matters is that the save now encrypts it).
+    vault.__setDekForTests(fixedDek());
+    expect(isSecretStoreReady()).toBe(true);
+    secretsPut(apiKeyAccount("legacy"), "sk-legacy-12345");
+
+    const raw = localStorage.getItem("socratic-council-secret:apiKey:legacy");
+    expect(raw).not.toBeNull();
+    expect(raw!.startsWith("ENC1:")).toBe(true);
+    expect(secretsGet(apiKeyAccount("legacy"))).toBe("sk-legacy-12345");
   });
 
   it("gracefully returns null when a ciphertext can't be decrypted", () => {
@@ -91,10 +115,20 @@ describe("secrets — localStorage + vault", () => {
       "ENC1:bm90LXJlYWwtY2lwaGVydGV4dA==",
     );
     expect(secretsGet(apiKeyAccount("zhipu"))).toBeNull();
+    // Decrypt failure should be observable from the vault module so the UI
+    // can detect a wrong-DEK situation (fix 2.2 / 2.3 surface).
+    expect(vault.getDecryptFailureCount()).toBeGreaterThan(0);
   });
 
-  it("isKeychainAvailable remains true for API compatibility", () => {
-    expect(isKeychainAvailable()).toBe(true);
+  it("rejects values larger than MAX_SECRET_VALUE_BYTES (fix 1.9)", () => {
+    vault.__setDekForTests(fixedDek());
+    const oversize = "a".repeat(MAX_SECRET_VALUE_BYTES + 1);
+    expect(() => secretsPut(apiKeyAccount("openai"), oversize))
+      .toThrowError(/exceeds.*byte limit/);
+    // A value just at the limit should be accepted.
+    const atLimit = "b".repeat(MAX_SECRET_VALUE_BYTES);
+    secretsPut(apiKeyAccount("openai"), atLimit);
+    expect(secretsGet(apiKeyAccount("openai"))).toBe(atLimit);
   });
 
   it("rejects empty account names", () => {

@@ -24,6 +24,7 @@ describe("vault ciphertext envelope", () => {
     expect(vault.encryptString("hello")).toBe("hello");
     expect(vault.isEnvelopedCiphertext("hello")).toBe(false);
     expect(vault.isVaultReady()).toBe(false);
+    expect(vault.getVaultStatus()).toBe("uninitialized");
   });
 
   it("detects the envelope prefix", () => {
@@ -35,6 +36,7 @@ describe("vault ciphertext envelope", () => {
   it("round-trips string plaintext once a DEK is injected", () => {
     vault.__setDekForTests(fixedDek(7));
     expect(vault.isVaultReady()).toBe(true);
+    expect(vault.getVaultStatus()).toBe("existing");
 
     const plaintext = "transcript with sensitive content: sk-fake-key-value";
     const encrypted = vault.encryptString(plaintext);
@@ -62,5 +64,34 @@ describe("vault ciphertext envelope", () => {
     // Too short to contain nonce + tag
     expect(() => vault.decryptBytes(new Uint8Array([1, 2, 3]))).toThrow();
     expect(() => vault.decryptString("ENC1:YQ==")).toThrow(); // tiny malformed envelope
+  });
+
+  it("counts decrypt failures so callers can detect wrong-DEK state (fix 2.2)", () => {
+    vault.__setDekForTests(fixedDek(13));
+    expect(vault.getDecryptFailureCount()).toBe(0);
+
+    // Forge a ciphertext encrypted under a different DEK.
+    vault.__setDekForTests(fixedDek(99));
+    const ciphertext = vault.encryptString("hello world");
+
+    // Switch to a different DEK and try to decrypt — must throw, must count.
+    vault.__setDekForTests(fixedDek(13));
+    expect(() => vault.decryptString(ciphertext)).toThrow();
+    expect(vault.getDecryptFailureCount()).toBe(1);
+
+    // Bytes path increments the counter independently.
+    const bytes = new Uint8Array(48);
+    bytes.set([1, 2, 3, 4]);
+    expect(() => vault.decryptBytes(bytes)).toThrow();
+    expect(vault.getDecryptFailureCount()).toBe(2);
+  });
+
+  it("setDekForTests resets the failure counter", () => {
+    vault.__setDekForTests(fixedDek(5));
+    expect(() => vault.decryptString("ENC1:not-real")).toThrow();
+    expect(vault.getDecryptFailureCount()).toBe(1);
+
+    vault.__setDekForTests(fixedDek(6));
+    expect(vault.getDecryptFailureCount()).toBe(0);
   });
 });

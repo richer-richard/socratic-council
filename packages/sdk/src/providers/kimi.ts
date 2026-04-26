@@ -275,7 +275,9 @@ export class KimiProvider implements BaseProvider {
             parser.flush();
             resolve();
           },
-          onError: (error) => reject(new Error(`${error.code}: ${error.message}`)),
+          // Fix 6.1: forward the typed TransportFailure so api.ts can
+          // classify abort/timeout via .code (see fix 4.1).
+          onError: (error) => reject(error),
         },
       );
     });
@@ -312,14 +314,14 @@ export class KimiProvider implements BaseProvider {
   /**
    * Test the connection to Kimi API
    */
-  async testConnection(): Promise<boolean> {
+  async testConnection(model?: string): Promise<boolean> {
     try {
       const { status } = await this.transport.request({
         url: this.endpoint,
         method: "POST",
         headers: createHeaders("kimi", this.apiKey),
         body: JSON.stringify({
-          model: "moonshot-v1-8k",
+          model: model ?? "moonshot-v1-8k",
           messages: [{ role: "user", content: "Hello" }],
           max_tokens: 10,
         }),

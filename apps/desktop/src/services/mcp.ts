@@ -1,6 +1,41 @@
 import { makeHttpRequest, apiLogger } from "./api";
 import type { ProxyConfig } from "../stores/config";
 
+/**
+ * Register a user-configured MCP server's host with the Rust IPC allowlist
+ * so outbound calls aren't blocked by the static provider allowlist
+ * (fix 9.1). Idempotent and safe to call repeatedly. Best-effort: the
+ * frontend's `callMcpTool` will surface the underlying allowlist error
+ * if the registration didn't take and the host isn't already permitted.
+ */
+export async function registerMcpHost(serverUrl: string): Promise<void> {
+  if (!serverUrl) return;
+  let host = "";
+  try {
+    host = new URL(serverUrl).hostname;
+  } catch {
+    return;
+  }
+  if (!host) return;
+  // Loopback hosts don't need registration; the static allowlist already permits.
+  if (host === "127.0.0.1" || host === "::1" || host === "localhost") return;
+
+  if (typeof window === "undefined") return;
+  const isTauri =
+    "__TAURI__" in window || "__TAURI_INTERNALS__" in window;
+  if (!isTauri) return;
+
+  try {
+    const { invoke } = await import("@tauri-apps/api/core");
+    await invoke("register_runtime_host", { host });
+  } catch (error) {
+    apiLogger.log("warn", "mcp", "Failed to register MCP host with IPC allowlist", {
+      host,
+      error,
+    });
+  }
+}
+
 interface McpRpcRequest {
   jsonrpc: "2.0";
   id: string;

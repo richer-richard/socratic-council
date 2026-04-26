@@ -13,6 +13,24 @@ vi.mock("@socratic-council/sdk", () => ({
       return providerState.instance;
     }
   },
+  // Mocked TransportFailure so api.ts's `instanceof TransportFailure`
+  // checks short-circuit cleanly in tests (we don't depend on the
+  // typed-error path here; just need the symbol to exist).
+  TransportFailure: class TransportFailure extends Error {
+    code: string;
+    constructor(code: string, message: string) {
+      super(message);
+      this.code = code;
+    }
+  },
+  // Sync no-op replay so the buffered-retry test still observes a single
+  // chunk callback per replay; we just call onChunk once with the buffer.
+  replayBufferedStream: async (
+    text: string,
+    onChunk: (chunk: string) => void,
+  ): Promise<void> => {
+    if (text) onChunk(text);
+  },
 }));
 
 vi.mock("./tauriTransport", () => ({

@@ -1,4 +1,8 @@
 import type { AttachmentKind } from "./attachments";
+import {
+  aliasAttachmentRecordToProject,
+  deleteProjectAttachmentBlobs,
+} from "./attachments";
 import type { SessionSummary } from "./sessions";
 import { listSessionSummaries } from "./sessions";
 import { decryptString, encryptString, isEnvelopedCiphertext } from "./vault";
@@ -162,16 +166,37 @@ function buildProjectSummary(project: Project): ProjectSummary {
   };
 }
 
+/** Bumped when readProjectIndex catches a parse / decrypt failure so the
+ * UI can surface "your project list might be incomplete" instead of
+ * silently rendering an empty home page (fix 2.16). */
+let projectIndexFailureCount = 0;
+
+export function getProjectIndexFailureCount(): number {
+  return projectIndexFailureCount;
+}
+
+export function __resetProjectIndexFailureCountForTests(): void {
+  projectIndexFailureCount = 0;
+}
+
 function readProjectIndex(): ProjectSummary[] {
   const storage = getStorage();
   if (!storage) return [];
 
   try {
     const raw = readSecureItem(storage, PROJECT_INDEX_KEY);
-    if (!raw) return [];
+    if (raw == null) {
+      // Distinguish "no index" (fresh install) from "decrypt failed".
+      const onDisk = storage.getItem(PROJECT_INDEX_KEY);
+      if (onDisk != null) projectIndexFailureCount += 1;
+      return [];
+    }
 
     const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
+    if (!Array.isArray(parsed)) {
+      projectIndexFailureCount += 1;
+      return [];
+    }
 
     return parsed
       .filter((entry): entry is ProjectSummary => !!entry && typeof entry === "object")
@@ -188,6 +213,7 @@ function readProjectIndex(): ProjectSummary[] {
       }))
       .filter((entry) => entry.id.length > 0);
   } catch (error) {
+    projectIndexFailureCount += 1;
     console.error("Failed to read project index:", error);
     return [];
   }
@@ -269,6 +295,17 @@ export function deleteProject(id: string): boolean {
   try {
     storage.removeItem(createProjectStorageKey(id));
     writeProjectIndex(readProjectIndex().filter((entry) => entry.id !== id));
+    // Fix 2.15 wiring: clean up the project's IndexedDB attachment ownership
+    // (best-effort — failures here don't block the metadata delete because
+    // the dossier-aliased records would otherwise become orphans). When a
+    // record's owner list goes empty after this removal it's deleted; when
+    // a session still references it, only the project's claim is dropped.
+    void deleteProjectAttachmentBlobs(id).catch((error) => {
+      console.warn(
+        `[projects] deleteProjectAttachmentBlobs(${id}) failed; project deleted anyway.`,
+        error,
+      );
+    });
     return true;
   } catch (error) {
     console.error("Failed to delete project:", error);
@@ -349,6 +386,18 @@ export function addDossierEntry(
     ...entry,
     addedAt: Date.now(),
   };
+
+  // Fix 2.10: also add the project to the IndexedDB record's owner list
+  // so the blob survives deletion of the source session. Best-effort —
+  // failure here doesn't block the metadata save (the dossier remains a
+  // pointer; if the alias didn't take, the user gets a dangling reference
+  // which is the pre-fix behavior, not a regression).
+  void aliasAttachmentRecordToProject(entry.attachmentId, projectId).catch((error) => {
+    console.warn(
+      `[projects] Failed to alias attachment ${entry.attachmentId} to project ${projectId}; the dossier entry may break if the source session is deleted.`,
+      error,
+    );
+  });
 
   return saveProject({
     ...project,

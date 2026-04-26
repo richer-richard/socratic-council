@@ -6,6 +6,7 @@ import { Starfield } from "../components/Starfield";
 import { ProviderIcon } from "../components/icons/ProviderIcons";
 import { BundleImportButton } from "../components/BundleActions";
 import {
+  MAX_ATTACHMENT_BYTES,
   buildAttachmentListLabel,
   createComposerAttachments,
   revokeComposerAttachmentPreviews,
@@ -452,6 +453,7 @@ export function Home({
     updateModel,
     hasAnyApiKey,
     getConfiguredProviders,
+    vaultReady,
   } = useConfig();
 
   const configuredProviders = getConfiguredProviders();
@@ -531,14 +533,47 @@ export function Home({
   ) => {
     if (files.length === 0) return;
 
+    // Fix 8.4: client-side size gate — reject oversize files BEFORE sending
+    // them through buildComposerAttachment / encryptAttachmentBlob, which
+    // load the whole file into memory and would OOM the renderer on a
+    // multi-GB drag. Each rejected file becomes a per-file failure entry
+    // so the user sees exactly which one was too large.
+    const sized = files.filter((f) => f.size <= MAX_ATTACHMENT_BYTES);
+    const oversize = files.filter((f) => f.size > MAX_ATTACHMENT_BYTES);
+
     try {
-      const next = await createComposerAttachments(files, source);
-      if (next.length === 0) {
-        setAttachmentError("No selected files could be prepared for the session.");
-        return;
+      const { attachments: next, failures } = await createComposerAttachments(sized, source);
+      const allFailures = [
+        ...oversize.map((f) => ({
+          name: f.name,
+          message: `File is ${(f.size / (1024 * 1024)).toFixed(1)} MB — exceeds the ${(
+            MAX_ATTACHMENT_BYTES /
+            (1024 * 1024)
+          ).toFixed(0)} MB limit. Split or compress before attaching.`,
+        })),
+        ...failures,
+      ];
+      if (next.length > 0) {
+        setComposerAttachments((current) => [...current, ...next]);
       }
-      setComposerAttachments((current) => [...current, ...next]);
-      setAttachmentError(null);
+
+      // Fix 2.8 / 8.2 / 8.4: surface every per-file failure (oversize +
+      // build errors) so the user sees exactly which files didn't make it.
+      if (allFailures.length === 0) {
+        setAttachmentError(null);
+      } else if (next.length === 0) {
+        setAttachmentError(
+          `No selected files could be prepared for the session:\n${allFailures
+            .map((f) => `• ${f.name}: ${f.message}`)
+            .join("\n")}`,
+        );
+      } else {
+        setAttachmentError(
+          `${allFailures.length} of ${files.length} file${files.length === 1 ? "" : "s"} couldn't be prepared:\n${allFailures
+            .map((f) => `• ${f.name}: ${f.message}`)
+            .join("\n")}`,
+        );
+      }
     } catch (error) {
       console.error("Failed to load attachments:", error);
       setAttachmentError(error instanceof Error ? error.message : "Failed to prepare attachments.");
@@ -612,8 +647,18 @@ export function Home({
 
   const handleStart = async () => {
     if (!topic.trim() || isOpeningSession) return;
-    if (!hasAnyApiKey()) {
+    // Fix 8.1: gate the no-keys warning on vaultReady. During the brief
+    // pre-hydration window the credentials map is empty regardless of what
+    // the user has actually configured, so without this gate the warning
+    // pops on first launch even for users whose keys are present on disk.
+    if (vaultReady && !hasAnyApiKey()) {
       setShowApiWarning(true);
+      return;
+    }
+    if (!vaultReady) {
+      // Treat clicks during hydration as a soft no-op rather than triggering
+      // a confusing modal — the button is rendered with an explicit
+      // "loading…" affordance so the user can see why it didn't do anything.
       return;
     }
 
@@ -1240,10 +1285,30 @@ export function Home({
                   onClick={() => {
                     void handleStart();
                   }}
-                  disabled={!topic.trim() || isOpeningSession}
+                  disabled={!topic.trim() || isOpeningSession || !vaultReady}
                   className="workstation-launch-button"
+                  title={!vaultReady ? "Loading vault…" : undefined}
                 >
-                  <span>{isOpeningSession ? "Opening…" : "Open Session"}</span>
+                  {/* Fix 8.3: spinner inside the button while opening so the
+                      user has visible feedback during the 1-3s create path. */}
+                  {(isOpeningSession || !vaultReady) ? (
+                    <span
+                      aria-hidden="true"
+                      style={{
+                        display: "inline-block",
+                        width: 14,
+                        height: 14,
+                        marginRight: 6,
+                        border: "2px solid currentColor",
+                        borderRightColor: "transparent",
+                        borderRadius: "50%",
+                        animation: "sc-spin 0.8s linear infinite",
+                      }}
+                    />
+                  ) : null}
+                  <span>
+                    {!vaultReady ? "Loading…" : isOpeningSession ? "Opening…" : "Open Session"}
+                  </span>
                   <ArrowIcon size={18} />
                 </button>
               </div>

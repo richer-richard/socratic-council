@@ -46,11 +46,21 @@ const URL_USERINFO = /([a-z][a-z0-9+\-.]*:\/\/)[^@\s/?#]+@/gi;
 // we don't mangle real prose. Keys typically contain only letters, digits,
 // `-`, and `_`. Thresholds are set low enough to catch short-form test keys
 // while high enough not to flag ordinary words.
+//
+// Fix 11.1: added xai- (Grok), ms-... (Anthropic-compatible MiniMax), and a
+// generic high-entropy fallback that catches long base64-ish strings. The
+// generic pattern requires ≥32 chars of base64-alphabet content to avoid
+// flagging everyday hashes or git short SHAs.
 const LOOSE_KEY_PATTERNS: RegExp[] = [
   /\b(sk-ant-[A-Za-z0-9_\-]{10,})\b/g,
   /\b(sk-proj-[A-Za-z0-9_\-]{10,})\b/g,
   /\b(sk-[A-Za-z0-9_\-]{10,})\b/g,
   /\b(AIza[A-Za-z0-9_\-]{16,})\b/g,
+  /\b(xai-[A-Za-z0-9_\-]{16,})\b/g,
+  /\b(ms-[A-Za-z0-9_\-]{16,})\b/g,
+  // Generic long-token fallback — looks like a base64 / hex secret. Bias
+  // toward false positives to keep secrets out of logs.
+  /\b([A-Za-z0-9+/=_\-]{48,})\b/g,
 ];
 
 function redactString(input: string): string {
