@@ -1281,6 +1281,17 @@ export function Chat({ session, onNavigate, onPersistSession }: ChatProps) {
   canvasStatesRef.current = canvasStates;
   const [expandedCanvases, setExpandedCanvases] = useState<Partial<Record<string, boolean>>>({});
   const [duoLogue, setDuoLogue] = useState<DuoLogueState | null>(normalizedSession.duoLogue);
+  // Argument-map state (declared early so it's in scope for the autosave
+  // callback's deps; the queue effect, runArgumentMapExtraction, and the
+  // panel render all consume these later in the component).
+  const [argGraph, setArgGraph] = useState<ArgGraph>(
+    () => normalizedSession.argGraph ?? emptyGraph(),
+  );
+  const argGraphRef = useRef(argGraph);
+  argGraphRef.current = argGraph;
+  const argmapExtractedIdsRef = useRef<Set<string>>(
+    new Set(normalizedSession.argmapExtractedIds ?? []),
+  );
   const [reactionPickerTarget, setReactionPickerTarget] = useState<string | null>(null);
   const [recentlyCopiedQuote, setRecentlyCopiedQuote] = useState<string | null>(null);
   const [highlightedMessageId, setHighlightedMessageId] = useState<string | null>(null);
@@ -4923,6 +4934,16 @@ Write the official moderator wrap-up in 4 short sentences:
       }
       return `${agents}:${total}`;
     })();
+    // Coarse fingerprint for the argument-map snapshot: count of nodes + edges
+    // + the last-message marker. Avoids serializing the whole graph just to
+    // detect "did anything change" while still triggering a re-persist when
+    // the extractor lands a fragment or the user reopens a session.
+    const argGraphFingerprint = (() => {
+      const n = argGraphRef.current.nodes.length;
+      const e = argGraphRef.current.edges.length;
+      const last = argGraphRef.current.lastMessageId ?? "";
+      return `${n}:${e}:${last}:${argmapExtractedIdsRef.current.size}`;
+    })();
     const signature = [
       nextStatus,
       phaseRef.current,
@@ -4934,6 +4955,7 @@ Write the official moderator wrap-up in 4 short sentences:
       observerUsage.outputTokens,
       observerUsage.estimatedUSD,
       canvasFingerprint,
+      argGraphFingerprint,
       errors.join("|"),
       duoLogue?.remainingTurns ?? 0,
       resolutionQueueRef.current.join(","),
@@ -4986,6 +5008,8 @@ Write the official moderator wrap-up in 4 short sentences:
           pendingHandoff: pendingHandoffRef.current,
         },
         canvasStates: canvasStatesRef.current,
+        argGraph: argGraphRef.current,
+        argmapExtractedIds: Array.from(argmapExtractedIdsRef.current),
       });
 
       setPersistenceError(null);
@@ -5016,6 +5040,7 @@ Write the official moderator wrap-up in 4 short sentences:
     topic,
     totalTokens,
     duoLogue,
+    argGraph,
   ]);
 
   // Fix 3.8: debounce persistSessionSnapshot during streaming so we don't
@@ -5107,12 +5132,8 @@ Write the official moderator wrap-up in 4 short sentences:
   // Live argument map (wave 2.6 UI). Toggle state; the extractor pipeline is
   // wired separately at the orchestrator level (core/argmap.ts).
   const [argmapOpen, setArgmapOpen] = useState(false);
-  const [argGraph, setArgGraph] = useState<ArgGraph>(() => emptyGraph());
-  const argGraphRef = useRef(argGraph);
-  argGraphRef.current = argGraph;
   const argmapBusyRef = useRef(false);
   const [argmapBusy, setArgmapBusy] = useState(false);
-  const argmapExtractedIdsRef = useRef(new Set<string>());
   const argmapInFlightRef = useRef(new Set<string>());
   const argmapAttemptsByIdRef = useRef(new Map<string, number>());
   const [argmapLastError, setArgmapLastError] = useState<string | null>(null);
@@ -5191,7 +5212,9 @@ Write the official moderator wrap-up in 4 short sentences:
         apiLogger.log(
           "info",
           runtime.provider,
-          fragments.length === 0 ? "argmap extraction empty" : "argmap extraction ok",
+          fragments.length === 0
+            ? "argmap: no fragments extracted (model judged message non-substantive)"
+            : "argmap: extracted fragments",
           { messageId, fragments: fragments.length, elapsedMs },
         );
         // Either way we accept the result — no fragments means the model
@@ -5240,7 +5263,10 @@ Write the official moderator wrap-up in 4 short sentences:
         !m.isStreaming &&
         !m.error &&
         isCouncilAgent(m.agentId) &&
-        (m.content ?? "").trim().length > 0 &&
+        // Skip greetings, single-emoji reactions, and other near-empty
+        // messages — they almost always come back as "no fragments
+        // extracted", so running them through Gemini is pure waste.
+        stripQuoteTokens(m.content ?? "").trim().length >= 60 &&
         !argmapExtractedIdsRef.current.has(m.id) &&
         !argmapInFlightRef.current.has(m.id),
     );
@@ -5261,18 +5287,23 @@ Write the official moderator wrap-up in 4 short sentences:
     argmapRetryNonce,
   ]);
 
-  // Reset argmap state whenever we switch sessions, so a stale extractedIds
-  // set from a prior session can't suppress extraction on the new one's
-  // messages (their ids never collide, but the graph carrying over would
-  // surface old claims under a new topic).
+  // Restore the persisted argument map whenever we switch sessions. The
+  // graph + extracted-ids set live on the session blob (sessions.ts), so
+  // reopening a session shows its previously-built map instantly without
+  // re-running Gemini on already-covered messages. Runtime-only state
+  // (in-flight, attempt counters, last error) always resets — those are
+  // ephemeral.
   useEffect(() => {
-    setArgGraph(emptyGraph());
-    argmapExtractedIdsRef.current = new Set();
+    setArgGraph(normalizedSession.argGraph ?? emptyGraph());
+    argmapExtractedIdsRef.current = new Set(normalizedSession.argmapExtractedIds ?? []);
     argmapInFlightRef.current = new Set();
     argmapAttemptsByIdRef.current = new Map();
     setArgmapLastError(null);
     setArgmapBusy(false);
     argmapBusyRef.current = false;
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- deliberately
+    // keying only on session.id; argGraph/argmapExtractedIds props update on
+    // load, but in-session mutations should NOT re-trigger this reset.
   }, [normalizedSession.id]);
 
   const argmapStatus: "no-credential" | "extracting" | "empty" | "failed" =
@@ -6719,10 +6750,12 @@ Write the official moderator wrap-up in 4 short sentences:
         <ArgumentMapPanel
           graph={argGraph}
           status={argmapStatus}
+          busy={argmapBusy}
           lastError={argmapLastError}
           onRetry={retryArgmap}
           onClose={() => setArgmapOpen(false)}
           onNavigateToMessage={jumpToMessage}
+          messages={messages}
           agentColors={Object.fromEntries(
             AGENT_IDS.map((id) => {
               const provider = AGENT_CONFIG[id]?.provider;

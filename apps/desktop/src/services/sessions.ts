@@ -1,4 +1,5 @@
 import type { AgentId as CouncilAgentId, Message as SharedMessage } from "@socratic-council/shared";
+import type { ArgEdge, ArgGraph, ArgNode, ArgNodeKind } from "@socratic-council/core";
 
 import type { Provider } from "../stores/config";
 import {
@@ -236,6 +237,20 @@ export interface DiscussionSession {
   duoLogue: DuoLogueSnapshot | null;
   runtime: SessionRuntimeSnapshot;
   canvasStates?: Record<string, unknown>;
+  /**
+   * Live argument-map snapshot. Persisted alongside the transcript so the
+   * extractor doesn't re-scan covered messages whenever the panel reopens
+   * or the session is reloaded. Initialized on demand by Chat.tsx the
+   * first time a council message is processed.
+   */
+  argGraph?: ArgGraph;
+  /**
+   * Council message ids that the argument-map extractor has already
+   * processed (success, judged-non-substantive, or retry-budget
+   * exhausted). Stored as a serialized array; restored into the runtime
+   * Set on Chat mount.
+   */
+  argmapExtractedIds?: string[];
   /**
    * Session branching (wave 2.7). When present, this session was forked from
    * another session at a specific message. The UI surfaces a "↪ branched
@@ -959,6 +974,67 @@ function normalizeCanvasStates(input: unknown): Record<string, unknown> | undefi
   return Object.keys(result).length > 0 ? result : undefined;
 }
 
+function normalizeArgGraph(input: unknown): ArgGraph | undefined {
+  if (!input || typeof input !== "object") return undefined;
+  const record = input as { nodes?: unknown; edges?: unknown; lastMessageId?: unknown };
+  if (!Array.isArray(record.nodes)) return undefined;
+
+  const allowedKind = (k: unknown): k is ArgNodeKind =>
+    k === "claim" || k === "evidence" || k === "rebuttal";
+
+  const nodes: ArgNode[] = [];
+  for (const raw of record.nodes) {
+    if (!raw || typeof raw !== "object") continue;
+    const r = raw as Partial<ArgNode>;
+    if (typeof r.id !== "string" || r.id.length === 0) continue;
+    if (!allowedKind(r.kind)) continue;
+    if (typeof r.text !== "string" || r.text.length === 0) continue;
+    if (typeof r.sourceMessageId !== "string" || r.sourceMessageId.length === 0) continue;
+    if (typeof r.sourceAgentId !== "string" || r.sourceAgentId.length === 0) continue;
+    nodes.push({
+      id: r.id,
+      kind: r.kind,
+      text: r.text,
+      sourceMessageId: r.sourceMessageId,
+      sourceAgentId: r.sourceAgentId,
+    });
+  }
+
+  const validNodeIds = new Set(nodes.map((n) => n.id));
+  const edges: ArgEdge[] = Array.isArray(record.edges)
+    ? record.edges
+        .map((raw): ArgEdge | null => {
+          if (!raw || typeof raw !== "object") return null;
+          const r = raw as Partial<ArgEdge>;
+          if (typeof r.from !== "string" || !validNodeIds.has(r.from)) return null;
+          if (typeof r.to !== "string" || !validNodeIds.has(r.to)) return null;
+          if (r.relation !== "supports" && r.relation !== "rebuts") return null;
+          return { from: r.from, to: r.to, relation: r.relation };
+        })
+        .filter((e): e is ArgEdge => Boolean(e))
+    : [];
+
+  const lastMessageId =
+    typeof record.lastMessageId === "string" && record.lastMessageId.length > 0
+      ? record.lastMessageId
+      : null;
+
+  return { nodes, edges, lastMessageId };
+}
+
+function normalizeArgmapExtractedIds(input: unknown): string[] | undefined {
+  if (!Array.isArray(input)) return undefined;
+  const seen = new Set<string>();
+  const ids: string[] = [];
+  for (const raw of input) {
+    if (typeof raw !== "string" || raw.length === 0) continue;
+    if (seen.has(raw)) continue;
+    seen.add(raw);
+    ids.push(raw);
+  }
+  return ids.length > 0 ? ids : undefined;
+}
+
 function buildSummary(session: DiscussionSession): SessionSummary {
   return {
     id: session.id,
@@ -1175,6 +1251,18 @@ function normalizeDiscussionSession(input: unknown): DiscussionSession | null {
     runtime: normalizeRuntime(record.runtime, status),
     ...(normalizeCanvasStates(record.canvasStates)
       ? { canvasStates: normalizeCanvasStates(record.canvasStates) }
+      : {}),
+    ...(normalizeArgGraph((record as { argGraph?: unknown }).argGraph)
+      ? { argGraph: normalizeArgGraph((record as { argGraph?: unknown }).argGraph) }
+      : {}),
+    ...(normalizeArgmapExtractedIds(
+      (record as { argmapExtractedIds?: unknown }).argmapExtractedIds,
+    )
+      ? {
+          argmapExtractedIds: normalizeArgmapExtractedIds(
+            (record as { argmapExtractedIds?: unknown }).argmapExtractedIds,
+          ),
+        }
       : {}),
     ...(typeof record.parentSessionId === "string" && record.parentSessionId.length > 0
       ? { parentSessionId: record.parentSessionId }

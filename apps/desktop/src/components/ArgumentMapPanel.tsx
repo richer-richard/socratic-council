@@ -1,21 +1,27 @@
-import { useMemo, useState } from "react";
+import { useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import type { ArgEdge, ArgGraph, ArgNode } from "@socratic-council/core";
+import type { Message as SharedMessage } from "@socratic-council/shared";
 
 /**
- * Live argument map — editorial graph renderer (wave 2.6 UI).
+ * Live argument map — editorial graph renderer (wave 2.6 UI, redesigned).
  *
- * Docks on the right side of the chat view when opened. Claims stack as
- * capital-lettered cards; evidence edges render as emerald filaments,
- * rebuttals as crimson ones, with light particles drifting at low opacity
- * across the negative space. Clicking a node fires `onNavigateToMessage`
- * so the transcript can scroll to the source.
+ * Docks on the right side of the chat view when opened. Each claim renders as
+ * a row on a vertical timeline: a timestamp marker on the left, a centered
+ * claim card, and a fan of evidence (green) and rebuttal (red) chips below.
+ * Connecting lines are drawn as quadratic Bezier curves in an SVG overlay
+ * behind the cards, measured from real DOM positions so resizing reflows
+ * cleanly. A subtle gold spine runs down the centerline connecting
+ * consecutive claim rows for cinematic continuity.
  *
- * This component does NOT touch the extraction pipeline — that's
- * `@socratic-council/core/argmap`. Feed it a graph and it draws.
+ * The panel does NOT touch the extraction pipeline — that's
+ * `@socratic-council/core/argmap`. Feed it a graph (and optionally the
+ * messages array, for accurate timestamps + ordering) and it draws.
  */
 
 export type ArgumentMapStatus = "no-credential" | "extracting" | "empty" | "failed";
+
+interface MessageLike extends Pick<SharedMessage, "id" | "timestamp"> {}
 
 export interface ArgumentMapPanelProps {
   graph: ArgGraph;
@@ -31,6 +37,10 @@ export interface ArgumentMapPanelProps {
   lastError?: string | null;
   /** Re-run the extractor on the oldest unprocessed message. */
   onRetry?: () => void;
+  /** True while a Gemini extraction call is in flight — drives the live pulse pill. */
+  busy?: boolean;
+  /** Source messages, used to order claims chronologically and label the timeline. */
+  messages?: MessageLike[];
 }
 
 export function ArgumentMapPanel({
@@ -41,13 +51,22 @@ export function ArgumentMapPanel({
   status = "empty",
   lastError = null,
   onRetry,
+  busy = false,
+  messages = [],
 }: ArgumentMapPanelProps) {
-  const [hoveredNode, setHoveredNode] = useState<string | null>(null);
-
   const { nodes, edges } = graph;
   const claims = useMemo(() => nodes.filter((n) => n.kind === "claim"), [nodes]);
   const evidence = useMemo(() => nodes.filter((n) => n.kind === "evidence"), [nodes]);
   const rebuttals = useMemo(() => nodes.filter((n) => n.kind === "rebuttal"), [nodes]);
+
+  // Index messages by id once for O(1) timestamp + order lookups.
+  const messageIndex = useMemo(() => {
+    const byId = new Map<string, { index: number; timestamp: number }>();
+    messages.forEach((m, i) => {
+      byId.set(m.id, { index: i, timestamp: m.timestamp });
+    });
+    return byId;
+  }, [messages]);
 
   // Build an adjacency map: claim id → list of [node, relation]
   const claimConnections = useMemo(() => {
@@ -60,6 +79,15 @@ export function ArgumentMapPanel({
     }
     return map;
   }, [edges, nodes]);
+
+  // Sort claims chronologically by source-message index. Claims whose source
+  // message isn't in the index (rare — happens transiently while a session
+  // is loading) sink to the end so they don't block the layout.
+  const orderedClaims = useMemo(() => {
+    const orderOf = (n: ArgNode) =>
+      messageIndex.get(n.sourceMessageId)?.index ?? Number.MAX_SAFE_INTEGER;
+    return [...claims].sort((a, b) => orderOf(a) - orderOf(b));
+  }, [claims, messageIndex]);
 
   return (
     <aside
@@ -115,13 +143,20 @@ export function ArgumentMapPanel({
               fontSize: "0.72rem",
               fontFamily: "'JetBrains Mono', ui-monospace, monospace",
               color: "rgba(232, 232, 239, 0.44)",
+              display: "flex",
+              alignItems: "center",
+              flexWrap: "wrap",
+              gap: "8px",
             }}
           >
-            {claims.length} claim{claims.length === 1 ? "" : "s"} ·{" "}
-            {evidence.length} evidence ·{" "}
-            <span style={{ color: "rgb(239, 120, 120)" }}>
-              {rebuttals.length} rebuttal{rebuttals.length === 1 ? "" : "s"}
+            <span>
+              {claims.length} claim{claims.length === 1 ? "" : "s"} ·{" "}
+              {evidence.length} evidence ·{" "}
+              <span style={{ color: "rgb(239, 120, 120)" }}>
+                {rebuttals.length} rebuttal{rebuttals.length === 1 ? "" : "s"}
+              </span>
             </span>
+            {busy && <UpdatingPill />}
           </div>
         </div>
         <button
@@ -148,31 +183,21 @@ export function ArgumentMapPanel({
         style={{
           flex: 1,
           overflowY: "auto",
-          padding: "20px 22px 30px",
+          padding: "20px 18px 30px",
           position: "relative",
           zIndex: 2,
         }}
       >
-        {claims.length === 0 ? (
+        {orderedClaims.length === 0 ? (
           <EmptyState status={status} lastError={lastError} onRetry={onRetry} />
         ) : (
-          claims.map((claim) => {
-            const connections = claimConnections.get(claim.id) ?? [];
-            const accent =
-              agentColors[claim.sourceAgentId] ?? "rgba(232, 232, 239, 0.72)";
-            return (
-              <ClaimBlock
-                key={claim.id}
-                claim={claim}
-                accent={accent}
-                connections={connections}
-                hovered={hoveredNode === claim.id}
-                onHover={setHoveredNode}
-                agentColors={agentColors}
-                onNavigate={onNavigateToMessage}
-              />
-            );
-          })
+          <TimelineGraph
+            claims={orderedClaims}
+            connectionsFor={(claimId) => claimConnections.get(claimId) ?? []}
+            messageIndex={messageIndex}
+            agentColors={agentColors}
+            onNavigate={onNavigateToMessage}
+          />
         )}
       </div>
 
@@ -180,6 +205,14 @@ export function ArgumentMapPanel({
         @keyframes argmap-slide-in {
           from { opacity: 0; transform: translateX(12px); }
           to { opacity: 1; transform: translateX(0); }
+        }
+        @keyframes argmap-pulse-ring {
+          0%, 100% { opacity: 0.4; transform: scale(1); }
+          50% { opacity: 1; transform: scale(1.45); }
+        }
+        @keyframes argmap-fade-in {
+          from { opacity: 0; transform: translateY(4px); }
+          to { opacity: 1; transform: translateY(0); }
         }
         @media (prefers-reduced-motion: reduce) {
           aside { animation: none !important; }
@@ -189,185 +222,531 @@ export function ArgumentMapPanel({
   );
 }
 
-function ClaimBlock({
-  claim,
-  accent,
-  connections,
-  hovered,
-  onHover,
-  agentColors,
-  onNavigate,
-}: {
-  claim: ArgNode;
-  accent: string;
-  connections: Array<{ node: ArgNode; relation: ArgEdge["relation"] }>;
-  hovered: boolean;
-  onHover: (id: string | null) => void;
+// ---------------------------------------------------------------------------
+// Header pulse pill
+// ---------------------------------------------------------------------------
+
+function UpdatingPill() {
+  return (
+    <span
+      role="status"
+      aria-live="polite"
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: "6px",
+        padding: "2px 8px",
+        borderRadius: "999px",
+        background: "rgba(245, 197, 66, 0.1)",
+        border: "1px solid rgba(245, 197, 66, 0.3)",
+        color: "rgba(245, 197, 66, 0.92)",
+        fontSize: "0.62rem",
+        letterSpacing: "0.16em",
+        textTransform: "uppercase",
+        fontFamily: "'JetBrains Mono', ui-monospace, monospace",
+      }}
+    >
+      <span
+        aria-hidden="true"
+        style={{
+          width: "6px",
+          height: "6px",
+          borderRadius: "50%",
+          background: "rgba(245, 197, 66, 0.95)",
+          boxShadow: "0 0 6px rgba(245, 197, 66, 0.8)",
+          animation: "argmap-pulse-ring 1.2s ease-in-out infinite",
+        }}
+      />
+      Updating live
+    </span>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Timeline graph: a stack of ClaimRow components with a subtle gold spine
+// ---------------------------------------------------------------------------
+
+interface TimelineGraphProps {
+  claims: ArgNode[];
+  connectionsFor: (
+    claimId: string,
+  ) => Array<{ node: ArgNode; relation: ArgEdge["relation"] }>;
+  messageIndex: Map<string, { index: number; timestamp: number }>;
   agentColors: Record<string, string>;
   onNavigate?: (messageId: string) => void;
-}) {
+}
+
+function TimelineGraph({
+  claims,
+  connectionsFor,
+  messageIndex,
+  agentColors,
+  onNavigate,
+}: TimelineGraphProps) {
+  return (
+    <div style={{ position: "relative" }}>
+      {/* Subtle gold spine running down the center, connecting consecutive
+          claim rows. The first/last 24px fade out so it reads as a thread,
+          not a hard rule. */}
+      <div
+        aria-hidden="true"
+        style={{
+          position: "absolute",
+          top: "32px",
+          bottom: "32px",
+          left: "50%",
+          width: "1px",
+          transform: "translateX(-0.5px)",
+          background:
+            "linear-gradient(180deg, rgba(245, 197, 66, 0) 0%, rgba(245, 197, 66, 0.32) 12%, rgba(245, 197, 66, 0.32) 88%, rgba(245, 197, 66, 0) 100%)",
+          zIndex: 0,
+        }}
+      />
+
+      {claims.map((claim) => {
+        const connections = connectionsFor(claim.id);
+        const evidenceConns = connections.filter((c) => c.relation === "supports");
+        const rebuttalConns = connections.filter((c) => c.relation === "rebuts");
+        const sourceTimestamp = messageIndex.get(claim.sourceMessageId)?.timestamp ?? null;
+        return (
+          <ClaimRow
+            key={claim.id}
+            claim={claim}
+            evidence={evidenceConns.map((c) => c.node)}
+            rebuttals={rebuttalConns.map((c) => c.node)}
+            timestamp={sourceTimestamp}
+            agentColors={agentColors}
+            onNavigate={onNavigate}
+          />
+        );
+      })}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// ClaimRow: timestamp + claim card + evidence/rebuttal chips + curve overlay
+// ---------------------------------------------------------------------------
+
+interface ClaimRowProps {
+  claim: ArgNode;
+  evidence: ArgNode[];
+  rebuttals: ArgNode[];
+  timestamp: number | null;
+  agentColors: Record<string, string>;
+  onNavigate?: (messageId: string) => void;
+}
+
+const EVIDENCE_COLOR = "rgb(74, 222, 128)";
+const REBUTTAL_COLOR = "rgb(239, 120, 120)";
+
+function ClaimRow({
+  claim,
+  evidence,
+  rebuttals,
+  timestamp,
+  agentColors,
+  onNavigate,
+}: ClaimRowProps) {
+  const rowRef = useRef<HTMLDivElement | null>(null);
+  const claimRef = useRef<HTMLDivElement | null>(null);
+  const chipRefs = useRef(new Map<string, HTMLDivElement>());
+  const [hoveredId, setHoveredId] = useState<string | null>(null);
+  const [paths, setPaths] = useState<
+    Array<{ id: string; d: string; relation: ArgEdge["relation"] }>
+  >([]);
+  const [overlaySize, setOverlaySize] = useState({ width: 0, height: 0 });
+
+  const claimAccent = agentColors[claim.sourceAgentId] ?? "rgba(232, 232, 239, 0.72)";
+
+  // Recompute curve paths from real DOM measurements after layout. We do
+  // this on graph-shape changes AND on resize, so the curves stay glued
+  // to their endpoints when the panel grows/shrinks or text wraps.
+  useLayoutEffect(() => {
+    const measure = () => {
+      const row = rowRef.current;
+      const claimEl = claimRef.current;
+      if (!row || !claimEl) return;
+      const rowRect = row.getBoundingClientRect();
+      const claimRect = claimEl.getBoundingClientRect();
+      const claimX = claimRect.left + claimRect.width / 2 - rowRect.left;
+      const claimY = claimRect.bottom - rowRect.top;
+
+      const next: Array<{ id: string; d: string; relation: ArgEdge["relation"] }> = [];
+      for (const ev of evidence) {
+        const el = chipRefs.current.get(ev.id);
+        if (!el) continue;
+        const r = el.getBoundingClientRect();
+        const x = r.left + r.width / 2 - rowRect.left;
+        const y = r.top - rowRect.top;
+        // Quadratic Bezier — control point hangs off the claim's bottom so
+        // the curve flares outward before settling on the chip.
+        const ctrlX = (claimX + x) / 2;
+        const ctrlY = claimY + 18;
+        next.push({
+          id: ev.id,
+          d: `M ${claimX} ${claimY} Q ${ctrlX} ${ctrlY} ${x} ${y}`,
+          relation: "supports",
+        });
+      }
+      for (const reb of rebuttals) {
+        const el = chipRefs.current.get(reb.id);
+        if (!el) continue;
+        const r = el.getBoundingClientRect();
+        const x = r.left + r.width / 2 - rowRect.left;
+        const y = r.top - rowRect.top;
+        const ctrlX = (claimX + x) / 2;
+        const ctrlY = claimY + 18;
+        next.push({
+          id: reb.id,
+          d: `M ${claimX} ${claimY} Q ${ctrlX} ${ctrlY} ${x} ${y}`,
+          relation: "rebuts",
+        });
+      }
+      setPaths(next);
+      setOverlaySize({ width: rowRect.width, height: rowRect.height });
+    };
+
+    measure();
+
+    const row = rowRef.current;
+    if (!row || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(() => measure());
+    ro.observe(row);
+    return () => ro.disconnect();
+  }, [evidence, rebuttals]);
+
+  const setChipRef = (id: string) => (el: HTMLDivElement | null) => {
+    if (el) chipRefs.current.set(id, el);
+    else chipRefs.current.delete(id);
+  };
+
+  const handleNavigate = (messageId: string) => {
+    if (onNavigate) onNavigate(messageId);
+  };
+
   return (
     <div
+      ref={rowRef}
       style={{
-        marginBottom: "22px",
         position: "relative",
+        marginBottom: "28px",
+        animation: "argmap-fade-in 280ms ease both",
       }}
-      onMouseEnter={() => onHover(claim.id)}
-      onMouseLeave={() => onHover(null)}
     >
-      <button
-        type="button"
-        onClick={() => onNavigate?.(claim.sourceMessageId)}
+      {/* Time marker — small mono tag on the far left. Relative time is shown
+          when a real timestamp is available; otherwise just a soft dot. */}
+      <div
         style={{
-          width: "100%",
-          padding: "14px 16px",
-          borderRadius: "10px",
-          border: `1px solid ${hovered ? accent : "rgba(232, 232, 239, 0.14)"}`,
-          background: hovered
-            ? `linear-gradient(180deg, rgba(32, 30, 26, 0.9) 0%, rgba(24, 22, 18, 0.9) 100%)`
-            : "rgba(18, 16, 14, 0.6)",
-          boxShadow: hovered ? `0 0 18px ${accent}30` : "none",
-          textAlign: "left",
-          cursor: onNavigate ? "pointer" : "default",
-          transition: "all 160ms ease",
-          display: "block",
+          position: "absolute",
+          left: 0,
+          top: "8px",
+          fontSize: "0.58rem",
+          letterSpacing: "0.2em",
+          textTransform: "uppercase",
+          fontFamily: "'JetBrains Mono', ui-monospace, monospace",
+          color: "rgba(245, 197, 66, 0.55)",
+          zIndex: 2,
         }}
       >
-        <div
-          style={{
-            fontSize: "0.6rem",
-            fontWeight: 600,
-            letterSpacing: "0.22em",
-            textTransform: "uppercase",
-            color: accent,
-            marginBottom: "6px",
-            fontFamily: "'JetBrains Mono', ui-monospace, monospace",
-          }}
-        >
-          Claim · {claim.sourceAgentId}
-        </div>
-        <div
-          style={{
-            fontSize: "0.94rem",
-            fontWeight: 500,
-            lineHeight: 1.4,
-            color: "#f8f8fc",
-            letterSpacing: "0.005em",
-          }}
-        >
-          {claim.text}
-        </div>
-      </button>
+        {timestamp ? formatClock(timestamp) : "…"}
+      </div>
 
-      {connections.length > 0 && (
-        <div
+      {/* SVG curve overlay — sits behind the cards. */}
+      <svg
+        aria-hidden="true"
+        width={overlaySize.width || "100%"}
+        height={overlaySize.height || "100%"}
+        viewBox={`0 0 ${overlaySize.width || 0} ${overlaySize.height || 0}`}
+        style={{
+          position: "absolute",
+          inset: 0,
+          pointerEvents: "none",
+          zIndex: 1,
+        }}
+      >
+        {paths.map((p) => {
+          const color = p.relation === "supports" ? EVIDENCE_COLOR : REBUTTAL_COLOR;
+          const dim = hoveredId !== null && hoveredId !== p.id;
+          return (
+            <path
+              key={p.id}
+              d={p.d}
+              stroke={color}
+              strokeWidth={hoveredId === p.id ? 2 : 1.4}
+              strokeLinecap="round"
+              fill="none"
+              opacity={hoveredId === p.id ? 0.92 : dim ? 0.18 : 0.42}
+              style={{ transition: "opacity 160ms ease, stroke-width 160ms ease" }}
+            />
+          );
+        })}
+      </svg>
+
+      {/* Claim card — centered, max ~72% panel width. */}
+      <div style={{ display: "flex", justifyContent: "center", position: "relative", zIndex: 2 }}>
+        <button
+          ref={claimRef as unknown as React.RefObject<HTMLButtonElement>}
+          type="button"
+          onClick={() => handleNavigate(claim.sourceMessageId)}
+          onMouseEnter={() => setHoveredId("__claim__")}
+          onMouseLeave={() => setHoveredId(null)}
           style={{
-            display: "flex",
-            flexDirection: "column",
-            gap: "6px",
-            paddingLeft: "14px",
-            marginTop: "10px",
-            borderLeft: "1px dashed rgba(232, 232, 239, 0.18)",
-            marginLeft: "8px",
+            width: "min(320px, 78%)",
+            padding: "12px 14px",
+            borderRadius: "10px",
+            background: "rgba(18, 16, 14, 0.7)",
+            border: `1px solid ${
+              hoveredId === "__claim__" ? claimAccent : "rgba(245, 197, 66, 0.22)"
+            }`,
+            boxShadow:
+              hoveredId === "__claim__"
+                ? `0 0 18px ${claimAccent}40`
+                : "0 4px 18px -8px rgba(0, 0, 0, 0.5)",
+            color: "#f8f8fc",
+            textAlign: "left",
+            cursor: onNavigate ? "pointer" : "default",
+            transition: "all 160ms ease",
+            fontFamily: "inherit",
           }}
         >
-          {connections.map(({ node, relation }) => (
-            <ConnectionRow
-              key={node.id}
-              node={node}
-              relation={relation}
-              accent={agentColors[node.sourceAgentId] ?? "rgba(232, 232, 239, 0.55)"}
-              onClick={() => onNavigate?.(node.sourceMessageId)}
-            />
-          ))}
+          <div
+            style={{
+              fontSize: "0.58rem",
+              fontWeight: 600,
+              letterSpacing: "0.22em",
+              textTransform: "uppercase",
+              color: claimAccent,
+              marginBottom: "5px",
+              fontFamily: "'JetBrains Mono', ui-monospace, monospace",
+            }}
+          >
+            Claim · {claim.sourceAgentId}
+          </div>
+          <div
+            style={{
+              fontSize: "0.9rem",
+              fontWeight: 500,
+              lineHeight: 1.4,
+              letterSpacing: "0.005em",
+            }}
+          >
+            {claim.text}
+          </div>
+        </button>
+      </div>
+
+      {/* Connection chips: evidence on the left column, rebuttals on the right.
+          Each side stacks vertically; rows are independent so chips never
+          collide across the spine. */}
+      {(evidence.length > 0 || rebuttals.length > 0) && (
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "1fr 1fr",
+            gap: "10px",
+            marginTop: "32px",
+            position: "relative",
+            zIndex: 2,
+            alignItems: "start",
+          }}
+        >
+          <SideColumn
+            align="left"
+            color={EVIDENCE_COLOR}
+            label="Evidence"
+            symbol="⊕"
+            nodes={evidence}
+            agentColors={agentColors}
+            hoveredId={hoveredId}
+            setHovered={setHoveredId}
+            setRef={setChipRef}
+            onNavigate={handleNavigate}
+          />
+          <SideColumn
+            align="right"
+            color={REBUTTAL_COLOR}
+            label="Rebuttal"
+            symbol="⊖"
+            nodes={rebuttals}
+            agentColors={agentColors}
+            hoveredId={hoveredId}
+            setHovered={setHoveredId}
+            setRef={setChipRef}
+            onNavigate={handleNavigate}
+          />
         </div>
       )}
     </div>
   );
 }
 
-function ConnectionRow({
-  node,
-  relation,
-  accent,
-  onClick,
+function formatClock(ts: number): string {
+  try {
+    const d = new Date(ts);
+    const hh = d.getHours().toString().padStart(2, "0");
+    const mm = d.getMinutes().toString().padStart(2, "0");
+    return `${hh}:${mm}`;
+  } catch {
+    return "…";
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Side column — a vertical stack of evidence or rebuttal chips
+// ---------------------------------------------------------------------------
+
+function SideColumn({
+  align,
+  color,
+  label,
+  symbol,
+  nodes,
+  agentColors,
+  hoveredId,
+  setHovered,
+  setRef,
+  onNavigate,
 }: {
-  node: ArgNode;
-  relation: ArgEdge["relation"];
-  accent: string;
-  onClick: () => void;
+  align: "left" | "right";
+  color: string;
+  label: string;
+  symbol: string;
+  nodes: ArgNode[];
+  agentColors: Record<string, string>;
+  hoveredId: string | null;
+  setHovered: (id: string | null) => void;
+  setRef: (id: string) => (el: HTMLDivElement | null) => void;
+  onNavigate: (messageId: string) => void;
 }) {
-  const tint =
-    relation === "supports"
-      ? { symbol: "↳", color: "rgb(74, 222, 128)" }
-      : { symbol: "⤴", color: "rgb(239, 120, 120)" };
+  if (nodes.length === 0) {
+    // Empty placeholder so the grid keeps its column structure when only one
+    // side has chips. Renders nothing visible.
+    return <div />;
+  }
   return (
-    <button
-      type="button"
-      onClick={onClick}
+    <div
       style={{
         display: "flex",
-        alignItems: "flex-start",
+        flexDirection: "column",
         gap: "8px",
-        padding: "8px 10px",
-        borderRadius: "7px",
-        border: `1px solid rgba(232, 232, 239, 0.1)`,
-        background: "rgba(10, 10, 14, 0.5)",
-        cursor: "pointer",
-        textAlign: "left",
-        transition: "all 140ms ease",
-      }}
-      onMouseEnter={(e) => {
-        e.currentTarget.style.borderColor = tint.color;
-        e.currentTarget.style.boxShadow = `0 0 10px ${tint.color}22`;
-      }}
-      onMouseLeave={(e) => {
-        e.currentTarget.style.borderColor = "rgba(232, 232, 239, 0.1)";
-        e.currentTarget.style.boxShadow = "none";
+        alignItems: align === "left" ? "flex-end" : "flex-start",
       }}
     >
-      <span
-        aria-hidden="true"
-        style={{
-          fontFamily: "'JetBrains Mono', ui-monospace, monospace",
-          fontSize: "0.8rem",
-          color: tint.color,
-          lineHeight: 1.3,
-          paddingTop: "2px",
-        }}
-      >
-        {tint.symbol}
-      </span>
-      <span style={{ flex: 1, minWidth: 0 }}>
-        <span
-          style={{
-            display: "block",
-            fontSize: "0.58rem",
-            fontWeight: 600,
-            letterSpacing: "0.2em",
-            textTransform: "uppercase",
-            color: tint.color,
-            marginBottom: "2px",
-            fontFamily: "'JetBrains Mono', ui-monospace, monospace",
-          }}
-        >
-          {relation === "supports" ? "Evidence" : "Rebuttal"} ·{" "}
-          <span style={{ color: accent }}>{node.sourceAgentId}</span>
-        </span>
-        <span
-          style={{
-            display: "block",
-            fontSize: "0.82rem",
-            color: "rgba(232, 232, 239, 0.82)",
-            lineHeight: 1.45,
-          }}
-        >
-          {node.text}
-        </span>
-      </span>
-    </button>
+      {nodes.map((node) => {
+        const accent = agentColors[node.sourceAgentId] ?? color;
+        const dim = hoveredId !== null && hoveredId !== node.id && hoveredId !== "__claim__";
+        return (
+          <Chip
+            key={node.id}
+            innerRef={setRef(node.id)}
+            color={color}
+            accent={accent}
+            symbol={symbol}
+            label={label}
+            text={node.text}
+            agentId={node.sourceAgentId}
+            dim={dim}
+            highlighted={hoveredId === node.id}
+            onClick={() => onNavigate(node.sourceMessageId)}
+            onHover={(over) => setHovered(over ? node.id : null)}
+          />
+        );
+      })}
+    </div>
   );
 }
+
+function Chip({
+  innerRef,
+  color,
+  accent,
+  symbol,
+  label,
+  text,
+  agentId,
+  dim,
+  highlighted,
+  onClick,
+  onHover,
+}: {
+  innerRef: (el: HTMLDivElement | null) => void;
+  color: string;
+  accent: string;
+  symbol: string;
+  label: string;
+  text: string;
+  agentId: string;
+  dim: boolean;
+  highlighted: boolean;
+  onClick: () => void;
+  onHover: (over: boolean) => void;
+}) {
+  return (
+    <div
+      ref={innerRef}
+      role="button"
+      tabIndex={0}
+      onClick={onClick}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onClick();
+        }
+      }}
+      onMouseEnter={() => onHover(true)}
+      onMouseLeave={() => onHover(false)}
+      style={{
+        width: "100%",
+        maxWidth: "190px",
+        padding: "8px 10px",
+        borderRadius: "8px",
+        background: highlighted
+          ? `rgba(${color === "rgb(74, 222, 128)" ? "74, 222, 128" : "239, 120, 120"}, 0.12)`
+          : "rgba(10, 10, 14, 0.6)",
+        border: `1px solid ${highlighted ? color : "rgba(232, 232, 239, 0.1)"}`,
+        boxShadow: highlighted ? `0 0 14px ${color}33` : "none",
+        cursor: "pointer",
+        textAlign: "left",
+        transition: "all 160ms ease",
+        opacity: dim ? 0.45 : 1,
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: "6px",
+          fontSize: "0.56rem",
+          fontWeight: 600,
+          letterSpacing: "0.2em",
+          textTransform: "uppercase",
+          color,
+          marginBottom: "3px",
+          fontFamily: "'JetBrains Mono', ui-monospace, monospace",
+        }}
+      >
+        <span aria-hidden="true">{symbol}</span>
+        <span>{label}</span>
+        <span style={{ color: accent, opacity: 0.85 }}>· {agentId}</span>
+      </div>
+      <div
+        style={{
+          fontSize: "0.78rem",
+          color: "rgba(232, 232, 239, 0.86)",
+          lineHeight: 1.4,
+        }}
+      >
+        {text}
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// EmptyState (unchanged from prior fix; kept as the panel's empty-state
+// branching for no-credential / extracting / failed)
+// ---------------------------------------------------------------------------
 
 function EmptyState({
   status,
@@ -431,7 +810,7 @@ function EmptyState({
                 height: "6px",
                 borderRadius: "50%",
                 background: "rgba(245, 197, 66, 0.78)",
-                animation: "argmap-pulse 1.4s ease-in-out infinite",
+                animation: "argmap-pulse-ring 1.4s ease-in-out infinite",
               }}
             />
             {headline}
@@ -461,25 +840,15 @@ function EmptyState({
           Retry now
         </button>
       )}
-      <style>{`
-        @keyframes argmap-pulse {
-          0%, 100% { opacity: 0.4; transform: scale(1); }
-          50% { opacity: 1; transform: scale(1.3); }
-        }
-        @media (prefers-reduced-motion: reduce) {
-          [aria-hidden="true"] { animation: none !important; }
-        }
-      `}</style>
     </div>
   );
 }
 
-/**
- * 12 softly-drifting particles rendered in a pure-CSS layer — matches the
- * plan's "light particles drifting between nodes" direction without
- * touching canvas. Particles are pinned to the aside's background via
- * absolute positioning and use keyframe drift with staggered delays.
- */
+// ---------------------------------------------------------------------------
+// 12 softly-drifting particles rendered in a pure-CSS layer — preserved from
+// the previous design so the panel keeps its cinematic feel.
+// ---------------------------------------------------------------------------
+
 function DriftingParticles() {
   const particles = Array.from({ length: 14 }, (_, i) => ({
     id: i,
@@ -528,3 +897,4 @@ function DriftingParticles() {
     </div>
   );
 }
+
