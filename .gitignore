@@ -41,7 +41,8 @@ playwright-report/
 test-results/
 
 # Planning documents (internal use only)
-PLANNING.md
+plan.md
+*.save
 docs/internal/
 
 # Temporary files
