@@ -1032,7 +1032,9 @@ export async function branchDiscussionSession(
     // whisperBonuses, and the synthesis cadence into the new session.
     runtime: createEmptyRuntime(),
     duoLogue: null,
-    currentTurn: 0,
+    // Inherit the parent's turn counter so the branch visibly continues
+    // from where the fork happened instead of restarting at 0/N.
+    currentTurn: parent.currentTurn,
     parentSessionId: parent.id,
     parentMessageId: forkMessageId,
   };
@@ -1451,4 +1453,33 @@ export function stabilizeStoredSessions(): SessionSummary[] {
 
 export function listSessionSummariesByProject(projectId: string | null): SessionSummary[] {
   return listSessionSummaries().filter((s) => s.projectId === projectId);
+}
+
+/**
+ * Return all sessions that were forked directly from `parentSessionId`.
+ * Used by the BranchLineage UI to show "other forks of this session".
+ */
+export function listChildBranches(parentSessionId: string): SessionSummary[] {
+  return listSessionSummaries().filter((s) => s.parentSessionId === parentSessionId);
+}
+
+/**
+ * Walk the branch lineage from the root down to `sessionId`. Returns an
+ * ordered array `[root, ..., parent, current]`. If `sessionId` itself
+ * is missing from the index, returns an empty array. Cycles are guarded
+ * by a visited set so a corrupt parent pointer cannot loop forever.
+ */
+export function getBranchLineage(sessionId: string): SessionSummary[] {
+  const all = listSessionSummaries();
+  const byId = new Map(all.map((s) => [s.id, s] as const));
+  const chain: SessionSummary[] = [];
+  const visited = new Set<string>();
+  let cur = byId.get(sessionId);
+  while (cur && !visited.has(cur.id)) {
+    visited.add(cur.id);
+    chain.unshift(cur);
+    if (!cur.parentSessionId) break;
+    cur = byId.get(cur.parentSessionId);
+  }
+  return chain;
 }
