@@ -818,6 +818,644 @@ export function migrateArgGraphV1ToV2(input: unknown): ArgGraph {
 }
 
 // ----------------------------------------------------------------------------
+// Consolidation pass (Phase 2)
+// ----------------------------------------------------------------------------
+//
+// `updateArgumentMap` runs once per message and only sees the current message
+// + a short prior-claims list. That myopic view can't infer the debate axis,
+// merge claims that two agents reached independently, or surface contradiction
+// pairs across the whole graph.
+//
+// `consolidateArgGraph` is the global pass: one model call that returns a
+// list of structural ops (set-axis, merge, set-stance, supersede, contradicts,
+// set-clusters, anchor-orphan, drop-orphan), which are applied in order.
+// Candidate contradicts edges are then NLI-confirmed via
+// semanticConflictCheck before being added — this keeps false positives down
+// in the same way the conflict engine uses NLI today.
+
+import { semanticConflictCheck } from "./semanticConflict.js";
+
+export interface ConsolidationInput {
+  topic: string;
+  graph: ArgGraph;
+  recentMessages: Array<{
+    id: string;
+    agentId: string;
+    agentName: string;
+    content: string;
+    timestamp: number;
+  }>;
+  knownAgentNames: string[];
+  /** PREMISES list pulled from `summarizeOlderMessages`, if available. The
+   *  consolidator surfaces these to the model so it reuses canonical
+   *  premises from older turns instead of re-deriving them. */
+  seedPremises?: string[];
+}
+
+export type ConsolidationCompletionFn = (prompt: {
+  system: string;
+  user: string;
+}) => Promise<string | null>;
+
+interface ConsolidationOps {
+  axis?: ArgGraphAxis | null;
+  stances: Array<{ id: string; polarity: number }>;
+  merges: Array<{ canonical: string; duplicate: string }>;
+  supersessions: Array<{ supersededId: string; byId: string }>;
+  candidateContradicts: Array<{
+    from: string;
+    to: string;
+    confidence: number;
+    rationale?: string;
+  }>;
+  clusters: ArgGraphCluster[];
+  orphanResolutions: Array<{
+    orphanId: string;
+    anchorClaimId: string | null;
+  }>;
+}
+
+const CONSOLIDATION_SYSTEM_PROMPT = `You are the consolidator for a multi-agent debate's live argument map. Your job is to look at the WHOLE graph plus the most recent messages and propose a single batch of structural updates that make the graph more coherent.
+
+You have access to:
+  - the existing nodes (claim / premise / evidence / rebuttal / concession / question / assumption / definition / proposal) with ids and text,
+  - the existing edges and their relations,
+  - the current axis (or none),
+  - the current clusters (or none),
+  - any unanchored orphan fragments staged by the per-message extractor,
+  - the recent transcript so you can pick up new framing,
+  - optionally a PREMISES list summarized from older turns.
+
+Output STRICT JSON — a single object — exactly matching this shape:
+
+{
+  "axis": { "name": "<short axis label>", "poles": ["<pole 0>", "<pole 1>"] } | null,
+  "stances": [{ "id": "<existing claim id>", "polarity": <-1..1> }],
+  "merges":  [{ "canonical": "<existing claim id>", "duplicate": "<other existing claim id>" }],
+  "supersessions": [{ "supersededId": "<earlier claim id>", "byId": "<later claim id>" }],
+  "candidateContradicts": [
+    { "from": "<existing claim id>", "to": "<existing claim id>", "confidence": <0..1>, "rationale": "<one short line>" }
+  ],
+  "clusters": [{ "label": "<short camp name>", "nodeIds": ["<claim id>", "..."] }],
+  "orphanResolutions": [
+    { "orphanId": "<existing orphan id>", "anchorClaimId": "<existing claim id>" } |
+    { "orphanId": "<existing orphan id>", "anchorClaimId": null }
+  ]
+}
+
+RULES:
+  1. Every id must be EXACT and EXISTING — no invention, no paraphrase.
+  2. Set axis only if the debate clearly has one. 1 axis is preferred. If you can't infer one with confidence, return "axis": null.
+  3. "merges" should ONLY pair claims that are semantically the same proposition (≥0.85 confidence). The "canonical" id stays; the "duplicate" id is removed and its sources merged into the canonical.
+  4. "supersessions" should ONLY mark a strictly sharper restatement by the SAME author. Both ids must already exist as claims.
+  5. "candidateContradicts" pairs are sent through a separate NLI confirmer; emit pairs you actually believe contradict — false positives there cost a model call to reject.
+  6. "clusters" should partition the active claims into 2–4 named camps. Each cluster's label should be 1–4 words. Camp labels should reflect a position taken in the debate, not a topic name.
+  7. "orphanResolutions" — for each orphan, either anchor it to an existing claim id (if it really is evidence/rebuttal/concession/premise for that claim) or set anchorClaimId to null (drop it).
+  8. Already-merged or already-superseded nodes are FINAL. Do not re-propose changes to them.
+  9. Output STRICT JSON only. No prose. No markdown. No code fences.
+ 10. If the graph is already in good shape, return all sections as empty arrays / null axis. The pass is idempotent.`;
+
+function buildConsolidationUserPrompt(input: ConsolidationInput): string {
+  const { graph } = input;
+  const lines: string[] = [`Topic: ${input.topic}`];
+  if (input.knownAgentNames.length > 0) {
+    lines.push(`Agents: ${input.knownAgentNames.join(", ")}`);
+  }
+  if (graph.axis) {
+    lines.push("");
+    lines.push(`Current axis: ${graph.axis.name}`);
+    lines.push(`  Pole 0 (-1): ${graph.axis.poles[0]}`);
+    lines.push(`  Pole 1 (+1): ${graph.axis.poles[1]}`);
+  }
+  if (graph.clusters.length > 0) {
+    lines.push("");
+    lines.push("Current clusters:");
+    for (const c of graph.clusters) {
+      lines.push(`  ${c.id} ("${c.label}"): ${c.nodeIds.join(", ")}`);
+    }
+  }
+  if (input.seedPremises && input.seedPremises.length > 0) {
+    lines.push("");
+    lines.push("PREMISES from older transcript (treat as established):");
+    for (const p of input.seedPremises) lines.push(`- ${p}`);
+  }
+
+  lines.push("");
+  lines.push("EXISTING NODES:");
+  for (const n of graph.nodes) {
+    const stance =
+      n.stance && typeof n.stance.polarity === "number"
+        ? ` polarity=${n.stance.polarity.toFixed(2)}`
+        : "";
+    const status = n.status === "active" ? "" : ` status=${n.status}`;
+    lines.push(
+      `  [${n.id}] kind=${n.kind} agent=${n.sourceAgentId}${stance}${status} :: ${n.text}`,
+    );
+  }
+
+  if (graph.edges.length > 0) {
+    lines.push("");
+    lines.push("EXISTING EDGES:");
+    for (const e of graph.edges) {
+      lines.push(`  ${e.from} --${e.relation}--> ${e.to} (conf=${e.confidence.toFixed(2)})`);
+    }
+  }
+
+  if (graph.orphans.length > 0) {
+    lines.push("");
+    lines.push("ORPHANS (unanchored fragments awaiting resolution):");
+    for (const o of graph.orphans) {
+      lines.push(`  [${o.id}] kind=${o.kind} agent=${o.sourceAgentId} :: ${o.text}`);
+    }
+  }
+
+  if (input.recentMessages.length > 0) {
+    lines.push("");
+    lines.push("RECENT MESSAGES:");
+    for (const m of input.recentMessages.slice(-12)) {
+      const truncated = m.content.trim().slice(0, 360);
+      lines.push(`  [${m.id}] ${m.agentName}: ${truncated}`);
+    }
+  }
+
+  lines.push("");
+  lines.push("Return the JSON consolidation object now.");
+  return lines.join("\n");
+}
+
+export function buildConsolidationPrompt(input: ConsolidationInput): {
+  system: string;
+  user: string;
+} {
+  return {
+    system: CONSOLIDATION_SYSTEM_PROMPT,
+    user: buildConsolidationUserPrompt(input),
+  };
+}
+
+/**
+ * Coerce the model's raw consolidation output into a typed op set. Returns
+ * null when the response can't be parsed at all (so the caller leaves the
+ * graph untouched).
+ */
+export function parseConsolidationResponse(
+  raw: string | null,
+): ConsolidationOps | null {
+  if (!raw) return null;
+  const trimmed = raw
+    .trim()
+    .replace(/^```(?:json)?\s*/i, "")
+    .replace(/\s*```$/i, "")
+    .trim();
+  const match = trimmed.match(/\{[\s\S]*\}/);
+  if (!match) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(match[0]);
+  } catch {
+    return null;
+  }
+  if (!parsed || typeof parsed !== "object") return null;
+  const r = parsed as Record<string, unknown>;
+
+  const ops: ConsolidationOps = {
+    stances: [],
+    merges: [],
+    supersessions: [],
+    candidateContradicts: [],
+    clusters: [],
+    orphanResolutions: [],
+  };
+
+  if (r.axis === null) {
+    ops.axis = null;
+  } else if (r.axis && typeof r.axis === "object") {
+    const a = r.axis as Partial<ArgGraphAxis>;
+    if (
+      typeof a.name === "string" &&
+      a.name.trim().length > 0 &&
+      Array.isArray(a.poles) &&
+      a.poles.length === 2 &&
+      typeof a.poles[0] === "string" &&
+      typeof a.poles[1] === "string"
+    ) {
+      ops.axis = {
+        name: a.name.trim().slice(0, 80),
+        poles: [a.poles[0].trim().slice(0, 60), a.poles[1].trim().slice(0, 60)],
+      };
+    }
+  }
+
+  if (Array.isArray(r.stances)) {
+    for (const raw of r.stances) {
+      if (!raw || typeof raw !== "object") continue;
+      const s = raw as Record<string, unknown>;
+      if (typeof s.id !== "string" || typeof s.polarity !== "number") continue;
+      ops.stances.push({ id: s.id.trim(), polarity: clamp(s.polarity, -1, 1) });
+    }
+  }
+
+  if (Array.isArray(r.merges)) {
+    for (const raw of r.merges) {
+      if (!raw || typeof raw !== "object") continue;
+      const m = raw as Record<string, unknown>;
+      if (typeof m.canonical !== "string" || typeof m.duplicate !== "string") continue;
+      const canonical = m.canonical.trim();
+      const duplicate = m.duplicate.trim();
+      if (!canonical || !duplicate || canonical === duplicate) continue;
+      ops.merges.push({ canonical, duplicate });
+    }
+  }
+
+  if (Array.isArray(r.supersessions)) {
+    for (const raw of r.supersessions) {
+      if (!raw || typeof raw !== "object") continue;
+      const s = raw as Record<string, unknown>;
+      if (typeof s.supersededId !== "string" || typeof s.byId !== "string") continue;
+      const supersededId = s.supersededId.trim();
+      const byId = s.byId.trim();
+      if (!supersededId || !byId || supersededId === byId) continue;
+      ops.supersessions.push({ supersededId, byId });
+    }
+  }
+
+  if (Array.isArray(r.candidateContradicts)) {
+    for (const raw of r.candidateContradicts) {
+      if (!raw || typeof raw !== "object") continue;
+      const c = raw as Record<string, unknown>;
+      if (typeof c.from !== "string" || typeof c.to !== "string") continue;
+      const from = c.from.trim();
+      const to = c.to.trim();
+      if (!from || !to || from === to) continue;
+      const confidence =
+        typeof c.confidence === "number" ? clamp(c.confidence, 0, 1) : 0.5;
+      const rationale =
+        typeof c.rationale === "string" && c.rationale.trim().length > 0
+          ? c.rationale.trim().slice(0, 200)
+          : undefined;
+      ops.candidateContradicts.push({
+        from,
+        to,
+        confidence,
+        ...(rationale ? { rationale } : {}),
+      });
+    }
+  }
+
+  if (Array.isArray(r.clusters)) {
+    for (const raw of r.clusters) {
+      if (!raw || typeof raw !== "object") continue;
+      const c = raw as Record<string, unknown>;
+      if (typeof c.label !== "string") continue;
+      const label = c.label.trim().slice(0, 60);
+      if (!label) continue;
+      if (!Array.isArray(c.nodeIds)) continue;
+      const nodeIds = c.nodeIds.filter((id): id is string => typeof id === "string");
+      if (nodeIds.length === 0) continue;
+      const id =
+        typeof c.id === "string" && c.id.trim().length > 0
+          ? c.id.trim()
+          : `cluster_${ops.clusters.length}`;
+      ops.clusters.push({ id, label, nodeIds });
+    }
+  }
+
+  if (Array.isArray(r.orphanResolutions)) {
+    for (const raw of r.orphanResolutions) {
+      if (!raw || typeof raw !== "object") continue;
+      const o = raw as Record<string, unknown>;
+      if (typeof o.orphanId !== "string") continue;
+      const orphanId = o.orphanId.trim();
+      if (!orphanId) continue;
+      const anchorClaimId =
+        typeof o.anchorClaimId === "string" && o.anchorClaimId.trim().length > 0
+          ? o.anchorClaimId.trim()
+          : null;
+      ops.orphanResolutions.push({ orphanId, anchorClaimId });
+    }
+  }
+
+  return ops;
+}
+
+/** Stable signature for "did anything actually change?" comparisons. */
+function structuralFingerprint(graph: ArgGraph): string {
+  const nodeIds = graph.nodes.map((n) => `${n.id}:${n.kind}:${n.status}:${n.text}`).join("|");
+  const aliases = graph.nodes.map((n) => n.aliases.join(",")).join("|");
+  const sources = graph.nodes
+    .map((n) => n.sources.map((s) => `${s.messageId}/${s.agentId}`).join(","))
+    .join("|");
+  const stances = graph.nodes
+    .map((n) => (n.stance ? `${n.stance.axis}@${n.stance.polarity.toFixed(3)}` : ""))
+    .join("|");
+  const supers = graph.nodes.map((n) => n.supersededBy ?? "").join("|");
+  const edges = graph.edges
+    .map((e) => `${e.from}>${e.relation}>${e.to}@${e.confidence.toFixed(3)}`)
+    .sort()
+    .join("|");
+  const orphans = graph.orphans.map((o) => `${o.id}:${o.kind}:${o.text}`).join("|");
+  const clusters = graph.clusters.map((c) => `${c.label}:${c.nodeIds.slice().sort().join(",")}`).join("|");
+  const axis = graph.axis ? `${graph.axis.name}|${graph.axis.poles.join("/")}` : "";
+  return [nodeIds, aliases, sources, stances, supers, edges, orphans, clusters, axis].join("\n");
+}
+
+function redirectEdgesAfterMerge(
+  edges: ArgEdge[],
+  duplicateId: string,
+  canonicalId: string,
+): { edges: ArgEdge[]; changed: boolean } {
+  let changed = false;
+  const seen = new Set<string>();
+  const next: ArgEdge[] = [];
+  for (const e of edges) {
+    let from = e.from;
+    let to = e.to;
+    if (from === duplicateId) {
+      from = canonicalId;
+      changed = true;
+    }
+    if (to === duplicateId) {
+      to = canonicalId;
+      changed = true;
+    }
+    if (from === to) {
+      changed = true; // self-loop produced by collapsing — drop
+      continue;
+    }
+    const sig = `${from}>${e.relation}>${to}`;
+    if (seen.has(sig)) {
+      changed = true; // duplicate after collapse — drop
+      continue;
+    }
+    seen.add(sig);
+    next.push({ ...e, from, to });
+  }
+  return { edges: next, changed };
+}
+
+/**
+ * Drive a global consolidation pass over the live argument graph. One model
+ * call returns the proposed structural ops; this function applies them in
+ * order and (for contradicts edges) confirms each via NLI before emitting it.
+ *
+ * Returns the same graph reference (===) when the model failed or proposed
+ * no real change. On any structural change, returns a new graph with
+ * consolidationVersion bumped by 1. Idempotent — re-running with no new
+ * messages is a no-op.
+ */
+export async function consolidateArgGraph(
+  input: ConsolidationInput,
+  complete: ConsolidationCompletionFn,
+): Promise<ArgGraph> {
+  const prompt = buildConsolidationPrompt(input);
+  let raw: string | null = null;
+  try {
+    raw = await complete(prompt);
+  } catch {
+    return input.graph;
+  }
+  const ops = parseConsolidationResponse(raw);
+  if (!ops) return input.graph;
+
+  const before = structuralFingerprint(input.graph);
+
+  // Work on a deep-enough copy. Nodes and orphans get mutated in place for
+  // strength/aliases/stance/sources updates, so we clone them too.
+  const cloneNode = (n: ArgNode): ArgNode => ({
+    ...n,
+    aliases: [...n.aliases],
+    sources: n.sources.map((s) => ({ ...s })),
+    ...(n.stance ? { stance: { ...n.stance } } : {}),
+    ...(n.verification ? { verification: { ...n.verification } } : {}),
+    ...(n.influencedBy ? { influencedBy: { ...n.influencedBy } } : {}),
+  });
+  let nodes = input.graph.nodes.map(cloneNode);
+  let edges = input.graph.edges.map((e) => ({ ...e }));
+  let orphans = input.graph.orphans.map(cloneNode);
+  let clusters = input.graph.clusters.map((c) => ({ ...c, nodeIds: [...c.nodeIds] }));
+  let axis: ArgGraphAxis | undefined = input.graph.axis
+    ? { ...input.graph.axis, poles: [...input.graph.axis.poles] }
+    : undefined;
+
+  // 1. Axis.
+  if (ops.axis === null) {
+    axis = undefined;
+  } else if (ops.axis) {
+    axis = ops.axis;
+  }
+
+  // 2. Stances.
+  for (const s of ops.stances) {
+    const node = nodes.find((n) => n.id === s.id);
+    if (!node || node.kind !== "claim") continue;
+    node.stance = {
+      axis: axis?.name ?? node.stance?.axis ?? "",
+      polarity: s.polarity,
+    };
+  }
+
+  // 3. Merges. Apply transitively — if A merges into B and B merges into C,
+  //    end up with everything in C.
+  const idMap = new Map<string, string>();
+  const resolveId = (id: string): string => {
+    let cur = id;
+    const seen = new Set<string>();
+    while (idMap.has(cur)) {
+      if (seen.has(cur)) break; // cycle guard
+      seen.add(cur);
+      cur = idMap.get(cur)!;
+    }
+    return cur;
+  };
+  for (const m of ops.merges) {
+    const canonicalId = resolveId(m.canonical);
+    const duplicateId = resolveId(m.duplicate);
+    if (canonicalId === duplicateId) continue;
+    const canonical = nodes.find((n) => n.id === canonicalId);
+    const duplicate = nodes.find((n) => n.id === duplicateId);
+    if (!canonical || !duplicate) continue;
+    if (canonical.kind !== "claim" || duplicate.kind !== "claim") continue;
+
+    // Move sources + alias text from duplicate into canonical.
+    for (const s of duplicate.sources) {
+      const dupe = canonical.sources.some(
+        (cs) => cs.messageId === s.messageId && cs.agentId === s.agentId,
+      );
+      if (!dupe) canonical.sources.push(s);
+    }
+    const dupAliasLower = duplicate.text.toLowerCase();
+    if (
+      canonical.text.toLowerCase() !== dupAliasLower &&
+      !canonical.aliases.some((a) => a.toLowerCase() === dupAliasLower)
+    ) {
+      canonical.aliases.push(duplicate.text);
+    }
+    for (const alias of duplicate.aliases) {
+      const aliasLower = alias.toLowerCase();
+      if (
+        canonical.text.toLowerCase() !== aliasLower &&
+        !canonical.aliases.some((a) => a.toLowerCase() === aliasLower)
+      ) {
+        canonical.aliases.push(alias);
+      }
+    }
+    canonical.strength = Math.min(1, canonical.strength + 0.1);
+
+    // Drop the duplicate node, redirect edges.
+    nodes = nodes.filter((n) => n.id !== duplicateId);
+    const redir = redirectEdgesAfterMerge(edges, duplicateId, canonicalId);
+    edges = redir.edges;
+    idMap.set(duplicateId, canonicalId);
+    // Re-point any cluster references.
+    clusters = clusters.map((c) => ({
+      ...c,
+      nodeIds: c.nodeIds.map((id) => (id === duplicateId ? canonicalId : id)),
+    }));
+  }
+
+  // 4. Supersessions.
+  for (const s of ops.supersessions) {
+    const supersededId = resolveId(s.supersededId);
+    const byId = resolveId(s.byId);
+    if (supersededId === byId) continue;
+    const earlier = nodes.find((n) => n.id === supersededId);
+    const later = nodes.find((n) => n.id === byId);
+    if (!earlier || !later) continue;
+    if (earlier.kind !== "claim" || later.kind !== "claim") continue;
+    if (earlier.status === "superseded" && earlier.supersededBy === byId) continue;
+    earlier.status = "superseded";
+    earlier.supersededBy = byId;
+  }
+
+  // 5. Contradicts edges — confirm each via NLI before emitting.
+  const validIds = new Set(nodes.map((n) => n.id));
+  for (const c of ops.candidateContradicts) {
+    const from = resolveId(c.from);
+    const to = resolveId(c.to);
+    if (from === to) continue;
+    if (!validIds.has(from) || !validIds.has(to)) continue;
+    const dup = edges.find(
+      (e) => e.from === from && e.to === to && e.relation === "contradicts",
+    );
+    if (dup) continue;
+    const fromNode = nodes.find((n) => n.id === from)!;
+    const toNode = nodes.find((n) => n.id === to)!;
+    const verdict = await semanticConflictCheck(
+      {
+        topic: input.topic,
+        agentAName: fromNode.sourceAgentId,
+        agentAMessage: fromNode.text,
+        agentBName: toNode.sourceAgentId,
+        agentBMessage: toNode.text,
+      },
+      complete,
+    );
+    if (!verdict || verdict.verdict !== "contradicts") continue;
+    if (verdict.confidence < 0.5) continue;
+    const id = `ed_${edges.length}`;
+    const edge: ArgEdge = {
+      id,
+      from,
+      to,
+      relation: "contradicts",
+      confidence: Math.min(1, Math.max(c.confidence, verdict.confidence)),
+    };
+    if (c.rationale) edge.rationale = c.rationale;
+    edges.push(edge);
+  }
+
+  // 6. Clusters.
+  if (ops.clusters.length > 0) {
+    clusters = ops.clusters
+      .map((c, i) => ({
+        id: c.id || `cluster_${i}`,
+        label: c.label,
+        nodeIds: c.nodeIds
+          .map(resolveId)
+          .filter((id) => validIds.has(id)),
+      }))
+      .filter((c) => c.nodeIds.length > 0);
+  }
+
+  // 7. Orphan resolutions.
+  if (ops.orphanResolutions.length > 0) {
+    const remaining: ArgNode[] = [];
+    for (const orphan of orphans) {
+      const op = ops.orphanResolutions.find((o) => o.orphanId === orphan.id);
+      if (!op) {
+        remaining.push(orphan);
+        continue;
+      }
+      if (op.anchorClaimId === null) continue; // explicit drop
+      const claimId = resolveId(op.anchorClaimId);
+      const target = nodes.find((n) => n.id === claimId && n.kind === "claim");
+      if (!target) {
+        // Couldn't resolve — keep the orphan staged for next pass.
+        remaining.push(orphan);
+        continue;
+      }
+      // Promote the orphan into a real node + the appropriate edge.
+      const anchored: ArgNode = { ...orphan };
+      nodes.push(anchored);
+      const relation = ANCHOR_RELATION[orphan.kind] ?? "supports";
+      edges.push({
+        id: `ed_${edges.length}`,
+        from: anchored.id,
+        to: target.id,
+        relation,
+        confidence: 0.8,
+      });
+    }
+    orphans = remaining;
+  }
+
+  const candidate: ArgGraph = {
+    ...input.graph,
+    nodes,
+    edges,
+    clusters,
+    orphans,
+    consolidationVersion: input.graph.consolidationVersion,
+    schemaVersion: 2,
+    ...(axis ? { axis } : {}),
+  };
+  if (!axis) {
+    delete (candidate as { axis?: ArgGraphAxis }).axis;
+  }
+
+  const after = structuralFingerprint(candidate);
+  if (before === after) {
+    return input.graph;
+  }
+  candidate.consolidationVersion = input.graph.consolidationVersion + 1;
+  return candidate;
+}
+
+/**
+ * Pull the PREMISES bullets out of a `summarizeOlderMessages` summary so the
+ * consolidator can seed them. Returns [] when no PREMISES section is found.
+ */
+export function extractPremisesFromSummary(summary: string | null | undefined): string[] {
+  if (!summary) return [];
+  const idx = summary.toUpperCase().indexOf("PREMISES");
+  if (idx < 0) return [];
+  const tail = summary.slice(idx);
+  const lines = tail.split(/\r?\n/);
+  const out: string[] = [];
+  for (let i = 1; i < lines.length; i += 1) {
+    const line = lines[i]!.trim();
+    if (line.length === 0) {
+      if (out.length > 0) break;
+      continue;
+    }
+    const m = line.match(/^[-*•]\s*(.+)$/);
+    if (m) out.push(m[1]!.trim());
+    else if (out.length > 0) break;
+  }
+  return out;
+}
+
+// ----------------------------------------------------------------------------
 // Re-exports for tests / consumers that want raw constants
 // ----------------------------------------------------------------------------
 
