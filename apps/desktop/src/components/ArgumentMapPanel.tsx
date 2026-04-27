@@ -1,81 +1,122 @@
-import { useLayoutEffect, useMemo, useRef, useState } from "react";
-
-import type { ArgEdge, ArgGraph, ArgNode } from "@socratic-council/core";
-import type { Message as SharedMessage } from "@socratic-council/shared";
-
 /**
- * Live argument map — editorial graph renderer (wave 2.6 UI, redesigned).
+ * ArgumentMapPanel — Phase 3 of the argmap rewrite.
  *
- * Docks on the right side of the chat view when opened. Each claim renders as
- * a row on a vertical timeline: a timestamp marker on the left, a centered
- * claim card, and a fan of evidence (green) and rebuttal (red) chips below.
- * Connecting lines are drawn as quadratic Bezier curves in an SVG overlay
- * behind the cards, measured from real DOM positions so resizing reflows
- * cleanly. A subtle gold spine runs down the centerline connecting
- * consecutive claim rows for cinematic continuity.
+ * Four tabs over one ArgGraph:
+ *   - Graph     react-flow + dagre layout, betweenness-centrality "spine"
+ *   - Outline   per-cluster brief, claim → premise/evidence/rebuttal tree
+ *   - Stance    2D scatter of polarity × strength along the inferred axis
+ *   - Timeline  ported from the v2.6 panel as the fourth tab
  *
- * The panel does NOT touch the extraction pipeline — that's
- * `@socratic-council/core/argmap`. Feed it a graph (and optionally the
- * messages array, for accurate timestamps + ordering) and it draws.
+ * Filter bar applies to all four views: agent multi-select, relation
+ * toggles, only-contested / only-verified / only-unresolved, since-turn
+ * slider, and ⌘F substring search. Selecting a node opens a drawer that
+ * surfaces every source, every incoming/outgoing edge with rationale,
+ * and per-source "Jump" + "Re-extract" affordances.
  */
+import { ReactFlowProvider } from "@xyflow/react";
+import { useEffect, useMemo, useState } from "react";
 
-export type ArgumentMapStatus = "no-credential" | "extracting" | "empty" | "failed";
+import type { ArgGraph } from "@socratic-council/core";
 
-interface MessageLike extends Pick<SharedMessage, "id" | "timestamp"> {}
+import { applyFilters } from "./argumentMap/filters";
+import { computeSpineNodeIds } from "./argumentMap/centrality";
+import { FilterBar } from "./argumentMap/FilterBar";
+import { ARGMAP_GOLD, ARGMAP_GOLD_HEX } from "./argumentMap/kindStyle";
+import { SelectionDrawer } from "./argumentMap/SelectionDrawer";
+import {
+  DEFAULT_FILTERS,
+  type MessageLike,
+  type PanelFilters,
+  type PanelStatus,
+  type PanelView,
+} from "./argumentMap/types";
+import { GraphView } from "./argumentMap/views/GraphView";
+import { OutlineView } from "./argumentMap/views/OutlineView";
+import { StanceView } from "./argumentMap/views/StanceView";
+import { TimelineView } from "./argumentMap/views/TimelineView";
 
 export interface ArgumentMapPanelProps {
   graph: ArgGraph;
-  /** Close the side panel. */
-  onClose: () => void;
-  /** Optional callback when the user clicks a node — jumps the transcript to the source message. */
-  onNavigateToMessage?: (messageId: string) => void;
-  /** Optional map of agentId → display color. If absent, uses neutral ink. */
-  agentColors?: Record<string, string>;
-  /** Diagnostic status for the empty state. */
-  status?: ArgumentMapStatus;
-  /** Most recent extractor error message, surfaced when status === "failed". */
-  lastError?: string | null;
-  /** Re-run the extractor on the oldest unprocessed message. */
-  onRetry?: () => void;
-  /** True while a Gemini extraction call is in flight — drives the live pulse pill. */
+  status?: PanelStatus;
+  /** True while a Gemini extraction call is in flight. */
   busy?: boolean;
-  /** Source messages, used to order claims chronologically and label the timeline. */
+  lastError?: string | null;
+  /** Retry the per-message extractor for the most recent failure. */
+  onRetry?: () => void;
+  /** Re-run extraction for a specific message (Phase 3 selection drawer). */
+  onRetryExtraction?: (messageId: string) => void;
+  /** Force a consolidation pass now. Phase 3 makes this a real button; until
+   *  Phase 4 lights up Verification, it's the user's primary lever. */
+  onConsolidate?: () => void;
+  /** Phase 5 export hooks. Optional today; the popover hides if undefined. */
+  onExport?: (format: "mermaid" | "json" | "svg" | "png") => void;
+  onClose: () => void;
+  onNavigateToMessage?: (messageId: string) => void;
+  agentColors?: Record<string, string>;
   messages?: MessageLike[];
+  /** Phase 4 hook — surfaces the count of NLI-confirmed contradictions for
+   *  a quick-jump pill. */
+  contradictionsCount?: number;
 }
 
-export function ArgumentMapPanel({
+const TAB_LABELS: Array<{ id: PanelView; label: string; hint: string }> = [
+  { id: "graph", label: "Graph", hint: "spatial view (dagre)" },
+  { id: "outline", label: "Outline", hint: "per-cluster brief" },
+  { id: "stance", label: "Stance", hint: "polarity × strength" },
+  { id: "timeline", label: "Timeline", hint: "chronological feed" },
+];
+
+export function ArgumentMapPanel(props: ArgumentMapPanelProps) {
+  return (
+    <ReactFlowProvider>
+      <ArgumentMapPanelInner {...props} />
+    </ReactFlowProvider>
+  );
+}
+
+function ArgumentMapPanelInner({
   graph,
+  status = "empty",
+  busy = false,
+  lastError = null,
+  onRetry,
+  onRetryExtraction,
+  onConsolidate,
+  onExport,
   onClose,
   onNavigateToMessage,
   agentColors = {},
-  status = "empty",
-  lastError = null,
-  onRetry,
-  busy = false,
   messages = [],
+  contradictionsCount,
 }: ArgumentMapPanelProps) {
-  const { nodes, edges } = graph;
-  const claims = useMemo(() => nodes.filter((n) => n.kind === "claim"), [nodes]);
-  const evidence = useMemo(() => nodes.filter((n) => n.kind === "evidence"), [nodes]);
-  const rebuttals = useMemo(() => nodes.filter((n) => n.kind === "rebuttal"), [nodes]);
-  // v2 introduced six more node kinds. Phase 1 shim: treat the standalone
-  // ones (question/assumption/definition/proposal) as additional row drivers
-  // alongside claims so they don't disappear from the panel before Phase 3
-  // replaces this layout entirely.
-  const rowNodes = useMemo(
-    () =>
-      nodes.filter(
-        (n) =>
-          n.kind === "claim" ||
-          n.kind === "question" ||
-          n.kind === "assumption" ||
-          n.kind === "definition" ||
-          n.kind === "proposal",
-      ),
-    [nodes],
-  );
+  const [view, setView] = useState<PanelView>("graph");
+  const [filters, setFilters] = useState<PanelFilters>(DEFAULT_FILTERS);
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  const [exportOpen, setExportOpen] = useState(false);
 
-  // Index messages by id once for O(1) timestamp + order lookups.
+  // ⌘F focuses the search input when the panel is the active surface.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const meta = e.metaKey || e.ctrlKey;
+      if (meta && e.key.toLowerCase() === "f") {
+        const input = document.querySelector<HTMLInputElement>(
+          "input[type='search'][placeholder='⌘F search']",
+        );
+        if (input) {
+          e.preventDefault();
+          input.focus();
+        }
+      }
+      if (e.key === "Escape") {
+        if (selectedNodeId) setSelectedNodeId(null);
+        else if (exportOpen) setExportOpen(false);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [selectedNodeId, exportOpen]);
+
+  // Build a message timestamp/index map once per messages prop.
   const messageIndex = useMemo(() => {
     const byId = new Map<string, { index: number; timestamp: number }>();
     messages.forEach((m, i) => {
@@ -84,26 +125,43 @@ export function ArgumentMapPanel({
     return byId;
   }, [messages]);
 
-  // Build an adjacency map: claim id → list of [node, relation]
-  const claimConnections = useMemo(() => {
-    const map = new Map<string, Array<{ node: ArgNode; relation: ArgEdge["relation"] }>>();
-    for (const edge of edges) {
-      const sourceNode = nodes.find((n) => n.id === edge.from);
-      if (!sourceNode) continue;
-      if (!map.has(edge.to)) map.set(edge.to, []);
-      map.get(edge.to)!.push({ node: sourceNode, relation: edge.relation });
-    }
-    return map;
-  }, [edges, nodes]);
+  // Memoize betweenness centrality at the consolidation/version + size level.
+  const spineNodeIds = useMemo(
+    () => computeSpineNodeIds(graph),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [graph.consolidationVersion, graph.nodes.length, graph.edges.length],
+  );
 
-  // Sort row nodes chronologically by source-message index. Nodes whose
-  // source message isn't in the index (rare — happens transiently while a
-  // session is loading) sink to the end so they don't block the layout.
-  const orderedClaims = useMemo(() => {
-    const orderOf = (n: ArgNode) =>
-      messageIndex.get(n.sourceMessageId)?.index ?? Number.MAX_SAFE_INTEGER;
-    return [...rowNodes].sort((a, b) => orderOf(a) - orderOf(b));
-  }, [rowNodes, messageIndex]);
+  const visible = useMemo(() => applyFilters(graph, filters), [graph, filters]);
+
+  const claimsCount = graph.nodes.filter((n) => n.kind === "claim").length;
+  const totalNodes = graph.nodes.length;
+  const totalEdges = graph.edges.length;
+
+  const selectedNode = useMemo(
+    () =>
+      selectedNodeId
+        ? graph.nodes.find((n) => n.id === selectedNodeId) ??
+          graph.orphans.find((n) => n.id === selectedNodeId) ??
+          null
+        : null,
+    [selectedNodeId, graph.nodes, graph.orphans],
+  );
+
+  const showEmpty = totalNodes === 0;
+
+  const sharedViewProps = {
+    graph,
+    visibleNodes: visible.nodes,
+    visibleEdges: visible.edges,
+    spineNodeIds,
+    agentColors,
+    messageIndex,
+    selectedNodeId,
+    onSelect: setSelectedNodeId,
+    onNavigateToMessage,
+    search: filters.search,
+  };
 
   return (
     <aside
@@ -113,109 +171,76 @@ export function ArgumentMapPanel({
         top: 0,
         right: 0,
         bottom: 0,
-        width: "min(460px, 45vw)",
+        width: "min(560px, 50vw)",
         zIndex: 40,
         display: "flex",
         flexDirection: "column",
         background:
-          "linear-gradient(180deg, rgba(24, 22, 18, 0.88) 0%, rgba(12, 11, 16, 0.92) 100%)",
+          "linear-gradient(180deg, rgba(24, 22, 18, 0.92) 0%, rgba(12, 11, 16, 0.96) 100%)",
         backdropFilter: "blur(14px)",
-        borderLeft: "1px solid rgba(245, 197, 66, 0.2)",
+        borderLeft: `1px solid rgba(${ARGMAP_GOLD}, 0.2)`,
         boxShadow: "-24px 0 60px -18px rgba(0, 0, 0, 0.55)",
-        fontFamily:
-          "'Manrope', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
-        color: "rgba(232, 232, 239, 0.9)",
+        fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
+        color: "rgba(232, 232, 239, 0.92)",
         animation: "argmap-slide-in 240ms cubic-bezier(0.2, 0.7, 0.2, 1) both",
       }}
     >
-      <DriftingParticles />
+      <Header
+        claimsCount={claimsCount}
+        totalEdges={totalEdges}
+        busy={busy}
+        onClose={onClose}
+        contradictionsCount={contradictionsCount}
+      />
 
-      <header
-        style={{
-          display: "flex",
-          alignItems: "baseline",
-          justifyContent: "space-between",
-          padding: "18px 22px 14px",
-          borderBottom: "1px solid rgba(232, 232, 239, 0.08)",
-          position: "relative",
-          zIndex: 2,
-        }}
-      >
-        <div>
-          <div
-            style={{
-              fontSize: "0.68rem",
-              fontWeight: 600,
-              letterSpacing: "0.22em",
-              textTransform: "uppercase",
-              color: "rgba(245, 197, 66, 0.78)",
-              marginBottom: "4px",
-            }}
-          >
-            Argument Map
-          </div>
-          <div
-            style={{
-              fontSize: "0.72rem",
-              fontFamily: "'JetBrains Mono', ui-monospace, monospace",
-              color: "rgba(232, 232, 239, 0.44)",
-              display: "flex",
-              alignItems: "center",
-              flexWrap: "wrap",
-              gap: "8px",
-            }}
-          >
-            <span>
-              {claims.length} claim{claims.length === 1 ? "" : "s"} ·{" "}
-              {evidence.length} evidence ·{" "}
-              <span style={{ color: "rgb(239, 120, 120)" }}>
-                {rebuttals.length} rebuttal{rebuttals.length === 1 ? "" : "s"}
-              </span>
-            </span>
-            {busy && <UpdatingPill />}
-          </div>
-        </div>
-        <button
-          type="button"
-          aria-label="Close argument map"
-          onClick={onClose}
-          style={{
-            padding: "4px 10px",
-            border: "1px solid rgba(232, 232, 239, 0.14)",
-            background: "transparent",
-            color: "rgba(232, 232, 239, 0.58)",
-            borderRadius: "6px",
-            cursor: "pointer",
-            fontSize: "0.72rem",
-            fontFamily: "'JetBrains Mono', ui-monospace, monospace",
-            letterSpacing: "0.04em",
-          }}
-        >
-          ✕
-        </button>
-      </header>
+      <Tabs view={view} setView={setView} />
+
+      <FilterBar graph={graph} filters={filters} setFilters={setFilters} />
 
       <div
         style={{
-          flex: 1,
-          overflowY: "auto",
-          padding: "20px 18px 30px",
           position: "relative",
-          zIndex: 2,
+          flex: 1,
+          overflow: "hidden",
+          background: "rgba(8, 7, 12, 0.45)",
         }}
       >
-        {orderedClaims.length === 0 ? (
+        {showEmpty ? (
           <EmptyState status={status} lastError={lastError} onRetry={onRetry} />
+        ) : view === "graph" ? (
+          <GraphView {...sharedViewProps} />
+        ) : view === "outline" ? (
+          <OutlineView {...sharedViewProps} />
+        ) : view === "stance" ? (
+          <StanceView {...sharedViewProps} />
         ) : (
-          <TimelineGraph
-            claims={orderedClaims}
-            connectionsFor={(claimId) => claimConnections.get(claimId) ?? []}
-            messageIndex={messageIndex}
+          <TimelineView {...sharedViewProps} />
+        )}
+
+        {selectedNode && (
+          <SelectionDrawer
+            graph={graph}
+            node={selectedNode}
             agentColors={agentColors}
-            onNavigate={onNavigateToMessage}
+            onClose={() => setSelectedNodeId(null)}
+            onNavigateToMessage={onNavigateToMessage}
+            onRetryExtraction={onRetryExtraction}
           />
         )}
       </div>
+
+      <Footer
+        graph={graph}
+        onConsolidate={onConsolidate}
+        onRetryExtraction={
+          onRetryExtraction && selectedNode
+            ? () => onRetryExtraction(selectedNode.sourceMessageId)
+            : undefined
+        }
+        onExport={onExport}
+        exportOpen={exportOpen}
+        setExportOpen={setExportOpen}
+      />
 
       <style>{`
         @keyframes argmap-slide-in {
@@ -231,7 +256,19 @@ export function ArgumentMapPanel({
           to { opacity: 1; transform: translateY(0); }
         }
         @media (prefers-reduced-motion: reduce) {
-          aside { animation: none !important; }
+          aside, .argmap-fade-in, .react-flow__node {
+            animation: none !important;
+            transition: none !important;
+          }
+        }
+        /* Re-color react-flow chrome to match the panel palette. */
+        .react-flow__controls button {
+          background: rgba(8, 7, 12, 0.7) !important;
+          border-bottom: 1px solid rgba(245, 197, 66, 0.15) !important;
+          color: rgba(232, 232, 239, 0.85) !important;
+        }
+        .react-flow__controls button:hover {
+          background: rgba(28, 24, 18, 0.9) !important;
         }
       `}</style>
     </aside>
@@ -239,38 +276,126 @@ export function ArgumentMapPanel({
 }
 
 // ---------------------------------------------------------------------------
-// Header pulse pill
+// Header
 // ---------------------------------------------------------------------------
+
+function Header({
+  claimsCount,
+  totalEdges,
+  busy,
+  onClose,
+  contradictionsCount,
+}: {
+  claimsCount: number;
+  totalEdges: number;
+  busy: boolean;
+  onClose: () => void;
+  contradictionsCount?: number;
+}) {
+  return (
+    <header
+      style={{
+        display: "flex",
+        alignItems: "baseline",
+        justifyContent: "space-between",
+        padding: "16px 20px 12px",
+        borderBottom: "1px solid rgba(232, 232, 239, 0.08)",
+      }}
+    >
+      <div>
+        <div
+          style={{
+            fontSize: "0.65rem",
+            fontWeight: 600,
+            letterSpacing: "0.22em",
+            textTransform: "uppercase",
+            color: `rgba(${ARGMAP_GOLD}, 0.78)`,
+            marginBottom: 4,
+          }}
+        >
+          Argument Map
+        </div>
+        <div
+          style={{
+            fontSize: "0.7rem",
+            fontFamily: "'JetBrains Mono', ui-monospace, monospace",
+            color: "rgba(232, 232, 239, 0.46)",
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+            flexWrap: "wrap",
+          }}
+        >
+          <span>
+            {claimsCount} claim{claimsCount === 1 ? "" : "s"} · {totalEdges} edge
+            {totalEdges === 1 ? "" : "s"}
+          </span>
+          {contradictionsCount !== undefined && contradictionsCount > 0 && (
+            <span
+              style={{
+                color: "rgb(230, 90, 200)",
+                padding: "2px 7px",
+                borderRadius: 5,
+                border: "1px solid rgba(230, 90, 200, 0.4)",
+                fontSize: "0.6rem",
+                letterSpacing: "0.16em",
+                textTransform: "uppercase",
+              }}
+            >
+              {contradictionsCount} ⚡
+            </span>
+          )}
+          {busy && <UpdatingPill />}
+        </div>
+      </div>
+      <button
+        type="button"
+        aria-label="Close argument map"
+        onClick={onClose}
+        style={{
+          padding: "5px 10px",
+          border: "1px solid rgba(232, 232, 239, 0.14)",
+          background: "transparent",
+          color: "rgba(232, 232, 239, 0.6)",
+          borderRadius: 6,
+          cursor: "pointer",
+          fontSize: "0.72rem",
+          fontFamily: "'JetBrains Mono', ui-monospace, monospace",
+        }}
+      >
+        ✕
+      </button>
+    </header>
+  );
+}
 
 function UpdatingPill() {
   return (
     <span
-      role="status"
-      aria-live="polite"
       style={{
         display: "inline-flex",
         alignItems: "center",
-        gap: "6px",
+        gap: 6,
         padding: "2px 8px",
-        borderRadius: "999px",
-        background: "rgba(245, 197, 66, 0.1)",
-        border: "1px solid rgba(245, 197, 66, 0.3)",
-        color: "rgba(245, 197, 66, 0.92)",
-        fontSize: "0.62rem",
-        letterSpacing: "0.16em",
-        textTransform: "uppercase",
+        borderRadius: 999,
+        background: `rgba(${ARGMAP_GOLD}, 0.12)`,
+        border: `1px solid rgba(${ARGMAP_GOLD}, 0.32)`,
+        color: ARGMAP_GOLD_HEX,
         fontFamily: "'JetBrains Mono', ui-monospace, monospace",
+        fontSize: "0.55rem",
+        letterSpacing: "0.18em",
+        textTransform: "uppercase",
       }}
     >
       <span
         aria-hidden="true"
         style={{
-          width: "6px",
-          height: "6px",
+          width: 6,
+          height: 6,
           borderRadius: "50%",
-          background: "rgba(245, 197, 66, 0.95)",
-          boxShadow: "0 0 6px rgba(245, 197, 66, 0.8)",
-          animation: "argmap-pulse-ring 1.2s ease-in-out infinite",
+          background: ARGMAP_GOLD_HEX,
+          boxShadow: `0 0 8px ${ARGMAP_GOLD_HEX}`,
+          animation: "argmap-pulse-ring 1.4s ease-in-out infinite",
         }}
       />
       Updating live
@@ -279,502 +404,198 @@ function UpdatingPill() {
 }
 
 // ---------------------------------------------------------------------------
-// Timeline graph: a stack of ClaimRow components with a subtle gold spine
+// Tabs
 // ---------------------------------------------------------------------------
 
-interface TimelineGraphProps {
-  claims: ArgNode[];
-  connectionsFor: (
-    claimId: string,
-  ) => Array<{ node: ArgNode; relation: ArgEdge["relation"] }>;
-  messageIndex: Map<string, { index: number; timestamp: number }>;
-  agentColors: Record<string, string>;
-  onNavigate?: (messageId: string) => void;
-}
-
-function TimelineGraph({
-  claims,
-  connectionsFor,
-  messageIndex,
-  agentColors,
-  onNavigate,
-}: TimelineGraphProps) {
-  return (
-    <div style={{ position: "relative" }}>
-      {/* Subtle gold spine running down the center, connecting consecutive
-          claim rows. The first/last 24px fade out so it reads as a thread,
-          not a hard rule. */}
-      <div
-        aria-hidden="true"
-        style={{
-          position: "absolute",
-          top: "32px",
-          bottom: "32px",
-          left: "50%",
-          width: "1px",
-          transform: "translateX(-0.5px)",
-          background:
-            "linear-gradient(180deg, rgba(245, 197, 66, 0) 0%, rgba(245, 197, 66, 0.32) 12%, rgba(245, 197, 66, 0.32) 88%, rgba(245, 197, 66, 0) 100%)",
-          zIndex: 0,
-        }}
-      />
-
-      {claims.map((claim) => {
-        const connections = connectionsFor(claim.id);
-        // v2 shim: premises (depends-on) sit on the evidence side; concessions
-        // (concedes) and consolidation-confirmed contradictions
-        // ("contradicts") sit on the rebuttal side. Other peer relations
-        // (agrees / restates / refines / answers / addresses) stay hidden
-        // until Phase 3's graph view surfaces them properly.
-        const evidenceConns = connections.filter(
-          (c) => c.relation === "supports" || c.relation === "depends-on",
-        );
-        const rebuttalConns = connections.filter(
-          (c) =>
-            c.relation === "rebuts" ||
-            c.relation === "concedes" ||
-            c.relation === "contradicts",
-        );
-        const sourceTimestamp = messageIndex.get(claim.sourceMessageId)?.timestamp ?? null;
-        return (
-          <ClaimRow
-            key={claim.id}
-            claim={claim}
-            evidence={evidenceConns.map((c) => c.node)}
-            rebuttals={rebuttalConns.map((c) => c.node)}
-            timestamp={sourceTimestamp}
-            agentColors={agentColors}
-            onNavigate={onNavigate}
-          />
-        );
-      })}
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// ClaimRow: timestamp + claim card + evidence/rebuttal chips + curve overlay
-// ---------------------------------------------------------------------------
-
-interface ClaimRowProps {
-  claim: ArgNode;
-  evidence: ArgNode[];
-  rebuttals: ArgNode[];
-  timestamp: number | null;
-  agentColors: Record<string, string>;
-  onNavigate?: (messageId: string) => void;
-}
-
-const EVIDENCE_COLOR = "rgb(74, 222, 128)";
-const REBUTTAL_COLOR = "rgb(239, 120, 120)";
-
-function ClaimRow({
-  claim,
-  evidence,
-  rebuttals,
-  timestamp,
-  agentColors,
-  onNavigate,
-}: ClaimRowProps) {
-  const rowRef = useRef<HTMLDivElement | null>(null);
-  const claimRef = useRef<HTMLDivElement | null>(null);
-  const chipRefs = useRef(new Map<string, HTMLDivElement>());
-  const [hoveredId, setHoveredId] = useState<string | null>(null);
-  const [paths, setPaths] = useState<
-    Array<{ id: string; d: string; relation: ArgEdge["relation"] }>
-  >([]);
-  const [overlaySize, setOverlaySize] = useState({ width: 0, height: 0 });
-
-  const claimAccent = agentColors[claim.sourceAgentId] ?? "rgba(232, 232, 239, 0.72)";
-
-  // Recompute curve paths from real DOM measurements after layout. We do
-  // this on graph-shape changes AND on resize, so the curves stay glued
-  // to their endpoints when the panel grows/shrinks or text wraps.
-  useLayoutEffect(() => {
-    const measure = () => {
-      const row = rowRef.current;
-      const claimEl = claimRef.current;
-      if (!row || !claimEl) return;
-      const rowRect = row.getBoundingClientRect();
-      const claimRect = claimEl.getBoundingClientRect();
-      const claimX = claimRect.left + claimRect.width / 2 - rowRect.left;
-      const claimY = claimRect.bottom - rowRect.top;
-
-      const next: Array<{ id: string; d: string; relation: ArgEdge["relation"] }> = [];
-      for (const ev of evidence) {
-        const el = chipRefs.current.get(ev.id);
-        if (!el) continue;
-        const r = el.getBoundingClientRect();
-        const x = r.left + r.width / 2 - rowRect.left;
-        const y = r.top - rowRect.top;
-        // Quadratic Bezier — control point hangs off the claim's bottom so
-        // the curve flares outward before settling on the chip.
-        const ctrlX = (claimX + x) / 2;
-        const ctrlY = claimY + 18;
-        next.push({
-          id: ev.id,
-          d: `M ${claimX} ${claimY} Q ${ctrlX} ${ctrlY} ${x} ${y}`,
-          relation: "supports",
-        });
-      }
-      for (const reb of rebuttals) {
-        const el = chipRefs.current.get(reb.id);
-        if (!el) continue;
-        const r = el.getBoundingClientRect();
-        const x = r.left + r.width / 2 - rowRect.left;
-        const y = r.top - rowRect.top;
-        const ctrlX = (claimX + x) / 2;
-        const ctrlY = claimY + 18;
-        next.push({
-          id: reb.id,
-          d: `M ${claimX} ${claimY} Q ${ctrlX} ${ctrlY} ${x} ${y}`,
-          relation: "rebuts",
-        });
-      }
-      setPaths(next);
-      setOverlaySize({ width: rowRect.width, height: rowRect.height });
-    };
-
-    measure();
-
-    const row = rowRef.current;
-    if (!row || typeof ResizeObserver === "undefined") return;
-    const ro = new ResizeObserver(() => measure());
-    ro.observe(row);
-    return () => ro.disconnect();
-  }, [evidence, rebuttals]);
-
-  const setChipRef = (id: string) => (el: HTMLDivElement | null) => {
-    if (el) chipRefs.current.set(id, el);
-    else chipRefs.current.delete(id);
-  };
-
-  const handleNavigate = (messageId: string) => {
-    if (onNavigate) onNavigate(messageId);
-  };
-
-  return (
-    <div
-      ref={rowRef}
-      style={{
-        position: "relative",
-        marginBottom: "28px",
-        animation: "argmap-fade-in 280ms ease both",
-      }}
-    >
-      {/* Time marker — small mono tag on the far left. Relative time is shown
-          when a real timestamp is available; otherwise just a soft dot. */}
-      <div
-        style={{
-          position: "absolute",
-          left: 0,
-          top: "8px",
-          fontSize: "0.58rem",
-          letterSpacing: "0.2em",
-          textTransform: "uppercase",
-          fontFamily: "'JetBrains Mono', ui-monospace, monospace",
-          color: "rgba(245, 197, 66, 0.55)",
-          zIndex: 2,
-        }}
-      >
-        {timestamp ? formatClock(timestamp) : "…"}
-      </div>
-
-      {/* SVG curve overlay — sits behind the cards. */}
-      <svg
-        aria-hidden="true"
-        width={overlaySize.width || "100%"}
-        height={overlaySize.height || "100%"}
-        viewBox={`0 0 ${overlaySize.width || 0} ${overlaySize.height || 0}`}
-        style={{
-          position: "absolute",
-          inset: 0,
-          pointerEvents: "none",
-          zIndex: 1,
-        }}
-      >
-        {paths.map((p) => {
-          const color = p.relation === "supports" ? EVIDENCE_COLOR : REBUTTAL_COLOR;
-          const dim = hoveredId !== null && hoveredId !== p.id;
-          return (
-            <path
-              key={p.id}
-              d={p.d}
-              stroke={color}
-              strokeWidth={hoveredId === p.id ? 2 : 1.4}
-              strokeLinecap="round"
-              fill="none"
-              opacity={hoveredId === p.id ? 0.92 : dim ? 0.18 : 0.42}
-              style={{ transition: "opacity 160ms ease, stroke-width 160ms ease" }}
-            />
-          );
-        })}
-      </svg>
-
-      {/* Claim card — centered, max ~72% panel width. */}
-      <div style={{ display: "flex", justifyContent: "center", position: "relative", zIndex: 2 }}>
-        <button
-          ref={claimRef as unknown as React.RefObject<HTMLButtonElement>}
-          type="button"
-          onClick={() => handleNavigate(claim.sourceMessageId)}
-          onMouseEnter={() => setHoveredId("__claim__")}
-          onMouseLeave={() => setHoveredId(null)}
-          style={{
-            width: "min(320px, 78%)",
-            padding: "12px 14px",
-            borderRadius: "10px",
-            background: "rgba(18, 16, 14, 0.7)",
-            border: `1px solid ${
-              hoveredId === "__claim__" ? claimAccent : "rgba(245, 197, 66, 0.22)"
-            }`,
-            boxShadow:
-              hoveredId === "__claim__"
-                ? `0 0 18px ${claimAccent}40`
-                : "0 4px 18px -8px rgba(0, 0, 0, 0.5)",
-            color: "#f8f8fc",
-            textAlign: "left",
-            cursor: onNavigate ? "pointer" : "default",
-            transition: "all 160ms ease",
-            fontFamily: "inherit",
-          }}
-        >
-          <div
-            style={{
-              fontSize: "0.58rem",
-              fontWeight: 600,
-              letterSpacing: "0.22em",
-              textTransform: "uppercase",
-              color: claimAccent,
-              marginBottom: "5px",
-              fontFamily: "'JetBrains Mono', ui-monospace, monospace",
-            }}
-          >
-            {claim.kind === "claim" ? "Claim" : claim.kind.toUpperCase()} ·{" "}
-            {claim.sourceAgentId}
-          </div>
-          <div
-            style={{
-              fontSize: "0.9rem",
-              fontWeight: 500,
-              lineHeight: 1.4,
-              letterSpacing: "0.005em",
-            }}
-          >
-            {claim.text}
-          </div>
-        </button>
-      </div>
-
-      {/* Connection chips: evidence on the left column, rebuttals on the right.
-          Each side stacks vertically; rows are independent so chips never
-          collide across the spine. */}
-      {(evidence.length > 0 || rebuttals.length > 0) && (
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "1fr 1fr",
-            gap: "10px",
-            marginTop: "32px",
-            position: "relative",
-            zIndex: 2,
-            alignItems: "start",
-          }}
-        >
-          <SideColumn
-            align="left"
-            color={EVIDENCE_COLOR}
-            label="Evidence"
-            symbol="⊕"
-            nodes={evidence}
-            agentColors={agentColors}
-            hoveredId={hoveredId}
-            setHovered={setHoveredId}
-            setRef={setChipRef}
-            onNavigate={handleNavigate}
-          />
-          <SideColumn
-            align="right"
-            color={REBUTTAL_COLOR}
-            label="Rebuttal"
-            symbol="⊖"
-            nodes={rebuttals}
-            agentColors={agentColors}
-            hoveredId={hoveredId}
-            setHovered={setHoveredId}
-            setRef={setChipRef}
-            onNavigate={handleNavigate}
-          />
-        </div>
-      )}
-    </div>
-  );
-}
-
-function formatClock(ts: number): string {
-  try {
-    const d = new Date(ts);
-    const hh = d.getHours().toString().padStart(2, "0");
-    const mm = d.getMinutes().toString().padStart(2, "0");
-    return `${hh}:${mm}`;
-  } catch {
-    return "…";
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Side column — a vertical stack of evidence or rebuttal chips
-// ---------------------------------------------------------------------------
-
-function SideColumn({
-  align,
-  color,
-  label,
-  symbol,
-  nodes,
-  agentColors,
-  hoveredId,
-  setHovered,
-  setRef,
-  onNavigate,
+function Tabs({
+  view,
+  setView,
 }: {
-  align: "left" | "right";
-  color: string;
-  label: string;
-  symbol: string;
-  nodes: ArgNode[];
-  agentColors: Record<string, string>;
-  hoveredId: string | null;
-  setHovered: (id: string | null) => void;
-  setRef: (id: string) => (el: HTMLDivElement | null) => void;
-  onNavigate: (messageId: string) => void;
+  view: PanelView;
+  setView: (v: PanelView) => void;
 }) {
-  if (nodes.length === 0) {
-    // Empty placeholder so the grid keeps its column structure when only one
-    // side has chips. Renders nothing visible.
-    return <div />;
-  }
   return (
     <div
+      role="tablist"
       style={{
         display: "flex",
-        flexDirection: "column",
-        gap: "8px",
-        alignItems: align === "left" ? "flex-end" : "flex-start",
+        padding: "8px 14px 0",
+        gap: 4,
+        borderBottom: "1px solid rgba(232,232,239,0.06)",
       }}
     >
-      {nodes.map((node) => {
-        const accent = agentColors[node.sourceAgentId] ?? color;
-        const dim = hoveredId !== null && hoveredId !== node.id && hoveredId !== "__claim__";
+      {TAB_LABELS.map((tab) => {
+        const active = tab.id === view;
         return (
-          <Chip
-            key={node.id}
-            innerRef={setRef(node.id)}
-            color={color}
-            accent={accent}
-            symbol={symbol}
-            label={label}
-            text={node.text}
-            agentId={node.sourceAgentId}
-            dim={dim}
-            highlighted={hoveredId === node.id}
-            onClick={() => onNavigate(node.sourceMessageId)}
-            onHover={(over) => setHovered(over ? node.id : null)}
-          />
+          <button
+            key={tab.id}
+            type="button"
+            role="tab"
+            aria-selected={active}
+            title={tab.hint}
+            onClick={() => setView(tab.id)}
+            style={{
+              background: "transparent",
+              border: "none",
+              padding: "6px 12px 8px",
+              color: active
+                ? "rgba(248,248,252,0.95)"
+                : "rgba(232,232,239,0.55)",
+              fontFamily: "'JetBrains Mono', ui-monospace, monospace",
+              fontSize: "0.7rem",
+              letterSpacing: "0.16em",
+              textTransform: "uppercase",
+              cursor: "pointer",
+              borderBottom: active
+                ? `2px solid rgba(${ARGMAP_GOLD}, 0.85)`
+                : "2px solid transparent",
+              transition: "color 160ms ease, border-color 160ms ease",
+            }}
+          >
+            {tab.label}
+          </button>
         );
       })}
     </div>
   );
 }
 
-function Chip({
-  innerRef,
-  color,
-  accent,
-  symbol,
-  label,
-  text,
-  agentId,
-  dim,
-  highlighted,
-  onClick,
-  onHover,
+// ---------------------------------------------------------------------------
+// Footer
+// ---------------------------------------------------------------------------
+
+function Footer({
+  graph,
+  onConsolidate,
+  onRetryExtraction,
+  onExport,
+  exportOpen,
+  setExportOpen,
 }: {
-  innerRef: (el: HTMLDivElement | null) => void;
-  color: string;
-  accent: string;
-  symbol: string;
-  label: string;
-  text: string;
-  agentId: string;
-  dim: boolean;
-  highlighted: boolean;
-  onClick: () => void;
-  onHover: (over: boolean) => void;
+  graph: ArgGraph;
+  onConsolidate?: () => void;
+  onRetryExtraction?: () => void;
+  onExport?: (format: "mermaid" | "json" | "svg" | "png") => void;
+  exportOpen: boolean;
+  setExportOpen: (b: boolean) => void;
 }) {
   return (
-    <div
-      ref={innerRef}
-      role="button"
-      tabIndex={0}
-      onClick={onClick}
-      onKeyDown={(e) => {
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
-          onClick();
-        }
-      }}
-      onMouseEnter={() => onHover(true)}
-      onMouseLeave={() => onHover(false)}
+    <footer
       style={{
-        width: "100%",
-        maxWidth: "190px",
-        padding: "8px 10px",
-        borderRadius: "8px",
-        background: highlighted
-          ? `rgba(${color === "rgb(74, 222, 128)" ? "74, 222, 128" : "239, 120, 120"}, 0.12)`
-          : "rgba(10, 10, 14, 0.6)",
-        border: `1px solid ${highlighted ? color : "rgba(232, 232, 239, 0.1)"}`,
-        boxShadow: highlighted ? `0 0 14px ${color}33` : "none",
-        cursor: "pointer",
-        textAlign: "left",
-        transition: "all 160ms ease",
-        opacity: dim ? 0.45 : 1,
+        position: "relative",
+        padding: "10px 14px",
+        borderTop: "1px solid rgba(232,232,239,0.08)",
+        background: "rgba(8, 7, 12, 0.45)",
+        display: "flex",
+        gap: 8,
+        alignItems: "center",
       }}
     >
-      <div
+      {onConsolidate && (
+        <button type="button" onClick={onConsolidate} style={footerButtonStyle}>
+          Consolidate now
+        </button>
+      )}
+      {onRetryExtraction && (
+        <button
+          type="button"
+          onClick={onRetryExtraction}
+          style={footerButtonStyle}
+        >
+          Re-extract turn
+        </button>
+      )}
+      <span style={{ flex: 1 }} />
+      <span
         style={{
-          display: "flex",
-          alignItems: "center",
-          gap: "6px",
-          fontSize: "0.56rem",
-          fontWeight: 600,
-          letterSpacing: "0.2em",
+          fontSize: "0.55rem",
+          letterSpacing: "0.18em",
           textTransform: "uppercase",
-          color,
-          marginBottom: "3px",
           fontFamily: "'JetBrains Mono', ui-monospace, monospace",
+          color: "rgba(232,232,239,0.4)",
+          marginRight: 8,
         }}
       >
-        <span aria-hidden="true">{symbol}</span>
-        <span>{label}</span>
-        <span style={{ color: accent, opacity: 0.85 }}>· {agentId}</span>
-      </div>
-      <div
-        style={{
-          fontSize: "0.78rem",
-          color: "rgba(232, 232, 239, 0.86)",
-          lineHeight: 1.4,
-        }}
-      >
-        {text}
-      </div>
-    </div>
+        v{graph.consolidationVersion}
+      </span>
+      {onExport && (
+        <div style={{ position: "relative" }}>
+          <button
+            type="button"
+            onClick={() => setExportOpen(!exportOpen)}
+            style={footerButtonStyle}
+          >
+            Export ▾
+          </button>
+          {exportOpen && (
+            <div
+              style={{
+                position: "absolute",
+                bottom: "calc(100% + 4px)",
+                right: 0,
+                background: "rgba(18, 16, 14, 0.96)",
+                border: `1px solid rgba(${ARGMAP_GOLD}, 0.2)`,
+                borderRadius: 6,
+                padding: 4,
+                display: "flex",
+                flexDirection: "column",
+                gap: 2,
+                minWidth: 120,
+                zIndex: 60,
+                boxShadow: "0 8px 22px -10px rgba(0,0,0,0.6)",
+              }}
+            >
+              {(["mermaid", "json", "svg", "png"] as const).map((fmt) => (
+                <button
+                  key={fmt}
+                  type="button"
+                  onClick={() => {
+                    onExport(fmt);
+                    setExportOpen(false);
+                  }}
+                  style={exportItemStyle}
+                >
+                  {fmt}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </footer>
   );
 }
 
+const footerButtonStyle: React.CSSProperties = {
+  padding: "5px 10px",
+  fontSize: "0.64rem",
+  letterSpacing: "0.14em",
+  textTransform: "uppercase",
+  fontFamily: "'JetBrains Mono', ui-monospace, monospace",
+  background: "rgba(28, 24, 18, 0.78)",
+  border: `1px solid rgba(${ARGMAP_GOLD}, 0.22)`,
+  color: "rgba(232,232,239,0.86)",
+  borderRadius: 5,
+  cursor: "pointer",
+  transition: "all 160ms ease",
+};
+
+const exportItemStyle: React.CSSProperties = {
+  padding: "5px 10px",
+  background: "transparent",
+  border: "none",
+  color: "rgba(232,232,239,0.86)",
+  fontFamily: "'JetBrains Mono', ui-monospace, monospace",
+  fontSize: "0.7rem",
+  textTransform: "lowercase",
+  letterSpacing: "0.06em",
+  textAlign: "left",
+  cursor: "pointer",
+  borderRadius: 4,
+};
+
 // ---------------------------------------------------------------------------
-// EmptyState (unchanged from prior fix; kept as the panel's empty-state
-// branching for no-credential / extracting / failed)
+// Empty state (shown when graph.nodes.length === 0)
 // ---------------------------------------------------------------------------
 
 function EmptyState({
@@ -782,148 +603,65 @@ function EmptyState({
   lastError,
   onRetry,
 }: {
-  status: ArgumentMapStatus;
+  status: PanelStatus;
   lastError: string | null;
   onRetry?: () => void;
 }) {
-  const headline = (() => {
-    switch (status) {
-      case "no-credential":
-        return "Add a Google API key to enable the live argument map.";
-      case "extracting":
-        return "Reading the latest message…";
-      case "failed":
-        return "The extractor stumbled.";
-      default:
-        return "The debate has not yet forked a claim.";
-    }
-  })();
-  const sub = (() => {
-    switch (status) {
-      case "no-credential":
-        return "The extractor uses Gemini 3 Flash. Open Settings → Providers → Google to plug one in.";
-      case "extracting":
-        return "Claims, evidence, and rebuttals appear here as the council speaks.";
-      case "failed":
-        return lastError
-          ? `Last error: ${lastError}. The next council turn will retry automatically — or click Retry now below.`
-          : "The next council turn will retry automatically — or click Retry now below.";
-      default:
-        return "Claims, evidence, and rebuttals appear here as the council speaks.";
-    }
-  })();
+  let primary = "";
+  let secondary = "";
+  if (status === "no-credential") {
+    primary = "Extractor offline";
+    secondary =
+      "Add a Gemini-compatible model in Settings to start building the argument map.";
+  } else if (status === "extracting") {
+    primary = "Listening to the council";
+    secondary = "Fragments will appear here as soon as the extractor lands the first claim.";
+  } else if (status === "failed") {
+    primary = "Extractor returned an error";
+    secondary = lastError ?? "Use Retry below to try again.";
+  } else {
+    primary = "Map is empty";
+    secondary = "Run a few council turns and the map will fill in.";
+  }
   return (
     <div
       style={{
-        padding: "40px 20px",
+        height: "100%",
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        justifyContent: "center",
         textAlign: "center",
-        color: "rgba(232, 232, 239, 0.42)",
+        padding: "0 28px",
+        gap: 10,
       }}
     >
       <div
         style={{
-          fontFamily:
-            "'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace",
-          fontSize: "0.95rem",
-          letterSpacing: "0.02em",
+          fontFamily: "'JetBrains Mono', ui-monospace, monospace",
+          fontSize: "0.7rem",
+          letterSpacing: "0.18em",
+          textTransform: "uppercase",
           color: "rgba(232, 232, 239, 0.62)",
-          marginBottom: "8px",
         }}
       >
-        {status === "extracting" ? (
-          <span style={{ display: "inline-flex", alignItems: "center", gap: "8px" }}>
-            <span
-              aria-hidden="true"
-              style={{
-                width: "6px",
-                height: "6px",
-                borderRadius: "50%",
-                background: "rgba(245, 197, 66, 0.78)",
-                animation: "argmap-pulse-ring 1.4s ease-in-out infinite",
-              }}
-            />
-            {headline}
-          </span>
-        ) : (
-          headline
-        )}
+        {primary}
       </div>
-      <div style={{ fontSize: "0.8rem", maxWidth: "32ch", margin: "0 auto" }}>{sub}</div>
+      <div
+        style={{
+          fontSize: "0.78rem",
+          color: "rgba(232, 232, 239, 0.42)",
+          lineHeight: 1.5,
+          maxWidth: 320,
+        }}
+      >
+        {secondary}
+      </div>
       {status === "failed" && onRetry && (
-        <button
-          type="button"
-          onClick={onRetry}
-          style={{
-            marginTop: "16px",
-            padding: "6px 14px",
-            border: "1px solid rgba(245, 197, 66, 0.35)",
-            background: "rgba(245, 197, 66, 0.08)",
-            color: "rgba(245, 197, 66, 0.92)",
-            borderRadius: "6px",
-            cursor: "pointer",
-            fontSize: "0.78rem",
-            fontFamily: "'JetBrains Mono', ui-monospace, monospace",
-            letterSpacing: "0.04em",
-          }}
-        >
-          Retry now
+        <button type="button" onClick={onRetry} style={footerButtonStyle}>
+          Retry
         </button>
       )}
     </div>
   );
 }
-
-// ---------------------------------------------------------------------------
-// 12 softly-drifting particles rendered in a pure-CSS layer — preserved from
-// the previous design so the panel keeps its cinematic feel.
-// ---------------------------------------------------------------------------
-
-function DriftingParticles() {
-  const particles = Array.from({ length: 14 }, (_, i) => ({
-    id: i,
-    left: `${(i * 37) % 100}%`,
-    delay: `${(i * 0.7) % 8}s`,
-    duration: `${10 + (i % 5) * 2}s`,
-  }));
-  return (
-    <div
-      aria-hidden="true"
-      style={{
-        position: "absolute",
-        inset: 0,
-        pointerEvents: "none",
-        overflow: "hidden",
-        zIndex: 1,
-      }}
-    >
-      {particles.map((p) => (
-        <span
-          key={p.id}
-          style={{
-            position: "absolute",
-            left: p.left,
-            top: "110%",
-            width: "2px",
-            height: "2px",
-            borderRadius: "50%",
-            background: "rgba(245, 197, 66, 0.4)",
-            boxShadow: "0 0 4px rgba(245, 197, 66, 0.3)",
-            animation: `argmap-float ${p.duration} linear ${p.delay} infinite`,
-          }}
-        />
-      ))}
-      <style>{`
-        @keyframes argmap-float {
-          0% { transform: translateY(0); opacity: 0; }
-          10% { opacity: 0.5; }
-          90% { opacity: 0.5; }
-          100% { transform: translateY(-110vh); opacity: 0; }
-        }
-        @media (prefers-reduced-motion: reduce) {
-          [aria-hidden="true"] span { animation: none !important; opacity: 0 !important; }
-        }
-      `}</style>
-    </div>
-  );
-}
-

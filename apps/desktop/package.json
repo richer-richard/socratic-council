@@ -17,6 +17,7 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
+    "@dagrejs/dagre": "^3.0.0",
     "@noble/ciphers": "^2.2.0",
     "@socratic-council/core": "workspace:*",
     "@socratic-council/sdk": "workspace:*",
@@ -27,8 +28,12 @@
     "@tauri-apps/plugin-opener": "^2.5.3",
     "@tauri-apps/plugin-store": "^2.4.2",
     "@tauri-apps/plugin-updater": "^2.10.1",
+    "@xyflow/react": "^12.10.2",
     "docx": "^9.5.1",
     "fflate": "^0.8.2",
+    "graphology": "^0.26.0",
+    "graphology-communities-louvain": "^2.0.2",
+    "graphology-metrics": "^2.4.0",
     "highlight.js": "^11.11.1",
     "jspdf": "^4.1.0",
     "katex": "^0.16.28",

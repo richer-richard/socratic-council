@@ -6946,6 +6946,19 @@ Write the official moderator wrap-up in 4 short sentences:
           busy={argmapBusy}
           lastError={argmapLastError}
           onRetry={retryArgmap}
+          onRetryExtraction={(messageId) => {
+            argmapAttemptsByIdRef.current.delete(messageId);
+            argmapExtractedIdsRef.current.delete(messageId);
+            setArgmapLastError(null);
+            setArgmapRetryNonce((n) => n + 1);
+          }}
+          onConsolidate={() => {
+            void runArgmapConsolidation(true);
+            setArgmapConsolidatorTrigger((n) => n + 1);
+          }}
+          contradictionsCount={
+            argGraph.edges.filter((e) => e.relation === "contradicts").length
+          }
           onClose={() => setArgmapOpen(false)}
           onNavigateToMessage={jumpToMessage}
           messages={messages}
