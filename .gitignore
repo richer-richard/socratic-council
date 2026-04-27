@@ -2,6 +2,9 @@
 node_modules/
 .pnpm-store/
 
+# Claude Code per-repo local state (scheduled task locks, plan files, etc.)
+.claude/
+
 # Build outputs
 dist/
 build/
