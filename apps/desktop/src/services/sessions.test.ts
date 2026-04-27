@@ -259,22 +259,46 @@ describe("session round-trip (fix 2.17)", () => {
       argGraph: {
         nodes: [
           {
-            id: "c0",
+            id: "c_0",
             kind: "claim",
             text: "Severity is the dominant deterrent.",
+            aliases: [],
+            sources: [
+              { messageId: "msg_2", agentId: "george", timestamp: 1000 },
+            ],
+            strength: 0.7,
+            status: "active",
             sourceMessageId: "msg_2",
             sourceAgentId: "george",
           },
           {
-            id: "e0",
+            id: "e_0",
             kind: "evidence",
             text: "Helland & Tabarrok 2007.",
+            aliases: [],
+            sources: [
+              { messageId: "msg_2", agentId: "george", timestamp: 1000 },
+            ],
+            strength: 0.5,
+            status: "active",
             sourceMessageId: "msg_2",
             sourceAgentId: "george",
           },
         ],
-        edges: [{ from: "e0", to: "c0", relation: "supports" }],
+        edges: [
+          {
+            id: "ed_0",
+            from: "e_0",
+            to: "c_0",
+            relation: "supports",
+            confidence: 0.85,
+          },
+        ],
+        clusters: [],
+        orphans: [],
         lastMessageId: "msg_2",
+        consolidationVersion: 0,
+        schemaVersion: 2,
       },
       argmapExtractedIds: ["msg_1", "msg_2"],
     });
@@ -282,12 +306,50 @@ describe("session round-trip (fix 2.17)", () => {
     saveDiscussionSession(original);
     const loaded = loadDiscussionSession(original.id);
 
+    expect(loaded?.argGraph?.schemaVersion).toBe(2);
     expect(loaded?.argGraph?.nodes).toHaveLength(2);
-    expect(loaded?.argGraph?.edges).toEqual([
-      { from: "e0", to: "c0", relation: "supports" },
-    ]);
+    expect(loaded?.argGraph?.edges).toHaveLength(1);
+    expect(loaded?.argGraph?.edges[0]?.relation).toBe("supports");
+    expect(loaded?.argGraph?.edges[0]?.id).toBeTruthy();
+    expect(loaded?.argGraph?.edges[0]?.confidence).toBeCloseTo(0.85);
     expect(loaded?.argGraph?.lastMessageId).toBe("msg_2");
     expect(loaded?.argmapExtractedIds).toEqual(["msg_1", "msg_2"]);
+  });
+
+  it("migrates a v1-shaped argGraph blob on load", () => {
+    installInMemoryStorage();
+    // Plant a session blob with a pre-v2 argGraph (no schemaVersion, no
+    // aliases / sources / strength / status). The normalizer must lift it
+    // to v2 via the migrator instead of rejecting it.
+    const original = createSessionFixture({ id: "session_v1_argmap" });
+    saveDiscussionSession(original);
+    const win = (globalThis as { window?: { localStorage: Storage } }).window!;
+    const key = "socratic-council-session:session_v1_argmap";
+    const raw = win.localStorage.getItem(key);
+    expect(raw).not.toBeNull();
+    const blob = JSON.parse(raw!) as Record<string, unknown>;
+    blob.argGraph = {
+      nodes: [
+        {
+          id: "c_0",
+          kind: "claim",
+          text: "Older claim.",
+          sourceMessageId: "msg_old",
+          sourceAgentId: "cathy",
+        },
+      ],
+      edges: [],
+      lastMessageId: "msg_old",
+    };
+    win.localStorage.setItem(key, JSON.stringify(blob));
+
+    const loaded = loadDiscussionSession("session_v1_argmap");
+    expect(loaded?.argGraph?.schemaVersion).toBe(2);
+    expect(loaded?.argGraph?.nodes).toHaveLength(1);
+    expect(loaded?.argGraph?.nodes[0]?.aliases).toEqual([]);
+    expect(loaded?.argGraph?.nodes[0]?.sources).toHaveLength(1);
+    expect(loaded?.argGraph?.nodes[0]?.status).toBe("active");
+    expect(loaded?.argGraph?.consolidationVersion).toBe(0);
   });
 
   it("drops argGraph edges that point at unknown nodes", () => {
@@ -297,16 +359,34 @@ describe("session round-trip (fix 2.17)", () => {
       argGraph: {
         nodes: [
           {
-            id: "c0",
+            id: "c_0",
             kind: "claim",
             text: "Anchor claim.",
+            aliases: [],
+            sources: [
+              { messageId: "msg_2", agentId: "george", timestamp: 1000 },
+            ],
+            strength: 0.5,
+            status: "active",
             sourceMessageId: "msg_2",
             sourceAgentId: "george",
           },
         ],
         // Edge points at a non-existent node id; must be filtered on load.
-        edges: [{ from: "ghost", to: "c0", relation: "supports" }],
+        edges: [
+          {
+            id: "ed_0",
+            from: "ghost",
+            to: "c_0",
+            relation: "supports",
+            confidence: 0.85,
+          },
+        ],
+        clusters: [],
+        orphans: [],
         lastMessageId: "msg_2",
+        consolidationVersion: 0,
+        schemaVersion: 2,
       },
     });
 

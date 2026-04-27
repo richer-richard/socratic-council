@@ -1,47 +1,239 @@
 /**
- * Live argument map for the debate (wave 2.6).
+ * Live argument map (schema v2) for the debate.
  *
- * Maintains a directed graph of claims, evidence, and rebuttals extracted
- * incrementally from the transcript. After each council message the caller
- * runs `updateArgumentMap(previous, newMessage, extract)` — the extractor
- * is a provider-agnostic completion function (Gemini 3.1 Flash in the
- * default wiring) that returns structured nodes, and the map merges them
- * in without duplicating existing claims.
+ * Maintains a directed graph of structured fragments extracted incrementally
+ * from the transcript. After each council message the caller runs
+ * `updateArgumentMap(previous, fragments, source)` — the extractor is a
+ * provider-agnostic completion function (Gemini 3.x by default) that returns
+ * a fragment list, and the merger appends or merges them into the live graph.
  *
- * The UI panel (desktop-side, follow-up) renders this graph as a
- * node-link diagram. Clicking a node should navigate to the source message
- * identified by `sourceMessageId`.
+ * v2 (April 2026 rewrite, supersedes the 3-kind v1 schema):
+ *
+ *   - 9-kind node taxonomy:
+ *       claim, premise, evidence, rebuttal, concession, question,
+ *       assumption, definition, proposal.
+ *   - 10-relation edge vocabulary:
+ *       supports, rebuts, concedes, restates, refines, agrees,
+ *       contradicts, depends-on, answers, addresses.
+ *   - Multi-source provenance — a claim asserted by two agents merges into
+ *     one node with two ArgNodeSource entries (and the new wording is added
+ *     to `aliases`), instead of becoming two unrelated nodes.
+ *   - Per-node `stance` polarity along an axis, `strength`, `status`
+ *     (active|withdrawn|superseded), and `verification` verdict.
+ *   - Per-edge `id`, `confidence` (0..1), and one-line `rationale`.
+ *   - Top-level `axis`, `clusters`, `orphans`, `consolidationVersion`,
+ *     `schemaVersion: 2`. Used by the consolidation pass (Phase 2) and the
+ *     react-flow Graph view (Phase 3).
+ *
+ * Old v1 sessions migrate losslessly via `migrateArgGraphV1ToV2()`.
+ *
+ * The merging heuristic uses a simple bag-of-words cosine — sufficient to
+ * catch "same claim, different wording" across speakers without pulling in
+ * an embedding model (Salton, 1971).
  */
 
-export type ArgNodeKind = "claim" | "evidence" | "rebuttal";
+// ----------------------------------------------------------------------------
+// Schema
+// ----------------------------------------------------------------------------
+
+export type ArgNodeKind =
+  | "claim"
+  | "premise"
+  | "evidence"
+  | "rebuttal"
+  | "concession"
+  | "question"
+  | "assumption"
+  | "definition"
+  | "proposal";
+
+export type ArgEdgeRelation =
+  | "supports"
+  | "rebuts"
+  | "concedes"
+  | "restates"
+  | "refines"
+  | "agrees"
+  | "contradicts"
+  | "depends-on"
+  | "answers"
+  | "addresses";
+
+export type ArgNodeStatus = "active" | "withdrawn" | "superseded";
+
+export interface ArgNodeSource {
+  messageId: string;
+  agentId: string;
+  timestamp: number;
+  /** Char offsets into the source message content (optional). */
+  span?: { start: number; end: number };
+  /** Verbatim quote from the source message (optional). */
+  quote?: string;
+}
+
+export interface ArgNodeStance {
+  /** Axis name (e.g. "central planning ↔ market"). */
+  axis: string;
+  /** -1..+1. -1 fully aligned with the FIRST pole, +1 with the SECOND. */
+  polarity: number;
+}
+
+export interface ArgNodeVerification {
+  verdict: "true" | "false" | "uncertain";
+  /** 0..1 confidence in the verdict. */
+  confidence: number;
+  evidenceUrl?: string;
+}
 
 export interface ArgNode {
   id: string;
   kind: ArgNodeKind;
+  /** Canonical text after merge. Earlier wordings live in `aliases`. */
   text: string;
+  aliases: string[];
+  /** Multi-source provenance — populated in order of first-seen. */
+  sources: ArgNodeSource[];
+  /** 0..1 — how load-bearing this node is. Bumped on every merging source. */
+  strength: number;
+  status: ArgNodeStatus;
+  stance?: ArgNodeStance;
+  supersededBy?: string;
+  verification?: ArgNodeVerification;
+  influencedBy?: { whisperId: string };
+  /**
+   * Compat shim — always equal to `sources[0].messageId` /
+   * `sources[0].agentId`. Lets the existing (Phase 1+2) Chat.tsx and
+   * ArgumentMapPanel keep reading `node.sourceMessageId` directly. The
+   * Phase 3 panel rewrite reads `sources[]` and these fields can be
+   * dropped at that point.
+   */
   sourceMessageId: string;
   sourceAgentId: string;
 }
 
 export interface ArgEdge {
-  from: string; // node id
-  to: string; // node id
-  /** "supports" = evidence → claim; "rebuts" = rebuttal → claim. */
-  relation: "supports" | "rebuts";
+  id: string;
+  from: string;
+  to: string;
+  relation: ArgEdgeRelation;
+  /** 0..1 — extractor's or consolidator's confidence in this relation. */
+  confidence: number;
+  /** Optional one-line rationale shown on hover. */
+  rationale?: string;
+}
+
+export interface ArgGraphAxis {
+  name: string;
+  poles: [string, string];
+}
+
+export interface ArgGraphCluster {
+  id: string;
+  label: string;
+  nodeIds: string[];
 }
 
 export interface ArgGraph {
   nodes: ArgNode[];
   edges: ArgEdge[];
-  /** Last message id already incorporated — so re-runs can skip. */
+  /** Inferred debate axis (Phase 2 consolidator fills this in). */
+  axis?: ArgGraphAxis;
+  /** Camp clustering (Phase 2). */
+  clusters: ArgGraphCluster[];
+  /** Anchored fragments (premise/evidence/rebuttal/concession) that couldn't
+   *  resolve to an existing claim id. The consolidation pass (Phase 2) tries
+   *  to anchor them; otherwise they are dropped. They are NEVER promoted to
+   *  free-standing claims (v1 behavior). */
+  orphans: ArgNode[];
+  /** Last message id incorporated, so re-runs can skip. */
   lastMessageId: string | null;
+  /** Bumped each successful consolidation pass. UI uses this to memoize
+   *  expensive layouts (dagre, betweenness centrality). */
+  consolidationVersion: number;
+  /** Pinned Graph-view positions per node id (Phase 3). */
+  layoutOverrides?: Record<string, { x: number; y: number }>;
+  schemaVersion: 2;
 }
 
 export function emptyGraph(): ArgGraph {
-  return { nodes: [], edges: [], lastMessageId: null };
+  return {
+    nodes: [],
+    edges: [],
+    clusters: [],
+    orphans: [],
+    lastMessageId: null,
+    consolidationVersion: 0,
+    schemaVersion: 2,
+  };
 }
 
-// --- Extractor contract ------------------------------------------------------
+// ----------------------------------------------------------------------------
+// Constants
+// ----------------------------------------------------------------------------
+
+const NODE_KINDS: readonly ArgNodeKind[] = [
+  "claim",
+  "premise",
+  "evidence",
+  "rebuttal",
+  "concession",
+  "question",
+  "assumption",
+  "definition",
+  "proposal",
+];
+
+const EDGE_RELATIONS: readonly ArgEdgeRelation[] = [
+  "supports",
+  "rebuts",
+  "concedes",
+  "restates",
+  "refines",
+  "agrees",
+  "contradicts",
+  "depends-on",
+  "answers",
+  "addresses",
+];
+
+/** Fragments whose semantics imply a single primary anchor on a claim. */
+const ANCHORED_KINDS: ReadonlySet<ArgNodeKind> = new Set([
+  "evidence",
+  "rebuttal",
+  "concession",
+  "premise",
+]);
+
+/** When an anchored fragment lands, generate this implicit edge. */
+const ANCHOR_RELATION: Record<string, ArgEdgeRelation> = {
+  evidence: "supports",
+  rebuttal: "rebuts",
+  concession: "concedes",
+  premise: "depends-on",
+};
+
+const KIND_ID_PREFIX: Record<ArgNodeKind, string> = {
+  claim: "c",
+  premise: "p",
+  evidence: "e",
+  rebuttal: "r",
+  concession: "x",
+  question: "q",
+  assumption: "a",
+  definition: "d",
+  proposal: "po",
+};
+
+/** Hard cap on fragments returned per message — keeps cost predictable. */
+const MAX_FRAGMENTS = 16;
+
+/** Cosine threshold for "same claim, different wording" merge. Above this,
+ *  two claims collapse into one multi-sourced node. */
+const MERGE_COSINE_THRESHOLD = 0.85;
+
+// ----------------------------------------------------------------------------
+// Extractor contract
+// ----------------------------------------------------------------------------
 
 export interface ExtractInput {
   topic: string;
@@ -49,64 +241,171 @@ export interface ExtractInput {
   agentName: string;
   agentId: string;
   messageText: string;
-  /** The agent names already present in the debate — helps the extractor
-      resolve "George's earlier point" to the right source agent. */
+  /** Council agent display names so the model can resolve "George said …"
+   *  to a known agent. */
   priorAgentNames: string[];
-  /** Most recent N claim texts so the extractor can link supports/rebuts. */
-  priorClaims: Array<{ id: string; text: string }>;
+  /** Up to ~16 most recent claims with id, text, and (optional) polarity. */
+  priorClaims: Array<{ id: string; text: string; polarity?: number }>;
+  /** Inferred debate axis, if known (Phase 2). */
+  axis?: ArgGraphAxis;
+  /** Existing cluster labels so the model can echo them. */
+  clusterLabels?: string[];
+  /** Open question nodes — emitted nodes can answer or address one. */
+  openQuestions?: Array<{ id: string; text: string }>;
 }
 
-export interface ExtractedFragment {
+export interface ExtractedNodeFragment {
   kind: ArgNodeKind;
   text: string;
-  /** When `kind === "evidence" | "rebuttal"`, id or quoted text of the claim it
-      links to. When `kind === "claim"`, ignored. */
+  /** Required for evidence / rebuttal / concession / premise — must be the
+   *  EXACT id of an existing claim. Anchorless fragments become orphans. */
   targetClaim?: string;
+  /** Optional stance polarity along the axis, -1..+1. */
+  polarity?: number;
+  /** Optional load-bearing-ness, 0..1. */
+  strength?: number;
 }
+
+export interface ExtractedEdgeFragment {
+  kind: "edge";
+  /** Existing node id. */
+  from: string;
+  /** Existing node id. */
+  to: string;
+  relation: ArgEdgeRelation;
+  /** 0..1. */
+  confidence: number;
+  rationale?: string;
+}
+
+export type ExtractedFragment = ExtractedNodeFragment | ExtractedEdgeFragment;
 
 export type ExtractorCompletionFn = (prompt: {
   system: string;
   user: string;
 }) => Promise<string | null>;
 
+// ----------------------------------------------------------------------------
+// Prompt
+// ----------------------------------------------------------------------------
+
 const SYSTEM_PROMPT = `You extract structured argument-map fragments from a single message in a multi-agent debate.
 
-Output a JSON array. Each element is one of:
-  {"kind":"claim","text":"the stance, position, criterion, or framing the speaker commits to (one sentence)"}
-  {"kind":"evidence","text":"a concrete example, number, citation, or case","targetClaim":"<exact existing claim id, e.g. c_0>"}
-  {"kind":"rebuttal","text":"the counter-argument or pushback","targetClaim":"<exact existing claim id, e.g. c_0>"}
+Output a JSON array of UP TO 16 fragments. Each element is either a node-fragment or an edge-fragment. No prose. No markdown. No code fences.
 
-EXTRACTION DEPTH:
-- A substantive message typically contains 2-5 distinct fragments. Extract them all — do not be lazy.
-- Treat reframings, sharp distinctions, proposed criteria, agreements/refinements, and concessions as CLAIMS — they all stake a position.
-- A claim phrased as a rhetorical question is still a claim. ("Doesn't enforcement matter?" → claim that enforcement matters.)
-- Evidence is anything concrete: a price, a named law, a specific service, a statistic, a case.
-- A rebuttal explicitly pushes back, denies, or proposes an alternative to a prior claim.
+NODE KINDS — pick the most precise; fall back to "claim" only when nothing tighter fits:
+  "claim"       — a stance, position, criterion, or framing the speaker commits to (one sentence).
+  "premise"     — a sub-statement the speaker uses to reach a claim. Anchors to that claim.
+  "evidence"    — a concrete example, number, citation, named case, or study. Anchors to the claim it backs.
+  "rebuttal"    — explicit pushback against a prior claim. Anchors to the claim it rebuts.
+  "concession"  — explicit acknowledgement that a counter-point has merit. Anchors to the conceded claim.
+  "question"    — an open question raised but not yet answered.
+  "assumption"  — an unstated belief the argument depends on, surfaced explicitly.
+  "definition"  — a clarification of what a key term means in this debate.
+  "proposal"    — a concrete suggested action or course of action.
 
-CRITICAL RULE for evidence and rebuttals:
-- targetClaim MUST be the EXACT id of one of the EXISTING CLAIMS listed in the user message (e.g. "c_0", "c_3"). Do NOT paraphrase the claim's text. Do NOT invent ids. The system cannot resolve paraphrased targets and will drop them.
-- If you cannot identify the precise existing claim id to anchor to, emit the fragment as a "claim" instead. Never invent a target.
+NODE FRAGMENT SHAPE:
+  {
+    "kind": "<one of the above>",
+    "text": "<one-sentence summary, ≤240 chars>",
+    "targetClaim": "<exact existing claim id, e.g. c_3>",   // REQUIRED for evidence|rebuttal|concession|premise
+    "polarity": <number in [-1, 1] along the named axis>,    // OPTIONAL
+    "strength": <number in [0, 1]>                            // OPTIONAL
+  }
 
-WHEN TO RETURN []:
-- ONLY for messages that are pure greetings, jokes, off-topic chitchat, or empty rhetorical filler. If the message advances the debate at all — even slightly — extract at least one fragment.
+EDGE FRAGMENT — a peer relation between TWO existing nodes:
+  {
+    "kind": "edge",
+    "from": "<existing node id>",
+    "to":   "<existing node id>",
+    "relation": "<one of the relations below>",
+    "confidence": <0..1>,
+    "rationale": "<one short line>"
+  }
 
-Output MUST be a JSON array, nothing else, no code fences.`;
+EDGE RELATIONS:
+  "supports"     — backing evidence for a claim.
+  "rebuts"       — a rebuttal contradicts a claim.
+  "concedes"     — a concession yields ground to a claim.
+  "restates"     — same proposition, different wording.
+  "refines"      — a sharper / more careful version of an earlier claim.
+  "agrees"       — peer agreement (different speaker, same direction).
+  "contradicts"  — logical incompatibility between two claims.
+  "depends-on"   — one claim presupposes another.
+  "answers"      — this fragment resolves an open question.
+  "addresses"    — this fragment engages a question without fully resolving it.
 
-export function buildExtractPrompt(input: ExtractInput): { system: string; user: string } {
-  const user = [
-    `Topic: ${input.topic}`,
-    "",
-    "EXISTING CLAIMS (reference these by id or by quoted text):",
-    ...(input.priorClaims.length === 0
-      ? ["(none yet)"]
-      : input.priorClaims.map((c) => `- [${c.id}] ${c.text}`)),
-    "",
-    `MESSAGE (from ${input.agentName}, id=${input.messageId}):`,
-    input.messageText.trim(),
-    "",
-    "Return the JSON array of fragments now.",
-  ].join("\n");
-  return { system: SYSTEM_PROMPT, user };
+CRITICAL RULES:
+  1. targetClaim and edge from/to MUST be EXACT existing ids listed in the user prompt (e.g. "c_3"). Do NOT paraphrase. Do NOT invent ids. Anchorless evidence becomes an orphan, not a free-standing claim.
+  2. Prefer a node-fragment for new content; emit an edge-fragment only when both endpoints already exist and you want to record a peer relationship between them.
+  3. If a debate axis is named in the user prompt, use it for polarity. -1 = aligned with pole 0, +1 = aligned with pole 1. Omit polarity if uncertain.
+  4. Substantive messages typically yield 2–5 fragments. Reframings, sharp distinctions, proposed criteria, and clear concessions all count — extract them.
+  5. Return [] only for greetings, jokes, or off-topic chitchat. If the message advances the debate at all, extract at least one fragment.
+  6. Output STRICT JSON. The array length must be ≤ 16.`;
+
+export function buildExtractPrompt(input: ExtractInput): {
+  system: string;
+  user: string;
+} {
+  const lines: string[] = [`Topic: ${input.topic}`];
+
+  if (input.axis) {
+    lines.push("");
+    lines.push(`Debate axis: ${input.axis.name}`);
+    lines.push(`  Pole 0 (polarity = -1): ${input.axis.poles[0]}`);
+    lines.push(`  Pole 1 (polarity = +1): ${input.axis.poles[1]}`);
+  }
+
+  if (input.clusterLabels && input.clusterLabels.length > 0) {
+    lines.push("");
+    lines.push(
+      `Current camps: ${input.clusterLabels.map((l) => `"${l}"`).join(", ")}`,
+    );
+  }
+
+  lines.push("");
+  lines.push("EXISTING CLAIMS (reference these by id; do NOT paraphrase):");
+  if (input.priorClaims.length === 0) {
+    lines.push("(none yet)");
+  } else {
+    for (const c of input.priorClaims) {
+      const polarity =
+        typeof c.polarity === "number"
+          ? ` [polarity=${c.polarity.toFixed(2)}]`
+          : "";
+      lines.push(`- [${c.id}] ${c.text}${polarity}`);
+    }
+  }
+
+  if (input.openQuestions && input.openQuestions.length > 0) {
+    lines.push("");
+    lines.push(
+      "OPEN QUESTIONS (an emitted node can answer or address one of these):",
+    );
+    for (const q of input.openQuestions) {
+      lines.push(`- [${q.id}] ${q.text}`);
+    }
+  }
+
+  lines.push("");
+  lines.push(`MESSAGE (from ${input.agentName}, id=${input.messageId}):`);
+  lines.push(input.messageText.trim());
+  lines.push("");
+  lines.push("Return the JSON array of fragments now.");
+
+  return { system: SYSTEM_PROMPT, user: lines.join("\n") };
+}
+
+// ----------------------------------------------------------------------------
+// Parser
+// ----------------------------------------------------------------------------
+
+const NODE_KIND_SET: ReadonlySet<string> = new Set(NODE_KINDS);
+const EDGE_RELATION_SET: ReadonlySet<string> = new Set(EDGE_RELATIONS);
+
+function clamp(n: number, lo: number, hi: number): number {
+  if (Number.isNaN(n)) return lo;
+  return Math.max(lo, Math.min(hi, n));
 }
 
 export function parseExtractResponse(raw: string | null): ExtractedFragment[] {
@@ -125,43 +424,138 @@ export function parseExtractResponse(raw: string | null): ExtractedFragment[] {
     return [];
   }
   if (!Array.isArray(parsed)) return [];
+
   const out: ExtractedFragment[] = [];
   for (const item of parsed) {
+    if (out.length >= MAX_FRAGMENTS) break;
     if (!item || typeof item !== "object") continue;
     const rec = item as Record<string, unknown>;
     const kind = rec.kind;
-    const text = typeof rec.text === "string" ? rec.text.trim() : "";
-    const targetClaim = typeof rec.targetClaim === "string" ? rec.targetClaim.trim() : undefined;
-    if (text.length === 0) continue;
-    if (kind === "claim" || kind === "evidence" || kind === "rebuttal") {
-      out.push({ kind, text: text.slice(0, 240), targetClaim: targetClaim?.slice(0, 240) });
+
+    if (kind === "edge") {
+      const from = typeof rec.from === "string" ? rec.from.trim() : "";
+      const to = typeof rec.to === "string" ? rec.to.trim() : "";
+      const relation = rec.relation;
+      if (!from || !to) continue;
+      if (typeof relation !== "string" || !EDGE_RELATION_SET.has(relation)) {
+        continue;
+      }
+      const confidence =
+        typeof rec.confidence === "number" ? clamp(rec.confidence, 0, 1) : 0.5;
+      const rationale =
+        typeof rec.rationale === "string" && rec.rationale.trim().length > 0
+          ? rec.rationale.trim().slice(0, 200)
+          : undefined;
+      out.push({
+        kind: "edge",
+        from,
+        to,
+        relation: relation as ArgEdgeRelation,
+        confidence,
+        ...(rationale ? { rationale } : {}),
+      });
+      continue;
     }
+
+    if (typeof kind !== "string" || !NODE_KIND_SET.has(kind)) continue;
+    const text = typeof rec.text === "string" ? rec.text.trim() : "";
+    if (text.length === 0) continue;
+    const targetClaim =
+      typeof rec.targetClaim === "string" && rec.targetClaim.trim().length > 0
+        ? rec.targetClaim.trim().slice(0, 240)
+        : undefined;
+    const polarity =
+      typeof rec.polarity === "number" ? clamp(rec.polarity, -1, 1) : undefined;
+    const strength =
+      typeof rec.strength === "number" ? clamp(rec.strength, 0, 1) : undefined;
+    out.push({
+      kind: kind as ArgNodeKind,
+      text: text.slice(0, 240),
+      ...(targetClaim ? { targetClaim } : {}),
+      ...(polarity !== undefined ? { polarity } : {}),
+      ...(strength !== undefined ? { strength } : {}),
+    });
   }
   return out;
 }
 
-function generateNodeId(existing: ArgGraph, prefix: string): string {
-  let i = existing.nodes.length;
+// ----------------------------------------------------------------------------
+// Merger
+// ----------------------------------------------------------------------------
+
+function tokenize(text: string): string[] {
+  return text
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[^a-z0-9\s]/g, " ")
+    .split(/\s+/)
+    .filter((w) => w.length >= 2);
+}
+
+/**
+ * Bag-of-words cosine similarity (Salton, 1971). Cheap, dependency-free, and
+ * good enough to catch "Nuclear is the safest source per TWh." vs. "Nuclear
+ * power is the safest source per terawatt hour." as a near-duplicate.
+ */
+export function bagOfWordsCosine(a: string, b: string): number {
+  const A = tokenize(a);
+  const B = tokenize(b);
+  if (A.length === 0 || B.length === 0) return 0;
+  const counts = new Map<string, [number, number]>();
+  for (const w of A) {
+    const cur = counts.get(w) ?? [0, 0];
+    cur[0] += 1;
+    counts.set(w, cur);
+  }
+  for (const w of B) {
+    const cur = counts.get(w) ?? [0, 0];
+    cur[1] += 1;
+    counts.set(w, cur);
+  }
+  let dot = 0;
+  let na = 0;
+  let nb = 0;
+  for (const pair of counts.values()) {
+    const ca = pair[0];
+    const cb = pair[1];
+    dot += ca * cb;
+    na += ca * ca;
+    nb += cb * cb;
+  }
+  if (na === 0 || nb === 0) return 0;
+  return dot / Math.sqrt(na * nb);
+}
+
+function generateNodeId(graph: ArgGraph, kind: ArgNodeKind): string {
+  const prefix = KIND_ID_PREFIX[kind];
+  const used = new Set(graph.nodes.map((n) => n.id).concat(graph.orphans.map((n) => n.id)));
+  let i = graph.nodes.length;
   while (true) {
     const candidate = `${prefix}_${i}`;
-    if (!existing.nodes.some((n) => n.id === candidate)) return candidate;
+    if (!used.has(candidate)) return candidate;
+    i += 1;
+  }
+}
+
+function generateEdgeId(graph: ArgGraph): string {
+  const used = new Set(graph.edges.map((e) => e.id));
+  let i = graph.edges.length;
+  while (true) {
+    const candidate = `ed_${i}`;
+    if (!used.has(candidate)) return candidate;
     i += 1;
   }
 }
 
 function findClaimByReference(graph: ArgGraph, ref: string | undefined): ArgNode | null {
   if (!ref) return null;
-  // First try id match (strip square brackets if present).
   const idCandidate = ref.replace(/^\[|\]$/g, "").trim();
   const byId = graph.nodes.find((n) => n.kind === "claim" && n.id === idCandidate);
   if (byId) return byId;
 
-  // Fix 5.13: fall back to substring matching ONLY when there's exactly one
-  // claim that contains the reference text and that claim is a strong match
-  // (≥40% character overlap of the shorter string). The previous "either
-  // direction substring" rule eagerly attached evidence/rebuttal nodes to
-  // whatever claim happened to share a few words, producing wrong-target
-  // edges in the argument map.
+  // v1's lenient substring match (Fix 5.13) — kept for backwards compat
+  // with extractors that paraphrase the target. Only attaches when there's
+  // exactly one reasonably-sized substring match.
   const needle = ref.toLowerCase();
   const candidates = graph.nodes.filter(
     (n) => n.kind === "claim" && n.text.toLowerCase().includes(needle),
@@ -175,74 +569,257 @@ function findClaimByReference(graph: ArgGraph, ref: string | undefined): ArgNode
   return null;
 }
 
+/** Returns the existing claim node a new claim should merge into, or null. */
+function findClaimMergeTarget(graph: ArgGraph, text: string): ArgNode | null {
+  const lower = text.toLowerCase();
+  const exact = graph.nodes.find(
+    (n) =>
+      n.kind === "claim" &&
+      (n.text.toLowerCase() === lower ||
+        n.aliases.some((a) => a.toLowerCase() === lower)),
+  );
+  if (exact) return exact;
+  for (const n of graph.nodes) {
+    if (n.kind !== "claim") continue;
+    if (bagOfWordsCosine(n.text, text) >= MERGE_COSINE_THRESHOLD) return n;
+    for (const alias of n.aliases) {
+      if (bagOfWordsCosine(alias, text) >= MERGE_COSINE_THRESHOLD) return n;
+    }
+  }
+  return null;
+}
+
+function makeNode(
+  graph: ArgGraph,
+  frag: ExtractedNodeFragment,
+  source: { messageId: string; agentId: string },
+  ts: number,
+): ArgNode {
+  const id = generateNodeId(graph, frag.kind);
+  const node: ArgNode = {
+    id,
+    kind: frag.kind,
+    text: frag.text,
+    aliases: [],
+    sources: [{ messageId: source.messageId, agentId: source.agentId, timestamp: ts }],
+    strength: typeof frag.strength === "number" ? frag.strength : 0.5,
+    status: "active",
+    sourceMessageId: source.messageId,
+    sourceAgentId: source.agentId,
+  };
+  if (typeof frag.polarity === "number") {
+    node.stance = {
+      axis: graph.axis?.name ?? "",
+      polarity: frag.polarity,
+    };
+  }
+  return node;
+}
+
 export function updateArgumentMap(
   previous: ArgGraph,
   fragments: ExtractedFragment[],
-  source: { messageId: string; agentId: string },
+  source: { messageId: string; agentId: string; timestamp?: number },
 ): ArgGraph {
   const next: ArgGraph = {
+    ...previous,
     nodes: [...previous.nodes],
     edges: [...previous.edges],
+    orphans: [...previous.orphans],
+    clusters: [...previous.clusters],
     lastMessageId: source.messageId,
   };
+  const ts = source.timestamp ?? Date.now();
 
   for (const frag of fragments) {
-    if (frag.kind === "claim") {
-      // Skip if an identical claim already exists from this source — avoid
-      // duplicating rewordings from the same speaker.
-      const duplicate = next.nodes.some(
-        (n) =>
-          n.kind === "claim" &&
-          n.sourceAgentId === source.agentId &&
-          n.text.toLowerCase() === frag.text.toLowerCase(),
+    if (frag.kind === "edge") {
+      const fromExists = next.nodes.some((n) => n.id === frag.from);
+      const toExists = next.nodes.some((n) => n.id === frag.to);
+      if (!fromExists || !toExists) continue; // unknown endpoint → drop
+      const dup = next.edges.find(
+        (e) => e.from === frag.from && e.to === frag.to && e.relation === frag.relation,
       );
-      if (duplicate) continue;
-      const id = generateNodeId(next, "c");
-      next.nodes.push({
-        id,
-        kind: "claim",
-        text: frag.text,
-        sourceMessageId: source.messageId,
-        sourceAgentId: source.agentId,
+      if (dup) continue;
+      next.edges.push({
+        id: generateEdgeId(next),
+        from: frag.from,
+        to: frag.to,
+        relation: frag.relation,
+        confidence: frag.confidence,
+        ...(frag.rationale ? { rationale: frag.rationale } : {}),
       });
-    } else {
+      continue;
+    }
+
+    // Anchored kinds (evidence/rebuttal/concession/premise) need a target.
+    if (ANCHORED_KINDS.has(frag.kind)) {
       const target = findClaimByReference(next, frag.targetClaim);
       if (!target) {
-        // Can't anchor — promote to a free-standing claim so the content
-        // survives in the UI instead of disappearing. The semantic label
-        // (evidence/rebuttal) is lost, but losing the text entirely is worse.
-        const duplicate = next.nodes.some(
-          (n) =>
-            n.kind === "claim" &&
-            n.sourceAgentId === source.agentId &&
-            n.text.toLowerCase() === frag.text.toLowerCase(),
-        );
-        if (duplicate) continue;
-        const claimId = generateNodeId(next, "c");
-        next.nodes.push({
-          id: claimId,
-          kind: "claim",
-          text: frag.text,
-          sourceMessageId: source.messageId,
-          sourceAgentId: source.agentId,
-        });
+        // v2: stage as orphan instead of promoting to claim. The
+        // consolidation pass (Phase 2) tries to anchor; otherwise dropped.
+        next.orphans.push(makeNode(next, frag, source, ts));
         continue;
       }
-      const id = generateNodeId(next, frag.kind === "evidence" ? "e" : "r");
-      next.nodes.push({
-        id,
-        kind: frag.kind,
-        text: frag.text,
-        sourceMessageId: source.messageId,
-        sourceAgentId: source.agentId,
-      });
+      const node = makeNode(next, frag, source, ts);
+      next.nodes.push(node);
+      const relation = ANCHOR_RELATION[frag.kind] ?? "supports";
       next.edges.push({
-        from: id,
+        id: generateEdgeId(next),
+        from: node.id,
         to: target.id,
-        relation: frag.kind === "evidence" ? "supports" : "rebuts",
+        relation,
+        confidence: 0.85,
       });
+      continue;
     }
+
+    // Standalone kinds — claim/question/assumption/definition/proposal.
+    // Claims merge across speakers via cosine-similarity; other kinds
+    // dedupe per-author by exact lowercase text.
+    if (frag.kind === "claim") {
+      const merge = findClaimMergeTarget(next, frag.text);
+      if (merge) {
+        const newSource: ArgNodeSource = {
+          messageId: source.messageId,
+          agentId: source.agentId,
+          timestamp: ts,
+        };
+        const sourceDupe = merge.sources.some(
+          (s) => s.messageId === newSource.messageId && s.agentId === newSource.agentId,
+        );
+        if (!sourceDupe) merge.sources.push(newSource);
+        const aliasLower = frag.text.toLowerCase();
+        const existsAsTextOrAlias =
+          merge.text.toLowerCase() === aliasLower ||
+          merge.aliases.some((a) => a.toLowerCase() === aliasLower);
+        if (!existsAsTextOrAlias) merge.aliases.push(frag.text);
+        // Each confirming source bumps strength a notch (caps at 1).
+        merge.strength = Math.min(1, merge.strength + 0.1);
+        if (typeof frag.polarity === "number") {
+          merge.stance = {
+            axis: next.axis?.name ?? merge.stance?.axis ?? "",
+            polarity: frag.polarity,
+          };
+        }
+        continue;
+      }
+      next.nodes.push(makeNode(next, frag, source, ts));
+      continue;
+    }
+
+    // question / assumption / definition / proposal — per-author dedupe.
+    const sameAuthorDupe = next.nodes.find(
+      (n) =>
+        n.kind === frag.kind &&
+        n.sourceAgentId === source.agentId &&
+        n.text.toLowerCase() === frag.text.toLowerCase(),
+    );
+    if (sameAuthorDupe) continue;
+    next.nodes.push(makeNode(next, frag, source, ts));
   }
 
   return next;
 }
+
+// ----------------------------------------------------------------------------
+// v1 → v2 migration
+// ----------------------------------------------------------------------------
+
+interface ArgGraphV1Node {
+  id: string;
+  kind: "claim" | "evidence" | "rebuttal";
+  text: string;
+  sourceMessageId: string;
+  sourceAgentId: string;
+}
+
+interface ArgGraphV1Edge {
+  from: string;
+  to: string;
+  relation: "supports" | "rebuts";
+}
+
+function isV1Node(raw: unknown): raw is ArgGraphV1Node {
+  if (!raw || typeof raw !== "object") return false;
+  const n = raw as Partial<ArgGraphV1Node>;
+  return (
+    typeof n.id === "string" &&
+    n.id.length > 0 &&
+    (n.kind === "claim" || n.kind === "evidence" || n.kind === "rebuttal") &&
+    typeof n.text === "string" &&
+    n.text.length > 0 &&
+    typeof n.sourceMessageId === "string" &&
+    typeof n.sourceAgentId === "string"
+  );
+}
+
+function isV1Edge(raw: unknown): raw is ArgGraphV1Edge {
+  if (!raw || typeof raw !== "object") return false;
+  const e = raw as Partial<ArgGraphV1Edge>;
+  return (
+    typeof e.from === "string" &&
+    typeof e.to === "string" &&
+    (e.relation === "supports" || e.relation === "rebuts")
+  );
+}
+
+/**
+ * Lossless lift of a v1 graph blob to the v2 schema. Each v1 node maps to a
+ * v2 node with strength 0.5, status "active", a single source with
+ * timestamp 0, and empty aliases / no stance / no verification. v1 edges
+ * map 1:1 with confidence 0.85 and a generated id. The result has empty
+ * clusters / orphans / no axis and consolidationVersion 0.
+ *
+ * Returns an `emptyGraph()` when the input is missing or unrecognizable.
+ */
+export function migrateArgGraphV1ToV2(input: unknown): ArgGraph {
+  if (!input || typeof input !== "object") return emptyGraph();
+  const v1 = input as { nodes?: unknown; edges?: unknown; lastMessageId?: unknown };
+
+  const v1Nodes = Array.isArray(v1.nodes) ? v1.nodes.filter(isV1Node) : [];
+  const nodes: ArgNode[] = v1Nodes.map((n) => ({
+    id: n.id,
+    kind: n.kind,
+    text: n.text,
+    aliases: [],
+    sources: [{ messageId: n.sourceMessageId, agentId: n.sourceAgentId, timestamp: 0 }],
+    strength: 0.5,
+    status: "active",
+    sourceMessageId: n.sourceMessageId,
+    sourceAgentId: n.sourceAgentId,
+  }));
+
+  const validIds = new Set(nodes.map((n) => n.id));
+  const v1Edges = Array.isArray(v1.edges) ? v1.edges.filter(isV1Edge) : [];
+  const edges: ArgEdge[] = v1Edges
+    .filter((e) => validIds.has(e.from) && validIds.has(e.to))
+    .map((e, i) => ({
+      id: `ed_${i}`,
+      from: e.from,
+      to: e.to,
+      relation: e.relation,
+      confidence: 0.85,
+    }));
+
+  const lastMessageId =
+    typeof v1.lastMessageId === "string" && v1.lastMessageId.length > 0
+      ? v1.lastMessageId
+      : null;
+
+  return {
+    nodes,
+    edges,
+    clusters: [],
+    orphans: [],
+    lastMessageId,
+    consolidationVersion: 0,
+    schemaVersion: 2,
+  };
+}
+
+// ----------------------------------------------------------------------------
+// Re-exports for tests / consumers that want raw constants
+// ----------------------------------------------------------------------------
+
+export const ARG_NODE_KINDS = NODE_KINDS;
+export const ARG_EDGE_RELATIONS = EDGE_RELATIONS;

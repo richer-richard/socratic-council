@@ -1,5 +1,18 @@
 import type { AgentId as CouncilAgentId, Message as SharedMessage } from "@socratic-council/shared";
-import type { ArgEdge, ArgGraph, ArgNode, ArgNodeKind } from "@socratic-council/core";
+import type {
+  ArgEdge,
+  ArgEdgeRelation,
+  ArgGraph,
+  ArgGraphAxis,
+  ArgGraphCluster,
+  ArgNode,
+  ArgNodeKind,
+  ArgNodeSource,
+  ArgNodeStance,
+  ArgNodeStatus,
+  ArgNodeVerification,
+} from "@socratic-council/core";
+import { migrateArgGraphV1ToV2 } from "@socratic-council/core";
 
 import type { Provider } from "../stores/config";
 import {
@@ -974,52 +987,306 @@ function normalizeCanvasStates(input: unknown): Record<string, unknown> | undefi
   return Object.keys(result).length > 0 ? result : undefined;
 }
 
-function normalizeArgGraph(input: unknown): ArgGraph | undefined {
-  if (!input || typeof input !== "object") return undefined;
-  const record = input as { nodes?: unknown; edges?: unknown; lastMessageId?: unknown };
-  if (!Array.isArray(record.nodes)) return undefined;
+const ARG_V2_NODE_KINDS: readonly ArgNodeKind[] = [
+  "claim",
+  "premise",
+  "evidence",
+  "rebuttal",
+  "concession",
+  "question",
+  "assumption",
+  "definition",
+  "proposal",
+];
 
-  const allowedKind = (k: unknown): k is ArgNodeKind =>
-    k === "claim" || k === "evidence" || k === "rebuttal";
+const ARG_V2_EDGE_RELATIONS: readonly ArgEdgeRelation[] = [
+  "supports",
+  "rebuts",
+  "concedes",
+  "restates",
+  "refines",
+  "agrees",
+  "contradicts",
+  "depends-on",
+  "answers",
+  "addresses",
+];
+
+const ARG_V2_NODE_KIND_SET: ReadonlySet<string> = new Set(ARG_V2_NODE_KINDS);
+const ARG_V2_EDGE_RELATION_SET: ReadonlySet<string> = new Set(
+  ARG_V2_EDGE_RELATIONS,
+);
+
+function clamp01(n: unknown, fallback: number): number {
+  if (typeof n !== "number" || !Number.isFinite(n)) return fallback;
+  return Math.max(0, Math.min(1, n));
+}
+
+function clampPolarity(n: unknown): number | undefined {
+  if (typeof n !== "number" || !Number.isFinite(n)) return undefined;
+  return Math.max(-1, Math.min(1, n));
+}
+
+function coerceArgNodeSource(raw: unknown): ArgNodeSource | null {
+  if (!raw || typeof raw !== "object") return null;
+  const s = raw as Partial<ArgNodeSource>;
+  if (typeof s.messageId !== "string" || s.messageId.length === 0) return null;
+  if (typeof s.agentId !== "string" || s.agentId.length === 0) return null;
+  const ts =
+    typeof s.timestamp === "number" && Number.isFinite(s.timestamp)
+      ? s.timestamp
+      : 0;
+  const out: ArgNodeSource = {
+    messageId: s.messageId,
+    agentId: s.agentId,
+    timestamp: ts,
+  };
+  if (s.span && typeof s.span === "object") {
+    const span = s.span as Partial<{ start: number; end: number }>;
+    if (typeof span.start === "number" && typeof span.end === "number") {
+      out.span = { start: span.start, end: span.end };
+    }
+  }
+  if (typeof s.quote === "string" && s.quote.length > 0) out.quote = s.quote;
+  return out;
+}
+
+function coerceArgNodeV2(raw: unknown): ArgNode | null {
+  if (!raw || typeof raw !== "object") return null;
+  const n = raw as Partial<ArgNode>;
+  if (typeof n.id !== "string" || n.id.length === 0) return null;
+  if (typeof n.kind !== "string" || !ARG_V2_NODE_KIND_SET.has(n.kind)) {
+    return null;
+  }
+  if (typeof n.text !== "string" || n.text.length === 0) return null;
+
+  const sources: ArgNodeSource[] = Array.isArray(n.sources)
+    ? n.sources
+        .map(coerceArgNodeSource)
+        .filter((s): s is ArgNodeSource => Boolean(s))
+    : [];
+  let primary: ArgNodeSource | null = sources[0] ?? null;
+  if (
+    !primary &&
+    typeof n.sourceMessageId === "string" &&
+    n.sourceMessageId.length > 0 &&
+    typeof n.sourceAgentId === "string" &&
+    n.sourceAgentId.length > 0
+  ) {
+    primary = {
+      messageId: n.sourceMessageId,
+      agentId: n.sourceAgentId,
+      timestamp: 0,
+    };
+    sources.push(primary);
+  }
+  if (!primary) return null;
+
+  const aliases: string[] = Array.isArray(n.aliases)
+    ? n.aliases.filter(
+        (a): a is string => typeof a === "string" && a.length > 0,
+      )
+    : [];
+  const strength = clamp01(n.strength, 0.5);
+  const allowedStatus =
+    n.status === "active" ||
+    n.status === "withdrawn" ||
+    n.status === "superseded";
+  const status: ArgNodeStatus = allowedStatus
+    ? (n.status as ArgNodeStatus)
+    : "active";
+
+  const out: ArgNode = {
+    id: n.id,
+    kind: n.kind as ArgNodeKind,
+    text: n.text,
+    aliases,
+    sources,
+    strength,
+    status,
+    sourceMessageId: primary.messageId,
+    sourceAgentId: primary.agentId,
+  };
+
+  if (n.stance && typeof n.stance === "object") {
+    const stance = n.stance as Partial<ArgNodeStance>;
+    const polarity = clampPolarity(stance.polarity);
+    if (typeof stance.axis === "string" && polarity !== undefined) {
+      out.stance = { axis: stance.axis, polarity };
+    }
+  }
+  if (typeof n.supersededBy === "string" && n.supersededBy.length > 0) {
+    out.supersededBy = n.supersededBy;
+  }
+  if (n.verification && typeof n.verification === "object") {
+    const v = n.verification as Partial<ArgNodeVerification>;
+    if (
+      (v.verdict === "true" ||
+        v.verdict === "false" ||
+        v.verdict === "uncertain") &&
+      typeof v.confidence === "number"
+    ) {
+      const ver: ArgNodeVerification = {
+        verdict: v.verdict,
+        confidence: clamp01(v.confidence, 0.5),
+      };
+      if (typeof v.evidenceUrl === "string" && v.evidenceUrl.length > 0) {
+        ver.evidenceUrl = v.evidenceUrl;
+      }
+      out.verification = ver;
+    }
+  }
+  if (n.influencedBy && typeof n.influencedBy === "object") {
+    const w = n.influencedBy as Partial<{ whisperId: string }>;
+    if (typeof w.whisperId === "string" && w.whisperId.length > 0) {
+      out.influencedBy = { whisperId: w.whisperId };
+    }
+  }
+  return out;
+}
+
+function coerceArgEdgeV2(
+  raw: unknown,
+  validNodeIds: ReadonlySet<string>,
+  edgeIndex: number,
+): ArgEdge | null {
+  if (!raw || typeof raw !== "object") return null;
+  const e = raw as Partial<ArgEdge>;
+  if (typeof e.from !== "string" || !validNodeIds.has(e.from)) return null;
+  if (typeof e.to !== "string" || !validNodeIds.has(e.to)) return null;
+  if (typeof e.relation !== "string" || !ARG_V2_EDGE_RELATION_SET.has(e.relation)) {
+    return null;
+  }
+  const confidence = clamp01(e.confidence, 0.5);
+  const id = typeof e.id === "string" && e.id.length > 0 ? e.id : `ed_${edgeIndex}`;
+  const out: ArgEdge = {
+    id,
+    from: e.from,
+    to: e.to,
+    relation: e.relation as ArgEdgeRelation,
+    confidence,
+  };
+  if (typeof e.rationale === "string" && e.rationale.length > 0) {
+    out.rationale = e.rationale;
+  }
+  return out;
+}
+
+function validateArgGraphV2(input: unknown): ArgGraph | undefined {
+  if (!input || typeof input !== "object") return undefined;
+  const r = input as Partial<ArgGraph>;
+  if (!Array.isArray(r.nodes)) return undefined;
 
   const nodes: ArgNode[] = [];
-  for (const raw of record.nodes) {
-    if (!raw || typeof raw !== "object") continue;
-    const r = raw as Partial<ArgNode>;
-    if (typeof r.id !== "string" || r.id.length === 0) continue;
-    if (!allowedKind(r.kind)) continue;
-    if (typeof r.text !== "string" || r.text.length === 0) continue;
-    if (typeof r.sourceMessageId !== "string" || r.sourceMessageId.length === 0) continue;
-    if (typeof r.sourceAgentId !== "string" || r.sourceAgentId.length === 0) continue;
-    nodes.push({
-      id: r.id,
-      kind: r.kind,
-      text: r.text,
-      sourceMessageId: r.sourceMessageId,
-      sourceAgentId: r.sourceAgentId,
-    });
+  for (const raw of r.nodes) {
+    const node = coerceArgNodeV2(raw);
+    if (node) nodes.push(node);
+  }
+
+  const orphans: ArgNode[] = [];
+  if (Array.isArray(r.orphans)) {
+    for (const raw of r.orphans) {
+      const orphan = coerceArgNodeV2(raw);
+      if (orphan) orphans.push(orphan);
+    }
   }
 
   const validNodeIds = new Set(nodes.map((n) => n.id));
-  const edges: ArgEdge[] = Array.isArray(record.edges)
-    ? record.edges
-        .map((raw): ArgEdge | null => {
-          if (!raw || typeof raw !== "object") return null;
-          const r = raw as Partial<ArgEdge>;
-          if (typeof r.from !== "string" || !validNodeIds.has(r.from)) return null;
-          if (typeof r.to !== "string" || !validNodeIds.has(r.to)) return null;
-          if (r.relation !== "supports" && r.relation !== "rebuts") return null;
-          return { from: r.from, to: r.to, relation: r.relation };
-        })
-        .filter((e): e is ArgEdge => Boolean(e))
-    : [];
+  const edges: ArgEdge[] = [];
+  if (Array.isArray(r.edges)) {
+    for (const raw of r.edges) {
+      const edge = coerceArgEdgeV2(raw, validNodeIds, edges.length);
+      if (edge) edges.push(edge);
+    }
+  }
+
+  const clusters: ArgGraphCluster[] = [];
+  if (Array.isArray(r.clusters)) {
+    for (const raw of r.clusters) {
+      if (!raw || typeof raw !== "object") continue;
+      const c = raw as Partial<ArgGraphCluster>;
+      if (typeof c.id !== "string" || c.id.length === 0) continue;
+      if (typeof c.label !== "string") continue;
+      if (!Array.isArray(c.nodeIds)) continue;
+      const nodeIds = c.nodeIds.filter(
+        (id): id is string => typeof id === "string" && validNodeIds.has(id),
+      );
+      clusters.push({ id: c.id, label: c.label, nodeIds });
+    }
+  }
+
+  let axis: ArgGraphAxis | undefined;
+  if (r.axis && typeof r.axis === "object") {
+    const a = r.axis as Partial<ArgGraphAxis>;
+    if (
+      typeof a.name === "string" &&
+      Array.isArray(a.poles) &&
+      a.poles.length === 2 &&
+      typeof a.poles[0] === "string" &&
+      typeof a.poles[1] === "string"
+    ) {
+      axis = { name: a.name, poles: [a.poles[0], a.poles[1]] };
+    }
+  }
 
   const lastMessageId =
-    typeof record.lastMessageId === "string" && record.lastMessageId.length > 0
-      ? record.lastMessageId
+    typeof r.lastMessageId === "string" && r.lastMessageId.length > 0
+      ? r.lastMessageId
       : null;
 
-  return { nodes, edges, lastMessageId };
+  const consolidationVersion =
+    typeof r.consolidationVersion === "number" &&
+    Number.isFinite(r.consolidationVersion)
+      ? Math.max(0, Math.floor(r.consolidationVersion))
+      : 0;
+
+  let layoutOverrides: Record<string, { x: number; y: number }> | undefined;
+  if (r.layoutOverrides && typeof r.layoutOverrides === "object") {
+    const lo = r.layoutOverrides as Record<string, unknown>;
+    const out: Record<string, { x: number; y: number }> = {};
+    let any = false;
+    for (const [id, raw] of Object.entries(lo)) {
+      if (!validNodeIds.has(id)) continue;
+      if (!raw || typeof raw !== "object") continue;
+      const p = raw as Partial<{ x: number; y: number }>;
+      if (typeof p.x === "number" && typeof p.y === "number") {
+        out[id] = { x: p.x, y: p.y };
+        any = true;
+      }
+    }
+    if (any) layoutOverrides = out;
+  }
+
+  return {
+    nodes,
+    edges,
+    clusters,
+    orphans,
+    lastMessageId,
+    consolidationVersion,
+    schemaVersion: 2,
+    ...(axis ? { axis } : {}),
+    ...(layoutOverrides ? { layoutOverrides } : {}),
+  };
+}
+
+/**
+ * Read an ArgGraph blob from a persisted session. Detects the schema version:
+ *   - schemaVersion === 2 → validate fields and return the v2 graph.
+ *   - missing or === 1    → run the v1 → v2 migrator (lossless lift).
+ * Returns undefined when no graph data is present (so the caller can omit the
+ * argGraph field entirely from the normalized session).
+ */
+function normalizeArgGraph(input: unknown): ArgGraph | undefined {
+  if (!input || typeof input !== "object") return undefined;
+  const r = input as { schemaVersion?: unknown; nodes?: unknown };
+  if (!Array.isArray(r.nodes)) return undefined;
+  if (r.schemaVersion === 2) {
+    return validateArgGraphV2(input);
+  }
+  // No schemaVersion (or any pre-v2 value) → migrate. The migrator returns
+  // emptyGraph() for any unrecognizable shape, so this never throws.
+  return migrateArgGraphV1ToV2(input);
 }
 
 function normalizeArgmapExtractedIds(input: unknown): string[] | undefined {
