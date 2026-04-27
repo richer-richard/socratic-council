@@ -592,7 +592,7 @@ function findClaimMergeTarget(graph: ArgGraph, text: string): ArgNode | null {
 function makeNode(
   graph: ArgGraph,
   frag: ExtractedNodeFragment,
-  source: { messageId: string; agentId: string },
+  source: { messageId: string; agentId: string; whisperId?: string },
   ts: number,
 ): ArgNode {
   const id = generateNodeId(graph, frag.kind);
@@ -613,13 +613,23 @@ function makeNode(
       polarity: frag.polarity,
     };
   }
+  if (source.whisperId) {
+    node.influencedBy = { whisperId: source.whisperId };
+  }
   return node;
 }
 
 export function updateArgumentMap(
   previous: ArgGraph,
   fragments: ExtractedFragment[],
-  source: { messageId: string; agentId: string; timestamp?: number },
+  source: {
+    messageId: string;
+    agentId: string;
+    timestamp?: number;
+    /** When set, every new node produced by this call is tagged with
+     *  influencedBy.whisperId — Phase 4 of the argmap rewrite. */
+    whisperId?: string;
+  },
 ): ArgGraph {
   const next: ArgGraph = {
     ...previous,
@@ -1429,6 +1439,148 @@ export async function consolidateArgGraph(
   }
   candidate.consolidationVersion = input.graph.consolidationVersion + 1;
   return candidate;
+}
+
+// ----------------------------------------------------------------------------
+// Phase 4 — fact-check overlay
+// ----------------------------------------------------------------------------
+//
+// `factCheckMessage` (in factcheck.ts) produces a list of FactCheckBadge
+// objects per council message. Phase 4 attaches each badge's verdict to
+// the matching ArgNode (preferring evidence in the same message; falling
+// back to the originating claim) so the Graph view can render ✓ / ✗ /
+// uncertain marks without piping the badges through React state.
+
+export type FactCheckMappableVerdict = "verified" | "unverified" | "contradicted";
+
+export interface FactCheckMappableBadge {
+  claim: string;
+  verdict: FactCheckMappableVerdict;
+  confidence: number;
+  evidence?: string;
+}
+
+/**
+ * Map a fact-check badge verdict to the argmap verification vocabulary.
+ *   "verified"     → "true"
+ *   "contradicted" → "false"
+ *   "unverified"   → "uncertain"
+ */
+export function mapFactCheckVerdict(
+  v: FactCheckMappableVerdict,
+): "true" | "false" | "uncertain" {
+  if (v === "verified") return "true";
+  if (v === "contradicted") return "false";
+  return "uncertain";
+}
+
+const FACT_CHECK_MATCH_THRESHOLD = 0.7;
+
+/**
+ * Apply a list of fact-check badges to the matching nodes in `graph`.
+ * Match strategy:
+ *   1. Within the same source message, prefer evidence-kind nodes whose
+ *      text or aliases score ≥ FACT_CHECK_MATCH_THRESHOLD against the
+ *      badge claim under bag-of-words cosine.
+ *   2. Fall back to claim-kind nodes that originated in the same message.
+ *   3. If no in-message match clears the threshold, the badge is dropped.
+ *
+ * Returns a new ArgGraph reference when any node was tagged, or the
+ * original input reference otherwise. Idempotent — re-applying a badge
+ * with the same verdict + confidence is a no-op.
+ */
+export function applyFactCheckBadgesToGraph(
+  graph: ArgGraph,
+  badges: readonly FactCheckMappableBadge[],
+  messageId: string,
+): ArgGraph {
+  if (badges.length === 0) return graph;
+  const inMessageEvidence = graph.nodes.filter(
+    (n) =>
+      n.kind === "evidence" &&
+      n.sources.some((s) => s.messageId === messageId),
+  );
+  const inMessageClaims = graph.nodes.filter(
+    (n) =>
+      n.kind === "claim" &&
+      n.sources.some((s) => s.messageId === messageId),
+  );
+  if (inMessageEvidence.length === 0 && inMessageClaims.length === 0) {
+    return graph;
+  }
+
+  const findBest = (claimText: string): ArgNode | null => {
+    let best: ArgNode | null = null;
+    let bestScore = FACT_CHECK_MATCH_THRESHOLD;
+    const score = (node: ArgNode): number => {
+      let s = bagOfWordsCosine(node.text, claimText);
+      for (const alias of node.aliases) {
+        const aliasScore = bagOfWordsCosine(alias, claimText);
+        if (aliasScore > s) s = aliasScore;
+      }
+      return s;
+    };
+    for (const ev of inMessageEvidence) {
+      const s = score(ev);
+      if (s >= bestScore) {
+        best = ev;
+        bestScore = s;
+      }
+    }
+    if (best) return best;
+    for (const cl of inMessageClaims) {
+      const s = score(cl);
+      if (s >= bestScore) {
+        best = cl;
+        bestScore = s;
+      }
+    }
+    return best;
+  };
+
+  const updates = new Map<string, ArgNodeVerification>();
+  for (const badge of badges) {
+    const target = findBest(badge.claim);
+    if (!target) continue;
+    const verdict = mapFactCheckVerdict(badge.verdict);
+    const confidence = clamp(badge.confidence, 0, 1);
+    const next: ArgNodeVerification = {
+      verdict,
+      confidence,
+      ...(badge.evidence ? { evidenceUrl: badge.evidence } : {}),
+    };
+    const existing = updates.get(target.id) ?? target.verification;
+    if (
+      existing &&
+      existing.verdict === next.verdict &&
+      existing.confidence === next.confidence &&
+      existing.evidenceUrl === next.evidenceUrl
+    ) {
+      // No-op write — preserve in case later badges produce a write.
+      updates.set(target.id, existing);
+      continue;
+    }
+    updates.set(target.id, next);
+  }
+
+  if (updates.size === 0) return graph;
+  let changed = false;
+  const nextNodes = graph.nodes.map((n) => {
+    const ver = updates.get(n.id);
+    if (!ver) return n;
+    if (
+      n.verification &&
+      n.verification.verdict === ver.verdict &&
+      n.verification.confidence === ver.confidence &&
+      n.verification.evidenceUrl === ver.evidenceUrl
+    ) {
+      return n;
+    }
+    changed = true;
+    return { ...n, verification: ver };
+  });
+  if (!changed) return graph;
+  return { ...graph, nodes: nextNodes };
 }
 
 /**

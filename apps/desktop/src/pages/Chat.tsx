@@ -73,6 +73,7 @@ import { BundleExportButton } from "../components/BundleActions";
 import { BranchAction, BranchLineage } from "../components/BranchAction";
 import { FactCheckStrip } from "../components/FactCheckBadge";
 import {
+  applyFactCheckBadgesToGraph,
   emptyGraph,
   buildExtractPrompt,
   consolidateArgGraph,
@@ -1851,6 +1852,10 @@ export function Chat({ session, onNavigate, onPersistSession }: ChatProps) {
       20,
       (whisperBonusesRef.current[to] ?? 0) + (whisper.payload.bidBonus ?? 0),
     );
+    // Phase 4 — record the most recent whisper id per recipient so the
+    // argmap extractor can tag the next node from that agent with
+    // influencedBy.whisperId. Cleared after one extraction window.
+    lastWhisperByAgentRef.current[to] = { id: whisper.id, deliveredAt: Date.now() };
   }, [conflictState]);
 
   // Generate bidding scores based on conversation context
@@ -5155,6 +5160,12 @@ Write the official moderator wrap-up in 4 short sentences:
   const [argmapLastError, setArgmapLastError] = useState<string | null>(null);
   const [argmapRetryNonce, setArgmapRetryNonce] = useState(0);
   const ARGMAP_MAX_ATTEMPTS = 3;
+  // Phase 4 — recent whisper-by-recipient. The conflict useEffect writes to
+  // this when a strategy whisper is delivered; the next time that agent
+  // speaks, runArgumentMapExtraction reads the entry, threads the whisperId
+  // into updateArgumentMap, and clears the slot so the influence applies
+  // to exactly one message.
+  const lastWhisperByAgentRef = useRef<Partial<Record<CouncilAgentId, { id: string; deliveredAt: number }>>>({});
   // Consolidation pass (Phase 2): a single global re-think pass that runs
   // every CONSOLIDATION_INTERVAL council messages OR on demand. Bumps
   // graph.consolidationVersion when it actually changes the graph.
@@ -5261,13 +5272,25 @@ Write the official moderator wrap-up in 4 short sentences:
         if (fragments.length === 0) {
           setArgGraph((prev) => ({ ...prev, lastMessageId: messageId }));
         } else {
+          // Phase 4 — if this agent received a whisper in the last 90s,
+          // tag the new nodes with the whisper id so the panel can render
+          // a gold "·" prefix and the SelectionDrawer can surface it.
+          const whisperEntry = lastWhisperByAgentRef.current[agentId];
+          const whisperId =
+            whisperEntry && Date.now() - whisperEntry.deliveredAt < 90_000
+              ? whisperEntry.id
+              : undefined;
           setArgGraph((prev) =>
             updateArgumentMap(prev, fragments, {
               messageId,
               agentId,
               timestamp: message.timestamp,
+              ...(whisperId ? { whisperId } : {}),
             }),
           );
+          if (whisperId) {
+            lastWhisperByAgentRef.current[agentId] = undefined;
+          }
         }
         setArgmapLastError(null);
       } catch (error) {
@@ -5699,6 +5722,12 @@ Write the official moderator wrap-up in 4 short sentences:
                   }
                 : m,
             ),
+          );
+          // Phase 4 — overlay verification verdicts onto matching ArgNodes
+          // so the panel renders ✓ / ✗ / uncertain marks. The mapper picks
+          // the closest evidence/claim in the SAME message at cosine ≥ 0.7.
+          setArgGraph((prev) =>
+            applyFactCheckBadgesToGraph(prev, badges, pending.id),
           );
         }
       } catch (error) {
