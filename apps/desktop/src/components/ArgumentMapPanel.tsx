@@ -93,6 +93,10 @@ function ArgumentMapPanelInner({
   const [filters, setFilters] = useState<PanelFilters>(DEFAULT_FILTERS);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [exportOpen, setExportOpen] = useState(false);
+  // Phase 4 — clicking the "{n} ⚡" pill toggles a focus mode that filters
+  // the visible subgraph to only nodes touched by a contradicts edge AND
+  // jumps to the Graph tab. Click again to clear.
+  const [contradictionFocus, setContradictionFocus] = useState(false);
 
   // ⌘F focuses the search input when the panel is the active surface.
   useEffect(() => {
@@ -132,7 +136,22 @@ function ArgumentMapPanelInner({
     [graph.consolidationVersion, graph.nodes.length, graph.edges.length],
   );
 
-  const visible = useMemo(() => applyFilters(graph, filters), [graph, filters]);
+  const visible = useMemo(() => {
+    const base = applyFilters(graph, filters);
+    if (!contradictionFocus) return base;
+    const contradictsEdges = base.edges.filter(
+      (e) => e.relation === "contradicts",
+    );
+    const keep = new Set<string>();
+    for (const e of contradictsEdges) {
+      keep.add(e.from);
+      keep.add(e.to);
+    }
+    return {
+      nodes: base.nodes.filter((n) => keep.has(n.id)),
+      edges: contradictsEdges,
+    };
+  }, [graph, filters, contradictionFocus]);
 
   const claimsCount = graph.nodes.filter((n) => n.kind === "claim").length;
   const totalNodes = graph.nodes.length;
@@ -191,6 +210,12 @@ function ArgumentMapPanelInner({
         busy={busy}
         onClose={onClose}
         contradictionsCount={contradictionsCount}
+        contradictionFocus={contradictionFocus}
+        onToggleContradictionFocus={() => {
+          const next = !contradictionFocus;
+          setContradictionFocus(next);
+          if (next) setView("graph");
+        }}
       />
 
       <Tabs view={view} setView={setView} />
@@ -285,12 +310,16 @@ function Header({
   busy,
   onClose,
   contradictionsCount,
+  contradictionFocus,
+  onToggleContradictionFocus,
 }: {
   claimsCount: number;
   totalEdges: number;
   busy: boolean;
   onClose: () => void;
   contradictionsCount?: number;
+  contradictionFocus: boolean;
+  onToggleContradictionFocus: () => void;
 }) {
   return (
     <header
@@ -331,19 +360,31 @@ function Header({
             {totalEdges === 1 ? "" : "s"}
           </span>
           {contradictionsCount !== undefined && contradictionsCount > 0 && (
-            <span
+            <button
+              type="button"
+              onClick={onToggleContradictionFocus}
+              title={
+                contradictionFocus
+                  ? "Showing only contradiction edges. Click to clear."
+                  : "Filter to NLI-confirmed contradictions"
+              }
               style={{
                 color: "rgb(230, 90, 200)",
                 padding: "2px 7px",
                 borderRadius: 5,
-                border: "1px solid rgba(230, 90, 200, 0.4)",
+                border: `1px solid rgba(230, 90, 200, ${contradictionFocus ? 0.85 : 0.4})`,
+                background: contradictionFocus
+                  ? "rgba(230, 90, 200, 0.18)"
+                  : "transparent",
                 fontSize: "0.6rem",
                 letterSpacing: "0.16em",
                 textTransform: "uppercase",
+                fontFamily: "'JetBrains Mono', ui-monospace, monospace",
+                cursor: "pointer",
               }}
             >
               {contradictionsCount} ⚡
-            </span>
+            </button>
           )}
           {busy && <UpdatingPill />}
         </div>
