@@ -265,6 +265,18 @@ export interface DiscussionSession {
    */
   argmapExtractedIds?: string[];
   /**
+   * Wall-clock ms timestamp of the last successful argmap consolidation
+   * pass (Phase 2). Set when `consolidateArgGraph` returns a
+   * structurally-changed graph; absent for sessions that haven't
+   * consolidated yet.
+   */
+  argmapConsolidationLastRunAt?: number;
+  /**
+   * Council-message count at the time of the last consolidation pass.
+   * The trigger fires again once the live count is ≥ this + 6.
+   */
+  argmapConsolidationLastMessageCount?: number;
+  /**
    * Session branching (wave 2.7). When present, this session was forked from
    * another session at a specific message. The UI surfaces a "↪ branched
    * from …" crumb so users can navigate back to the parent.
@@ -1528,6 +1540,34 @@ function normalizeDiscussionSession(input: unknown): DiscussionSession | null {
       ? {
           argmapExtractedIds: normalizeArgmapExtractedIds(
             (record as { argmapExtractedIds?: unknown }).argmapExtractedIds,
+          ),
+        }
+      : {}),
+    ...(typeof (record as { argmapConsolidationLastRunAt?: unknown })
+      .argmapConsolidationLastRunAt === "number" &&
+    Number.isFinite(
+      (record as { argmapConsolidationLastRunAt?: number })
+        .argmapConsolidationLastRunAt,
+    )
+      ? {
+          argmapConsolidationLastRunAt: (
+            record as { argmapConsolidationLastRunAt: number }
+          ).argmapConsolidationLastRunAt,
+        }
+      : {}),
+    ...(typeof (record as { argmapConsolidationLastMessageCount?: unknown })
+      .argmapConsolidationLastMessageCount === "number" &&
+    Number.isFinite(
+      (record as { argmapConsolidationLastMessageCount?: number })
+        .argmapConsolidationLastMessageCount,
+    )
+      ? {
+          argmapConsolidationLastMessageCount: Math.max(
+            0,
+            Math.floor(
+              (record as { argmapConsolidationLastMessageCount: number })
+                .argmapConsolidationLastMessageCount,
+            ),
           ),
         }
       : {}),

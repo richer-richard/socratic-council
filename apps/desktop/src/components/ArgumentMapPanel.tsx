@@ -322,14 +322,18 @@ function TimelineGraph({
       {claims.map((claim) => {
         const connections = connectionsFor(claim.id);
         // v2 shim: premises (depends-on) sit on the evidence side; concessions
-        // (concedes) sit on the rebuttal side. Peer relations (agrees,
-        // contradicts, restates, refines, answers, addresses) stay hidden in
-        // Phase 1 — Phase 3's graph view surfaces them.
+        // (concedes) and consolidation-confirmed contradictions
+        // ("contradicts") sit on the rebuttal side. Other peer relations
+        // (agrees / restates / refines / answers / addresses) stay hidden
+        // until Phase 3's graph view surfaces them properly.
         const evidenceConns = connections.filter(
           (c) => c.relation === "supports" || c.relation === "depends-on",
         );
         const rebuttalConns = connections.filter(
-          (c) => c.relation === "rebuts" || c.relation === "concedes",
+          (c) =>
+            c.relation === "rebuts" ||
+            c.relation === "concedes" ||
+            c.relation === "contradicts",
         );
         const sourceTimestamp = messageIndex.get(claim.sourceMessageId)?.timestamp ?? null;
         return (

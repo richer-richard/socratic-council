@@ -75,6 +75,8 @@ import { FactCheckStrip } from "../components/FactCheckBadge";
 import {
   emptyGraph,
   buildExtractPrompt,
+  consolidateArgGraph,
+  extractPremisesFromSummary,
   parseExtractResponse,
   updateArgumentMap,
   type ArgGraph,
@@ -4942,7 +4944,12 @@ Write the official moderator wrap-up in 4 short sentences:
       const n = argGraphRef.current.nodes.length;
       const e = argGraphRef.current.edges.length;
       const last = argGraphRef.current.lastMessageId ?? "";
-      return `${n}:${e}:${last}:${argmapExtractedIdsRef.current.size}`;
+      const cv = argGraphRef.current.consolidationVersion;
+      const orphans = argGraphRef.current.orphans.length;
+      const clusters = argGraphRef.current.clusters.length;
+      const axis = argGraphRef.current.axis?.name ?? "";
+      const consol = argmapConsolidatorLastMessageCountRef.current;
+      return `${n}:${e}:${last}:${argmapExtractedIdsRef.current.size}:${cv}:${orphans}:${clusters}:${axis}:${consol}`;
     })();
     const signature = [
       nextStatus,
@@ -5010,6 +5017,15 @@ Write the official moderator wrap-up in 4 short sentences:
         canvasStates: canvasStatesRef.current,
         argGraph: argGraphRef.current,
         argmapExtractedIds: Array.from(argmapExtractedIdsRef.current),
+        ...(normalizedSession.argmapConsolidationLastRunAt !== undefined
+          ? { argmapConsolidationLastRunAt: normalizedSession.argmapConsolidationLastRunAt }
+          : {}),
+        ...(argmapConsolidatorLastMessageCountRef.current > 0
+          ? {
+              argmapConsolidationLastMessageCount:
+                argmapConsolidatorLastMessageCountRef.current,
+            }
+          : {}),
       });
 
       setPersistenceError(null);
@@ -5139,6 +5155,15 @@ Write the official moderator wrap-up in 4 short sentences:
   const [argmapLastError, setArgmapLastError] = useState<string | null>(null);
   const [argmapRetryNonce, setArgmapRetryNonce] = useState(0);
   const ARGMAP_MAX_ATTEMPTS = 3;
+  // Consolidation pass (Phase 2): a single global re-think pass that runs
+  // every CONSOLIDATION_INTERVAL council messages OR on demand. Bumps
+  // graph.consolidationVersion when it actually changes the graph.
+  const argmapConsolidatorBusyRef = useRef(false);
+  const argmapConsolidatorLastMessageCountRef = useRef<number>(
+    normalizedSession.argmapConsolidationLastMessageCount ?? 0,
+  );
+  const [argmapConsolidatorTrigger, setArgmapConsolidatorTrigger] = useState(0);
+  const ARGMAP_CONSOLIDATION_INTERVAL = 6;
 
   // Runs argument-map extraction for a single completed council message.
   // Uses the `ExtractorCompletionFn` contract from @socratic-council/core:
@@ -5319,10 +5344,160 @@ Write the official moderator wrap-up in 4 short sentences:
     setArgmapLastError(null);
     setArgmapBusy(false);
     argmapBusyRef.current = false;
+    argmapConsolidatorBusyRef.current = false;
+    argmapConsolidatorLastMessageCountRef.current =
+      normalizedSession.argmapConsolidationLastMessageCount ?? 0;
     // eslint-disable-next-line react-hooks/exhaustive-deps -- deliberately
     // keying only on session.id; argGraph/argmapExtractedIds props update on
     // load, but in-session mutations should NOT re-trigger this reset.
   }, [normalizedSession.id]);
+
+  // Consolidation pass — fires every ARGMAP_CONSOLIDATION_INTERVAL completed
+  // council messages, OR on demand via window.__argmapConsolidate(). Re-thinks
+  // the WHOLE graph in one model call: infers axis, merges duplicates from
+  // different speakers, marks supersessions, surfaces NLI-confirmed
+  // contradictions, names camps, and resolves orphans. Only runs while the
+  // per-message extractor is idle so the two passes don't race on the graph.
+  const runArgmapConsolidation = useCallback(
+    async (force: boolean = false) => {
+      if (argmapConsolidatorBusyRef.current) return;
+      if (argmapBusyRef.current && !force) return;
+      const runtime = pickExtractorRuntime();
+      if (!runtime) return;
+
+      const councilCount = messagesRef.current.filter(
+        (m) => isCouncilAgent(m.agentId) && !m.isStreaming && !m.error,
+      ).length;
+      const lastCount = argmapConsolidatorLastMessageCountRef.current;
+      if (!force && councilCount - lastCount < ARGMAP_CONSOLIDATION_INTERVAL) return;
+      if (argGraphRef.current.nodes.length === 0) return;
+
+      argmapConsolidatorBusyRef.current = true;
+      try {
+        const summary = memoryManagerRef.current?.getSessionSummary?.() ?? null;
+        const seedPremises = extractPremisesFromSummary(summary);
+        const recentMessages = messagesRef.current
+          .filter(
+            (m) =>
+              isCouncilAgent(m.agentId) &&
+              !m.isStreaming &&
+              !m.error &&
+              (m.content ?? "").trim().length > 0,
+          )
+          .slice(-12)
+          .map((m) => ({
+            id: m.id,
+            agentId: m.agentId,
+            agentName:
+              AGENT_CONFIG[m.agentId as CouncilAgentId]?.name ?? m.agentId,
+            content: stripQuoteTokens(m.content ?? "").slice(0, 1000),
+            timestamp: m.timestamp,
+          }));
+        const knownAgentNames = Array.from(
+          new Set(
+            messagesRef.current
+              .filter((m) => isCouncilAgent(m.agentId))
+              .map(
+                (m) =>
+                  AGENT_CONFIG[m.agentId as CouncilAgentId]?.name ?? m.agentId,
+              ),
+          ),
+        );
+
+        const startedAt = Date.now();
+        const consolidated = await consolidateArgGraph(
+          {
+            topic,
+            graph: argGraphRef.current,
+            recentMessages,
+            knownAgentNames,
+            ...(seedPremises.length > 0 ? { seedPremises } : {}),
+          },
+          async ({ system, user }): Promise<string | null> => {
+            try {
+              const result = await callProvider(
+                runtime.provider,
+                runtime.credential,
+                runtime.model,
+                [
+                  { role: "system", content: system },
+                  { role: "user", content: user },
+                ],
+                () => undefined,
+                getProxy(),
+                {
+                  requestTimeoutMs: 60000,
+                  idleTimeoutMs: 30000,
+                  maxTokens: 4096,
+                },
+              );
+              return result.success && result.content ? result.content : null;
+            } catch {
+              return null;
+            }
+          },
+        );
+        const elapsedMs = Date.now() - startedAt;
+        if (consolidated !== argGraphRef.current) {
+          setArgGraph(consolidated);
+          apiLogger.log(
+            "info",
+            runtime.provider,
+            "argmap: consolidation pass landed structural change",
+            {
+              nodes: consolidated.nodes.length,
+              edges: consolidated.edges.length,
+              clusters: consolidated.clusters.length,
+              orphans: consolidated.orphans.length,
+              axis: consolidated.axis?.name ?? null,
+              consolidationVersion: consolidated.consolidationVersion,
+              elapsedMs,
+            },
+          );
+        } else {
+          apiLogger.log(
+            "info",
+            runtime.provider,
+            "argmap: consolidation pass produced no structural change",
+            { elapsedMs },
+          );
+        }
+        // Always advance the watermark so we don't burn tokens re-running on
+        // the same message window.
+        argmapConsolidatorLastMessageCountRef.current = councilCount;
+      } catch (error) {
+        apiLogger.log("warn", "argmap", "consolidation failed", {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      } finally {
+        argmapConsolidatorBusyRef.current = false;
+      }
+    },
+    [pickExtractorRuntime, getProxy, topic],
+  );
+
+  // Auto-trigger: re-evaluate on every message change AND every time the
+  // per-message extractor transitions out of busy. The callback gates on
+  // (count - lastCount) ≥ ARGMAP_CONSOLIDATION_INTERVAL, so this is cheap
+  // when nothing is due.
+  useEffect(() => {
+    void runArgmapConsolidation(false);
+  }, [messages, argmapBusy, runArgmapConsolidation, argmapConsolidatorTrigger]);
+
+  // Debug hook (Phase 2). Phase 3 surfaces a visible "Consolidate now"
+  // button on the panel; until then, type `__argmapConsolidate()` in the
+  // devtools console to force a pass.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const w = window as unknown as { __argmapConsolidate?: () => void };
+    w.__argmapConsolidate = () => {
+      void runArgmapConsolidation(true);
+      setArgmapConsolidatorTrigger((n) => n + 1);
+    };
+    return () => {
+      delete w.__argmapConsolidate;
+    };
+  }, [runArgmapConsolidation]);
 
   const argmapStatus: "no-credential" | "extracting" | "empty" | "failed" =
     !pickExtractorRuntime()
