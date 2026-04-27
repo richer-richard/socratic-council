@@ -35,6 +35,7 @@
     "graphology-communities-louvain": "^2.0.2",
     "graphology-metrics": "^2.4.0",
     "highlight.js": "^11.11.1",
+    "html-to-image": "^1.11.13",
     "jspdf": "^4.1.0",
     "katex": "^0.16.28",
     "mammoth": "^1.10.0",

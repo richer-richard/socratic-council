@@ -16,6 +16,11 @@
 
 import { strFromU8, strToU8, unzipSync, zipSync } from "fflate";
 
+import {
+  exportArgGraphToJSON,
+  exportArgGraphToMermaid,
+} from "@socratic-council/core";
+
 import { loadDiscussionSession, saveDiscussionSession, type DiscussionSession } from "./sessions";
 
 export const BUNDLE_SCHEMA_VERSION = 1;
@@ -89,6 +94,14 @@ export function exportBundle({
     files[`${ATTACHMENT_DIR}${id}.json`] = strToU8(
       JSON.stringify({ id: a.id, name: a.name, mimeType: a.mimeType }),
     );
+  }
+
+  // Phase 5 of the argmap rewrite — when the session has a live argument
+  // map, drop the deterministic JSON + Mermaid renders into the bundle so
+  // recipients can view the structure without rerunning the extractor.
+  if (session.argGraph) {
+    files["argmap.json"] = strToU8(exportArgGraphToJSON(session.argGraph));
+    files["argmap.mmd"] = strToU8(exportArgGraphToMermaid(session.argGraph));
   }
 
   return zipSync(files);

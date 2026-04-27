@@ -151,6 +151,55 @@ describe("bundle — export/import round-trip", () => {
     expect(() => parseBundle(junk)).toThrow(/valid zip archive/i);
   });
 
+  it("includes argmap.json + argmap.mmd when the session has an ArgGraph", () => {
+    const session: DiscussionSession = {
+      ...tinySession(),
+      argGraph: {
+        nodes: [
+          {
+            id: "c_0",
+            kind: "claim",
+            text: "Test that exports survive a bundle round-trip.",
+            aliases: [],
+            sources: [
+              { messageId: "m1", agentId: "george", timestamp: 1 },
+            ],
+            strength: 0.6,
+            status: "active",
+            sourceMessageId: "m1",
+            sourceAgentId: "george",
+          },
+        ],
+        edges: [],
+        clusters: [],
+        orphans: [],
+        lastMessageId: "m1",
+        consolidationVersion: 1,
+        schemaVersion: 2,
+      },
+    };
+    const bytes = exportBundle({ session, attachments: new Map() });
+    const { strFromU8, unzipSync } = require("fflate") as typeof import("fflate");
+    const entries = unzipSync(bytes);
+    expect(entries["argmap.json"]).toBeDefined();
+    expect(entries["argmap.mmd"]).toBeDefined();
+    const json = strFromU8(entries["argmap.json"]!);
+    expect(json).toContain('"schemaVersion": 2');
+    expect(json).toContain("c_0");
+    const mmd = strFromU8(entries["argmap.mmd"]!);
+    expect(mmd).toContain("graph TD");
+    expect(mmd).toContain("c_0");
+  });
+
+  it("omits argmap artifacts when the session has no ArgGraph", () => {
+    const session = tinySession();
+    const bytes = exportBundle({ session, attachments: new Map() });
+    const { unzipSync } = require("fflate") as typeof import("fflate");
+    const entries = unzipSync(bytes);
+    expect(entries["argmap.json"]).toBeUndefined();
+    expect(entries["argmap.mmd"]).toBeUndefined();
+  });
+
   it("rejects bundles missing the session payload", () => {
     const {
       strFromU8,

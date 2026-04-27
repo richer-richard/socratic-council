@@ -13,10 +13,17 @@
  * surfaces every source, every incoming/outgoing edge with rationale,
  * and per-source "Jump" + "Re-extract" affordances.
  */
-import { ReactFlowProvider } from "@xyflow/react";
+import { ReactFlowProvider, useReactFlow } from "@xyflow/react";
 import { useEffect, useMemo, useState } from "react";
 
-import type { ArgGraph } from "@socratic-council/core";
+import {
+  exportArgGraphToJSON,
+  exportArgGraphToMermaid,
+  type ArgGraph,
+} from "@socratic-council/core";
+
+import { exportArgGraphSvg, exportArgGraphPng } from "./argumentMap/imageExport";
+import { downloadBytes, downloadText } from "./argumentMap/download";
 
 import { applyFilters } from "./argumentMap/filters";
 import { computeSpineNodeIds } from "./argumentMap/centrality";
@@ -256,6 +263,7 @@ function ArgumentMapPanelInner({
 
       <Footer
         graph={graph}
+        view={view}
         onConsolidate={onConsolidate}
         onRetryExtraction={
           onRetryExtraction && selectedNode
@@ -507,6 +515,7 @@ function Tabs({
 
 function Footer({
   graph,
+  view,
   onConsolidate,
   onRetryExtraction,
   onExport,
@@ -514,12 +523,51 @@ function Footer({
   setExportOpen,
 }: {
   graph: ArgGraph;
+  view: PanelView;
   onConsolidate?: () => void;
   onRetryExtraction?: () => void;
   onExport?: (format: "mermaid" | "json" | "svg" | "png") => void;
   exportOpen: boolean;
   setExportOpen: (b: boolean) => void;
 }) {
+  const flow = useReactFlow();
+  const [busyFormat, setBusyFormat] = useState<string | null>(null);
+
+  const handleExport = async (format: "mermaid" | "json" | "svg" | "png") => {
+    if (busyFormat) return;
+    if (onExport) {
+      // External override wins — typically for testing or alternative
+      // save flows. Panel still closes the popover.
+      onExport(format);
+      setExportOpen(false);
+      return;
+    }
+    setBusyFormat(format);
+    try {
+      const baseName = `argmap-v${graph.consolidationVersion}-${graph.nodes.length}n${graph.edges.length}e`;
+      if (format === "mermaid") {
+        downloadText(`${baseName}.mmd`, exportArgGraphToMermaid(graph), "text/plain");
+      } else if (format === "json") {
+        downloadText(`${baseName}.json`, exportArgGraphToJSON(graph), "application/json");
+      } else if (format === "svg") {
+        // Snapshot is meaningful only when the user is on the Graph tab —
+        // the other tabs render a totally different layout. Best-effort
+        // path otherwise: snapshot whatever the panel is showing.
+        const svg = await exportArgGraphSvg(flow, view);
+        downloadText(`${baseName}.svg`, svg, "image/svg+xml");
+      } else if (format === "png") {
+        const blob = await exportArgGraphPng(flow, view);
+        downloadBytes(`${baseName}.png`, blob);
+      }
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error("[argmap export] failed:", err);
+    } finally {
+      setBusyFormat(null);
+      setExportOpen(false);
+    }
+  };
+
   return (
     <footer
       style={{
@@ -559,50 +607,50 @@ function Footer({
       >
         v{graph.consolidationVersion}
       </span>
-      {onExport && (
-        <div style={{ position: "relative" }}>
-          <button
-            type="button"
-            onClick={() => setExportOpen(!exportOpen)}
-            style={footerButtonStyle}
+      <div style={{ position: "relative" }}>
+        <button
+          type="button"
+          onClick={() => setExportOpen(!exportOpen)}
+          style={footerButtonStyle}
+          disabled={graph.nodes.length === 0}
+        >
+          Export ▾
+        </button>
+        {exportOpen && (
+          <div
+            style={{
+              position: "absolute",
+              bottom: "calc(100% + 4px)",
+              right: 0,
+              background: "rgba(18, 16, 14, 0.96)",
+              border: `1px solid rgba(${ARGMAP_GOLD}, 0.2)`,
+              borderRadius: 6,
+              padding: 4,
+              display: "flex",
+              flexDirection: "column",
+              gap: 2,
+              minWidth: 120,
+              zIndex: 60,
+              boxShadow: "0 8px 22px -10px rgba(0,0,0,0.6)",
+            }}
           >
-            Export ▾
-          </button>
-          {exportOpen && (
-            <div
-              style={{
-                position: "absolute",
-                bottom: "calc(100% + 4px)",
-                right: 0,
-                background: "rgba(18, 16, 14, 0.96)",
-                border: `1px solid rgba(${ARGMAP_GOLD}, 0.2)`,
-                borderRadius: 6,
-                padding: 4,
-                display: "flex",
-                flexDirection: "column",
-                gap: 2,
-                minWidth: 120,
-                zIndex: 60,
-                boxShadow: "0 8px 22px -10px rgba(0,0,0,0.6)",
-              }}
-            >
-              {(["mermaid", "json", "svg", "png"] as const).map((fmt) => (
-                <button
-                  key={fmt}
-                  type="button"
-                  onClick={() => {
-                    onExport(fmt);
-                    setExportOpen(false);
-                  }}
-                  style={exportItemStyle}
-                >
-                  {fmt}
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
+            {(["mermaid", "json", "svg", "png"] as const).map((fmt) => (
+              <button
+                key={fmt}
+                type="button"
+                onClick={() => void handleExport(fmt)}
+                disabled={busyFormat !== null}
+                style={{
+                  ...exportItemStyle,
+                  opacity: busyFormat === fmt ? 0.6 : 1,
+                }}
+              >
+                {busyFormat === fmt ? "saving…" : fmt}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
     </footer>
   );
 }
