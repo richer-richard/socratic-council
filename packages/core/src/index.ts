@@ -40,3 +40,4 @@ export * from "./semanticBidding.js";
 export * from "./reflection.js";
 export * from "./factcheck.js";
 export * from "./argmap.js";
+export * from "./argmap.export.js";
