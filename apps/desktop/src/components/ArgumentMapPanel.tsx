@@ -58,6 +58,22 @@ export function ArgumentMapPanel({
   const claims = useMemo(() => nodes.filter((n) => n.kind === "claim"), [nodes]);
   const evidence = useMemo(() => nodes.filter((n) => n.kind === "evidence"), [nodes]);
   const rebuttals = useMemo(() => nodes.filter((n) => n.kind === "rebuttal"), [nodes]);
+  // v2 introduced six more node kinds. Phase 1 shim: treat the standalone
+  // ones (question/assumption/definition/proposal) as additional row drivers
+  // alongside claims so they don't disappear from the panel before Phase 3
+  // replaces this layout entirely.
+  const rowNodes = useMemo(
+    () =>
+      nodes.filter(
+        (n) =>
+          n.kind === "claim" ||
+          n.kind === "question" ||
+          n.kind === "assumption" ||
+          n.kind === "definition" ||
+          n.kind === "proposal",
+      ),
+    [nodes],
+  );
 
   // Index messages by id once for O(1) timestamp + order lookups.
   const messageIndex = useMemo(() => {
@@ -80,14 +96,14 @@ export function ArgumentMapPanel({
     return map;
   }, [edges, nodes]);
 
-  // Sort claims chronologically by source-message index. Claims whose source
-  // message isn't in the index (rare — happens transiently while a session
-  // is loading) sink to the end so they don't block the layout.
+  // Sort row nodes chronologically by source-message index. Nodes whose
+  // source message isn't in the index (rare — happens transiently while a
+  // session is loading) sink to the end so they don't block the layout.
   const orderedClaims = useMemo(() => {
     const orderOf = (n: ArgNode) =>
       messageIndex.get(n.sourceMessageId)?.index ?? Number.MAX_SAFE_INTEGER;
-    return [...claims].sort((a, b) => orderOf(a) - orderOf(b));
-  }, [claims, messageIndex]);
+    return [...rowNodes].sort((a, b) => orderOf(a) - orderOf(b));
+  }, [rowNodes, messageIndex]);
 
   return (
     <aside
@@ -305,8 +321,16 @@ function TimelineGraph({
 
       {claims.map((claim) => {
         const connections = connectionsFor(claim.id);
-        const evidenceConns = connections.filter((c) => c.relation === "supports");
-        const rebuttalConns = connections.filter((c) => c.relation === "rebuts");
+        // v2 shim: premises (depends-on) sit on the evidence side; concessions
+        // (concedes) sit on the rebuttal side. Peer relations (agrees,
+        // contradicts, restates, refines, answers, addresses) stay hidden in
+        // Phase 1 — Phase 3's graph view surfaces them.
+        const evidenceConns = connections.filter(
+          (c) => c.relation === "supports" || c.relation === "depends-on",
+        );
+        const rebuttalConns = connections.filter(
+          (c) => c.relation === "rebuts" || c.relation === "concedes",
+        );
         const sourceTimestamp = messageIndex.get(claim.sourceMessageId)?.timestamp ?? null;
         return (
           <ClaimRow
@@ -521,7 +545,8 @@ function ClaimRow({
               fontFamily: "'JetBrains Mono', ui-monospace, monospace",
             }}
           >
-            Claim · {claim.sourceAgentId}
+            {claim.kind === "claim" ? "Claim" : claim.kind.toUpperCase()} ·{" "}
+            {claim.sourceAgentId}
           </div>
           <div
             style={{

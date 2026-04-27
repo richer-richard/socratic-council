@@ -5162,8 +5162,17 @@ Write the official moderator wrap-up in 4 short sentences:
       );
       const priorClaims = graph.nodes
         .filter((n) => n.kind === "claim")
-        .slice(-12)
+        .slice(-16)
+        .map((n) => ({
+          id: n.id,
+          text: n.text,
+          ...(n.stance ? { polarity: n.stance.polarity } : {}),
+        }));
+      const openQuestions = graph.nodes
+        .filter((n) => n.kind === "question")
+        .slice(-8)
         .map((n) => ({ id: n.id, text: n.text }));
+      const clusterLabels = graph.clusters.map((c) => c.label);
       const cleanedText = stripQuoteTokens(message.content).slice(0, 4000);
       if (!cleanedText.trim()) return;
 
@@ -5175,6 +5184,9 @@ Write the official moderator wrap-up in 4 short sentences:
         messageText: cleanedText,
         priorAgentNames,
         priorClaims,
+        ...(graph.axis ? { axis: graph.axis } : {}),
+        ...(clusterLabels.length > 0 ? { clusterLabels } : {}),
+        ...(openQuestions.length > 0 ? { openQuestions } : {}),
       });
 
       const startedAt = Date.now();
@@ -5224,7 +5236,13 @@ Write the official moderator wrap-up in 4 short sentences:
         if (fragments.length === 0) {
           setArgGraph((prev) => ({ ...prev, lastMessageId: messageId }));
         } else {
-          setArgGraph((prev) => updateArgumentMap(prev, fragments, { messageId, agentId }));
+          setArgGraph((prev) =>
+            updateArgumentMap(prev, fragments, {
+              messageId,
+              agentId,
+              timestamp: message.timestamp,
+            }),
+          );
         }
         setArgmapLastError(null);
       } catch (error) {
