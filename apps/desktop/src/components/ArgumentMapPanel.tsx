@@ -14,12 +14,16 @@
  * and per-source "Jump" + "Re-extract" affordances.
  */
 import { ReactFlowProvider, useReactFlow } from "@xyflow/react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import {
+  ARG_EDGE_RELATIONS,
+  ARG_NODE_KINDS,
   exportArgGraphToJSON,
   exportArgGraphToMermaid,
+  type ArgEdgeRelation,
   type ArgGraph,
+  type ArgNodeKind,
 } from "@socratic-council/core";
 
 import { exportArgGraphSvg, exportArgGraphPng } from "./argumentMap/imageExport";
@@ -28,7 +32,12 @@ import { downloadBytes, downloadText } from "./argumentMap/download";
 import { applyFilters } from "./argumentMap/filters";
 import { computeSpineNodeIds } from "./argumentMap/centrality";
 import { FilterBar } from "./argumentMap/FilterBar";
-import { ARGMAP_GOLD, ARGMAP_GOLD_HEX } from "./argumentMap/kindStyle";
+import {
+  ARGMAP_GOLD,
+  ARGMAP_GOLD_HEX,
+  styleFor,
+  styleForRelation,
+} from "./argumentMap/kindStyle";
 import { SelectionDrawer } from "./argumentMap/SelectionDrawer";
 import {
   DEFAULT_FILTERS,
@@ -57,6 +66,12 @@ export interface ArgumentMapPanelProps {
   onConsolidate?: () => void;
   /** Phase 5 export hooks. Optional today; the popover hides if undefined. */
   onExport?: (format: "mermaid" | "json" | "svg" | "png") => void;
+  /**
+   * Drag-to-pin persistence. Fires when the user drags a node to a new
+   * position in the Graph view. The host folds the override into
+   * `argGraph.layoutOverrides[id]` so the position survives reload.
+   */
+  onLayoutOverride?: (nodeId: string, position: { x: number; y: number }) => void;
   onClose: () => void;
   onNavigateToMessage?: (messageId: string) => void;
   agentColors?: Record<string, string>;
@@ -81,6 +96,34 @@ export function ArgumentMapPanel(props: ArgumentMapPanelProps) {
   );
 }
 
+const PANEL_WIDTH_KEY = "socratic-council-argmap-panel-width-v1";
+const PANEL_FULLSCREEN_KEY = "socratic-council-argmap-fullscreen-v1";
+const PANEL_DEFAULT_WIDTH = 620;
+const PANEL_MIN_WIDTH = 420;
+const PANEL_MAX_WIDTH_VW = 0.85;
+
+function readStoredPanelWidth(): number {
+  try {
+    const raw = localStorage.getItem(PANEL_WIDTH_KEY);
+    if (!raw) return PANEL_DEFAULT_WIDTH;
+    const parsed = Number.parseInt(raw, 10);
+    if (!Number.isFinite(parsed) || parsed < PANEL_MIN_WIDTH) {
+      return PANEL_DEFAULT_WIDTH;
+    }
+    return parsed;
+  } catch {
+    return PANEL_DEFAULT_WIDTH;
+  }
+}
+
+function readStoredFullscreen(): boolean {
+  try {
+    return localStorage.getItem(PANEL_FULLSCREEN_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
 function ArgumentMapPanelInner({
   graph,
   status = "empty",
@@ -90,6 +133,7 @@ function ArgumentMapPanelInner({
   onRetryExtraction,
   onConsolidate,
   onExport,
+  onLayoutOverride,
   onClose,
   onNavigateToMessage,
   agentColors = {},
@@ -100,10 +144,67 @@ function ArgumentMapPanelInner({
   const [filters, setFilters] = useState<PanelFilters>(DEFAULT_FILTERS);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [exportOpen, setExportOpen] = useState(false);
+  const [legendOpen, setLegendOpen] = useState(false);
   // Phase 4 — clicking the "{n} ⚡" pill toggles a focus mode that filters
   // the visible subgraph to only nodes touched by a contradicts edge AND
   // jumps to the Graph tab. Click again to clear.
   const [contradictionFocus, setContradictionFocus] = useState(false);
+
+  // Resizable + fullscreen state (Phase "make it beautiful"). Width and
+  // mode persist to localStorage so the user's chosen size sticks across
+  // sessions. Min width keeps the chrome legible; max caps at 85vw so the
+  // user can't accidentally drag the panel off-screen.
+  const [panelWidth, setPanelWidth] = useState<number>(readStoredPanelWidth);
+  const [isFullscreen, setIsFullscreen] = useState<boolean>(readStoredFullscreen);
+  const dragStartRef = useRef<{ x: number; width: number } | null>(null);
+
+  // Persist width/fullscreen on every change. localStorage writes are
+  // synchronous and fast; debouncing only matters at extreme drag rates
+  // and the cost is fine in practice.
+  useEffect(() => {
+    try {
+      localStorage.setItem(PANEL_WIDTH_KEY, String(panelWidth));
+    } catch {
+      /* quota exhaustion / sandboxed env — accept the loss */
+    }
+  }, [panelWidth]);
+  useEffect(() => {
+    try {
+      localStorage.setItem(PANEL_FULLSCREEN_KEY, isFullscreen ? "1" : "0");
+    } catch {
+      /* see above */
+    }
+  }, [isFullscreen]);
+
+  const handleResizeMouseDown = (e: React.MouseEvent) => {
+    if (isFullscreen) return; // resizing is disabled while fullscreen
+    e.preventDefault();
+    dragStartRef.current = { x: e.clientX, width: panelWidth };
+    document.body.style.cursor = "ew-resize";
+    const onMove = (ev: MouseEvent) => {
+      if (!dragStartRef.current) return;
+      // Panel is right-docked: a leftward drag (smaller clientX) widens.
+      const delta = dragStartRef.current.x - ev.clientX;
+      const next = Math.max(
+        PANEL_MIN_WIDTH,
+        Math.min(
+          window.innerWidth * PANEL_MAX_WIDTH_VW,
+          dragStartRef.current.width + delta,
+        ),
+      );
+      setPanelWidth(next);
+    };
+    const onUp = () => {
+      document.body.style.cursor = "";
+      dragStartRef.current = null;
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+    };
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
+  };
+
+  const toggleFullscreen = () => setIsFullscreen((v) => !v);
 
   // ⌘F focuses the search input when the panel is the active surface.
   useEffect(() => {
@@ -187,6 +288,7 @@ function ArgumentMapPanelInner({
     onSelect: setSelectedNodeId,
     onNavigateToMessage,
     search: filters.search,
+    onLayoutOverride,
   };
 
   return (
@@ -194,10 +296,11 @@ function ArgumentMapPanelInner({
       aria-label="Argument map"
       style={{
         position: "fixed",
-        top: 0,
-        right: 0,
-        bottom: 0,
-        width: "min(560px, 50vw)",
+        top: isFullscreen ? "5vh" : 0,
+        right: isFullscreen ? "5vw" : 0,
+        bottom: isFullscreen ? "5vh" : 0,
+        width: isFullscreen ? "90vw" : `${panelWidth}px`,
+        maxWidth: `${PANEL_MAX_WIDTH_VW * 100}vw`,
         zIndex: 40,
         display: "flex",
         flexDirection: "column",
@@ -205,12 +308,39 @@ function ArgumentMapPanelInner({
           "linear-gradient(180deg, rgba(24, 22, 18, 0.92) 0%, rgba(12, 11, 16, 0.96) 100%)",
         backdropFilter: "blur(14px)",
         borderLeft: `1px solid rgba(${ARGMAP_GOLD}, 0.2)`,
+        borderRadius: isFullscreen ? "12px" : 0,
         boxShadow: "-24px 0 60px -18px rgba(0, 0, 0, 0.55)",
         fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
         color: "rgba(232, 232, 239, 0.92)",
         animation: "argmap-slide-in 240ms cubic-bezier(0.2, 0.7, 0.2, 1) both",
       }}
     >
+      {!isFullscreen && (
+        <div
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Resize argument map panel"
+          onMouseDown={handleResizeMouseDown}
+          style={{
+            position: "absolute",
+            top: 0,
+            left: 0,
+            bottom: 0,
+            width: "6px",
+            cursor: "ew-resize",
+            background: "transparent",
+            transition: "background 120ms ease",
+            zIndex: 41,
+          }}
+          onMouseEnter={(e) => {
+            (e.target as HTMLDivElement).style.background = `rgba(${ARGMAP_GOLD}, 0.18)`;
+          }}
+          onMouseLeave={(e) => {
+            (e.target as HTMLDivElement).style.background = "transparent";
+          }}
+        />
+      )}
+
       <Header
         claimsCount={claimsCount}
         totalEdges={totalEdges}
@@ -223,6 +353,9 @@ function ArgumentMapPanelInner({
           setContradictionFocus(next);
           if (next) setView("graph");
         }}
+        isFullscreen={isFullscreen}
+        onToggleFullscreen={toggleFullscreen}
+        onShowLegend={() => setLegendOpen(true)}
       />
 
       <Tabs view={view} setView={setView} />
@@ -275,6 +408,8 @@ function ArgumentMapPanelInner({
         setExportOpen={setExportOpen}
       />
 
+      {legendOpen && <LegendPopover onClose={() => setLegendOpen(false)} />}
+
       <style>{`
         @keyframes argmap-slide-in {
           from { opacity: 0; transform: translateX(12px); }
@@ -287,12 +422,6 @@ function ArgumentMapPanelInner({
         @keyframes argmap-fade-in {
           from { opacity: 0; transform: translateY(4px); }
           to { opacity: 1; transform: translateY(0); }
-        }
-        @media (prefers-reduced-motion: reduce) {
-          aside, .argmap-fade-in, .react-flow__node {
-            animation: none !important;
-            transition: none !important;
-          }
         }
         /* Re-color react-flow chrome to match the panel palette. */
         .react-flow__controls button {
@@ -320,6 +449,9 @@ function Header({
   contradictionsCount,
   contradictionFocus,
   onToggleContradictionFocus,
+  isFullscreen,
+  onToggleFullscreen,
+  onShowLegend,
 }: {
   claimsCount: number;
   totalEdges: number;
@@ -328,6 +460,9 @@ function Header({
   contradictionsCount?: number;
   contradictionFocus: boolean;
   onToggleContradictionFocus: () => void;
+  isFullscreen: boolean;
+  onToggleFullscreen: () => void;
+  onShowLegend: () => void;
 }) {
   return (
     <header
@@ -397,23 +532,82 @@ function Header({
           {busy && <UpdatingPill />}
         </div>
       </div>
-      <button
-        type="button"
-        aria-label="Close argument map"
-        onClick={onClose}
-        style={{
-          padding: "5px 10px",
-          border: "1px solid rgba(232, 232, 239, 0.14)",
-          background: "transparent",
-          color: "rgba(232, 232, 239, 0.6)",
-          borderRadius: 6,
-          cursor: "pointer",
-          fontSize: "0.72rem",
-          fontFamily: "'JetBrains Mono', ui-monospace, monospace",
-        }}
-      >
-        ✕
-      </button>
+      <div style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+        <button
+          type="button"
+          aria-label="Show argument map legend"
+          onClick={onShowLegend}
+          title="Reference: what each node kind and edge relation means"
+          style={{
+            width: 28,
+            height: 28,
+            border: "1px solid rgba(232, 232, 239, 0.14)",
+            background: "transparent",
+            color: "rgba(232, 232, 239, 0.7)",
+            borderRadius: 6,
+            cursor: "pointer",
+            fontSize: "0.82rem",
+            fontFamily: "'Manrope', sans-serif",
+            display: "inline-flex",
+            alignItems: "center",
+            justifyContent: "center",
+            lineHeight: 1,
+          }}
+        >
+          ?
+        </button>
+        <button
+          type="button"
+          aria-label={isFullscreen ? "Exit fullscreen" : "Expand to fullscreen"}
+          onClick={onToggleFullscreen}
+          title={isFullscreen ? "Exit fullscreen" : "Expand to fullscreen"}
+          style={{
+            width: 28,
+            height: 28,
+            border: "1px solid rgba(232, 232, 239, 0.14)",
+            background: isFullscreen ? "rgba(245, 197, 66, 0.08)" : "transparent",
+            color: "rgba(232, 232, 239, 0.7)",
+            borderRadius: 6,
+            cursor: "pointer",
+            display: "inline-flex",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          {isFullscreen ? (
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <polyline points="6 3 6 6 3 6" />
+              <polyline points="10 3 10 6 13 6" />
+              <polyline points="6 13 6 10 3 10" />
+              <polyline points="10 13 10 10 13 10" />
+            </svg>
+          ) : (
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <polyline points="3 6 3 3 6 3" />
+              <polyline points="13 6 13 3 10 3" />
+              <polyline points="3 10 3 13 6 13" />
+              <polyline points="13 10 13 13 10 13" />
+            </svg>
+          )}
+        </button>
+        <button
+          type="button"
+          aria-label="Close argument map"
+          onClick={onClose}
+          style={{
+            padding: "5px 10px",
+            border: "1px solid rgba(232, 232, 239, 0.14)",
+            background: "transparent",
+            color: "rgba(232, 232, 239, 0.6)",
+            borderRadius: 6,
+            cursor: "pointer",
+            fontSize: "0.72rem",
+            fontFamily: "'JetBrains Mono', ui-monospace, monospace",
+          }}
+        >
+          ✕
+        </button>
+      </div>
     </header>
   );
 }
@@ -751,6 +945,304 @@ function EmptyState({
           Retry
         </button>
       )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Legend popover — reference for the 9 node kinds + 10 edge relations
+// ---------------------------------------------------------------------------
+
+const KIND_DEFINITIONS: Record<ArgNodeKind, string> = {
+  claim: "A position someone commits to.",
+  premise: "A sub-statement supporting a claim.",
+  evidence: "A concrete example, citation, or named case backing a claim.",
+  rebuttal: "Direct pushback against a prior claim.",
+  concession: "Yielding ground to a counter-point.",
+  question: "An open question raised but not yet answered.",
+  assumption: "An unstated belief the argument depends on.",
+  definition: "A clarification of what a key term means.",
+  proposal: "A concrete suggested action or course of action.",
+};
+
+const RELATION_DEFINITIONS: Record<ArgEdgeRelation, string> = {
+  supports: "Backing evidence for a claim.",
+  rebuts: "A rebuttal contradicts a claim.",
+  concedes: "A concession yields ground to a claim.",
+  restates: "Same proposition, different wording.",
+  refines: "A sharper version of an earlier claim.",
+  agrees: "Peer agreement (different speaker, same direction).",
+  contradicts: "Logical incompatibility between two claims.",
+  "depends-on": "One claim presupposes another.",
+  answers: "This fragment resolves an open question.",
+  addresses: "Engages a question without fully resolving it.",
+};
+
+function LegendPopover({ onClose }: { onClose: () => void }) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="Argument map legend"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+      style={{
+        position: "fixed",
+        inset: 0,
+        zIndex: 60,
+        background: "rgba(0, 0, 0, 0.55)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: "5vh 4vw",
+      }}
+    >
+      <div
+        style={{
+          maxWidth: 760,
+          width: "100%",
+          maxHeight: "90vh",
+          overflowY: "auto",
+          padding: 24,
+          borderRadius: 12,
+          background:
+            "linear-gradient(180deg, rgba(24, 22, 18, 0.98) 0%, rgba(12, 11, 16, 0.99) 100%)",
+          border: `1px solid rgba(${ARGMAP_GOLD}, 0.28)`,
+          boxShadow: "0 30px 80px -20px rgba(0, 0, 0, 0.7)",
+          color: "rgba(232, 232, 239, 0.92)",
+          fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "baseline",
+            marginBottom: 18,
+          }}
+        >
+          <div>
+            <h3
+              style={{
+                margin: 0,
+                fontSize: "1rem",
+                fontWeight: 600,
+                color: ARGMAP_GOLD_HEX,
+              }}
+            >
+              Argument map legend
+            </h3>
+            <p
+              style={{
+                margin: "6px 0 0",
+                fontSize: "0.78rem",
+                color: "rgba(232, 232, 239, 0.55)",
+                lineHeight: 1.5,
+              }}
+            >
+              Every fragment the council produces is classified into one of nine
+              node kinds and connected via one of ten edge relations.
+            </p>
+          </div>
+          <button
+            type="button"
+            aria-label="Close legend"
+            onClick={onClose}
+            style={{
+              padding: "4px 9px",
+              border: "1px solid rgba(232, 232, 239, 0.14)",
+              background: "transparent",
+              color: "rgba(232, 232, 239, 0.6)",
+              borderRadius: 6,
+              cursor: "pointer",
+              fontSize: "0.72rem",
+              fontFamily: "'JetBrains Mono', ui-monospace, monospace",
+            }}
+          >
+            ✕
+          </button>
+        </div>
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "1fr 1fr",
+            gap: 24,
+          }}
+        >
+          <section>
+            <div
+              style={{
+                fontSize: "0.62rem",
+                fontWeight: 600,
+                letterSpacing: "0.22em",
+                textTransform: "uppercase",
+                color: `rgba(${ARGMAP_GOLD}, 0.78)`,
+                marginBottom: 10,
+                fontFamily: "'JetBrains Mono', ui-monospace, monospace",
+              }}
+            >
+              Node kinds ({ARG_NODE_KINDS.length})
+            </div>
+            <ul
+              style={{
+                margin: 0,
+                padding: 0,
+                listStyle: "none",
+                display: "flex",
+                flexDirection: "column",
+                gap: 12,
+              }}
+            >
+              {ARG_NODE_KINDS.map((kind) => {
+                const style = styleFor(kind);
+                return (
+                  <li
+                    key={kind}
+                    style={{ display: "flex", alignItems: "flex-start", gap: 10 }}
+                  >
+                    <span
+                      aria-hidden="true"
+                      style={{
+                        flexShrink: 0,
+                        width: 18,
+                        height: 18,
+                        marginTop: 2,
+                        borderRadius: style.variant === "square" ? 3 : style.radius,
+                        background: `rgba(${style.accentRgb}, 0.18)`,
+                        border: `1px solid rgba(${style.accentRgb}, 0.6)`,
+                        transform:
+                          style.variant === "diamond"
+                            ? "rotate(45deg) scale(0.74)"
+                            : undefined,
+                      }}
+                    />
+                    <div style={{ flex: 1 }}>
+                      <div
+                        style={{
+                          fontSize: "0.78rem",
+                          fontWeight: 500,
+                          color: `rgba(${style.accentRgb}, 1)`,
+                        }}
+                      >
+                        {style.symbol} {style.label}
+                      </div>
+                      <div
+                        style={{
+                          fontSize: "0.74rem",
+                          color: "rgba(232, 232, 239, 0.55)",
+                          lineHeight: 1.45,
+                        }}
+                      >
+                        {KIND_DEFINITIONS[kind]}
+                      </div>
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          </section>
+          <section>
+            <div
+              style={{
+                fontSize: "0.62rem",
+                fontWeight: 600,
+                letterSpacing: "0.22em",
+                textTransform: "uppercase",
+                color: `rgba(${ARGMAP_GOLD}, 0.78)`,
+                marginBottom: 10,
+                fontFamily: "'JetBrains Mono', ui-monospace, monospace",
+              }}
+            >
+              Edge relations ({ARG_EDGE_RELATIONS.length})
+            </div>
+            <ul
+              style={{
+                margin: 0,
+                padding: 0,
+                listStyle: "none",
+                display: "flex",
+                flexDirection: "column",
+                gap: 12,
+              }}
+            >
+              {ARG_EDGE_RELATIONS.map((relation) => {
+                const style = styleForRelation(relation);
+                return (
+                  <li
+                    key={relation}
+                    style={{ display: "flex", alignItems: "flex-start", gap: 10 }}
+                  >
+                    <span
+                      aria-hidden="true"
+                      style={{
+                        flexShrink: 0,
+                        width: 28,
+                        height: 16,
+                        marginTop: 2,
+                      }}
+                    >
+                      <svg
+                        width="28"
+                        height="16"
+                        viewBox="0 0 28 16"
+                        style={{ overflow: "visible" }}
+                      >
+                        <line
+                          x1="2"
+                          y1="8"
+                          x2="24"
+                          y2="8"
+                          stroke={`rgb(${style.rgb})`}
+                          strokeWidth="1.6"
+                          strokeLinecap="round"
+                          strokeDasharray={style.dashed ? "4 3" : undefined}
+                        />
+                        <polyline
+                          points="20,5 24,8 20,11"
+                          fill="none"
+                          stroke={`rgb(${style.rgb})`}
+                          strokeWidth="1.6"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        />
+                      </svg>
+                    </span>
+                    <div style={{ flex: 1 }}>
+                      <div
+                        style={{
+                          fontSize: "0.78rem",
+                          fontWeight: 500,
+                          color: `rgb(${style.rgb})`,
+                        }}
+                      >
+                        {style.label}
+                      </div>
+                      <div
+                        style={{
+                          fontSize: "0.74rem",
+                          color: "rgba(232, 232, 239, 0.55)",
+                          lineHeight: 1.45,
+                        }}
+                      >
+                        {RELATION_DEFINITIONS[relation]}
+                      </div>
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          </section>
+        </div>
+      </div>
     </div>
   );
 }

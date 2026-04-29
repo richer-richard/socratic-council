@@ -56,10 +56,50 @@ describe("exportArgGraphToMermaid", () => {
     expect(out).toContain('e_2("OECD 2022 study shows productivity gains.")');
     // Edges render with relation labels.
     expect(out).toContain("e_2 -->|supports| c_0");
-    expect(out).toContain("c_0 <-.->|contradicts| c_1");
+    expect(out).toContain("c_0 <-->|contradicts| c_1");
+    // Guard: legacy non-standard tokens must never appear (mermaid.live and
+    // GitHub silently fail to parse them).
+    expect(out).not.toContain("<-.->");
+    expect(out).not.toMatch(/\b===\b/);
     // Status classDefs declared.
     expect(out).toContain("classDef withdrawn");
     expect(out).toContain("classDef superseded");
+  });
+
+  it("renders agrees edges with a labeled forward arrow (no triple-equals)", () => {
+    let g: ArgGraph = emptyGraph();
+    g = updateArgumentMap(
+      g,
+      [
+        { kind: "claim", text: "Renewables scale faster than nuclear." },
+        { kind: "claim", text: "Renewables scale faster than nuclear." },
+      ],
+      { messageId: "m1", agentId: "george", timestamp: 1 },
+    );
+    g = updateArgumentMap(
+      g,
+      [
+        {
+          kind: "edge",
+          from: "c_0",
+          to: "c_0",
+          relation: "agrees",
+          confidence: 0.9,
+        },
+      ],
+      { messageId: "m2", agentId: "cathy", timestamp: 2 },
+    );
+    // Self-edges are dropped during merge. Inject directly to exercise the renderer.
+    g.edges.push({
+      id: "ed_test",
+      from: "c_0",
+      to: "c_0",
+      relation: "agrees",
+      confidence: 0.9,
+    });
+    const out = exportArgGraphToMermaid(g);
+    expect(out).toContain("|agrees|");
+    expect(out).not.toMatch(/\b===\b/);
   });
 
   it("renders the consolidation header comment", () => {

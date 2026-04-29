@@ -273,6 +273,10 @@ fi
 
 info "Copying .app to /Applications …"
 ditto "$APP_PATH" "$DEST"
+# Defensive: clear the quarantine attribute if present. Locally built bundles
+# don't have one, so this is a no-op in the common path; it exists as a safety
+# net if a pre-built bundle is ever fed through this script.
+xattr -dr com.apple.quarantine "$DEST" 2>/dev/null || true
 ok "Installed: ${DEST}"
 
 step "6/7  Cleaning local build caches"
@@ -292,6 +296,6 @@ else
 fi
 
 # ── Done ─────────────────────────────────────────────────────
-printf "\n${GREEN}${BOLD}✅  Socratic Council installed and running!${NC}\n"
+printf "\n${GREEN}${BOLD}[ OK ] Socratic Council installed and running!${NC}\n"
 printf "    Location: ${DEST}\n"
 printf "    To re-open: ${BOLD}open \"/Applications/Socratic Council.app\"${NC}\n\n"

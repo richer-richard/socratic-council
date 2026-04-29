@@ -13,7 +13,7 @@ proposal (security hardening, Wave 2–4 features, completed task list).
 
 ```bash
 pnpm typecheck                                       # whole workspace
-pnpm test                                            # vitest, 211 tests
+pnpm test                                            # vitest, 333 tests
 pnpm --filter @socratic-council/desktop tauri:dev    # dev hot-reload
 pnpm --filter @socratic-council/desktop tauri:build  # signed release .app
 ./install.sh                                         # quick install (macOS)
@@ -96,9 +96,10 @@ Additive UI surfaces (see `ChamberSurface` for the shared primitive):
 `ArgumentMapPanel`, `LocalProviderTab`, `BranchAction` + `BranchCrumb`,
 `BundleExportButton` + `BundleImportButton`, `ErrorBoundary`.
 
-All honor `prefers-reduced-motion` and match the app's cinematic-dark
-aesthetic (gold accent `#F5C542`, Manrope + JetBrains Mono + Cormorant
-Garamond).
+Match the app's cinematic-dark aesthetic (gold accent `#F5C542`, Manrope
++ JetBrains Mono + Cormorant Garamond). Optimize for max performance —
+60fps animations, lazy renders, virtualized long lists, no idle CPU
+burn.
 
 ---
 
@@ -131,13 +132,12 @@ that ends up in an error string).
 
 ---
 
-## Don't change
+## Conventions
 
-- Existing UI layouts or the 5541-line `Chat.tsx` — new features are
-  added as additive overlays / buttons / tabs.
-- Existing provider request contracts — new providers (Ollama,
-  fact-check model) add new call sites, but the OpenAI/Anthropic/Google/
-  etc. request paths stay untouched.
+- Default to additive changes — new features typically land as overlays,
+  buttons, tabs, or new modules. But edit `Chat.tsx`, the provider
+  request contracts, or any other shared surface freely when a refactor
+  is warranted; this isn't a hard rule.
 - CSP configuration (deferred).
 
 ---

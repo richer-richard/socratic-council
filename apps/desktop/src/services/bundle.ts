@@ -112,6 +112,12 @@ export interface ParsedBundle {
   manifest: BundleManifest;
   session: DiscussionSession;
   attachments: BundleAttachment[];
+  /**
+   * Non-fatal issues encountered while parsing — e.g. a manifested
+   * attachment was missing from the zip. The session still imports;
+   * the caller should surface these to the user rather than swallowing.
+   */
+  warnings: string[];
 }
 
 export function parseBundle(bytes: Uint8Array): ParsedBundle {
@@ -160,12 +166,14 @@ export function parseBundle(bytes: Uint8Array): ParsedBundle {
   }
 
   const attachments: BundleAttachment[] = [];
+  const warnings: string[] = [];
   for (const id of manifest.attachmentIds) {
     const bytes = entries[`${ATTACHMENT_DIR}${id}.bin`];
     const metaBytes = entries[`${ATTACHMENT_DIR}${id}.json`];
     if (!bytes || !metaBytes) {
-      // Missing attachment is non-fatal — record a placeholder so the import
-      // can show a warning and the session still restores.
+      // Missing attachment is non-fatal — surface a warning so the user
+      // knows the session imported but is missing files.
+      warnings.push(`Attachment "${id}" was missing from the bundle and could not be restored.`);
       continue;
     }
     let meta: { name?: string; mimeType?: string } = {};
@@ -182,7 +190,7 @@ export function parseBundle(bytes: Uint8Array): ParsedBundle {
     });
   }
 
-  return { manifest, session, attachments };
+  return { manifest, session, attachments, warnings };
 }
 
 /**
