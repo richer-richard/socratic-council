@@ -602,7 +602,11 @@ function getRoundOneAdvanceThreshold(configuredAgentIds: readonly CouncilAgentId
 }
 
 function parseVoteChoiceFromVisibleText(content: string): EndVoteChoice | null {
-  const match = content.match(/^\s*Vote:\s*(YES|NO)\b/i);
+  // Look for "Vote: YES" or "Vote: NO" anywhere in the content. We used to
+  // anchor at the start, but models occasionally emit a one-word preamble
+  // ("Sure,", "Okay —") before the formal Vote: line and the strict anchor
+  // would drop those into the fallback path.
+  const match = content.match(/\bVote:\s*(YES|NO)\b/i);
   if (!match) return null;
   return match[1]?.toLowerCase() === "no" ? "no" : "yes";
 }
@@ -626,18 +630,17 @@ function stripLegacyEndVoteDirective(raw: string) {
 
 function extractVoteReasonFromVisibleText(choice: EndVoteChoice | null, content: string) {
   if (!choice) return "";
-
-  const pattern = choice === "no" ? /^\s*Vote:\s*NO\b[:.!-]?\s*/i : /^\s*Vote:\s*YES\b[:.!-]?\s*/i;
-  return normalizeMessageText(content).replace(pattern, "").trim();
+  // Strip the "Vote: YES/NO" marker wherever it appears (matches the looser
+  // parser above) and any short trailing punctuation, then return the rest
+  // as the reason. Global flag handles the rare "Vote: YES ... Vote: YES"
+  // double-emit some models do.
+  const pattern =
+    choice === "no" ? /\bVote:\s*NO\b[:.!-]?\s*/gi : /\bVote:\s*YES\b[:.!-]?\s*/gi;
+  return normalizeMessageText(content.replace(pattern, " ")).trim();
 }
 
 function hasRequiredVoteReason(choice: EndVoteChoice | null, reason: string) {
   return choice !== "no" || reason.trim().length >= 16;
-}
-
-function buildEndVoteBallotContent(ballot: EndVoteBallotSnapshot) {
-  const prefix = ballot.choice === "yes" ? "Submitted a YES vote." : "Submitted a NO vote.";
-  return ballot.reason ? `${prefix} ${ballot.reason}` : prefix;
 }
 
 function buildEndVoteBoardContent(board: EndVoteBoardSnapshot) {
@@ -4072,18 +4075,15 @@ Write the official moderator wrap-up in 4 short sentences:
       activeRequestsRef.current.set(agentId, controller);
       setTypingAgents((prev) => (prev.includes(agentId) ? prev : [...prev, agentId]));
 
-      const newMessage: ChatMessage = {
-        id: `msg_${Date.now()}_${agentId}_end_vote_${voteState.round}`,
-        agentId,
-        content: "",
-        timestamp: Date.now(),
-        isStreaming: true,
-        metadata: { model: model as ModelId, latencyMs: 0 },
-      };
-
-      setMessages((prev) => [...prev, newMessage]);
-
-      let streamingContent = "";
+      // End-vote responses are NOT chat bubbles. Their only surface is the
+      // vote board (a system message rendered as a card with each agent's
+      // YES/NO + reason). Previously we created a streaming ChatMessage,
+      // updated it on every chunk, then swapped in a finalized version with
+      // `endVoteBallot` set — which is filtered from `displayMessages` —
+      // so the bubble appeared during streaming and vanished on completion.
+      // The fix is to skip the bubble entirely: stream into local buffers
+      // and let the caller fold the result into the board state. The typing
+      // indicator (added above) is the only progress affordance.
       let streamingRawContent = "";
       let streamingThinking = "";
       try {
@@ -4097,23 +4097,9 @@ Write the official moderator wrap-up in 4 short sentences:
             if (abortRef.current) return;
             if (chunk.content) {
               streamingRawContent += chunk.content;
-              streamingContent = stripLegacyEndVoteDirective(streamingRawContent).cleaned;
             }
             if (chunk.thinking) {
               streamingThinking += chunk.thinking;
-            }
-            if (chunk.content || chunk.thinking) {
-              setMessages((prev) =>
-                prev.map((m) =>
-                  m.id === newMessage.id
-                    ? {
-                        ...m,
-                        content: streamingContent,
-                        thinking: streamingThinking || undefined,
-                      }
-                    : m,
-                ),
-              );
             }
           },
           proxy,
@@ -4125,7 +4111,6 @@ Write the official moderator wrap-up in 4 short sentences:
         );
 
         if (abortRef.current) {
-          setMessages((prev) => prev.filter((m) => m.id !== newMessage.id));
           return { message: null, choice: null, reason: "" };
         }
 
@@ -4135,7 +4120,7 @@ Write the official moderator wrap-up in 4 short sentences:
         let displayContent =
           voteExtraction.cleaned ||
           normalizeMessageText(
-            extractCanvasDirectives(result.content || streamingRawContent || streamingContent || "").cleaned,
+            extractCanvasDirectives(result.content || streamingRawContent || "").cleaned,
           );
         let voteChoice =
           voteExtraction.voteChoice ?? parseVoteChoiceFromVisibleText(displayContent);
@@ -4155,7 +4140,6 @@ Write the official moderator wrap-up in 4 short sentences:
                 "You did not cast a valid end vote. Reply again now. Your first visible sentence must start exactly with Vote: YES or Vote: NO. If you vote NO, you must give one concrete reason to continue. End with exactly one standalone line: @vote(end, yes) or @vote(end, no).",
             },
           ];
-          streamingContent = "";
           streamingRawContent = "";
           streamingThinking = "";
           result = await callProvider(
@@ -4167,23 +4151,9 @@ Write the official moderator wrap-up in 4 short sentences:
               if (abortRef.current) return;
               if (chunk.content) {
                 streamingRawContent += chunk.content;
-                streamingContent = stripLegacyEndVoteDirective(streamingRawContent).cleaned;
               }
               if (chunk.thinking) {
                 streamingThinking += chunk.thinking;
-              }
-              if (chunk.content || chunk.thinking) {
-                setMessages((prev) =>
-                  prev.map((m) =>
-                    m.id === newMessage.id
-                      ? {
-                          ...m,
-                          content: streamingContent,
-                          thinking: streamingThinking || undefined,
-                        }
-                      : m,
-                  ),
-                );
               }
             },
             proxy,
@@ -4195,7 +4165,6 @@ Write the official moderator wrap-up in 4 short sentences:
           );
 
           if (abortRef.current) {
-            setMessages((prev) => prev.filter((m) => m.id !== newMessage.id));
             return { message: null, choice: null, reason: "" };
           }
 
@@ -4205,7 +4174,7 @@ Write the official moderator wrap-up in 4 short sentences:
           displayContent =
             voteExtraction.cleaned ||
             normalizeMessageText(
-              extractCanvasDirectives(result.content || streamingRawContent || streamingContent || "").cleaned,
+              extractCanvasDirectives(result.content || streamingRawContent || "").cleaned,
             );
           voteChoice = voteExtraction.voteChoice ?? parseVoteChoiceFromVisibleText(displayContent);
           voteReason = extractVoteReasonFromVisibleText(voteChoice, displayContent);
@@ -4216,40 +4185,9 @@ Write the official moderator wrap-up in 4 short sentences:
           voteChoice = "no";
           voteReason =
             "I am not ready to end because I did not provide a valid ballot with a clear reason to stop.";
-          displayContent = "";
         }
 
-        const ballot: EndVoteBallotSnapshot = {
-          voteId: voteState.id,
-          round: voteState.round,
-          choice: voteChoice,
-          ...(voteReason ? { reason: voteReason } : {}),
-        };
-        const finalVisibleContent = displayContent || buildEndVoteBallotContent(ballot);
-
-        const finalMessage: ChatMessage = {
-          ...newMessage,
-          content: finalVisibleContent || "[No response received]",
-          thinking: result.thinking || streamingThinking || undefined,
-          fullResponse: finalVisibleContent || undefined,
-          isStreaming: false,
-          tokens: result.tokens,
-          latencyMs: result.latencyMs,
-          error: result.error,
-          endVoteBallot: ballot,
-          metadata: {
-            model: model as ModelId,
-            latencyMs: result.latencyMs,
-          },
-        };
-
-        setMessages((prev) => prev.map((m) => (m.id === newMessage.id ? finalMessage : m)));
-
         if (result.success) {
-          if (memoryManagerRef.current) {
-            memoryManagerRef.current.addMessage(finalMessage);
-          }
-
           setTotalTokens((prev) => ({
             input: prev.input + result.tokens.input,
             output: prev.output + result.tokens.output,
@@ -4259,11 +4197,11 @@ Write the official moderator wrap-up in 4 short sentences:
             costTrackerRef.current.recordUsage(agentId, result.tokens, model);
             setCostState(costTrackerRef.current.getState());
           }
-        } else {
+        } else if (result.error) {
           setErrors((prev) => [...prev, result.error || "Unknown error"]);
         }
 
-        return { message: finalMessage, choice: voteChoice, reason: voteReason };
+        return { message: null, choice: voteChoice, reason: voteReason };
       } finally {
         activeRequestsRef.current.delete(agentId);
         setTypingAgents((prev) => prev.filter((id) => id !== agentId));
