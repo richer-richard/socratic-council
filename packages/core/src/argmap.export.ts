@@ -32,8 +32,14 @@ const MERMAID_EDGE_OP: Record<ArgEdgeRelation, string> = {
   concedes: "==>",
   restates: "-->",
   refines: "-->",
-  agrees: "===",
-  contradicts: "<-.->",
+  // `agrees` previously used `===` (not valid Mermaid edge syntax). Plain
+  // forward arrow + the `|agrees|` label keeps the relation legible in any
+  // Mermaid renderer (mermaid.live, GitHub, mdBook, etc.).
+  agrees: "-->",
+  // `contradicts` previously used `<-.->` (also non-standard). `<-->` is
+  // Mermaid's canonical symmetric edge — semantically right for "logical
+  // incompatibility between two claims".
+  contradicts: "<-->",
   "depends-on": "-.->",
   answers: "==>",
   addresses: "-->",

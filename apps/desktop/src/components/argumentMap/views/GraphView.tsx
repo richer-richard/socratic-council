@@ -65,6 +65,7 @@ function runDagre(
   nodes: ArgNode[],
   edges: ArgEdge[],
   rankdir: "TB" | "LR",
+  layoutOverrides?: Record<string, { x: number; y: number }>,
 ): LayoutResult {
   const graph = new dagre.graphlib.Graph({ multigraph: false });
   graph.setDefaultEdgeLabel(() => ({}));
@@ -91,14 +92,15 @@ function runDagre(
   } catch {
     // dagre throws on malformed graphs (e.g. detached cycles in some
     // configurations). Fall back to a simple grid so the user never sees
-    // an empty canvas.
+    // an empty canvas. Honor pinned overrides even in the fallback path.
     const positions = new Map<string, PositionedNode>();
     nodes.forEach((n, i) => {
       const dims = NODE_DIMS[n.kind];
+      const override = layoutOverrides?.[n.id];
       positions.set(n.id, {
         id: n.id,
-        x: (i % 4) * 240,
-        y: Math.floor(i / 4) * 120,
+        x: override?.x ?? (i % 4) * 240,
+        y: override?.y ?? Math.floor(i / 4) * 120,
         width: dims.width,
         height: dims.height,
       });
@@ -111,10 +113,15 @@ function runDagre(
     const node = graph.node(n.id);
     if (!node) continue;
     const dims = NODE_DIMS[n.kind];
+    // Pinned positions (drag-to-pin from a previous session) win over
+    // dagre's auto-layout. The override is the top-left corner; dagre
+    // returns the centre, so we adjust dagre's output (dims/2) only when
+    // there's no override.
+    const override = layoutOverrides?.[n.id];
     positions.set(n.id, {
       id: n.id,
-      x: node.x - dims.width / 2,
-      y: node.y - dims.height / 2,
+      x: override ? override.x : node.x - dims.width / 2,
+      y: override ? override.y : node.y - dims.height / 2,
       width: dims.width,
       height: dims.height,
     });
@@ -336,14 +343,17 @@ export function GraphView({
   selectedNodeId,
   onSelect,
   search,
+  onLayoutOverride,
 }: ViewProps) {
   const rankdir: "TB" | "LR" = visibleNodes.length > 60 ? "LR" : "TB";
 
   // Layout key — re-run dagre only on real graph-shape changes. Filters
   // can shrink/expand the visible set; we layout the visible set only.
+  // The layoutOverrides map is also keyed in so dragged-to-pin positions
+  // re-flow properly when nodes appear/disappear.
   const layout = useMemo(
-    () => runDagre(visibleNodes, visibleEdges, rankdir),
-    [visibleNodes, visibleEdges, rankdir],
+    () => runDagre(visibleNodes, visibleEdges, rankdir, graph.layoutOverrides),
+    [visibleNodes, visibleEdges, rankdir, graph.layoutOverrides],
   );
 
   const neighborSet = useMemo(() => {
@@ -449,9 +459,19 @@ export function GraphView({
         fitViewOptions={{ padding: 0.18, includeHiddenNodes: false }}
         onNodeClick={(_, node) => onSelect(node.id)}
         onPaneClick={() => onSelect(null)}
-        onNodesChange={() => {
-          // Drag-pinning persistence is a follow-up; nodes are still
-          // freely draggable, but positions don't survive reload yet.
+        onNodesChange={(changes) => {
+          if (!onLayoutOverride) return;
+          // Drag-to-pin persistence — bubble the new position up only at
+          // drag-end (`dragging === false`). Intermediate frames during
+          // the drag are visually handled by react-flow internally; no
+          // need to flush each one to React state.
+          for (const change of changes) {
+            if (change.type !== "position") continue;
+            if (change.dragging) continue;
+            const pos = change.position;
+            if (!pos) continue;
+            onLayoutOverride(change.id, { x: pos.x, y: pos.y });
+          }
         }}
         proOptions={{ hideAttribution: true }}
         nodesDraggable

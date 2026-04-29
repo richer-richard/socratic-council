@@ -93,10 +93,12 @@ export interface BundleImportButtonProps {
 export function BundleImportButton({ onImported }: BundleImportButtonProps) {
   const inputRef = useRef<HTMLInputElement | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [warnings, setWarnings] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
 
   const handlePick = () => {
     setError(null);
+    setWarnings([]);
     inputRef.current?.click();
   };
 
@@ -106,11 +108,8 @@ export function BundleImportButton({ onImported }: BundleImportButtonProps) {
     try {
       const bytes = new Uint8Array(await file.arrayBuffer());
       const parsed = parseBundle(bytes);
+      const importWarnings = [...parsed.warnings];
       const saved = importBundleSession(parsed);
-      // Fix 10.2: write the parsed attachment blobs into IndexedDB under
-      // the imported session's id. Without this, the imported session
-      // would render with attachment chips but every blob lookup would
-      // miss because nothing wrote them to disk.
       if (parsed.attachments.length > 0) {
         try {
           await persistRawAttachmentsForSession(
@@ -127,8 +126,12 @@ export function BundleImportButton({ onImported }: BundleImportButtonProps) {
             "[BundleImportButton] attachment persistence failed; session imported but blobs missing",
             attachmentError,
           );
+          importWarnings.push(
+            "Some attachment blobs couldn't be written to local storage — open the session and re-attach the files manually.",
+          );
         }
       }
+      setWarnings(importWarnings);
       onImported(saved);
     } catch (err) {
       const message =
@@ -172,6 +175,48 @@ export function BundleImportButton({ onImported }: BundleImportButtonProps) {
           }}
         >
           {error}
+        </div>
+      )}
+      {warnings.length > 0 && (
+        <div
+          role="status"
+          style={{
+            fontSize: "0.72rem",
+            color: "rgb(252, 211, 77)",
+            background: "rgba(245, 197, 66, 0.08)",
+            border: "1px solid rgba(245, 197, 66, 0.25)",
+            borderRadius: "8px",
+            padding: "8px 10px",
+            display: "flex",
+            flexDirection: "column",
+            gap: "4px",
+          }}
+        >
+          <strong style={{ fontWeight: 600 }}>
+            Imported with {warnings.length} warning{warnings.length === 1 ? "" : "s"}:
+          </strong>
+          <ul style={{ margin: 0, paddingLeft: "18px", display: "flex", flexDirection: "column", gap: "2px" }}>
+            {warnings.map((w, i) => (
+              <li key={i}>{w}</li>
+            ))}
+          </ul>
+          <button
+            type="button"
+            onClick={() => setWarnings([])}
+            style={{
+              alignSelf: "flex-start",
+              marginTop: "4px",
+              fontSize: "0.7rem",
+              color: "rgba(232, 232, 239, 0.65)",
+              background: "transparent",
+              border: "none",
+              padding: "2px 0",
+              cursor: "pointer",
+              textDecoration: "underline",
+            }}
+          >
+            Dismiss
+          </button>
         </div>
       )}
     </div>

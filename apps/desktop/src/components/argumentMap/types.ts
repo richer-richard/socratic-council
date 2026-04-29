@@ -61,4 +61,10 @@ export interface ViewProps {
   onSelect: (id: string | null) => void;
   onNavigateToMessage?: (messageId: string) => void;
   search: string;
+  /**
+   * Drag-to-pin persistence. When the user drags a node in the Graph view,
+   * the host writes the new (x, y) onto `argGraph.layoutOverrides[id]` so
+   * the position survives reload. Other views ignore this prop.
+   */
+  onLayoutOverride?: (nodeId: string, position: { x: number; y: number }) => void;
 }

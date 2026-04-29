@@ -82,7 +82,13 @@ const AGENT_COLORS: Record<string, string> = {
   zhipu: "#a78bfa",
 };
 
-function CouncilCircleViz({ configured }: { configured: Provider[] }) {
+function CouncilCircleViz({
+  configured,
+  onShowHelp,
+}: {
+  configured: Provider[];
+  onShowHelp?: () => void;
+}) {
   const cx = 100;
   const cy = 100;
   const rInner = 38;
@@ -104,7 +110,7 @@ function CouncilCircleViz({ configured }: { configured: Provider[] }) {
   });
 
   return (
-    <div className="council-circle-viz">
+    <div className="council-circle-viz" style={{ position: "relative" }}>
       <svg viewBox="0 0 200 200" width="420" height="420">
         <defs>
           <radialGradient id="cc-glow" cx="50%" cy="50%" r="50%">
@@ -137,7 +143,295 @@ function CouncilCircleViz({ configured }: { configured: Provider[] }) {
           </g>
         ))}
       </svg>
+      {onShowHelp ? (
+        <button
+          type="button"
+          onClick={onShowHelp}
+          aria-label="What is this council?"
+          title="What is this council?"
+          style={{
+            position: "absolute",
+            top: "8px",
+            right: "8px",
+            width: 28,
+            height: 28,
+            borderRadius: "50%",
+            border: "1px solid rgba(245, 197, 66, 0.45)",
+            background: "rgba(20, 17, 12, 0.65)",
+            color: "rgba(245, 197, 66, 0.85)",
+            cursor: "pointer",
+            fontSize: "0.85rem",
+            fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
+            fontWeight: 600,
+            lineHeight: 1,
+            display: "inline-flex",
+            alignItems: "center",
+            justifyContent: "center",
+            transition: "background 120ms ease, border-color 120ms ease",
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.background = "rgba(245, 197, 66, 0.18)";
+            e.currentTarget.style.borderColor = "rgba(245, 197, 66, 0.85)";
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.background = "rgba(20, 17, 12, 0.65)";
+            e.currentTarget.style.borderColor = "rgba(245, 197, 66, 0.45)";
+          }}
+        >
+          ?
+        </button>
+      ) : null}
     </div>
+  );
+}
+
+/**
+ * Small modal explaining the council structure. Opens when the user clicks
+ * the "?" button next to the council circle. Lists the 8 inner speakers and
+ * their 8 outer-circle silent partners, with a one-line gloss.
+ */
+function CouncilHelpPopup({ onClose }: { onClose: () => void }) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="About the Socratic Council"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+      style={{
+        position: "fixed",
+        inset: 0,
+        zIndex: 80,
+        background: "rgba(0, 0, 0, 0.6)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: "5vh 4vw",
+      }}
+    >
+      <div
+        style={{
+          maxWidth: 540,
+          width: "100%",
+          maxHeight: "84vh",
+          overflowY: "auto",
+          padding: 28,
+          borderRadius: 14,
+          background:
+            "linear-gradient(180deg, rgba(24, 22, 18, 0.98) 0%, rgba(12, 11, 16, 0.99) 100%)",
+          border: "1px solid rgba(245, 197, 66, 0.32)",
+          boxShadow: "0 30px 80px -20px rgba(0, 0, 0, 0.7)",
+          color: "rgba(232, 232, 239, 0.92)",
+          fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "baseline",
+            marginBottom: 16,
+          }}
+        >
+          <h3 style={{ margin: 0, fontSize: "1.05rem", fontWeight: 600, color: "#F5C542" }}>
+            About this council
+          </h3>
+          <button
+            type="button"
+            aria-label="Close"
+            onClick={onClose}
+            style={{
+              padding: "4px 9px",
+              border: "1px solid rgba(232, 232, 239, 0.14)",
+              background: "transparent",
+              color: "rgba(232, 232, 239, 0.6)",
+              borderRadius: 6,
+              cursor: "pointer",
+              fontSize: "0.72rem",
+              fontFamily: "'JetBrains Mono', ui-monospace, monospace",
+            }}
+          >
+            ✕
+          </button>
+        </div>
+        <p
+          style={{
+            margin: "0 0 18px",
+            fontSize: "0.85rem",
+            color: "rgba(232, 232, 239, 0.78)",
+            lineHeight: 1.55,
+          }}
+        >
+          Sixteen agents debate every topic. The eight on the inner ring speak
+          publicly. Each has a silent partner on the outer ring who whispers
+          tactical advice — visible only to their assigned speaker — every few
+          turns.
+        </p>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 18 }}>
+          <section>
+            <div
+              style={{
+                fontSize: "0.62rem",
+                fontWeight: 600,
+                letterSpacing: "0.22em",
+                textTransform: "uppercase",
+                color: "rgba(245, 197, 66, 0.78)",
+                marginBottom: 10,
+                fontFamily: "'JetBrains Mono', ui-monospace, monospace",
+              }}
+            >
+              Inner ring · 8 speakers
+            </div>
+            <ul
+              style={{
+                margin: 0,
+                padding: 0,
+                listStyle: "none",
+                display: "flex",
+                flexDirection: "column",
+                gap: 8,
+                fontSize: "0.78rem",
+              }}
+            >
+              {AGENT_CARDS.map((agent) => (
+                <li
+                  key={agent.name}
+                  style={{ display: "flex", alignItems: "center", gap: 8 }}
+                >
+                  <span
+                    aria-hidden="true"
+                    style={{
+                      width: 8,
+                      height: 8,
+                      borderRadius: "50%",
+                      background: AGENT_COLORS[agent.provider] ?? "#888",
+                      flexShrink: 0,
+                    }}
+                  />
+                  <span style={{ fontWeight: 500 }}>{agent.name}</span>
+                  <span style={{ color: "rgba(232, 232, 239, 0.5)", fontSize: "0.7rem" }}>
+                    {getModelDisplayName(agent.provider)}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </section>
+          <section>
+            <div
+              style={{
+                fontSize: "0.62rem",
+                fontWeight: 600,
+                letterSpacing: "0.22em",
+                textTransform: "uppercase",
+                color: "rgba(245, 197, 66, 0.78)",
+                marginBottom: 10,
+                fontFamily: "'JetBrains Mono', ui-monospace, monospace",
+              }}
+            >
+              Outer ring · 8 advisors
+            </div>
+            <ul
+              style={{
+                margin: 0,
+                padding: 0,
+                listStyle: "none",
+                display: "flex",
+                flexDirection: "column",
+                gap: 8,
+                fontSize: "0.78rem",
+              }}
+            >
+              {AGENT_CARDS.map((agent) => (
+                <li
+                  key={agent.partner}
+                  style={{ display: "flex", alignItems: "center", gap: 8 }}
+                >
+                  <span
+                    aria-hidden="true"
+                    style={{
+                      width: 6,
+                      height: 6,
+                      borderRadius: "50%",
+                      background: AGENT_COLORS[agent.provider] ?? "#888",
+                      opacity: 0.55,
+                      flexShrink: 0,
+                    }}
+                  />
+                  <span style={{ fontWeight: 500, color: "rgba(232, 232, 239, 0.78)" }}>
+                    {agent.partner}
+                  </span>
+                  <span style={{ color: "rgba(232, 232, 239, 0.4)", fontSize: "0.7rem" }}>
+                    → {agent.name}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </section>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * ⌘K pill — fixed bottom-right hint that opens the global command palette.
+ * The keyboard shortcut listener (in CommandPalette.tsx) listens at the
+ * window level for ⌘K, so dispatching a synthetic keyboard event from the
+ * pill click is enough to flip the palette open without re-threading state.
+ */
+function CommandPalettePill() {
+  const handleClick = () => {
+    window.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "k", metaKey: true, bubbles: true }),
+    );
+  };
+  return (
+    <button
+      type="button"
+      onClick={handleClick}
+      aria-label="Open command palette"
+      title="Open command palette"
+      style={{
+        position: "fixed",
+        right: 18,
+        bottom: 18,
+        zIndex: 30,
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 6,
+        padding: "6px 12px",
+        borderRadius: 999,
+        border: "1px solid rgba(232, 232, 239, 0.18)",
+        background: "rgba(18, 16, 14, 0.78)",
+        color: "rgba(232, 232, 239, 0.62)",
+        cursor: "pointer",
+        fontFamily:
+          "'JetBrains Mono', ui-monospace, monospace",
+        fontSize: "0.7rem",
+        letterSpacing: "0.08em",
+        transition: "all 140ms ease",
+      }}
+      onMouseEnter={(e) => {
+        e.currentTarget.style.color = "rgba(245, 197, 66, 0.92)";
+        e.currentTarget.style.borderColor = "rgba(245, 197, 66, 0.5)";
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.color = "rgba(232, 232, 239, 0.62)";
+        e.currentTarget.style.borderColor = "rgba(232, 232, 239, 0.18)";
+      }}
+    >
+      <span aria-hidden="true">⌘K</span>
+      <span>Commands</span>
+    </button>
   );
 }
 
@@ -424,6 +718,9 @@ export function Home({
   const [topic, setTopic] = useState("");
   const [showSettings, setShowSettings] = useState(false);
   const [showApiWarning, setShowApiWarning] = useState(false);
+  /** "?" affordance next to the council circle. Opens a small popup
+   *  explaining the inner / outer ring system to first-run users. */
+  const [councilHelpOpen, setCouncilHelpOpen] = useState(false);
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
   const [expandedProjects, setExpandedProjects] = useState<Set<string>>(() => new Set([INBOX_KEY]));
   const [showArchived, setShowArchived] = useState(false);
@@ -1212,7 +1509,10 @@ export function Home({
         <div className="workstation-stage">
           <section className="workstation-composer-card">
             <div className="workstation-composer-header">
-              <CouncilCircleViz configured={configuredProviders} />
+              <CouncilCircleViz
+                configured={configuredProviders}
+                onShowHelp={() => setCouncilHelpOpen(true)}
+              />
             </div>
 
             <div className="workstation-composer-body">
@@ -1757,6 +2057,11 @@ export function Home({
           </div>
         </div>
       )}
+
+      {councilHelpOpen && (
+        <CouncilHelpPopup onClose={() => setCouncilHelpOpen(false)} />
+      )}
+      <CommandPalettePill />
     </div>
   );
 }

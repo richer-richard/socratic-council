@@ -77,6 +77,24 @@ export default function App() {
     quarantinePath: string | null;
     failedDecrypts: number;
   } | null>(null);
+  /**
+   * Set when `initVault()` finishes with status === "init_failed" — the DEK
+   * file couldn't be read or written at all (e.g. a permissions issue under
+   * `~/Library/Application Support/...`). When this is true we render a
+   * hard-stop screen instead of letting the app fall back to plaintext
+   * writes against localStorage. The user can dismiss the screen via
+   * "Continue without encryption", which sets `encryptionBypassAcked` for
+   * this session only (sessionStorage, not localStorage — so the next boot
+   * re-asks).
+   */
+  const [vaultInitFailed, setVaultInitFailed] = useState(false);
+  const [encryptionBypassAcked, setEncryptionBypassAcked] = useState<boolean>(() => {
+    try {
+      return sessionStorage.getItem("socratic-council-encryption-bypass-acked") === "1";
+    } catch {
+      return false;
+    }
+  });
   const { config } = useConfig();
 
   useEffect(() => {
@@ -99,6 +117,9 @@ export default function App() {
 
       const status = getVaultStatus();
       const failedDecrypts = getDecryptFailureCount();
+      if (status === "init_failed") {
+        setVaultInitFailed(true);
+      }
       if (status === "quarantined" || failedDecrypts > 0) {
         setVaultRecoveryNotice({
           quarantinePath: getQuarantinePath(),
@@ -387,6 +408,61 @@ export default function App() {
     },
     [refreshAll],
   );
+
+  if (vaultInitFailed && !encryptionBypassAcked) {
+    return (
+      <ErrorBoundary label="app">
+        <div className="h-screen flex items-center justify-center bg-gray-900 text-gray-100 p-6">
+          <div
+            className="max-w-lg w-full rounded-2xl border border-red-500/30 bg-red-500/5 p-6"
+            style={{ display: "flex", flexDirection: "column", gap: "16px" }}
+          >
+            <h2 className="text-lg font-semibold text-red-300">Encryption is unavailable</h2>
+            <p className="text-sm text-gray-300 leading-relaxed">
+              The encryption key file couldn't be initialized on this machine.
+              Sessions and API keys can't be safely stored right now. This
+              usually means filesystem permissions on{" "}
+              <code className="text-gray-200">
+                ~/Library/Application Support/com.socratic-council.desktop/
+              </code>{" "}
+              are blocking the app from writing the key file.
+            </p>
+            <div className="flex gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => window.location.reload()}
+                className="px-4 py-2 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 text-sm font-medium transition-colors"
+              >
+                Retry
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  try {
+                    sessionStorage.setItem(
+                      "socratic-council-encryption-bypass-acked",
+                      "1",
+                    );
+                  } catch {
+                    /* sessionStorage unavailable; bypass stays in-memory only */
+                  }
+                  setEncryptionBypassAcked(true);
+                }}
+                className="px-4 py-2 rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-300 text-sm font-medium transition-colors"
+              >
+                Continue without encryption
+              </button>
+            </div>
+            <p className="text-xs text-gray-500 leading-relaxed">
+              Continuing without encryption stores keys and sessions in plain
+              text on disk for this session only. The setting resets when you
+              relaunch the app.
+            </p>
+          </div>
+        </div>
+      </ErrorBoundary>
+    );
+  }
 
   return (
     <ErrorBoundary label="app">

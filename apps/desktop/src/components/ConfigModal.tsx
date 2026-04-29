@@ -91,6 +91,7 @@ const ABOUT_IDENTIFIER = "com.socratic-council.desktop";
 const ABOUT_LICENSE = "Apache-2.0";
 const ABOUT_REPOSITORY = "https://github.com/richer-richard/socratic-council";
 const ABOUT_SHORTCUTS = [
+  { keys: "Cmd+K", description: "Open the command palette" },
   { keys: "Cmd+O", description: "Attach files to a new session" },
   { keys: "Shift+Cmd+O", description: "Choose photos from the Mac picker" },
   { keys: "Shift+Cmd+C", description: "Open the camera capture sheet" },
@@ -98,6 +99,49 @@ const ABOUT_SHORTCUTS = [
   { keys: "Esc", description: "Close the current modal or attachment menu" },
   { keys: "Delete", description: "Remove the focused attachment chip on the home screen" },
 ];
+
+/**
+ * Map a raw provider-test error into something the user can act on. The
+ * default branch passes through the original error text so unknown failure
+ * modes still surface — categorization is purely additive guidance.
+ */
+function mapTestConnectionError(provider: Provider, error: unknown): string {
+  const info = PROVIDER_INFO[provider];
+  const name = provider === "kimi" ? "Kimi" : info.name;
+  const raw = error instanceof Error ? error.message : String(error);
+  const lower = raw.toLowerCase();
+
+  if (
+    lower.includes("401") ||
+    lower.includes("unauthorized") ||
+    lower.includes("invalid_api_key") ||
+    lower.includes("invalid api key") ||
+    lower.includes("authentication")
+  ) {
+    return `${name} rejected this key. Double-check it at ${info.signupUrl}.`;
+  }
+  if (
+    lower.includes("429") ||
+    lower.includes("rate limit") ||
+    lower.includes("rate-limit") ||
+    lower.includes("too many requests")
+  ) {
+    return `${name} is rate-limiting requests. Wait a minute and retry.`;
+  }
+  if (
+    lower.includes("failed to fetch") ||
+    lower.includes("econnrefused") ||
+    lower.includes("enotfound") ||
+    lower.includes("network") ||
+    lower.includes("connection failed")
+  ) {
+    return `Couldn't reach ${name} — check your proxy or internet connection.`;
+  }
+  if (/\b5\d{2}\b/.test(raw) || lower.includes("server error") || lower.includes("internal error")) {
+    return `${name} is having issues server-side. Try again in a few minutes.`;
+  }
+  return `Test failed: ${raw}`;
+}
 
 export function ConfigModal({
   isOpen,
@@ -182,7 +226,7 @@ export function ConfigModal({
     } catch (error) {
       console.error(`Error testing ${provider}:`, error);
       setTestResults((prev) => ({ ...prev, [provider]: "error" }));
-      setTestError(error instanceof Error ? error.message : "Unknown error");
+      setTestError(mapTestConnectionError(provider, error));
     } finally {
       setTestingProvider(null);
     }
@@ -306,6 +350,15 @@ export function ConfigModal({
 
                       {!isEditing && (
                         <div className="flex items-center gap-2">
+                          <a
+                            href={info.signupUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-xs text-gray-400 hover:text-primary px-2 py-1.5 transition-colors whitespace-nowrap"
+                            title={`Open ${providerName} API key page`}
+                          >
+                            Get a key →
+                          </a>
                           {isConfigured ? (
                             <>
                               <button
@@ -416,8 +469,12 @@ export function ConfigModal({
                   <div>
                     <h4 className="text-blue-400 font-medium text-sm">Security Note</h4>
                     <p className="text-blue-300/80 text-sm mt-1">
-                      API keys are stored locally in your browser's storage. They are never
-                      transmitted to external servers.
+                      API keys are encrypted at rest with XChaCha20-Poly1305 and stored in
+                      <code className="mx-1 text-blue-200/90">
+                        ~/Library/Application Support/com.socratic-council.desktop/
+                      </code>
+                      . They are only sent to the provider's API endpoint when you start a
+                      discussion, and are never transmitted to any third party.
                     </p>
                   </div>
                 </div>
@@ -629,23 +686,6 @@ export function ConfigModal({
                         type="checkbox"
                         checked={config.preferences.autoScroll}
                         onChange={(e) => onUpdatePreferences({ autoScroll: e.target.checked })}
-                      />
-                      <div className="toggle-slider" />
-                    </label>
-                  </div>
-
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <div className="text-sm text-white">Sound Effects</div>
-                      <div className="text-xs text-gray-400">
-                        Play sounds for new messages and events
-                      </div>
-                    </div>
-                    <label className="toggle-switch">
-                      <input
-                        type="checkbox"
-                        checked={config.preferences.soundEffects}
-                        onChange={(e) => onUpdatePreferences({ soundEffects: e.target.checked })}
                       />
                       <div className="toggle-slider" />
                     </label>

@@ -92,7 +92,6 @@ export interface DiscussionPreferences {
   customTurns: number;
   showBiddingScores: boolean;
   autoScroll: boolean;
-  soundEffects: boolean;
   moderatorEnabled: boolean;
   observersEnabled: boolean;
   /** Cost circuit breaker. See `utils/budgetEnforcer.ts`. 0 caps disable. */
@@ -108,18 +107,11 @@ export interface DiscussionPreferences {
   observerInterval: number;
 }
 
-export interface McpConfig {
-  enabled: boolean;
-  serverUrl: string;
-  apiKey?: string;
-}
-
 export interface AppConfig {
   credentials: Partial<Record<Provider, ProviderCredential>>;
   proxy: ProxyConfig;
   preferences: DiscussionPreferences;
   models: Partial<Record<Provider, string>>;
-  mcp: McpConfig;
 }
 
 // Each character is locked to one model.
@@ -157,7 +149,6 @@ const DEFAULT_CONFIG: AppConfig = {
     customTurns: 100,
     showBiddingScores: true,
     autoScroll: true,
-    soundEffects: false,
     moderatorEnabled: true,
     observersEnabled: true,
     budget: {
@@ -169,11 +160,6 @@ const DEFAULT_CONFIG: AppConfig = {
     observerInterval: 2,
   },
   models: { ...LOCKED_MODELS },
-  mcp: {
-    enabled: false,
-    serverUrl: "",
-    apiKey: "",
-  },
 };
 
 const VALID_PROXY_TYPES: ProxyType[] = ["none", "http", "https", "socks5", "socks5h"];
@@ -332,10 +318,6 @@ function loadConfig(): AppConfig {
           parsed.preferences?.autoScroll,
           DEFAULT_CONFIG.preferences.autoScroll,
         ),
-        soundEffects: safeBoolean(
-          parsed.preferences?.soundEffects,
-          DEFAULT_CONFIG.preferences.soundEffects,
-        ),
         moderatorEnabled: safeBoolean(
           parsed.preferences?.moderatorEnabled,
           DEFAULT_CONFIG.preferences.moderatorEnabled,
@@ -349,7 +331,6 @@ function loadConfig(): AppConfig {
       // persisted (fix 1.6 — the previous needsMigration branch was dead
       // code because of the unconditional reset that followed it).
       models: { ...LOCKED_MODELS, ...sanitizeModels(parsed.models) },
-      mcp: { ...DEFAULT_CONFIG.mcp, ...parsed.mcp },
     };
 
     return merged;
@@ -616,13 +597,6 @@ export function useConfig() {
     }));
   }, []);
 
-  const updateMcp = useCallback((mcp: Partial<McpConfig>) => {
-    setSnapshot((prev) => ({
-      ...prev,
-      config: { ...prev.config, mcp: { ...prev.config.mcp, ...mcp } },
-    }));
-  }, []);
-
   const getConfiguredProviders = useCallback((): Provider[] => {
     return Object.keys(config.credentials).filter(
       (p): p is Provider => isProvider(p) && !!config.credentials[p]?.apiKey,
@@ -656,7 +630,6 @@ export function useConfig() {
     updateProxy,
     updatePreferences,
     updateModel,
-    updateMcp,
     getConfiguredProviders,
     hasAnyApiKey,
     getMaxTurns,
@@ -683,6 +656,9 @@ export const PROVIDER_INFO: Record<
     description: string;
     keyPrefix: string;
     defaultBaseUrl: string;
+    /** Where the user signs up for / manages keys for this provider. Surfaced
+     *  in the Settings modal as a "Get a key →" link next to each card. */
+    signupUrl: string;
   }
 > = {
   openai: {
@@ -693,6 +669,7 @@ export const PROVIDER_INFO: Record<
     description: "GPT-5.5 (default), GPT-5.4, GPT-5.3 Instant, GPT-5.3 Codex",
     keyPrefix: "sk-",
     defaultBaseUrl: "https://api.openai.com",
+    signupUrl: "https://platform.openai.com/api-keys",
   },
   anthropic: {
     name: "Anthropic",
@@ -702,6 +679,7 @@ export const PROVIDER_INFO: Record<
     description: "Claude Opus 4.7 (default), Sonnet, Haiku",
     keyPrefix: "sk-ant-",
     defaultBaseUrl: "https://api.anthropic.com",
+    signupUrl: "https://console.anthropic.com/settings/keys",
   },
   google: {
     name: "Google",
@@ -711,6 +689,7 @@ export const PROVIDER_INFO: Record<
     description: "Gemini 3.1 Pro, Flash models",
     keyPrefix: "AIza",
     defaultBaseUrl: "https://generativelanguage.googleapis.com",
+    signupUrl: "https://aistudio.google.com/app/apikey",
   },
   deepseek: {
     name: "DeepSeek",
@@ -720,6 +699,7 @@ export const PROVIDER_INFO: Record<
     description: "DeepSeek V4 Pro (default), V4 Flash, Reasoner, Chat",
     keyPrefix: "sk-",
     defaultBaseUrl: "https://api.deepseek.com",
+    signupUrl: "https://platform.deepseek.com/api_keys",
   },
   kimi: {
     name: "Moonshot",
@@ -729,6 +709,7 @@ export const PROVIDER_INFO: Record<
     description: "Kimi K2.6 (default), Moonshot models",
     keyPrefix: "sk-",
     defaultBaseUrl: "https://api.moonshot.cn",
+    signupUrl: "https://platform.moonshot.cn/console/api-keys",
   },
   qwen: {
     name: "Qwen",
@@ -738,6 +719,7 @@ export const PROVIDER_INFO: Record<
     description: "Qwen 3.6 Max Preview (Alibaba Cloud Bailian)",
     keyPrefix: "sk-",
     defaultBaseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    signupUrl: "https://dashscope.console.aliyun.com/apiKey",
   },
   minimax: {
     name: "MiniMax",
@@ -747,6 +729,7 @@ export const PROVIDER_INFO: Record<
     description: "MiniMax M2.7 (Anthropic-compatible endpoint)",
     keyPrefix: "sk-",
     defaultBaseUrl: "https://api.minimaxi.com/anthropic",
+    signupUrl: "https://api.minimaxi.com/user-center/basic-information/interface-key",
   },
   zhipu: {
     name: "Z.AI",
@@ -756,6 +739,7 @@ export const PROVIDER_INFO: Record<
     description: "GLM-5.1 (Zhipu AI, bigmodel.cn)",
     keyPrefix: "",
     defaultBaseUrl: "https://open.bigmodel.cn/api/paas/v4",
+    signupUrl: "https://open.bigmodel.cn/usercenter/proj-mgmt/apikeys",
   },
 };
 

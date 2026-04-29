@@ -13,6 +13,8 @@ import {
   type SessionAttachment,
 } from "../services/attachments";
 import {
+  getBranchLineage,
+  listChildBranches,
   type DeepResearchReportSnapshot,
   type DiscussionSession,
   type EndVoteChoice,
@@ -25,6 +27,7 @@ import {
   type SessionMessage as PersistedSessionMessage,
   type SessionPhase,
   type SessionStatus,
+  type SessionSummary,
   type SessionToolEvent,
 } from "../services/sessions";
 import { getToolPrompt, runToolCall, type ToolCall, type ToolContext } from "../services/tools";
@@ -70,14 +73,18 @@ import { splitIntoInlineQuoteSegments, stripQuoteTokens } from "../utils/inlineQ
 import { CostBudgetBadge } from "../components/CostBudgetBadge";
 import { ArgumentMapPanel } from "../components/ArgumentMapPanel";
 import { BundleExportButton } from "../components/BundleActions";
-import { BranchAction, BranchLineage } from "../components/BranchAction";
+import {
+  BranchAction,
+  BranchPointBadge,
+  type BranchPointEntry,
+} from "../components/BranchAction";
 import { FactCheckStrip } from "../components/FactCheckBadge";
 import {
   applyFactCheckBadgesToGraph,
-  emptyGraph,
   buildExtractPrompt,
   consolidateArgGraph,
   extractPremisesFromSummary,
+  migrateArgGraphV1ToV2,
   parseExtractResponse,
   updateArgumentMap,
   type ArgGraph,
@@ -128,6 +135,94 @@ type EndVoteChoiceMap = Partial<Record<CouncilAgentId, EndVoteChoice>>;
 
 type EndVoteReasonMap = Partial<Record<CouncilAgentId, string>>;
 type PendingHandoffState = HandoffSnapshot;
+
+// Small monochrome SVG icons for the chat header action group. Inline to
+// match the pattern in `pages/Home.tsx` (GearIcon / ArrowIcon) — kept
+// verbose-on-purpose so a future reader can read them at a glance instead
+// of chasing yet another component file. No emoji.
+function HeaderIconLogs() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" aria-hidden="true">
+      <line x1="3" y1="4.5" x2="13" y2="4.5" />
+      <line x1="3" y1="8" x2="13" y2="8" />
+      <line x1="3" y1="11.5" x2="10" y2="11.5" />
+    </svg>
+  );
+}
+
+function HeaderIconSearch() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" aria-hidden="true">
+      <circle cx="7" cy="7" r="4.5" />
+      <line x1="10.5" y1="10.5" x2="13.5" y2="13.5" />
+    </svg>
+  );
+}
+
+function HeaderIconExport() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M3 9.5v2.5a1.5 1.5 0 0 0 1.5 1.5h7a1.5 1.5 0 0 0 1.5-1.5V9.5" />
+      <line x1="8" y1="2.5" x2="8" y2="10" />
+      <polyline points="5.2 5.2 8 2.5 10.8 5.2" />
+    </svg>
+  );
+}
+
+function HeaderIconDossier() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" aria-hidden="true">
+      <path d="M2.4 5a1.5 1.5 0 0 1 1.5-1.5h2.6a1 1 0 0 1 .7.3l1.4 1.4h4.5a1.5 1.5 0 0 1 1.5 1.5V12a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 2.4 12V5Z" />
+    </svg>
+  );
+}
+
+function HeaderIconMap() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" aria-hidden="true">
+      <circle cx="4" cy="4" r="1.5" />
+      <circle cx="12" cy="4" r="1.5" />
+      <circle cx="8" cy="11.5" r="1.5" />
+      <line x1="5.5" y1="4" x2="10.5" y2="4" />
+      <line x1="5" y1="5.4" x2="7.5" y2="10" />
+      <line x1="11" y1="5.4" x2="8.5" y2="10" />
+    </svg>
+  );
+}
+
+/** Slim vertical divider between header action groups. Decorative. */
+function HeaderGroupDivider() {
+  return (
+    <span
+      aria-hidden="true"
+      style={{
+        width: "1px",
+        height: "20px",
+        background: "rgba(232, 232, 239, 0.16)",
+        marginInline: "2px",
+      }}
+    />
+  );
+}
+
+/**
+ * Migrate persisted argmap blobs forward to the v2 schema. Older sessions
+ * stored a v1 graph (3 kinds, 2 relations) without `schemaVersion`. Without
+ * this lift, opening a v1 session would silently drop the existing map back
+ * to an empty graph — a real data-loss bug for anyone who beta-tested the
+ * v1 argmap. `migrateArgGraphV1ToV2` already returns `emptyGraph()` for
+ * unrecognizable input, so missing/null also lands cleanly.
+ */
+function loadArgGraphForSession(stored: unknown): ArgGraph {
+  if (
+    stored &&
+    typeof stored === "object" &&
+    (stored as { schemaVersion?: unknown }).schemaVersion === 2
+  ) {
+    return stored as ArgGraph;
+  }
+  return migrateArgGraphV1ToV2(stored ?? null);
+}
 
 // Model display names mapping - includes both full dated IDs and aliases
 const MODEL_DISPLAY_NAMES: Record<string, string> = {
@@ -1247,10 +1342,81 @@ export function Chat({ session, onNavigate, onPersistSession }: ChatProps) {
   const normalizedSession = useMemo(() => normalizeSessionForChat(session), [session]);
   const topic = normalizedSession.topic;
 
+  /**
+   * Branch turn-count repair. Branched sessions created before commit
+   * fa28d88 ("Inherit parent turn count on branch") persisted
+   * `currentTurn: 0` even though they carry the parent's truncated
+   * message history. Without this repair the closing-round prompt and
+   * the resolution-prompt pass tell the agents the council ran for only
+   * the new branch turns (e.g. "4 turns") instead of the cumulative
+   * count since the parent debate started — so when the council ends
+   * the session, agents say things like "we only discussed for 4 turns"
+   * even though 20+ turns happened upstream. Modern branches inherit
+   * `currentTurn` correctly at fork time, so this only adjusts legacy
+   * persisted data.
+   */
+  const inferredInitialTurn = useMemo(() => {
+    if (
+      normalizedSession.parentSessionId &&
+      normalizedSession.currentTurn === 0 &&
+      normalizedSession.messages.length > 0
+    ) {
+      return normalizedSession.messages.filter(
+        (m) => isCouncilAgent(m.agentId) && !m.isStreaming && !m.error,
+      ).length;
+    }
+    return normalizedSession.currentTurn;
+    // Only recompute when the session id changes (Chat is keyed by session
+    // id at the App level so this useMemo runs once per mount in practice).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [normalizedSession.id]);
+
   const [messages, setMessages] = useState<ChatMessage[]>(normalizedSession.messages);
+
+  /**
+   * Bumps when a new fork is created from this session, so the
+   * `branchPointsByMessageId` useMemo refreshes immediately. Without it,
+   * the new "X forks from here" indicator would only appear after a
+   * remount (i.e. navigating away and back).
+   */
+  const [branchPointsRefreshKey, setBranchPointsRefreshKey] = useState(0);
+
+  /**
+   * Map of message-id → branch points anchored at that message. Two flavors:
+   *   - `kind: "ancestor"` — this session was forked from this message in
+   *     the parent. Click navigates back to the parent session.
+   *   - `kind: "child"` — another session was forked from this message.
+   *     Click navigates into that child session.
+   * Persistence lives in session storage already (parent and child
+   * branches keep their `parentSessionId` / `parentMessageId`), so fork
+   * indicators survive quit/reopen automatically.
+   */
+  const branchPointsByMessageId = useMemo<Map<string, BranchPointEntry[]>>(() => {
+    const map = new Map<string, BranchPointEntry[]>();
+    const push = (id: string, entry: BranchPointEntry) => {
+      const list = map.get(id) ?? [];
+      list.push(entry);
+      map.set(id, list);
+    };
+    const childBranches = listChildBranches(normalizedSession.id);
+    for (const child of childBranches) {
+      if (!child.parentMessageId) continue;
+      push(child.parentMessageId, { kind: "child", session: child });
+    }
+    if (normalizedSession.parentSessionId && normalizedSession.parentMessageId) {
+      const lineage = getBranchLineage(normalizedSession.id);
+      const parent: SessionSummary | undefined =
+        lineage.length >= 2 ? lineage[lineage.length - 2] : undefined;
+      if (parent) {
+        push(normalizedSession.parentMessageId, { kind: "ancestor", session: parent });
+      }
+    }
+    return map;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [normalizedSession.id, branchPointsRefreshKey]);
   const [isRunning, setIsRunning] = useState(false);
   const [typingAgents, setTypingAgents] = useState<CouncilAgentId[]>([]);
-  const [currentTurn, setCurrentTurn] = useState(normalizedSession.currentTurn);
+  const [currentTurn, setCurrentTurn] = useState(inferredInitialTurn);
   const [showBidding, setShowBidding] = useState(false);
   const [currentBidding, setCurrentBidding] = useState<BiddingRound | null>(null);
   const [totalTokens, setTotalTokens] = useState(normalizedSession.totalTokens);
@@ -1287,8 +1453,8 @@ export function Chat({ session, onNavigate, onPersistSession }: ChatProps) {
   // Argument-map state (declared early so it's in scope for the autosave
   // callback's deps; the queue effect, runArgumentMapExtraction, and the
   // panel render all consume these later in the component).
-  const [argGraph, setArgGraph] = useState<ArgGraph>(
-    () => normalizedSession.argGraph ?? emptyGraph(),
+  const [argGraph, setArgGraph] = useState<ArgGraph>(() =>
+    loadArgGraphForSession(normalizedSession.argGraph),
   );
   const argGraphRef = useRef(argGraph);
   argGraphRef.current = argGraph;
@@ -1342,7 +1508,7 @@ export function Chat({ session, onNavigate, onPersistSession }: ChatProps) {
   const moderatorInFlightRef = useRef(false);
   const duoLogueRef = useRef<DuoLogueState | null>(normalizedSession.duoLogue);
   const messagesRef = useRef<ChatMessage[]>(normalizedSession.messages);
-  const currentTurnRef = useRef(normalizedSession.currentTurn);
+  const currentTurnRef = useRef(inferredInitialTurn);
   const previousSpeakerRef = useRef<CouncilAgentId | null>(
     normalizedSession.runtime.previousSpeaker,
   );
@@ -4954,7 +5120,19 @@ Write the official moderator wrap-up in 4 short sentences:
       const clusters = argGraphRef.current.clusters.length;
       const axis = argGraphRef.current.axis?.name ?? "";
       const consol = argmapConsolidatorLastMessageCountRef.current;
-      return `${n}:${e}:${last}:${argmapExtractedIdsRef.current.size}:${cv}:${orphans}:${clusters}:${axis}:${consol}`;
+      // Include pinned node positions in the fingerprint so a drag-to-pin
+      // change actually triggers a persist. Coordinates are rounded to
+      // integer px — sub-pixel jitter on the same physical position
+      // shouldn't kick off a save.
+      const overridesEntries = argGraphRef.current.layoutOverrides ?? {};
+      const overrides = Object.keys(overridesEntries)
+        .sort()
+        .map(
+          (k) =>
+            `${k}@${Math.round(overridesEntries[k]!.x)},${Math.round(overridesEntries[k]!.y)}`,
+        )
+        .join("|");
+      return `${n}:${e}:${last}:${argmapExtractedIdsRef.current.size}:${cv}:${orphans}:${clusters}:${axis}:${consol}:${overrides}`;
     })();
     const signature = [
       nextStatus,
@@ -5323,6 +5501,12 @@ Write the official moderator wrap-up in 4 short sentences:
   // when no new messages have arrived.
   useEffect(() => {
     if (argmapBusyRef.current) return;
+    // Race-fix: don't kick off per-message extraction while the
+    // consolidator is mid-flight. Both writers ultimately call setArgGraph
+    // with a result derived from a captured snapshot of the graph; if they
+    // overlap, the later writer can clobber the earlier one's structural
+    // changes. Serializing through the two busy refs is the cheap fix.
+    if (argmapConsolidatorBusyRef.current) return;
     if (!pickExtractorRuntime()) return;
     const pending = messages.find(
       (m) =>
@@ -5360,7 +5544,7 @@ Write the official moderator wrap-up in 4 short sentences:
   // (in-flight, attempt counters, last error) always resets — those are
   // ephemeral.
   useEffect(() => {
-    setArgGraph(normalizedSession.argGraph ?? emptyGraph());
+    setArgGraph(loadArgGraphForSession(normalizedSession.argGraph));
     argmapExtractedIdsRef.current = new Set(normalizedSession.argmapExtractedIds ?? []);
     argmapInFlightRef.current = new Set();
     argmapAttemptsByIdRef.current = new Map();
@@ -5384,7 +5568,12 @@ Write the official moderator wrap-up in 4 short sentences:
   const runArgmapConsolidation = useCallback(
     async (force: boolean = false) => {
       if (argmapConsolidatorBusyRef.current) return;
-      if (argmapBusyRef.current && !force) return;
+      // Race-fix: even when force=true, never run consolidation while the
+      // per-message extractor is in-flight. `force` was originally meant
+      // to bypass the cadence interval (consolidate now even if not enough
+      // turns have passed), not to bypass the mutex with the extractor.
+      // The "Consolidate now" button surfaces a busy state to the user.
+      if (argmapBusyRef.current) return;
       const runtime = pickExtractorRuntime();
       if (!runtime) return;
 
@@ -5428,10 +5617,15 @@ Write the official moderator wrap-up in 4 short sentences:
         );
 
         const startedAt = Date.now();
+        // Capture the graph reference we hand to the consolidator so we
+        // can detect a concurrent extraction write and drop the result if
+        // so (race-fix). The two busy refs already gate against this, but
+        // a defensive check is cheap and survives future refactors.
+        const argGraphInputAtStart = argGraphRef.current;
         const consolidated = await consolidateArgGraph(
           {
             topic,
-            graph: argGraphRef.current,
+            graph: argGraphInputAtStart,
             recentMessages,
             knownAgentNames,
             ...(seedPremises.length > 0 ? { seedPremises } : {}),
@@ -5461,22 +5655,44 @@ Write the official moderator wrap-up in 4 short sentences:
           },
         );
         const elapsedMs = Date.now() - startedAt;
-        if (consolidated !== argGraphRef.current) {
-          setArgGraph(consolidated);
-          apiLogger.log(
-            "info",
-            runtime.provider,
-            "argmap: consolidation pass landed structural change",
-            {
-              nodes: consolidated.nodes.length,
-              edges: consolidated.edges.length,
-              clusters: consolidated.clusters.length,
-              orphans: consolidated.orphans.length,
-              axis: consolidated.axis?.name ?? null,
-              consolidationVersion: consolidated.consolidationVersion,
-              elapsedMs,
-            },
-          );
+        if (consolidated !== argGraphInputAtStart) {
+          let landed = false;
+          setArgGraph((prev) => {
+            // Race guard: if anything wrote between the start of this
+            // consolidation and now (extraction, fact-check overlay, drag
+            // override), prev will differ from the input we operated on.
+            // Drop the consolidation rather than clobber the new writes;
+            // the next interval will re-consolidate against the fresher
+            // graph.
+            if (prev !== argGraphInputAtStart) {
+              return prev;
+            }
+            landed = true;
+            return consolidated;
+          });
+          if (landed) {
+            apiLogger.log(
+              "info",
+              runtime.provider,
+              "argmap: consolidation pass landed structural change",
+              {
+                nodes: consolidated.nodes.length,
+                edges: consolidated.edges.length,
+                clusters: consolidated.clusters.length,
+                orphans: consolidated.orphans.length,
+                axis: consolidated.axis?.name ?? null,
+                consolidationVersion: consolidated.consolidationVersion,
+                elapsedMs,
+              },
+            );
+          } else {
+            apiLogger.log(
+              "info",
+              runtime.provider,
+              "argmap: consolidation dropped — concurrent write detected",
+              { elapsedMs },
+            );
+          }
         } else {
           apiLogger.log(
             "info",
@@ -5873,6 +6089,22 @@ Write the official moderator wrap-up in 4 short sentences:
       apiLogger.log("info", "budget", snap.message ?? "Budget warning", {
         sessionUSD: snap.sessionUSD,
       });
+      // Surface the 80%-threshold warning inline as a system message so it
+      // isn't buried in logs. The signature dedup above ensures we only
+      // fire once per warning-level transition (re-firing requires the
+      // verdict signature to change, e.g. crossing into a new percentage
+      // band or hitting the cap).
+      if (snap.message) {
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: `msg_${Date.now()}_budget_warn`,
+            agentId: "system",
+            content: `Budget notice: ${snap.message}`,
+            timestamp: Date.now(),
+          },
+        ]);
+      }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [totalEstimatedCostUSD, config.preferences.budget]);
@@ -5930,17 +6162,10 @@ Write the official moderator wrap-up in 4 short sentences:
                 />
               </div>
               <h1 className="chat-session-title">Socratic Council</h1>
-              {/* Branch lineage — replaces the single-parent crumb. Renders
-                  the full ancestor chain back to root and exposes a
-                  popover with sibling/child branches so the user can
-                  navigate the whole local family tree from one control. */}
-              <div style={{ marginTop: "0.4rem" }}>
-                <BranchLineage
-                  sessionId={normalizedSession.id}
-                  refreshKey={lastSavedAt}
-                  onNavigate={(id) => onNavigate("chat", id)}
-                />
-              </div>
+              {/* Branch lineage no longer renders here — fork indicators are
+                  now inline at the messages where the branches happened
+                  (BranchPointBadge inside Virtuoso itemContent). The header
+                  stays clean; the branches live where they're anchored. */}
               <div className={`chat-session-topic-shell${isTopicExpanded ? " is-expanded" : ""}`}>
                 <div className={`chat-session-topic-body${isTopicExpanded ? " is-expanded" : ""}`}>
                   <p
@@ -5994,34 +6219,38 @@ Write the official moderator wrap-up in 4 short sentences:
 
             {/* Gracefully End button moved after Pause — see below */}
 
+            {/* Group A — review tools */}
             <button
               onClick={() => setSidePanelView((prev) => (prev === "logs" ? "default" : "logs"))}
               className="button-secondary text-sm"
+              style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}
+              title="Show recent log events for this session"
             >
+              <HeaderIconLogs />
               Logs {errors.length > 0 && `(${errors.length})`}
             </button>
 
             <button
               onClick={() => setSidePanelView((prev) => (prev === "search" ? "default" : "search"))}
               className="button-secondary text-sm"
+              style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}
+              title="Search the transcript"
             >
+              <HeaderIconSearch />
               Search
             </button>
 
+            <HeaderGroupDivider />
+
+            {/* Group B — output tools */}
             <button
               onClick={() => setSidePanelView((prev) => (prev === "export" ? "default" : "export"))}
               className="button-secondary text-sm"
+              style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}
+              title="Export this session"
             >
+              <HeaderIconExport />
               Export
-            </button>
-
-            <button
-              onClick={() => setArgmapOpen((prev) => !prev)}
-              className="button-secondary text-sm"
-              aria-pressed={argmapOpen}
-              title="Toggle the live argument map"
-            >
-              Argument Map {argGraph.nodes.length > 0 ? `(${argGraph.nodes.length})` : ""}
             </button>
 
             {normalizedSession.projectId && normalizedSession.attachments.length > 0 && (
@@ -6049,11 +6278,51 @@ Write the official moderator wrap-up in 4 short sentences:
                   }
                 }}
                 className="button-secondary text-sm"
+                style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}
                 title="Promote session attachments to the project dossier"
               >
+                <HeaderIconDossier />
                 Save to Dossier
               </button>
             )}
+
+            <HeaderGroupDivider />
+
+            {/* Group C — analysis tool, distinct visual weight via primary border */}
+            <button
+              onClick={() => setArgmapOpen((prev) => !prev)}
+              className="button-secondary text-sm"
+              aria-pressed={argmapOpen}
+              title={argmapBusy ? "Argument map · extracting…" : "Toggle the live argument map"}
+              style={{
+                position: "relative",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "6px",
+                borderColor: argmapOpen
+                  ? "rgba(245, 197, 66, 0.55)"
+                  : "rgba(245, 197, 66, 0.32)",
+              }}
+            >
+              <HeaderIconMap />
+              Argument Map {argGraph.nodes.length > 0 ? `(${argGraph.nodes.length})` : ""}
+              {argmapBusy ? (
+                <span
+                  aria-hidden="true"
+                  className="animate-pulse"
+                  style={{
+                    position: "absolute",
+                    top: "5px",
+                    right: "6px",
+                    width: "6px",
+                    height: "6px",
+                    borderRadius: "50%",
+                    background: "#F5C542",
+                    boxShadow: "0 0 4px rgba(245, 197, 66, 0.65)",
+                  }}
+                />
+              ) : null}
+            </button>
 
             {!isArchived &&
               sessionStatus !== "completed" &&
@@ -6544,6 +6813,17 @@ Write the official moderator wrap-up in 4 short sentences:
                         >
                           React
                         </button>
+                        {/* Inline fork-point indicator. Replaces the top-of-chat
+                            BranchLineage crumb so users see branch metadata
+                            AT the message where the fork happened. Persists
+                            across quit/reopen because parentSessionId/
+                            parentMessageId already live on the session record. */}
+                        {branchPointsByMessageId.has(message.id) ? (
+                          <BranchPointBadge
+                            entries={branchPointsByMessageId.get(message.id) ?? []}
+                            onNavigate={(id) => onNavigate("chat", id)}
+                          />
+                        ) : null}
                         {/* Fix 3.6: wire BranchAction so users can fork a session
                             at this message. Hidden on archived sessions and
                             on messages without an established conversation
@@ -6553,6 +6833,7 @@ Write the official moderator wrap-up in 4 short sentences:
                             session={normalizedSession}
                             messageId={message.id}
                             onBranched={(branch) => {
+                              setBranchPointsRefreshKey((k) => k + 1);
                               onNavigate("chat", branch.id);
                             }}
                           />
@@ -6984,6 +7265,19 @@ Write the official moderator wrap-up in 4 short sentences:
           onConsolidate={() => {
             void runArgmapConsolidation(true);
             setArgmapConsolidatorTrigger((n) => n + 1);
+          }}
+          onLayoutOverride={(nodeId, position) => {
+            // Drag-to-pin persistence — fold the override into the live
+            // graph; the persist debouncer picks up the change via the
+            // fingerprint above. Functional updater so we don't clobber
+            // any concurrent extraction or consolidation write.
+            setArgGraph((prev) => ({
+              ...prev,
+              layoutOverrides: {
+                ...(prev.layoutOverrides ?? {}),
+                [nodeId]: { x: position.x, y: position.y },
+              },
+            }));
           }}
           contradictionsCount={
             argGraph.edges.filter((e) => e.relation === "contradicts").length

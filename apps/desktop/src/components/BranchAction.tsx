@@ -380,6 +380,151 @@ function forkSummary(siblingCount: number, childCount: number): string {
   return parts.join(" · ");
 }
 
+/**
+ * One branch path that converges on a specific message in the current
+ * session. `kind: "ancestor"` means the current session was forked from
+ * here (clicking switches to the parent). `kind: "child"` means another
+ * session was forked from here (clicking switches to that child).
+ */
+export interface BranchPointEntry {
+  kind: "ancestor" | "child";
+  session: SessionSummary;
+}
+
+/**
+ * BranchPointBadge — slim inline indicator that renders next to a message
+ * which is a fork point. Replaces the top-of-chat BranchLineage crumb so
+ * the user sees branches AT the point where they happened, in-stream.
+ *
+ * The persistence is already in the data model (`parentSessionId` /
+ * `parentMessageId` survive quit/reopen); this component just surfaces
+ * those fork relationships in-line and lets the user click into any
+ * sibling, parent, or child branch from the same anchor.
+ */
+export function BranchPointBadge({
+  entries,
+  onNavigate,
+}: {
+  entries: BranchPointEntry[];
+  onNavigate: (id: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const popoverRef = useRef<HTMLDivElement | null>(null);
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      const t = e.target as Node | null;
+      if (!t) return;
+      if (popoverRef.current?.contains(t)) return;
+      if (triggerRef.current?.contains(t)) return;
+      setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  if (entries.length === 0) return null;
+
+  const ancestors = entries.filter((e) => e.kind === "ancestor");
+  const children = entries.filter((e) => e.kind === "child");
+  const summary = (() => {
+    const parts: string[] = [];
+    if (ancestors.length > 0) parts.push("branched from parent here");
+    if (children.length > 0) {
+      parts.push(`${children.length} fork${children.length === 1 ? "" : "s"}`);
+    }
+    return parts.join(" · ");
+  })();
+
+  return (
+    <div style={{ position: "relative", display: "inline-block" }}>
+      <button
+        ref={triggerRef}
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        aria-haspopup="dialog"
+        title={`${entries.length} branch ${entries.length === 1 ? "path" : "paths"} at this message`}
+        style={{
+          display: "inline-flex",
+          alignItems: "center",
+          gap: "5px",
+          padding: "2px 9px",
+          borderRadius: "999px",
+          background: open ? "rgba(245, 197, 66, 0.14)" : "rgba(245, 197, 66, 0.06)",
+          border: "1px solid rgba(245, 197, 66, 0.32)",
+          color: "rgba(245, 197, 66, 0.88)",
+          cursor: "pointer",
+          fontFamily:
+            "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
+          fontSize: "0.68rem",
+          fontStyle: "italic",
+          letterSpacing: "0.01em",
+        }}
+      >
+        <span aria-hidden="true">↪</span>
+        {summary}
+        <span aria-hidden="true" style={{ opacity: 0.6 }}>
+          {open ? "▴" : "▾"}
+        </span>
+      </button>
+
+      {open && (
+        <div
+          ref={popoverRef}
+          role="dialog"
+          aria-label="Branch list"
+          style={{
+            position: "absolute",
+            top: "calc(100% + 4px)",
+            left: 0,
+            zIndex: 50,
+            minWidth: "260px",
+            maxWidth: "380px",
+            padding: "10px 12px",
+            borderRadius: "10px",
+            background:
+              "linear-gradient(180deg, rgba(24, 22, 18, 0.96) 0%, rgba(12, 11, 16, 0.98) 100%)",
+            border: "1px solid rgba(245, 197, 66, 0.22)",
+            boxShadow: "0 18px 40px -12px rgba(0, 0, 0, 0.6)",
+            color: "rgba(232, 232, 239, 0.92)",
+          }}
+        >
+          {ancestors.length > 0 && (
+            <BranchListSection
+              title="Branched from"
+              entries={ancestors.map((a) => a.session)}
+              onNavigate={(id) => {
+                setOpen(false);
+                onNavigate(id);
+              }}
+            />
+          )}
+          {children.length > 0 && (
+            <BranchListSection
+              title="Forks at this point"
+              entries={children.map((c) => c.session)}
+              onNavigate={(id) => {
+                setOpen(false);
+                onNavigate(id);
+              }}
+            />
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function BranchListSection({
   title,
   entries,
