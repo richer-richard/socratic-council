@@ -4369,48 +4369,67 @@ Write the official moderator wrap-up in 4 short sentences:
     if (!voteState || abortRef.current) return;
 
     const threshold = getEndVoteThreshold(configuredAgentIds);
-    const nextAgent = voteState.queue[0];
 
-    if (nextAgent) {
-      const { choice, reason } = await generateEndVoteResponse(nextAgent, voteState);
-      if (abortRef.current) return;
+    if (voteState.queue.length > 0) {
+      // Fire every queued agent's ballot request in parallel rather than
+      // serially. End votes are procedural, not a discussion turn — the
+      // serial dispatch was wasting wall-clock time (8× over a 7-agent
+      // round) and exposing later voters to the running tally of earlier
+      // ones, which doesn't match the prompt's "starts at" wording.
+      //
+      // Each agent's prompt is built from `voteState` captured at dispatch
+      // time, so all voters see the same initial conditions. Ballots are
+      // folded into state as they land via handleBallot (sync, no awaits),
+      // so the tally board updates incrementally even though the API
+      // calls overlap.
+      const agents = voteState.queue;
 
-      const safeChoice = choice ?? "no";
-      const nextVoteState: EndVoteState =
-        voteState.round === 1
-          ? {
-              ...voteState,
-              queue: voteState.queue.slice(1),
-              firstRoundVotes: {
-                ...voteState.firstRoundVotes,
-                [nextAgent]: safeChoice,
-              },
-              firstRoundReasons: {
-                ...voteState.firstRoundReasons,
-                ...(reason ? { [nextAgent]: reason } : {}),
-              },
-            }
-          : {
-              ...voteState,
-              queue: voteState.queue.slice(1),
-              secondRoundVotes: {
-                ...voteState.secondRoundVotes,
-                [nextAgent]: safeChoice,
-              },
-              secondRoundReasons: {
-                ...voteState.secondRoundReasons,
-                ...(reason ? { [nextAgent]: reason } : {}),
-              },
-            };
+      const handleBallot = (
+        agentId: CouncilAgentId,
+        choice: EndVoteChoice | null,
+        reason: string,
+      ) => {
+        const cur = endVoteRef.current;
+        if (!cur) return;
+        const safeChoice = choice ?? "no";
+        const next: EndVoteState =
+          cur.round === 1
+            ? {
+                ...cur,
+                queue: cur.queue.filter((a) => a !== agentId),
+                firstRoundVotes: { ...cur.firstRoundVotes, [agentId]: safeChoice },
+                firstRoundReasons: {
+                  ...cur.firstRoundReasons,
+                  ...(reason ? { [agentId]: reason } : {}),
+                },
+              }
+            : {
+                ...cur,
+                queue: cur.queue.filter((a) => a !== agentId),
+                secondRoundVotes: { ...cur.secondRoundVotes, [agentId]: safeChoice },
+                secondRoundReasons: {
+                  ...cur.secondRoundReasons,
+                  ...(reason ? { [agentId]: reason } : {}),
+                },
+              };
+        endVoteRef.current = next;
+        upsertEndVoteBoardMessage(
+          buildEndVoteBoard(next, next.queue.length === 0 ? "complete" : "active"),
+        );
+        cyclePendingRef.current = cyclePendingRef.current.filter((a) => a !== agentId);
+        previousSpeakerRef.current = agentId;
+        fairnessManagerRef.current.recordSpeaker(agentId);
+        recentSpeakersRef.current = [...recentSpeakersRef.current.slice(-5), agentId];
+      };
 
-      endVoteRef.current = nextVoteState;
-      upsertEndVoteBoardMessage(
-        buildEndVoteBoard(nextVoteState, nextVoteState.queue.length === 0 ? "complete" : "active"),
+      await Promise.all(
+        agents.map(async (agentId) => {
+          const { choice, reason } = await generateEndVoteResponse(agentId, voteState);
+          if (abortRef.current) return;
+          handleBallot(agentId, choice, reason);
+        }),
       );
-      cyclePendingRef.current = cyclePendingRef.current.filter((agentId) => agentId !== nextAgent);
-      previousSpeakerRef.current = nextAgent;
-      fairnessManagerRef.current.recordSpeaker(nextAgent);
-      recentSpeakersRef.current = [...recentSpeakersRef.current.slice(-5), nextAgent];
+
       // End-vote turns are NOT counted against the discussion turn budget —
       // voting is a procedural step, not a debate contribution. The outer
       // loop's termination is already gated on endVoteRef.current staying
