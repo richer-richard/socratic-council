@@ -3492,6 +3492,7 @@ Write the official moderator wrap-up in 4 short sentences:
             timedOut: interruptedForTools ? false : providerResult.timedOut,
             streamedToolCalls,
             interruptedForTools,
+            canvasDirectivesApplied,
           };
         };
 
@@ -3535,8 +3536,18 @@ Write the official moderator wrap-up in 4 short sentences:
               ? result.streamedToolCalls
               : parsedForTools.toolCalls;
 
-          // Apply canvas directives from this round immediately
-          for (const directive of canvasFromRound.directives) {
+          // Apply canvas directives from this round, but skip ones the
+          // streaming path already applied. The bug was a 3× duplication of
+          // every @canvas append: streaming Site 1 applies all N during the
+          // stream (deduped via the in-function counter), then this loop
+          // re-applies all N from result.rawContent, then the post-loop
+          // final block re-applies all N again. Threading the streaming
+          // counter out of runCompletion lets us only catch directives the
+          // stream missed — typically only when a tool call aborted the
+          // stream mid-chunk and the directive arrived in that same chunk.
+          const alreadyAppliedRound = result.canvasDirectivesApplied ?? 0;
+          for (let ci = alreadyAppliedRound; ci < canvasFromRound.directives.length; ci++) {
+            const directive = canvasFromRound.directives[ci]!;
             setCanvasStates((prev) => ({
               ...prev,
               [agentId]: applyCanvasDirective(prev[agentId], directive, agentId, currentTurnRef.current),
@@ -3620,9 +3631,13 @@ Write the official moderator wrap-up in 4 short sentences:
           }
         }
 
-        // Strip canvas directives from the final content
+        // Strip canvas directives from the final content. Same dedup as
+        // the loop above — only apply directives the streaming path didn't
+        // already cover.
         const canvasFromFinal = extractCanvasDirectives(result.rawContent || result.content || "");
-        for (const directive of canvasFromFinal.directives) {
+        const alreadyAppliedFinal = result.canvasDirectivesApplied ?? 0;
+        for (let ci = alreadyAppliedFinal; ci < canvasFromFinal.directives.length; ci++) {
+          const directive = canvasFromFinal.directives[ci]!;
           setCanvasStates((prev) => ({
             ...prev,
             [agentId]: applyCanvasDirective(prev[agentId], directive, agentId, currentTurnRef.current),
