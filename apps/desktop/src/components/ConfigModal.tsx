@@ -11,7 +11,81 @@ import {
 import { getModelsByProvider } from "@socratic-council/shared";
 import { ProviderIcon } from "./icons/ProviderIcons";
 import { testProviderConnection } from "../services/api";
-import { clearAllAttachmentBlobs, getProviderAttachmentSupport } from "../services/attachments";
+import { clearAllAttachmentBlobs } from "../services/attachments";
+
+// Stroked SVG icons in the same visual language as the Chat header
+// (HeaderIconLogs / HeaderIconSearch / etc.) — 16x16 viewBox, 1.4 stroke,
+// currentColor. Replaces the emoji set that broke the cinematic-dark
+// aesthetic.
+function IconGear() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <circle cx="8" cy="8" r="2.2" />
+      <path d="M8 1.5v1.7 M8 12.8v1.7 M14.5 8h-1.7 M3.2 8H1.5 M12.6 3.4l-1.2 1.2 M4.6 11.4l-1.2 1.2 M12.6 12.6l-1.2-1.2 M4.6 4.6L3.4 3.4" />
+    </svg>
+  );
+}
+function IconKey() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <circle cx="5" cy="8" r="2.4" />
+      <path d="M7.4 8h6.6 M11.4 8v2.2 M13.6 8v2.6" />
+    </svg>
+  );
+}
+function IconChip() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect x="4" y="4" width="8" height="8" rx="1.4" />
+      <line x1="8" y1="1.5" x2="8" y2="3.8" />
+      <line x1="8" y1="12.2" x2="8" y2="14.5" />
+      <line x1="1.5" y1="8" x2="3.8" y2="8" />
+      <line x1="12.2" y1="8" x2="14.5" y2="8" />
+      <line x1="5.6" y1="1.5" x2="5.6" y2="3.8" />
+      <line x1="10.4" y1="12.2" x2="10.4" y2="14.5" />
+      <line x1="1.5" y1="10.4" x2="3.8" y2="10.4" />
+      <line x1="12.2" y1="5.6" x2="14.5" y2="5.6" />
+    </svg>
+  );
+}
+function IconGlobe() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <circle cx="8" cy="8" r="6" />
+      <ellipse cx="8" cy="8" rx="2.6" ry="6" />
+      <line x1="2" y1="8" x2="14" y2="8" />
+    </svg>
+  );
+}
+function IconSliders() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <line x1="2.5" y1="4.5" x2="13.5" y2="4.5" />
+      <circle cx="6" cy="4.5" r="1.4" fill="var(--config-bg, #111)" />
+      <line x1="2.5" y1="8" x2="13.5" y2="8" />
+      <circle cx="10.5" cy="8" r="1.4" fill="var(--config-bg, #111)" />
+      <line x1="2.5" y1="11.5" x2="13.5" y2="11.5" />
+      <circle cx="5" cy="11.5" r="1.4" fill="var(--config-bg, #111)" />
+    </svg>
+  );
+}
+function IconInfo() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <circle cx="8" cy="8" r="6" />
+      <line x1="8" y1="7.2" x2="8" y2="11.5" />
+      <circle cx="8" cy="4.6" r="0.6" fill="currentColor" stroke="none" />
+    </svg>
+  );
+}
+function IconClose() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" aria-hidden="true">
+      <line x1="3.5" y1="3.5" x2="12.5" y2="12.5" />
+      <line x1="12.5" y1="3.5" x2="3.5" y2="12.5" />
+    </svg>
+  );
+}
 
 interface ConfigModalProps {
   isOpen: boolean;
@@ -237,7 +311,12 @@ export function ConfigModal({
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-700">
           <div className="flex items-center gap-3">
-            <span className="text-2xl">⚙️</span>
+            <span
+              className="config-modal-icon"
+              style={{ display: "inline-flex", color: "rgba(245, 197, 66, 0.85)" }}
+            >
+              <IconGear />
+            </span>
             <div>
               <h2 className="text-xl font-bold text-white">Settings</h2>
               <p className="text-sm text-gray-400">Configure API keys, proxy, and preferences</p>
@@ -250,8 +329,9 @@ export function ConfigModal({
             <button
               onClick={onClose}
               className="text-gray-400 hover:text-white p-2 rounded-lg hover:bg-gray-700 transition-colors"
+              aria-label="Close settings"
             >
-              ✕
+              <IconClose />
             </button>
           </div>
         </div>
@@ -260,23 +340,24 @@ export function ConfigModal({
         <div className="border-b border-gray-700 px-6">
           <nav className="flex gap-1">
             {[
-              { id: "api-keys" as TabType, label: "API Keys", icon: "🔑" },
-              { id: "models" as TabType, label: "Models", icon: "🤖" },
-              { id: "proxy" as TabType, label: "Proxy", icon: "🌐" },
-              { id: "preferences" as TabType, label: "Preferences", icon: "⚡" },
-              { id: "about" as TabType, label: "About", icon: "ℹ️" },
+              { id: "api-keys" as TabType, label: "API Keys", Icon: IconKey },
+              { id: "models" as TabType, label: "Models", Icon: IconChip },
+              { id: "proxy" as TabType, label: "Proxy", Icon: IconGlobe },
+              { id: "preferences" as TabType, label: "Preferences", Icon: IconSliders },
+              { id: "about" as TabType, label: "About", Icon: IconInfo },
             ].map((tab) => (
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id)}
                 className={`px-4 py-3 text-sm font-medium border-b-2 transition-colors
+                  inline-flex items-center gap-2
                   ${
                     activeTab === tab.id
                       ? "border-primary text-white"
                       : "border-transparent text-gray-400 hover:text-white hover:border-gray-600"
                   }`}
               >
-                <span className="mr-2">{tab.icon}</span>
+                <tab.Icon />
                 {tab.label}
               </button>
             ))}
@@ -304,8 +385,9 @@ export function ConfigModal({
                 return (
                   <div
                     key={provider}
-                    className={`bg-gray-800/50 border rounded-xl p-5 transition-all
-                      ${isEditing ? "border-primary ring-2 ring-primary/20" : "border-gray-700"}`}
+                    className={`settings-card transition-all ${
+                      isEditing ? "settings-card-editing" : ""
+                    }`}
                   >
                     <div className="flex items-start justify-between">
                       <div className="flex items-center gap-4">
@@ -335,8 +417,8 @@ export function ConfigModal({
                             )}
                           </div>
                           <p className="text-sm text-gray-400 mt-0.5">
-                            Used by <span className={info.color}>{info.agent}</span> •{" "}
-                            {info.description}
+                            Used by <span className={info.color}>{info.agent}</span> ·{" "}
+                            <code className="text-gray-300">{LOCKED_MODELS[provider]}</code>
                           </p>
                         </div>
                       </div>
@@ -494,7 +576,7 @@ export function ConfigModal({
                 return (
                   <div
                     key={provider}
-                    className="bg-gray-800/50 border border-gray-700 rounded-xl p-5"
+                    className="settings-card"
                   >
                     <div className="flex items-center gap-4 mb-4">
                       <ProviderIcon provider={provider} size={32} />
@@ -529,7 +611,7 @@ export function ConfigModal({
                 need to route traffic through a specific server.
               </p>
 
-              <div className="bg-gray-800/50 border border-gray-700 rounded-xl p-5 space-y-4">
+              <div className="settings-card space-y-4">
                 <div>
                   <label className="block text-sm text-gray-300 mb-2">Proxy Type:</label>
                   <select
@@ -644,7 +726,7 @@ export function ConfigModal({
           {activeTab === "preferences" && (
             <div className="space-y-6 scale-in">
               {/* Discussion Settings */}
-              <div className="bg-gray-800/50 border border-gray-700 rounded-xl p-5">
+              <div className="settings-card">
                 <h3 className="font-medium text-white mb-4">Discussion Settings</h3>
 
                 <div className="space-y-4">
@@ -706,7 +788,7 @@ export function ConfigModal({
               </div>
 
               {/* Default Discussion Length */}
-              <div className="bg-gray-800/50 border border-gray-700 rounded-xl p-5">
+              <div className="settings-card">
                 <h3 className="font-medium text-white mb-4">Default Discussion Length</h3>
                 <select
                   value={config.preferences.defaultLength}
@@ -718,10 +800,16 @@ export function ConfigModal({
                   className="w-full bg-gray-900 border border-gray-600 rounded-lg px-4 py-2.5
                     text-white focus:outline-none focus:border-primary transition-colors mb-4"
                 >
-                  <option value="quick">Quick ({DISCUSSION_LENGTHS.quick} turns)</option>
-                  <option value="standard">Standard ({DISCUSSION_LENGTHS.standard} turns)</option>
-                  <option value="extended">Extended ({DISCUSSION_LENGTHS.extended} turns)</option>
-                  <option value="marathon">Marathon ({DISCUSSION_LENGTHS.marathon} turns)</option>
+                  <option value="quick">
+                    Quick (3 rounds · {DISCUSSION_LENGTHS.quick} turns)
+                  </option>
+                  <option value="standard">
+                    Standard (5 rounds · {DISCUSSION_LENGTHS.standard} turns)
+                  </option>
+                  <option value="extended">
+                    Extended (10 rounds · {DISCUSSION_LENGTHS.extended} turns)
+                  </option>
+                  <option value="marathon">Marathon (no cap — until vote)</option>
                   <option value="custom">Custom</option>
                 </select>
 
@@ -751,7 +839,7 @@ export function ConfigModal({
               </div>
 
               {/* Data Management */}
-              <div className="bg-gray-800/50 border border-gray-700 rounded-xl p-5">
+              <div className="settings-card">
                 <h3 className="font-medium text-white mb-4">Data Management</h3>
                 <div className="flex flex-wrap gap-3">
                   <button
@@ -845,7 +933,7 @@ export function ConfigModal({
 
           {activeTab === "about" && (
             <div className="space-y-6 scale-in">
-              <div className="bg-gray-800/50 border border-gray-700 rounded-xl p-5">
+              <div className="settings-card">
                 <div className="flex items-start justify-between gap-4 flex-wrap">
                   <div>
                     <h3 className="font-medium text-white">Socratic Council Desktop</h3>
@@ -884,7 +972,7 @@ export function ConfigModal({
                 </div>
               </div>
 
-              <div className="bg-gray-800/50 border border-gray-700 rounded-xl p-5">
+              <div className="settings-card">
                 <h3 className="font-medium text-white mb-4">Local Data and Attachments</h3>
                 <div className="space-y-3 text-sm text-gray-400">
                   <p>Sessions, API settings, and attachment metadata stay on this machine.</p>
@@ -904,42 +992,7 @@ export function ConfigModal({
                 </div>
               </div>
 
-              <div className="bg-gray-800/50 border border-gray-700 rounded-xl p-5">
-                <h3 className="font-medium text-white mb-4">Attachment Support Matrix</h3>
-                <div className="space-y-3">
-                  {PROVIDERS.map((provider) => {
-                    const support = getProviderAttachmentSupport(provider, LOCKED_MODELS[provider]);
-                    const info = PROVIDER_INFO[provider];
-                    return (
-                      <div
-                        key={provider}
-                        className="bg-gray-900 border border-gray-600 rounded-lg px-4 py-3 flex items-center justify-between gap-4 flex-wrap"
-                      >
-                        <div className="flex items-center gap-3 min-w-0">
-                          <ProviderIcon provider={provider} size={24} />
-                          <div className="min-w-0">
-                            <div className={`font-medium ${info.color}`}>{info.agent}</div>
-                            <div className="text-xs text-gray-400 truncate">
-                              {LOCKED_MODELS[provider]}
-                            </div>
-                          </div>
-                        </div>
-                        <div className="flex gap-2 flex-wrap">
-                          <span className="badge badge-info">
-                            Images: {support.images === "raw" ? "raw" : "fallback"}
-                          </span>
-                          <span className="badge badge-info">
-                            PDF: {support.pdf === "raw" ? "raw" : "fallback"}
-                          </span>
-                          <span className="badge badge-info">Text: extracted</span>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-
-              <div className="bg-gray-800/50 border border-gray-700 rounded-xl p-5">
+              <div className="settings-card">
                 <h3 className="font-medium text-white mb-4">Shortcuts</h3>
                 <div className="grid md:grid-cols-2 gap-3">
                   {ABOUT_SHORTCUTS.map((shortcut) => (

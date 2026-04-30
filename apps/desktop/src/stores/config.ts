@@ -265,13 +265,20 @@ function sanitizeModels(_input: unknown): Partial<Record<Provider, string>> {
 
 const STORAGE_KEY = "socratic-council-config";
 
+// Length values are in turns. With 8 inner-ring agents, one "round" is
+// 8 turns, so quick = 3 rounds, standard = 5 rounds, extended = 10 rounds.
+// `marathon` and `custom` use 0 as the sentinel for "no cap — discuss
+// until somebody ends the session via vote".
 export const DISCUSSION_LENGTHS = {
-  quick: 20,
-  standard: 50,
-  extended: 200,
-  marathon: 500,
+  quick: 24,
+  standard: 40,
+  extended: 80,
+  marathon: 0,
   custom: 0,
 } as const;
+
+/** Number of inner-ring agents whose round-robin defines a "round". */
+export const TURNS_PER_ROUND = 8;
 
 function safeBoolean(value: unknown, fallback: boolean): boolean {
   return typeof value === "boolean" ? value : fallback;
@@ -612,7 +619,10 @@ export function useConfig() {
     if (defaultLength === "custom") {
       return customTurns === 0 ? Infinity : customTurns;
     }
-    return DISCUSSION_LENGTHS[defaultLength];
+    const length = DISCUSSION_LENGTHS[defaultLength];
+    // Marathon (and any other 0-valued preset) means "no cap — discuss
+    // until somebody ends the session via vote".
+    return length === 0 ? Infinity : length;
   }, [config.preferences]);
 
   const getProxy = useCallback((): ProxyConfig | undefined => {
