@@ -4,5 +4,4 @@
  */
 
 export * from "./providers/index.js";
-export * from "./base-agent.js";
 export * from "./transport.js";

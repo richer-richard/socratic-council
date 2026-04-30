@@ -529,62 +529,6 @@ export interface Message {
 }
 
 // =============================================================================
-// COUNCIL TYPES
-// =============================================================================
-
-export interface CouncilConfig {
-  topic: string;
-  maxTurns: number;
-  biddingTimeout: number;
-  budgetLimit: number;
-  autoMode: boolean;
-}
-
-export const CouncilConfigSchema = z.object({
-  topic: z.string().min(1),
-  maxTurns: z.number().min(1).max(1000).default(50),
-  biddingTimeout: z.number().min(500).max(10000).default(2000),
-  budgetLimit: z.number().min(0).default(5.0),
-  autoMode: z.boolean().default(true),
-});
-
-export interface CouncilState {
-  id: string;
-  config: CouncilConfig;
-  agents: AgentConfig[];
-  messages: Message[];
-  currentTurn: number;
-  totalCost: number;
-  costTracker?: CostTracker;
-  conflict?: ConflictDetection;
-  duoLogue?: DuoLogue;
-  whisperState?: WhisperState;
-  status: "idle" | "running" | "paused" | "completed";
-  startedAt?: number;
-  completedAt?: number;
-}
-
-// =============================================================================
-// BIDDING TYPES
-// =============================================================================
-
-export interface Bid {
-  agentId: AgentId;
-  urgency: number; // 0-100
-  relevance: number; // 0-100
-  confidence: number; // 0-100
-  whisperBonus: number; // 0-20
-  timestamp: number;
-}
-
-export interface BiddingRound {
-  roundId: string;
-  bids: Bid[];
-  winner: AgentId;
-  scores: Record<AgentId, number>;
-}
-
-// =============================================================================
 // PROVIDER CREDENTIALS
 // =============================================================================
 
@@ -609,16 +553,6 @@ export const ProviderCredentialsSchema = z.object({
   minimax: z.object({ apiKey: z.string().min(1), baseUrl: z.string().optional() }).optional(),
   zhipu: z.object({ apiKey: z.string().min(1), baseUrl: z.string().optional() }).optional(),
 });
-
-// =============================================================================
-// APP CONFIG
-// =============================================================================
-
-export interface AppConfig {
-  credentials: ProviderCredentials;
-  agents: Record<AgentId, AgentConfig>;
-  council: CouncilConfig;
-}
 
 // =============================================================================
 // WHISPER PROTOCOL
@@ -658,12 +592,6 @@ export interface ConflictDetection {
 export interface PairwiseConflict {
   agents: [AgentId, AgentId];
   score: number; // 0-1 normalized
-}
-
-export interface DuoLogue {
-  participants: [AgentId, AgentId];
-  remainingTurns: number;
-  otherAgentsBidding: boolean;
 }
 
 // =============================================================================
@@ -724,19 +652,6 @@ export interface OracleTool {
 // =============================================================================
 // AGENT CONTEXT
 // =============================================================================
-
-export interface CouncilContext {
-  topic: string;
-  messages: Message[];
-  agents: AgentConfig[];
-  currentTurn: number;
-  maxTurns: number;
-  lastSpeaker?: AgentId;
-  costTracker?: CostTracker;
-  conflict?: ConflictDetection;
-  duoLogue?: DuoLogue;
-  whisperState?: WhisperState;
-}
 
 export interface AgentResponse {
   agentId: AgentId;

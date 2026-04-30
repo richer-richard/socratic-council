@@ -2,7 +2,7 @@ import { useEffect, type ReactNode } from "react";
 
 /**
  * ChamberSurface — shared primitive for every floating/dialog surface added
- * in waves 2-4 (command palette, diagnostics, telemetry card, recovery panel).
+ * in waves 2-4 (command palette, diagnostics, recovery panel).
  *
  * Establishes the app's cinematic-dark visual language in one place so every
  * additive surface inherits it automatically:

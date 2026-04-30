@@ -53,7 +53,7 @@ export class SessionPersistenceError extends Error {
 
 export type SessionStatus = "draft" | "running" | "paused" | "completed";
 export type SessionPhase = "discussion" | "resolution" | "completed";
-export type EndVoteChoice = "yes" | "no";
+export type EndVoteChoice = "yes" | "no" | "abstain";
 export type EndVoteBoardStatus = "active" | "complete" | "passed" | "failed";
 export type ModeratorConclusionStatus = "consensus" | "majority" | "unresolved";
 
@@ -418,7 +418,7 @@ function isCouncilAgent(value: unknown): value is CouncilAgentId {
 }
 
 function isEndVoteChoice(value: unknown): value is EndVoteChoice {
-  return value === "yes" || value === "no";
+  return value === "yes" || value === "no" || value === "abstain";
 }
 
 function isEndVoteBoardStatus(value: unknown): value is EndVoteBoardStatus {
@@ -1416,16 +1416,67 @@ export async function branchDiscussionSession(
   return saveDiscussionSession(branch);
 }
 
+// Fix B4: when the index blob is on disk but un-decryptable (vault DEK
+// rotated / quarantined), rebuild a placeholder index by scanning the
+// individual `socratic-council-session:*` keys. Without this, a vault
+// quarantine made every session disappear from the home sidebar even
+// though the blobs were still on disk.
+function reconstructIndexFromSessionKeys(storage: Storage): SessionSummary[] {
+  const summaries: SessionSummary[] = [];
+  for (let i = 0; i < storage.length; i += 1) {
+    const key = storage.key(i);
+    if (!key || !key.startsWith(SESSION_KEY_PREFIX)) continue;
+    const id = key.slice(SESSION_KEY_PREFIX.length);
+    if (!id) continue;
+    const session = loadDiscussionSession(id);
+    if (session) {
+      summaries.push(buildSummary(session));
+    } else {
+      summaries.push({
+        id,
+        title: "Recoverable session",
+        topic: "",
+        createdAt: 0,
+        updatedAt: 0,
+        lastOpenedAt: 0,
+        archivedAt: null,
+        projectId: null,
+        status: "draft",
+        currentTurn: 0,
+        messageCount: 0,
+        attachmentCount: 0,
+        preview: "",
+        loadError: true,
+      });
+    }
+  }
+  return summaries;
+}
+
 function readIndex(): SessionSummary[] {
   const storage = getStorage();
   if (!storage) return [];
 
+  // Distinguish "index absent" (genuinely no sessions) from "index
+  // unreadable" (decrypt failed or JSON corrupt). Only the former should
+  // produce an empty list — the latter must fall back to scanning the
+  // individual session keys so the user doesn't lose visibility on their
+  // sessions after a vault quarantine.
+  const rawOnDisk = storage.getItem(SESSION_INDEX_KEY);
+  if (rawOnDisk == null) return [];
+
   try {
     const raw = readSecureItem(storage, SESSION_INDEX_KEY);
-    if (!raw) return [];
+    if (!raw) {
+      sessionLoadFailureCount += 1;
+      return reconstructIndexFromSessionKeys(storage);
+    }
 
     const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
+    if (!Array.isArray(parsed)) {
+      sessionLoadFailureCount += 1;
+      return reconstructIndexFromSessionKeys(storage);
+    }
 
     return parsed
       .filter((entry): entry is SessionSummary => !!entry && typeof entry === "object")
@@ -1447,7 +1498,8 @@ function readIndex(): SessionSummary[] {
       .filter((entry) => entry.id.length > 0);
   } catch (error) {
     console.error("Failed to read session index:", error);
-    return [];
+    sessionLoadFailureCount += 1;
+    return reconstructIndexFromSessionKeys(storage);
   }
 }
 

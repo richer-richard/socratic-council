@@ -35,9 +35,7 @@ import {
 } from "./services/vault";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { CommandPalette, useCommandPaletteShortcut } from "./components/CommandPalette";
-import { TelemetryOptInCard } from "./components/TelemetryOptInCard";
 import { DiagnosticsPanel } from "./components/DiagnosticsPanel";
-import { loadTelemetryConfig } from "./services/telemetry";
 import { registerCommand, resetCommandsForTests } from "./utils/commandPalette";
 import { useConfig } from "./stores/config";
 
@@ -64,9 +62,6 @@ export default function App() {
   // Global ⌘K command palette — binding lives here so it works on any page.
   const palette = useCommandPaletteShortcut();
 
-  // Telemetry first-launch card — shown once, then never again (acceptedAt
-  // stays set either way). Suppressed on initial mount to avoid startup noise.
-  const [showTelemetryCard, setShowTelemetryCard] = useState(false);
   const [showDiagnostics, setShowDiagnostics] = useState(false);
   /**
    * Boot-time warning when the vault DEK file was quarantined and there's
@@ -126,21 +121,6 @@ export default function App() {
           failedDecrypts,
         });
       }
-
-      // First-launch telemetry prompt: only show if the user has never
-      // recorded a choice AND has at least one session worth of activity.
-      // Gated off until the maintainer deploys an ingest endpoint — the
-      // services/telemetry.ts plumbing and the card component stay intact
-      // so flipping this flag back to true is the only step required.
-      const TELEMETRY_PROMPT_ENABLED = false;
-      const telemetry = loadTelemetryConfig();
-      if (
-        TELEMETRY_PROMPT_ENABLED &&
-        telemetry.acceptedAt == null &&
-        listSessionSummaries().length > 0
-      ) {
-        setShowTelemetryCard(true);
-      }
     })();
     return () => {
       cancelled = true;
@@ -167,13 +147,6 @@ export default function App() {
         keywords: ["config", "api keys", "preferences"],
         shortcut: "⌘,",
         run: () => setState((p) => ({ ...p, currentPage: "settings" })),
-      }),
-      registerCommand({
-        id: "privacy.reopen",
-        label: "Reopen privacy / telemetry choice",
-        category: "Privacy",
-        keywords: ["telemetry", "analytics", "tracking"],
-        run: () => setShowTelemetryCard(true),
       }),
       registerCommand({
         id: "diagnostics.open",
@@ -555,10 +528,6 @@ export default function App() {
 
       {/* Global additive surfaces — overlay the page, don't modify its layout. */}
       <CommandPalette open={palette.open} onClose={palette.close} />
-      <TelemetryOptInCard
-        open={showTelemetryCard}
-        onClose={() => setShowTelemetryCard(false)}
-      />
       <DiagnosticsPanel
         open={showDiagnostics}
         onClose={() => setShowDiagnostics(false)}
