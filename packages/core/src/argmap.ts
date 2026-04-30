@@ -1247,6 +1247,40 @@ export async function consolidateArgGraph(
     ? { ...input.graph.axis, poles: [...input.graph.axis.poles] }
     : undefined;
 
+  // Fix B6: collision-checking edge id generator. Previously the
+  // consolidator minted ids as `ed_${edges.length}`, which collides after
+  // any merge/redirect that drops edges since `edges.length` is no longer
+  // monotonic. Using the same probe-from-length pattern as `generateEdgeId`
+  // but operating on the in-progress edges array.
+  const nextEdgeId = (): string => {
+    const used = new Set(edges.map((e) => e.id));
+    let i = edges.length;
+    while (true) {
+      const candidate = `ed_${i}`;
+      if (!used.has(candidate)) return candidate;
+      i += 1;
+    }
+  };
+
+  // Fix B7: defensive node id generator for orphan promotion. Re-mints the
+  // id only when it would collide with an already-promoted node — the
+  // common case (no collision) keeps the orphan's original id so the
+  // structuralFingerprint stays stable across passes.
+  const ensureUniqueNodeId = (id: string, kind: ArgNodeKind): string => {
+    if (!nodes.some((n) => n.id === id) && !orphans.some((n) => n.id === id && n.id !== id)) {
+      return id;
+    }
+    if (!nodes.some((n) => n.id === id)) return id;
+    const prefix = KIND_ID_PREFIX[kind];
+    const used = new Set(nodes.map((n) => n.id).concat(orphans.map((n) => n.id)));
+    let i = nodes.length;
+    while (true) {
+      const candidate = `${prefix}_${i}`;
+      if (!used.has(candidate)) return candidate;
+      i += 1;
+    }
+  };
+
   // 1. Axis.
   if (ops.axis === null) {
     axis = undefined;
@@ -1362,7 +1396,7 @@ export async function consolidateArgGraph(
     );
     if (!verdict || verdict.verdict !== "contradicts") continue;
     if (verdict.confidence < 0.5) continue;
-    const id = `ed_${edges.length}`;
+    const id = nextEdgeId();
     const edge: ArgEdge = {
       id,
       from,
@@ -1405,11 +1439,11 @@ export async function consolidateArgGraph(
         continue;
       }
       // Promote the orphan into a real node + the appropriate edge.
-      const anchored: ArgNode = { ...orphan };
+      const anchored: ArgNode = { ...orphan, id: ensureUniqueNodeId(orphan.id, orphan.kind) };
       nodes.push(anchored);
       const relation = ANCHOR_RELATION[orphan.kind] ?? "supports";
       edges.push({
-        id: `ed_${edges.length}`,
+        id: nextEdgeId(),
         from: anchored.id,
         to: target.id,
         relation,

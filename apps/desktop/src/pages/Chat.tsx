@@ -56,7 +56,6 @@ import {
   createMemoryManager,
   FairnessManager,
   SEMANTIC_CHECK_REGEX_FLOOR,
-  assessVerification,
   factCheckMessage,
   reflectAndRevise,
   scoreAgentsRelevance,
@@ -572,19 +571,18 @@ function createWhisperBonuses(): Record<CouncilAgentId, number> {
 function countEndVoteChoices(
   votes: EndVoteChoiceMap,
   configuredAgentIds: readonly CouncilAgentId[],
-): { yes: number; no: number } {
+): { yes: number; no: number; abstain: number } {
   let yes = 0;
   let no = 0;
+  let abstain = 0;
 
   for (const agentId of configuredAgentIds) {
-    if (votes[agentId] === "yes") {
-      yes += 1;
-    } else if (votes[agentId] === "no") {
-      no += 1;
-    }
+    if (votes[agentId] === "yes") yes += 1;
+    else if (votes[agentId] === "no") no += 1;
+    else if (votes[agentId] === "abstain") abstain += 1;
   }
 
-  return { yes, no };
+  return { yes, no, abstain };
 }
 
 function getEndVoteThreshold(configuredAgentIds: readonly CouncilAgentId[]) {
@@ -602,22 +600,25 @@ function getRoundOneAdvanceThreshold(configuredAgentIds: readonly CouncilAgentId
 }
 
 function parseVoteChoiceFromVisibleText(content: string): EndVoteChoice | null {
-  // Look for "Vote: YES" or "Vote: NO" anywhere in the content. We used to
-  // anchor at the start, but models occasionally emit a one-word preamble
-  // ("Sure,", "Okay —") before the formal Vote: line and the strict anchor
-  // would drop those into the fallback path.
-  const match = content.match(/\bVote:\s*(YES|NO)\b/i);
+  // Look for "Vote: YES", "Vote: NO", or "Vote: ABSTAIN" anywhere in the
+  // content. Loose anchor (not start-of-string) because models sometimes
+  // emit a one-word preamble before the formal Vote: line.
+  const match = content.match(/\bVote:\s*(YES|NO|ABSTAIN)\b/i);
   if (!match) return null;
-  return match[1]?.toLowerCase() === "no" ? "no" : "yes";
+  const upper = match[1]?.toUpperCase();
+  if (upper === "NO") return "no";
+  if (upper === "ABSTAIN") return "abstain";
+  return "yes";
 }
 
 function stripLegacyEndVoteDirective(raw: string) {
   let voteChoice: EndVoteChoice | null = null;
 
   const cleaned = raw.replace(
-    /(^|\n)[ \t]*@vote\(end,\s*(yes|no)\)[ \t]*(\n|$)/gi,
+    /(^|\n)[ \t]*@vote\(end,\s*(yes|no|abstain)\)[ \t]*(\n|$)/gi,
     (_match, prefix: string, choice: string, suffix: string) => {
-      voteChoice = choice.toLowerCase() === "no" ? "no" : "yes";
+      const lc = choice.toLowerCase();
+      voteChoice = lc === "no" ? "no" : lc === "abstain" ? "abstain" : "yes";
       return prefix && suffix ? "\n" : "";
     },
   );
@@ -630,22 +631,28 @@ function stripLegacyEndVoteDirective(raw: string) {
 
 function extractVoteReasonFromVisibleText(choice: EndVoteChoice | null, content: string) {
   if (!choice) return "";
-  // Strip the "Vote: YES/NO" marker wherever it appears (matches the looser
-  // parser above) and any short trailing punctuation, then return the rest
-  // as the reason. Global flag handles the rare "Vote: YES ... Vote: YES"
-  // double-emit some models do.
+  // Strip the "Vote: YES/NO/ABSTAIN" marker wherever it appears (loose match)
+  // and any short trailing punctuation, then return the rest as the reason.
+  // Global flag handles the rare double-emit some models do.
   const pattern =
-    choice === "no" ? /\bVote:\s*NO\b[:.!-]?\s*/gi : /\bVote:\s*YES\b[:.!-]?\s*/gi;
+    choice === "no"
+      ? /\bVote:\s*NO\b[:.!-]?\s*/gi
+      : choice === "abstain"
+        ? /\bVote:\s*ABSTAIN\b[:.!-]?\s*/gi
+        : /\bVote:\s*YES\b[:.!-]?\s*/gi;
   return normalizeMessageText(content.replace(pattern, " ")).trim();
 }
 
+// NO requires a concrete objection. YES and ABSTAIN don't require a reason
+// — abstain is "I don't have a clear position" and shouldn't be punished
+// for terseness.
 function hasRequiredVoteReason(choice: EndVoteChoice | null, reason: string) {
   return choice !== "no" || reason.trim().length >= 16;
 }
 
 function buildEndVoteBoardContent(board: EndVoteBoardSnapshot) {
-  const { yes, no } = countEndVoteChoices(board.votes, board.agentOrder);
-  const pending = Math.max(board.totalAgents - yes - no, 0);
+  const { yes, no, abstain } = countEndVoteChoices(board.votes, board.agentOrder);
+  const pending = Math.max(board.totalAgents - yes - no - abstain, 0);
   const statusText =
     board.status === "passed"
       ? "Passed"
@@ -655,7 +662,7 @@ function buildEndVoteBoardContent(board: EndVoteBoardSnapshot) {
           ? "Complete"
           : "Active";
 
-  return `End vote round ${board.round}: YES ${yes}, NO ${no}, Pending ${pending}. ${statusText}${
+  return `End vote round ${board.round}: YES ${yes}, NO ${no}, ABSTAIN ${abstain}, Pending ${pending}. ${statusText}${
     board.outcome ? ` ${board.outcome}` : ""
   }`;
 }
@@ -768,11 +775,22 @@ function StatusGlyph({
   );
 }
 
-function VotePieChart({ yes, no, pending }: { yes: number; no: number; pending: number }) {
-  const total = Math.max(yes + no + pending, 1);
+function VotePieChart({
+  yes,
+  no,
+  abstain,
+  pending,
+}: {
+  yes: number;
+  no: number;
+  abstain: number;
+  pending: number;
+}) {
+  const total = Math.max(yes + no + abstain + pending, 1);
   const yesDeg = (yes / total) * 360;
   const noDeg = yesDeg + (no / total) * 360;
-  const background = `conic-gradient(#34d399 0deg ${yesDeg}deg, #fb7185 ${yesDeg}deg ${noDeg}deg, rgba(148, 163, 184, 0.28) ${noDeg}deg 360deg)`;
+  const abstainDeg = noDeg + (abstain / total) * 360;
+  const background = `conic-gradient(#34d399 0deg ${yesDeg}deg, #fb7185 ${yesDeg}deg ${noDeg}deg, #94a3b8 ${noDeg}deg ${abstainDeg}deg, rgba(148, 163, 184, 0.28) ${abstainDeg}deg 360deg)`;
 
   return (
     <div className="vote-pie-chart" style={{ background }}>
@@ -784,29 +802,37 @@ function VotePieChart({ yes, no, pending }: { yes: number; no: number; pending: 
   );
 }
 
+function ballotClass(choice: EndVoteChoice): string {
+  return choice === "no" ? "is-no" : choice === "abstain" ? "is-abstain" : "is-yes";
+}
+
+function ballotLabel(choice: EndVoteChoice): string {
+  return choice === "no" ? "NO" : choice === "abstain" ? "ABSTAIN" : "YES";
+}
+
 function EndVoteBallotCard({ ballot }: { ballot: EndVoteBallotSnapshot }) {
-  const choiceLabel = ballot.choice === "yes" ? "YES" : "NO";
+  const cls = ballotClass(ballot.choice);
+  const fallback =
+    ballot.choice === "yes"
+      ? "Supports ending the session."
+      : ballot.choice === "no"
+        ? "Requests more discussion before ending."
+        : "No clear position — abstaining.";
 
   return (
-    <div className={`end-vote-ballot-card ${ballot.choice === "no" ? "is-no" : "is-yes"}`}>
+    <div className={`end-vote-ballot-card ${cls}`}>
       <div className="end-vote-ballot-topline">
-        <span className={`end-vote-choice-badge ${ballot.choice === "no" ? "is-no" : "is-yes"}`}>
-          {choiceLabel}
-        </span>
+        <span className={`end-vote-choice-badge ${cls}`}>{ballotLabel(ballot.choice)}</span>
         <span className="end-vote-round-label">Round {ballot.round}</span>
       </div>
-      <div className="end-vote-ballot-copy">
-        {ballot.choice === "yes"
-          ? ballot.reason || "Supports ending the session."
-          : ballot.reason || "Requests more discussion before ending."}
-      </div>
+      <div className="end-vote-ballot-copy">{ballot.reason || fallback}</div>
     </div>
   );
 }
 
 function EndVoteBoardCard({ board }: { board: EndVoteBoardSnapshot }) {
-  const { yes, no } = countEndVoteChoices(board.votes, board.agentOrder);
-  const pending = Math.max(board.totalAgents - yes - no, 0);
+  const { yes, no, abstain } = countEndVoteChoices(board.votes, board.agentOrder);
+  const pending = Math.max(board.totalAgents - yes - no - abstain, 0);
   const allReasonEntries = board.agentOrder
     .filter((agentId) => board.votes[agentId] != null)
     .map((agentId) => ({
@@ -836,7 +862,7 @@ function EndVoteBoardCard({ board }: { board: EndVoteBoardSnapshot }) {
       </div>
 
       <div className="end-vote-board-grid">
-        <VotePieChart yes={yes} no={no} pending={pending} />
+        <VotePieChart yes={yes} no={no} abstain={abstain} pending={pending} />
 
         <div className="end-vote-board-stats">
           <div className="end-vote-board-stat is-yes">
@@ -846,6 +872,10 @@ function EndVoteBoardCard({ board }: { board: EndVoteBoardSnapshot }) {
           <div className="end-vote-board-stat is-no">
             <span>NO</span>
             <strong>{no}</strong>
+          </div>
+          <div className="end-vote-board-stat is-abstain">
+            <span>ABSTAIN</span>
+            <strong>{abstain}</strong>
           </div>
           <div className="end-vote-board-stat is-pending">
             <span>Pending</span>
@@ -860,16 +890,12 @@ function EndVoteBoardCard({ board }: { board: EndVoteBoardSnapshot }) {
       <div className="end-vote-agent-grid">
         {board.agentOrder.map((agentId) => {
           const choice = board.votes[agentId];
+          const choiceClass = choice ? ballotClass(choice) : "is-pending";
+          const choiceText = choice ? ballotLabel(choice) : "Pending";
           return (
             <div key={`${board.voteId}-${board.round}-${agentId}`} className="end-vote-agent-chip">
               <span className="end-vote-agent-name">{AGENT_CONFIG[agentId].name}</span>
-              <span
-                className={`end-vote-agent-choice ${
-                  choice === "yes" ? "is-yes" : choice === "no" ? "is-no" : "is-pending"
-                }`}
-              >
-                {choice === "yes" ? "YES" : choice === "no" ? "NO" : "Pending"}
-              </span>
+              <span className={`end-vote-agent-choice ${choiceClass}`}>{choiceText}</span>
             </div>
           );
         })}
@@ -890,10 +916,8 @@ function EndVoteBoardCard({ board }: { board: EndVoteBoardSnapshot }) {
               >
                 <div className="end-vote-reason-agent">
                   {AGENT_CONFIG[entry.agentId].name}
-                  <span
-                    className={`end-vote-inline-badge ${entry.choice === "no" ? "is-no" : "is-yes"}`}
-                  >
-                    {entry.choice === "yes" ? "YES" : "NO"}
+                  <span className={`end-vote-inline-badge ${ballotClass(entry.choice)}`}>
+                    {ballotLabel(entry.choice)}
                   </span>
                 </div>
                 <div className="end-vote-reason-copy">{entry.reason}</div>
@@ -2518,26 +2542,28 @@ This canvas is yours and persists across the entire session. Edit it in place th
             ? `${AGENT_CONFIG[voteState.proposer].name} moved to end the session now. This is end-vote round 1 of 2.
 - The motion currently includes ${AGENT_CONFIG[voteState.proposer].name}'s YES vote, so the tally starts at YES ${firstRoundCount.yes}/${configuredAgentIds.length}, NO ${firstRoundCount.no}/${configuredAgentIds.length}.
 - How round 1 resolves: if all ${configuredAgentIds.length} agents vote YES the session ends now (no round 2). If between ${advanceThreshold} and ${configuredAgentIds.length - 1} vote YES, round 2 is held and ending requires at least ${threshold} YES there. If fewer than ${advanceThreshold} vote YES, round 2 is skipped and the council just continues the discussion.
-- Vote your honest position. Voting YES does not commit the room to end; round 2 is the binding round when round 1 is split.
+- Vote your honest position. Voting YES does not commit the room to end; round 2 is the binding round when round 1 is split. ABSTAIN is allowed when you genuinely don't have a clear position — abstains do not count toward the YES threshold, so use it sparingly.
 - Write 1-3 short sentences total.
-- Your first visible sentence must start exactly with Vote: YES or Vote: NO.
+- Your first visible sentence must start exactly with Vote: YES, Vote: NO, or Vote: ABSTAIN.
 - If you vote NO, you must state one concrete reason the discussion should continue.
 - If you vote YES, briefly state why the room is ready to stop.
+- If you vote ABSTAIN, briefly note why you don't have a clear position.
 - Do NOT ask a question.
 - Do NOT include @quote(...), @react(...), @tool(...), or @end().
-- End by appending exactly one standalone line: @vote(end, yes) or @vote(end, no).`
+- End by appending exactly one standalone line: @vote(end, yes), @vote(end, no), or @vote(end, abstain).`
             : `Round 1 of the end vote is complete. This is round 2 of 2 and it decides the result.
 - Round 1 tally was YES ${firstRoundCount.yes}/${configuredAgentIds.length}, NO ${firstRoundCount.no}/${configuredAgentIds.length}.
 - Round 1 objections:
 ${firstRoundObjections.length > 0 ? firstRoundObjections.join("\n") : "- None. Everyone supported ending."}
-- The motion passes only if at least ${threshold} of ${configuredAgentIds.length} council agents vote YES in round 2.
+- The motion passes only if at least ${threshold} of ${configuredAgentIds.length} council agents vote YES in round 2. Abstains do not count toward that threshold.
 - Write 1-3 short sentences total.
-- Your first visible sentence must start exactly with Vote: YES or Vote: NO.
+- Your first visible sentence must start exactly with Vote: YES, Vote: NO, or Vote: ABSTAIN.
 - If you vote NO, you must state one concrete reason the discussion should continue.
 - If you vote YES, briefly state why the room is ready to stop.
+- If you vote ABSTAIN, briefly note why you don't have a clear position.
 - Do NOT ask a question.
 - Do NOT include @quote(...), @react(...), @tool(...), or @end().
-- End by appending exactly one standalone line: @vote(end, yes) or @vote(end, no).`,
+- End by appending exactly one standalone line: @vote(end, yes), @vote(end, no), or @vote(end, abstain).`,
       });
 
       return history;
@@ -3668,8 +3694,16 @@ Write the official moderator wrap-up in 4 short sentences:
           parsed = extractActions(result.rawContent || result.content || "", REACTION_IDS);
         }
 
+        // Fix B9: only fire the no-visible-content retry when the model
+        // produced thinking text WITHOUT also charging for reasoning tokens.
+        // Reasoning tokens > 0 means the provider already billed for the
+        // chain-of-thought; retrying with disableThinking would double-bill
+        // a thinking-only completion. Treat that as the model's chosen
+        // output and let downstream fallbacks handle it.
+        const hadBilledReasoning = (result.tokens?.reasoning ?? 0) > 0;
         if (
           result.success &&
+          !hadBilledReasoning &&
           !normalizeMessageText(result.content || "") &&
           normalizeMessageText(result.thinking || streamingThinking || "")
         ) {
@@ -4067,7 +4101,11 @@ Write the official moderator wrap-up in 4 short sentences:
       const model = config.models[agentConfig.provider];
 
       if (!credential?.apiKey || !model) {
-        return { message: null, choice: "no", reason: "" };
+        return {
+          message: null,
+          choice: "abstain",
+          reason: "No provider credentials configured for this agent — recorded as abstain.",
+        };
       }
 
       const proxy = getProxy();
@@ -4181,10 +4219,18 @@ Write the official moderator wrap-up in 4 short sentences:
           hasReason = hasRequiredVoteReason(voteChoice, voteReason);
         }
 
-        if (!voteChoice || !hasReason) {
-          voteChoice = "no";
+        if (!voteChoice) {
+          // No parseable vote at all — record as abstain rather than coerce
+          // to NO, which used to bury "model fumbled the format" inside a
+          // misleading "agent objected" tally.
+          voteChoice = "abstain";
+          voteReason = voteReason || "Did not return a parseable ballot — recorded as abstain.";
+        } else if (!hasReason) {
+          // NO without a substantiated reason — convert to abstain so the
+          // unsubstantiated objection doesn't mislead the count or the UI.
+          voteChoice = "abstain";
           voteReason =
-            "I am not ready to end because I did not provide a valid ballot with a clear reason to stop.";
+            voteReason || "Voted NO without a substantiated reason — recorded as abstain.";
         }
 
         if (result.success) {
@@ -4322,49 +4368,65 @@ Write the official moderator wrap-up in 4 short sentences:
       // calls overlap.
       const agents = voteState.queue;
 
-      const handleBallot = (
+      // Serialize the state-mutation writes through a single promise chain
+      // so concurrently-resolving ballots don't race on shared refs
+      // (recentSpeakersRef, cyclePendingRef, fairnessManagerRef, endVoteRef).
+      // The API requests still fire in parallel via Promise.all; only the
+      // post-resolve folds are sequenced.
+      let stateChain: Promise<void> = Promise.resolve();
+
+      const enqueueBallot = (
         agentId: CouncilAgentId,
         choice: EndVoteChoice | null,
         reason: string,
-      ) => {
-        const cur = endVoteRef.current;
-        if (!cur) return;
-        const safeChoice = choice ?? "no";
-        const next: EndVoteState =
-          cur.round === 1
-            ? {
-                ...cur,
-                queue: cur.queue.filter((a) => a !== agentId),
-                firstRoundVotes: { ...cur.firstRoundVotes, [agentId]: safeChoice },
-                firstRoundReasons: {
-                  ...cur.firstRoundReasons,
-                  ...(reason ? { [agentId]: reason } : {}),
-                },
-              }
-            : {
-                ...cur,
-                queue: cur.queue.filter((a) => a !== agentId),
-                secondRoundVotes: { ...cur.secondRoundVotes, [agentId]: safeChoice },
-                secondRoundReasons: {
-                  ...cur.secondRoundReasons,
-                  ...(reason ? { [agentId]: reason } : {}),
-                },
-              };
-        endVoteRef.current = next;
-        upsertEndVoteBoardMessage(
-          buildEndVoteBoard(next, next.queue.length === 0 ? "complete" : "active"),
-        );
-        cyclePendingRef.current = cyclePendingRef.current.filter((a) => a !== agentId);
-        previousSpeakerRef.current = agentId;
-        fairnessManagerRef.current.recordSpeaker(agentId);
-        recentSpeakersRef.current = [...recentSpeakersRef.current.slice(-5), agentId];
+      ): Promise<void> => {
+        stateChain = stateChain.then(() => {
+          const cur = endVoteRef.current;
+          if (!cur) return;
+          // Null choice (abort / timeout / unparseable) becomes abstain
+          // rather than NO. Abstain doesn't count toward the YES threshold
+          // either, but it doesn't smuggle a phantom objection into the
+          // ledger and doesn't unfairly fail a motion when the user pauses.
+          const safeChoice: EndVoteChoice = choice ?? "abstain";
+          const safeReason =
+            reason ||
+            (choice == null
+              ? "Did not return a vote in time — recorded as abstain."
+              : "");
+          const reasonPatch: Partial<Record<CouncilAgentId, string>> = safeReason
+            ? { [agentId]: safeReason }
+            : {};
+          const next: EndVoteState =
+            cur.round === 1
+              ? {
+                  ...cur,
+                  queue: cur.queue.filter((a) => a !== agentId),
+                  firstRoundVotes: { ...cur.firstRoundVotes, [agentId]: safeChoice },
+                  firstRoundReasons: { ...cur.firstRoundReasons, ...reasonPatch },
+                }
+              : {
+                  ...cur,
+                  queue: cur.queue.filter((a) => a !== agentId),
+                  secondRoundVotes: { ...cur.secondRoundVotes, [agentId]: safeChoice },
+                  secondRoundReasons: { ...cur.secondRoundReasons, ...reasonPatch },
+                };
+          endVoteRef.current = next;
+          upsertEndVoteBoardMessage(
+            buildEndVoteBoard(next, next.queue.length === 0 ? "complete" : "active"),
+          );
+          cyclePendingRef.current = cyclePendingRef.current.filter((a) => a !== agentId);
+          previousSpeakerRef.current = agentId;
+          fairnessManagerRef.current.recordSpeaker(agentId);
+          recentSpeakersRef.current = [...recentSpeakersRef.current.slice(-5), agentId];
+        });
+        return stateChain;
       };
 
       await Promise.all(
         agents.map(async (agentId) => {
           const { choice, reason } = await generateEndVoteResponse(agentId, voteState);
           if (abortRef.current) return;
-          handleBallot(agentId, choice, reason);
+          await enqueueBallot(agentId, choice, reason);
         }),
       );
 
@@ -5332,11 +5394,23 @@ Write the official moderator wrap-up in 4 short sentences:
   // parsed and merged into the live graph via updateArgumentMap.
   const runArgumentMapExtraction = useCallback(
     async (messageId: string, agentId: CouncilAgentId) => {
+      // Fix B5: every early-return path must mark the message as
+      // "extracted" so the queue effect doesn't immediately refire on the
+      // same id. Previously, paths that bailed before the network call
+      // (no runtime, missing/empty message, empty cleaned text) released
+      // the busy ref via .finally but never added the id to the extracted
+      // set, producing an infinite no-op loop on certain edge cases.
       const runtime = pickExtractorRuntime();
-      if (!runtime) return;
+      if (!runtime) {
+        argmapExtractedIdsRef.current.add(messageId);
+        return;
+      }
       const currentMessages = messagesRef.current;
       const message = currentMessages.find((m) => m.id === messageId);
-      if (!message || !message.content) return;
+      if (!message || !message.content) {
+        argmapExtractedIdsRef.current.add(messageId);
+        return;
+      }
       const agentName = AGENT_CONFIG[agentId]?.name ?? agentId;
       const graph = argGraphRef.current;
       const priorAgentNames = Array.from(
@@ -5360,7 +5434,10 @@ Write the official moderator wrap-up in 4 short sentences:
         .map((n) => ({ id: n.id, text: n.text }));
       const clusterLabels = graph.clusters.map((c) => c.label);
       const cleanedText = stripQuoteTokens(message.content).slice(0, 4000);
-      if (!cleanedText.trim()) return;
+      if (!cleanedText.trim()) {
+        argmapExtractedIdsRef.current.add(messageId);
+        return;
+      }
 
       const prompt = buildExtractPrompt({
         topic,
@@ -5557,6 +5634,13 @@ Write the official moderator wrap-up in 4 short sentences:
       if (argGraphRef.current.nodes.length === 0) return;
 
       argmapConsolidatorBusyRef.current = true;
+      // Fix B10: advance the watermark BEFORE awaiting so a slow
+      // consolidator can't be racing against a fresher effect-firing that
+      // would observe the same stale `lastCount` and retry immediately
+      // after busy clears. The mutex already serializes, but this closes
+      // the implicit "watermark only advances on success" gap that could
+      // produce a retry storm on a transient consolidator failure.
+      argmapConsolidatorLastMessageCountRef.current = councilCount;
       try {
         const summary = memoryManagerRef.current?.getSessionSummary?.() ?? null;
         const seedPremises = extractPremisesFromSummary(summary);
@@ -5673,9 +5757,6 @@ Write the official moderator wrap-up in 4 short sentences:
             { elapsedMs },
           );
         }
-        // Always advance the watermark so we don't burn tokens re-running on
-        // the same message window.
-        argmapConsolidatorLastMessageCountRef.current = councilCount;
       } catch (error) {
         apiLogger.log("warn", "argmap", "consolidation failed", {
           error: error instanceof Error ? error.message : String(error),
@@ -5927,10 +6008,6 @@ Write the official moderator wrap-up in 4 short sentences:
         factCheckBusyRef.current = false;
       }
     })();
-    // assessVerification import below is reserved for a future direct
-    // oracle.verify replacement that doesn't go through runToolCall; left
-    // imported so that future call site doesn't need a separate import.
-    void assessVerification;
   }, [
     messages,
     pickExtractorRuntime,

@@ -12,7 +12,6 @@ import { getModelsByProvider } from "@socratic-council/shared";
 import { ProviderIcon } from "./icons/ProviderIcons";
 import { testProviderConnection } from "../services/api";
 import { clearAllAttachmentBlobs, getProviderAttachmentSupport } from "../services/attachments";
-import { LocalProviderTab } from "./LocalProviderTab";
 
 interface ConfigModalProps {
   isOpen: boolean;
@@ -37,7 +36,6 @@ type TabType =
   | "models"
   | "proxy"
   | "preferences"
-  | "local"
   | "diagnostics"
   | "about";
 
@@ -150,13 +148,9 @@ export function ConfigModal({
   onUpdateCredential,
   onUpdateProxy,
   onUpdatePreferences,
-  onUpdateModel: _onUpdateModel,
+  onUpdateModel,
 }: ConfigModalProps) {
   const [activeTab, setActiveTab] = useState<TabType>("api-keys");
-  // Local (Ollama) endpoint — held here so the Local tab has a controlled
-  // input. Persisting globally is follow-up work when the provider wiring
-  // lands in config store.
-  const [localEndpoint, setLocalEndpoint] = useState("http://localhost:11434");
   const [editingProvider, setEditingProvider] = useState<Provider | null>(null);
   const [apiKeyInput, setApiKeyInput] = useState("");
   const [baseUrlInput, setBaseUrlInput] = useState("");
@@ -270,7 +264,6 @@ export function ConfigModal({
               { id: "models" as TabType, label: "Models", icon: "🤖" },
               { id: "proxy" as TabType, label: "Proxy", icon: "🌐" },
               { id: "preferences" as TabType, label: "Preferences", icon: "⚡" },
-              { id: "local" as TabType, label: "Local", icon: "🏠" },
               { id: "about" as TabType, label: "About", icon: "ℹ️" },
             ].map((tab) => (
               <button
@@ -801,7 +794,7 @@ export function ConfigModal({
                             if (imported.models) {
                               Object.entries(imported.models).forEach(([p, m]) => {
                                 if (isProvider(p)) {
-                                  _onUpdateModel(p, m as string);
+                                  onUpdateModel(p, m as string);
                                 }
                               });
                             }
@@ -847,15 +840,6 @@ export function ConfigModal({
                   </button>
                 </div>
               </div>
-            </div>
-          )}
-
-          {activeTab === "local" && (
-            <div className="scale-in">
-              <LocalProviderTab
-                endpoint={localEndpoint}
-                onChangeEndpoint={setLocalEndpoint}
-              />
             </div>
           )}
 

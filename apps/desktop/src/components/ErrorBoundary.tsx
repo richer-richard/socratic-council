@@ -17,8 +17,8 @@ interface ErrorBoundaryProps {
    */
   label?: string;
   /**
-   * Called after the error is captured — handy for logging or telemetry
-   * (which runs through our secret-redaction pass automatically).
+   * Called after the error is captured — handy for logging
+   * (runs through our secret-redaction pass automatically).
    */
   onError?: (error: Error, info: React.ErrorInfo) => void;
 }

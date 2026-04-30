@@ -51,11 +51,6 @@ pub fn run() {
             http::http_cancel,
             vault_file::vault_get_dek,
             vault_file::vault_reset,
-            // Fix 9.1: user-configured MCP / runtime hosts can register
-            // themselves so outbound IPC requests aren't blocked by the
-            // static provider allowlist.
-            allowlist::register_runtime_host,
-            allowlist::unregister_runtime_host,
         ])
         .setup(|_app| {
             #[cfg(debug_assertions)]

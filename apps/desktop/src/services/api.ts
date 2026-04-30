@@ -380,9 +380,12 @@ export async function callProvider(
             }
             console.warn("[api] replay buffered stream failed", replayError);
           }
-          // Final done event so the UI stops the typing indicator.
-          onChunk({ content: "", done: true });
         }
+        // Fix B3: always emit a final done event so the typing indicator
+        // clears even when the retry returned empty content. Previously
+        // this fired only inside the `if (retry.content)` branch, which
+        // left the UI in a stuck "typing" state for empty completions.
+        onChunk({ content: "", done: true });
         return {
           content: retry.content,
           thinking: retry.thinking,

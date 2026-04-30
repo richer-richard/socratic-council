@@ -2,9 +2,8 @@
 //! surface. Every call to `http_request` / `http_request_stream` is checked
 //! against:
 //!
-//!   1. **Host allowlist** — known provider domains plus registered local
-//!      endpoints. Requests to any other host are rejected without making a
-//!      network call.
+//!   1. **Host allowlist** — known provider domains. Requests to any other
+//!      host are rejected without making a network call.
 //!   2. **Scheme rule** — external hosts must be `https://`; `http://` is
 //!      only allowed for loopback (`127.0.0.1`, `localhost`, `::1`).
 //!   3. **Body size cap** — 4MB upper bound on the outbound request body.
@@ -47,13 +46,6 @@ const PROVIDER_HOSTS: &[&str] = &[
 /// Loopback hosts — `http://` is permitted to these, everyone else is `https://` only.
 const LOOPBACK_HOSTS: &[&str] = &["127.0.0.1", "localhost", "::1", "[::1]"];
 
-/// Runtime-registered hosts (fix 9.1). Populated via `register_runtime_host`
-/// from the frontend when the user configures an MCP server URL or other
-/// non-default endpoint. Same scheme/method rules apply (HTTPS required
-/// for non-loopback). Cleared when the app restarts; the frontend re-
-/// registers on init.
-static RUNTIME_HOSTS: Lazy<Mutex<Vec<String>>> = Lazy::new(|| Mutex::new(Vec::new()));
-
 fn host_matches(list: &[&str], host: &str) -> bool {
     let host_lc = host.to_ascii_lowercase();
     list.iter().any(|entry| *entry == host_lc)
@@ -65,47 +57,6 @@ fn is_loopback_host(host: &str) -> bool {
 
 fn is_allowlisted_provider(host: &str) -> bool {
     host_matches(PROVIDER_HOSTS, host)
-}
-
-fn is_runtime_host(host: &str) -> bool {
-    let host_lc = host.to_ascii_lowercase();
-    let guard = match RUNTIME_HOSTS.lock() {
-        Ok(g) => g,
-        Err(_) => return false,
-    };
-    guard.iter().any(|h| h.eq_ignore_ascii_case(&host_lc))
-}
-
-/// Frontend-callable IPC: register a host for the runtime allowlist.
-/// Used by the MCP configuration flow so user-configured server URLs
-/// pass `validate_outbound_url` without baking a wildcard into the
-/// static `PROVIDER_HOSTS` list.
-#[tauri::command]
-pub fn register_runtime_host(host: String) -> Result<(), String> {
-    let trimmed = host.trim().to_ascii_lowercase();
-    if trimmed.is_empty() {
-        return Err("Host cannot be empty".to_string());
-    }
-    // Sanity: parse `https://<host>` to validate the host portion is well-formed.
-    let probe = format!("https://{}", trimmed);
-    Url::parse(&probe).map_err(|_| "Invalid host".to_string())?;
-    let mut guard = RUNTIME_HOSTS
-        .lock()
-        .map_err(|_| "Runtime host store unavailable".to_string())?;
-    if !guard.iter().any(|h| h.eq_ignore_ascii_case(&trimmed)) {
-        guard.push(trimmed);
-    }
-    Ok(())
-}
-
-#[tauri::command]
-pub fn unregister_runtime_host(host: String) -> Result<(), String> {
-    let trimmed = host.trim().to_ascii_lowercase();
-    let mut guard = RUNTIME_HOSTS
-        .lock()
-        .map_err(|_| "Runtime host store unavailable".to_string())?;
-    guard.retain(|h| !h.eq_ignore_ascii_case(&trimmed));
-    Ok(())
 }
 
 /// Validate an outbound URL against scheme + host rules. Returns a concise
@@ -130,10 +81,9 @@ pub fn validate_outbound_url(url_str: &str) -> Result<Url, String> {
         if scheme != "https" {
             return Err(format!("Scheme '{}' not allowed (https:// required)", scheme));
         }
-        if !is_allowlisted_provider(&host) && !is_runtime_host(&host) {
+        if !is_allowlisted_provider(&host) {
             return Err(format!(
-                "Host '{}' is not on the IPC allowlist. \
-                 Register it via the MCP / runtime host configuration first.",
+                "Host '{}' is not on the IPC allowlist.",
                 host
             ));
         }
@@ -210,6 +160,12 @@ mod tests {
     fn unknown_host_is_rejected() {
         let err = validate_outbound_url("https://evil.test/exfil").unwrap_err();
         assert!(err.contains("not on the IPC allowlist"));
+    }
+
+    #[test]
+    fn loopback_unknown_scheme_rejected() {
+        let err = validate_outbound_url("ftp://localhost/foo").unwrap_err();
+        assert!(err.contains("Unsupported scheme"));
     }
 
     #[test]

@@ -13,7 +13,7 @@ proposal (security hardening, Wave 2–4 features, completed task list).
 
 ```bash
 pnpm typecheck                                       # whole workspace
-pnpm test                                            # vitest, 333 tests
+pnpm test                                            # vitest, 323 tests
 pnpm --filter @socratic-council/desktop tauri:dev    # dev hot-reload
 pnpm --filter @socratic-council/desktop tauri:build  # signed release .app
 ./install.sh                                         # quick install (macOS)
@@ -63,12 +63,6 @@ transport-free.
 
 All have unit tests in `packages/core/src/*.test.ts`.
 
-### `@socratic-council/sdk`
-
-| Export | Purpose |
-|---|---|
-| `detectOllama`, `sendOllamaChat` | Local LLM client (Ollama/LM Studio) — offline, zero cost |
-
 ### `apps/desktop/src/services/`
 
 | Module | Purpose |
@@ -76,7 +70,6 @@ All have unit tests in `packages/core/src/*.test.ts`.
 | `vault.ts` | File-backed DEK + XChaCha20-Poly1305 envelope |
 | `secrets.ts` | Encrypted `localStorage` secret store (sync API) |
 | `bundle.ts` | Portable `.scbundle` zip round-trip for session sharing |
-| `telemetry.ts` | Opt-in minimal health pings (off by default) |
 
 ### `apps/desktop/src/utils/`
 
@@ -92,9 +85,9 @@ All have unit tests in `packages/core/src/*.test.ts`.
 
 Additive UI surfaces (see `ChamberSurface` for the shared primitive):
 `CommandPalette`, `CostBudgetBadge`, `DiagnosticsPanel`,
-`TelemetryOptInCard`, `FactCheckBadge` + `FactCheckStrip`,
-`ArgumentMapPanel`, `LocalProviderTab`, `BranchAction` + `BranchCrumb`,
-`BundleExportButton` + `BundleImportButton`, `ErrorBoundary`.
+`FactCheckBadge` + `FactCheckStrip`, `ArgumentMapPanel`, `BranchAction`
++ `BranchCrumb`, `BundleExportButton` + `BundleImportButton`,
+`ErrorBoundary`.
 
 Match the app's cinematic-dark aesthetic (gold accent `#F5C542`, Manrope
 + JetBrains Mono + Cormorant Garamond). Optimize for max performance —
