@@ -5,6 +5,7 @@ import {
   useConfig,
   PROVIDER_INFO,
   ANTHROPIC_OPUS_FALLBACK_MODEL,
+  TURNS_PER_ROUND,
   type Provider,
 } from "../stores/config";
 import { callProvider, apiLogger, type ChatMessage as APIChatMessage } from "../services/api";
@@ -5314,6 +5315,19 @@ Write the official moderator wrap-up in 4 short sentences:
   }, [persistSessionSnapshot]);
 
   const displayMaxTurns = maxTurns === Infinity ? "\u221E" : maxTurns;
+  // 1 round = 8 turns (one inner-ring round-robin). Round 1 covers turns
+  // 1-8, round 2 covers 9-16, etc. Before any turn fires we consider the
+  // session "in" round 1 with 0 turns done.
+  const currentRound =
+    currentTurn === 0 ? 1 : Math.floor((currentTurn - 1) / TURNS_PER_ROUND) + 1;
+  const turnsInCurrentRound =
+    currentTurn === 0 ? 0 : ((currentTurn - 1) % TURNS_PER_ROUND) + 1;
+  const maxRounds =
+    maxTurns === Infinity ? Infinity : Math.max(1, Math.ceil(maxTurns / TURNS_PER_ROUND));
+  const displayMaxRounds = maxRounds === Infinity ? "\u221E" : maxRounds;
+  const roundProgressPct = (turnsInCurrentRound / TURNS_PER_ROUND) * 100;
+  const turnProgressPct =
+    maxTurns === Infinity ? 0 : Math.min((currentTurn / maxTurns) * 100, 100);
   const formattedLastSavedAt = new Date(lastSavedAt).toLocaleTimeString([], {
     hour: "2-digit",
     minute: "2-digit",
@@ -6238,18 +6252,48 @@ Write the official moderator wrap-up in 4 short sentences:
           </div>
 
           <div className="flex flex-wrap items-center gap-3 justify-start xl:justify-end">
-            <div className="flex items-center gap-2">
-              <div className="text-sm text-ink-500" style={{ fontFamily: "var(--font-mono)" }}>
-                Turn {currentTurn}/{displayMaxTurns}
-              </div>
-              {maxTurns !== Infinity && (
-                <div className="progress-track">
-                  <div
-                    className="progress-fill"
-                    style={{ width: `${Math.min((currentTurn / maxTurns) * 100, 100)}%` }}
-                  />
+            <div
+              className="flex flex-col gap-1"
+              title={
+                maxTurns === Infinity
+                  ? `Round ${currentRound} · Turn ${currentTurn} (no cap)`
+                  : `Round ${currentRound}/${displayMaxRounds} · Turn ${currentTurn}/${displayMaxTurns}`
+              }
+            >
+              <div className="flex items-center gap-2">
+                <div
+                  className="text-xs text-ink-500"
+                  style={{
+                    fontFamily: "var(--font-mono)",
+                    minWidth: "78px",
+                    textAlign: "right",
+                  }}
+                >
+                  Round {currentRound}/{displayMaxRounds}
                 </div>
-              )}
+                <div className="progress-track" style={{ width: "120px", height: "4px" }}>
+                  <div className="progress-fill" style={{ width: `${roundProgressPct}%` }} />
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <div
+                  className="text-xs text-ink-500"
+                  style={{
+                    fontFamily: "var(--font-mono)",
+                    minWidth: "78px",
+                    textAlign: "right",
+                  }}
+                >
+                  Turn {currentTurn}/{displayMaxTurns}
+                </div>
+                {maxTurns === Infinity ? (
+                  <div style={{ width: "120px" }} aria-hidden="true" />
+                ) : (
+                  <div className="progress-track" style={{ width: "120px", height: "4px" }}>
+                    <div className="progress-fill" style={{ width: `${turnProgressPct}%` }} />
+                  </div>
+                )}
+              </div>
             </div>
 
             <div className="badge badge-info">{totalTokens.input + totalTokens.output} tokens</div>

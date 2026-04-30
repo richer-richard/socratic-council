@@ -4317,3 +4317,39 @@ details[open] > .deep-research-report-summary .deep-research-report-expand::befo
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+/* Settings cards (ConfigModal). Borderless by default — a soft gold halo
+   appears on hover so the surface still reads as interactive without the
+   harsh gray rule that the previous `border-gray-700` baked in. */
+.settings-card {
+  background: rgba(31, 41, 55, 0.5);
+  border: 1px solid transparent;
+  border-radius: 0.75rem;
+  padding: 1.25rem;
+  transition:
+    border-color 220ms ease,
+    box-shadow 220ms ease,
+    background 220ms ease;
+}
+
+.settings-card:hover {
+  border-color: rgba(245, 197, 66, 0.18);
+  background: rgba(31, 41, 55, 0.62);
+  box-shadow:
+    0 0 0 1px rgba(245, 197, 66, 0.06),
+    0 0 22px -4px rgba(245, 197, 66, 0.18);
+}
+
+.settings-card.settings-card-editing,
+.settings-card.settings-card-editing:hover {
+  border-color: rgba(245, 197, 66, 0.55);
+  box-shadow:
+    0 0 0 2px rgba(245, 197, 66, 0.15),
+    0 0 26px -4px rgba(245, 197, 66, 0.28);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .settings-card {
+    transition: none;
+  }
+}
