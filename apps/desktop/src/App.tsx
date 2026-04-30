@@ -90,7 +90,7 @@ export default function App() {
       return false;
     }
   });
-  const { config } = useConfig();
+  const { config, getMaxTurns: getMaxTurnsLive } = useConfig();
 
   useEffect(() => {
     let cancelled = false;
@@ -205,7 +205,14 @@ export default function App() {
       projectId: string | null = null,
     ) => {
       try {
-        const session = await createDiscussionSession(topic, attachments, projectId);
+        const liveCap = getMaxTurnsLive();
+        const capSnapshot = liveCap === Infinity ? null : liveCap;
+        const session = await createDiscussionSession(
+          topic,
+          attachments,
+          projectId,
+          capSnapshot,
+        );
         setAppError(null);
         setActiveSession(session);
         if (projectId) {
@@ -226,7 +233,7 @@ export default function App() {
         );
       }
     },
-    [refreshAll],
+    [refreshAll, getMaxTurnsLive],
   );
 
   const handleOpenSession = useCallback(

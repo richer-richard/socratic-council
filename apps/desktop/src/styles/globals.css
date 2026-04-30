@@ -4353,3 +4353,217 @@ details[open] > .deep-research-report-summary .deep-research-report-expand::befo
     transition: none;
   }
 }
+
+/* Inner cards (e.g. shortcut tiles inside the About tab). Same borderless
+   philosophy as `.settings-card`, no halo — they live inside another
+   surface so they don't need their own glow. */
+.settings-subcard {
+  background: rgba(15, 23, 42, 0.55);
+  border: 1px solid transparent;
+  border-radius: 0.5rem;
+  padding: 1rem;
+  transition: background 200ms ease;
+}
+
+.settings-subcard:hover {
+  background: rgba(15, 23, 42, 0.8);
+}
+
+/* Custom dropdown — replaces native <select> so the cinematic-dark theme
+   carries through to the option panel. The OS-rendered <select> popup
+   ignored our colors. */
+.app-dropdown {
+  position: relative;
+  display: block;
+  width: 100%;
+}
+
+.app-dropdown-trigger {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  background: rgba(10, 10, 14, 0.55);
+  border: 1px solid rgba(232, 232, 239, 0.12);
+  border-radius: 8px;
+  color: #f8f8fc;
+  padding: 10px 14px;
+  font-size: 0.86rem;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color 160ms ease,
+    box-shadow 160ms ease,
+    background 160ms ease;
+}
+
+.app-dropdown-trigger:hover {
+  border-color: rgba(245, 197, 66, 0.32);
+}
+
+.app-dropdown-trigger[aria-expanded="true"] {
+  border-color: rgba(245, 197, 66, 0.55);
+  box-shadow: 0 0 0 3px rgba(245, 197, 66, 0.1);
+}
+
+.app-dropdown-value {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.app-dropdown-caret {
+  display: inline-flex;
+  color: rgba(232, 232, 239, 0.55);
+  transition: transform 160ms ease, color 160ms ease;
+}
+
+.app-dropdown-caret.is-open {
+  transform: rotate(180deg);
+  color: #f5c542;
+}
+
+.app-dropdown-panel {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  z-index: 65;
+  list-style: none;
+  margin: 0;
+  padding: 4px;
+  border: 1px solid rgba(245, 197, 66, 0.32);
+  background: linear-gradient(
+    180deg,
+    rgba(24, 22, 18, 0.96) 0%,
+    rgba(18, 16, 14, 0.98) 100%
+  );
+  backdrop-filter: blur(14px);
+  border-radius: 10px;
+  box-shadow:
+    0 24px 60px -12px rgba(0, 0, 0, 0.6),
+    0 0 32px rgba(245, 197, 66, 0.1);
+  max-height: 280px;
+  overflow-y: auto;
+  animation: app-dropdown-in 140ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+
+@keyframes app-dropdown-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.app-dropdown-item {
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: none;
+  color: rgba(232, 232, 239, 0.86);
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: 0.86rem;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.app-dropdown-item:hover {
+  background: rgba(245, 197, 66, 0.1);
+  color: #f8f8fc;
+}
+
+.app-dropdown-item.is-selected {
+  color: #f5c542;
+  background: rgba(245, 197, 66, 0.06);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app-dropdown-panel {
+    animation: none;
+  }
+  .app-dropdown-caret {
+    transition: none;
+  }
+}
+
+/* Round progress bar — when at least one turn has completed within the
+   current round, the unfilled gap pulses softly to suggest "more turns
+   coming". The progress-fill itself remains crisp; we layer a pseudo-
+   element over the right-of-fill portion of the track. */
+.progress-track-round {
+  position: relative;
+  overflow: hidden;
+}
+
+.progress-track-round.is-active::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: var(--round-fill-pct, 0%);
+  right: 0;
+  background: rgba(245, 197, 66, 0.22);
+  pointer-events: none;
+  animation: round-gap-pulse 1.8s ease-in-out infinite;
+}
+
+@keyframes round-gap-pulse {
+  0%, 100% { opacity: 0.15; }
+  50% { opacity: 0.85; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .progress-track-round.is-active::before {
+    animation: none;
+    opacity: 0.4;
+  }
+}
+
+/* Per-session cap popover — opened by clicking the round counter in the
+   chat header. Mirrors the dropdown panel styling. */
+.session-cap-popover {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 65;
+  width: 280px;
+  padding: 14px;
+  border: 1px solid rgba(245, 197, 66, 0.32);
+  background: linear-gradient(
+    180deg,
+    rgba(24, 22, 18, 0.96) 0%,
+    rgba(18, 16, 14, 0.98) 100%
+  );
+  backdrop-filter: blur(14px);
+  border-radius: 10px;
+  box-shadow:
+    0 24px 60px -12px rgba(0, 0, 0, 0.6),
+    0 0 32px rgba(245, 197, 66, 0.1);
+  animation: app-dropdown-in 160ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+
+.session-cap-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: rgba(232, 232, 239, 0.55);
+  padding: 2px 6px;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  cursor: pointer;
+  transition:
+    background 140ms ease,
+    border-color 140ms ease,
+    color 140ms ease;
+}
+
+.session-cap-trigger:hover {
+  background: rgba(245, 197, 66, 0.06);
+  border-color: rgba(245, 197, 66, 0.25);
+  color: #f5c542;
+}

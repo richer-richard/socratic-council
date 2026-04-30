@@ -277,6 +277,20 @@ export interface DiscussionSession {
    */
   argmapConsolidationLastMessageCount?: number;
   /**
+   * Snapshot of the discussion-cap chosen at session-creation time, in
+   * turns. The default-discussion-length preference is read once when the
+   * session is created; later changes to that preference do NOT affect
+   * already-running sessions.
+   *   - `number`: hard cap in turns
+   *   - `null`: explicit "no cap" (marathon)
+   *   - `undefined`: legacy session created before this field existed —
+   *     treated as "no cap" so we don't retroactively shorten anyone's
+   *     transcript.
+   * The cap can be raised or lowered later as long as the new value is
+   * not below the number of turns already recorded.
+   */
+  maxTurnsCap?: number | null;
+  /**
    * Session branching (wave 2.7). When present, this session was forked from
    * another session at a specific message. The UI surfaces a "↪ branched
    * from …" crumb so users can navigate back to the parent.
@@ -1623,6 +1637,11 @@ function normalizeDiscussionSession(input: unknown): DiscussionSession | null {
           ),
         }
       : {}),
+    ...(record.maxTurnsCap === null
+      ? { maxTurnsCap: null }
+      : typeof record.maxTurnsCap === "number" && Number.isFinite(record.maxTurnsCap) && record.maxTurnsCap > 0
+        ? { maxTurnsCap: Math.floor(record.maxTurnsCap) }
+        : {}),
     ...(typeof record.parentSessionId === "string" && record.parentSessionId.length > 0
       ? { parentSessionId: record.parentSessionId }
       : {}),
@@ -1810,6 +1829,8 @@ export async function createDiscussionSession(
   topic: string,
   pendingAttachments: ComposerAttachment[] = [],
   projectId: string | null = null,
+  /** Optional cap snapshot. `null` = no cap (marathon). Omitted = no cap. */
+  maxTurnsCap: number | null = null,
 ): Promise<DiscussionSession> {
   const trimmed = topic.trim();
   const now = Date.now();
@@ -1835,6 +1856,7 @@ export async function createDiscussionSession(
     attachments,
     duoLogue: null,
     runtime: createEmptyRuntime(),
+    maxTurnsCap,
   };
 
   try {
