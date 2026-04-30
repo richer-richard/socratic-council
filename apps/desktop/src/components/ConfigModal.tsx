@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   type Provider,
   type ProxyType,
@@ -84,6 +84,89 @@ function IconClose() {
       <line x1="3.5" y1="3.5" x2="12.5" y2="12.5" />
       <line x1="12.5" y1="3.5" x2="3.5" y2="12.5" />
     </svg>
+  );
+}
+
+function IconChevronDown() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <polyline points="4 6 8 10 12 6" />
+    </svg>
+  );
+}
+
+/**
+ * Custom dropdown that replaces the native <select>. Tauri renders the OS
+ * default popup which fights the cinematic-dark theme; this listbox
+ * panel inherits the same gold-on-dark palette as the rest of the app.
+ */
+function Dropdown<T extends string>({
+  value,
+  options,
+  onChange,
+  ariaLabel,
+}: {
+  value: T;
+  options: ReadonlyArray<{ value: T; label: string }>;
+  onChange: (value: T) => void;
+  ariaLabel?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const handlePointer = (event: MouseEvent) => {
+      if (!containerRef.current) return;
+      if (!containerRef.current.contains(event.target as Node)) setOpen(false);
+    };
+    const handleKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setOpen(false);
+    };
+    window.addEventListener("mousedown", handlePointer);
+    window.addEventListener("keydown", handleKey);
+    return () => {
+      window.removeEventListener("mousedown", handlePointer);
+      window.removeEventListener("keydown", handleKey);
+    };
+  }, [open]);
+
+  const current = options.find((option) => option.value === value);
+
+  return (
+    <div ref={containerRef} className="app-dropdown">
+      <button
+        type="button"
+        className="app-dropdown-trigger"
+        onClick={() => setOpen((prev) => !prev)}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        aria-label={ariaLabel}
+      >
+        <span className="app-dropdown-value">{current?.label ?? value}</span>
+        <span className={`app-dropdown-caret ${open ? "is-open" : ""}`}>
+          <IconChevronDown />
+        </span>
+      </button>
+      {open && (
+        <ul className="app-dropdown-panel" role="listbox" tabIndex={-1}>
+          {options.map((option) => (
+            <li key={option.value} role="option" aria-selected={option.value === value}>
+              <button
+                type="button"
+                className={`app-dropdown-item ${option.value === value ? "is-selected" : ""}`}
+                onClick={() => {
+                  onChange(option.value);
+                  setOpen(false);
+                }}
+              >
+                {option.label}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
   );
 }
 
@@ -614,20 +697,18 @@ export function ConfigModal({
               <div className="settings-card space-y-4">
                 <div>
                   <label className="block text-sm text-gray-300 mb-2">Proxy Type:</label>
-                  <select
+                  <Dropdown<ProxyType>
                     value={config.proxy.type}
-                    onChange={(e) =>
-                      onUpdateProxy({ ...config.proxy, type: e.target.value as ProxyType })
-                    }
-                    className="w-full bg-gray-900 border border-gray-600 rounded-lg px-4 py-2.5
-                      text-white focus:outline-none focus:border-primary transition-colors"
-                  >
-                    <option value="none">None (Direct Connection)</option>
-                    <option value="http">HTTP Proxy</option>
-                    <option value="https">HTTPS Proxy</option>
-                    <option value="socks5">SOCKS5 Proxy</option>
-                    <option value="socks5h">SOCKS5h Proxy (DNS through proxy)</option>
-                  </select>
+                    onChange={(next) => onUpdateProxy({ ...config.proxy, type: next })}
+                    ariaLabel="Proxy type"
+                    options={[
+                      { value: "none", label: "None (Direct Connection)" },
+                      { value: "http", label: "HTTP Proxy" },
+                      { value: "https", label: "HTTPS Proxy" },
+                      { value: "socks5", label: "SOCKS5 Proxy" },
+                      { value: "socks5h", label: "SOCKS5h Proxy (DNS through proxy)" },
+                    ]}
+                  />
                 </div>
 
                 {config.proxy.type !== "none" && (
@@ -787,31 +868,36 @@ export function ConfigModal({
                 </div>
               </div>
 
-              {/* Default Discussion Length */}
+              {/* Discussion cap */}
               <div className="settings-card">
-                <h3 className="font-medium text-white mb-4">Default Discussion Length</h3>
-                <select
+                <h3 className="font-medium text-white mb-1">Default discussion cap</h3>
+                <p className="text-xs text-gray-400 mb-4">
+                  New sessions inherit this cap at creation. Existing sessions keep
+                  their original limit unless you adjust it from the chat header.
+                </p>
+                <Dropdown<AppConfig["preferences"]["defaultLength"]>
                   value={config.preferences.defaultLength}
-                  onChange={(e) =>
-                    onUpdatePreferences({
-                      defaultLength: e.target.value as AppConfig["preferences"]["defaultLength"],
-                    })
-                  }
-                  className="w-full bg-gray-900 border border-gray-600 rounded-lg px-4 py-2.5
-                    text-white focus:outline-none focus:border-primary transition-colors mb-4"
-                >
-                  <option value="quick">
-                    Quick (3 rounds · {DISCUSSION_LENGTHS.quick} turns)
-                  </option>
-                  <option value="standard">
-                    Standard (5 rounds · {DISCUSSION_LENGTHS.standard} turns)
-                  </option>
-                  <option value="extended">
-                    Extended (10 rounds · {DISCUSSION_LENGTHS.extended} turns)
-                  </option>
-                  <option value="marathon">Marathon (no cap — until vote)</option>
-                  <option value="custom">Custom</option>
-                </select>
+                  onChange={(next) => onUpdatePreferences({ defaultLength: next })}
+                  ariaLabel="Default discussion cap"
+                  options={[
+                    {
+                      value: "quick",
+                      label: `Quick (3 rounds · ${DISCUSSION_LENGTHS.quick} turns)`,
+                    },
+                    {
+                      value: "standard",
+                      label: `Standard (5 rounds · ${DISCUSSION_LENGTHS.standard} turns)`,
+                    },
+                    {
+                      value: "extended",
+                      label: `Extended (10 rounds · ${DISCUSSION_LENGTHS.extended} turns)`,
+                    },
+                    { value: "marathon", label: "Marathon (no cap)" },
+                    { value: "custom", label: "Custom" },
+                  ]}
+                />
+                <div className="mb-4" />
+
 
                 {config.preferences.defaultLength === "custom" && (
                   <div>
@@ -946,17 +1032,17 @@ export function ConfigModal({
                 </div>
 
                 <div className="grid md:grid-cols-2 gap-4 mt-5">
-                  <div className="bg-gray-900 border border-gray-600 rounded-lg p-4">
+                  <div className="settings-subcard">
                     <div className="text-xs text-gray-400 uppercase tracking-[0.18em]">
                       Bundle Identifier
                     </div>
                     <div className="text-sm text-white mt-2">{ABOUT_IDENTIFIER}</div>
                   </div>
-                  <div className="bg-gray-900 border border-gray-600 rounded-lg p-4">
+                  <div className="settings-subcard">
                     <div className="text-xs text-gray-400 uppercase tracking-[0.18em]">License</div>
                     <div className="text-sm text-white mt-2">{ABOUT_LICENSE}</div>
                   </div>
-                  <div className="bg-gray-900 border border-gray-600 rounded-lg p-4 md:col-span-2">
+                  <div className="settings-subcard md:col-span-2">
                     <div className="text-xs text-gray-400 uppercase tracking-[0.18em]">
                       Repository
                     </div>
@@ -998,7 +1084,7 @@ export function ConfigModal({
                   {ABOUT_SHORTCUTS.map((shortcut) => (
                     <div
                       key={shortcut.keys}
-                      className="bg-gray-900 border border-gray-600 rounded-lg p-4"
+                      className="settings-subcard"
                     >
                       <div className="text-sm text-white font-medium">{shortcut.keys}</div>
                       <div className="text-sm text-gray-400 mt-1">{shortcut.description}</div>

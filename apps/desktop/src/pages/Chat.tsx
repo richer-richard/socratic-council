@@ -190,6 +190,164 @@ function HeaderIconMap() {
   );
 }
 
+function SessionCapIndicator({
+  currentTurn,
+  currentRound,
+  displayMaxRounds,
+  displayMaxTurns,
+  roundProgressPct,
+  turnProgressPct,
+  roundActive,
+  maxTurns,
+  sessionCap,
+  onChangeCap,
+}: {
+  currentTurn: number;
+  currentRound: number;
+  displayMaxRounds: number | string;
+  displayMaxTurns: number | string;
+  roundProgressPct: number;
+  turnProgressPct: number;
+  roundActive: boolean;
+  maxTurns: number;
+  sessionCap: number | null;
+  onChangeCap: (cap: number | null) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const handlePointer = (event: MouseEvent) => {
+      if (!containerRef.current) return;
+      if (!containerRef.current.contains(event.target as Node)) setOpen(false);
+    };
+    const handleKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setOpen(false);
+    };
+    window.addEventListener("mousedown", handlePointer);
+    window.addEventListener("keydown", handleKey);
+    return () => {
+      window.removeEventListener("mousedown", handlePointer);
+      window.removeEventListener("keydown", handleKey);
+    };
+  }, [open]);
+
+  const presets: ReadonlyArray<{ label: string; value: number | null }> = [
+    { label: "Quick (3 rounds · 24 turns)", value: 24 },
+    { label: "Standard (5 rounds · 40 turns)", value: 40 },
+    { label: "Extended (10 rounds · 80 turns)", value: 80 },
+    { label: "Marathon (no cap)", value: null },
+  ];
+
+  const isAllowed = (cap: number | null) => cap === null || cap >= currentTurn;
+  const monoStyle: CSSProperties = {
+    fontFamily: "var(--font-mono)",
+    minWidth: "78px",
+    textAlign: "right",
+  };
+
+  return (
+    <div ref={containerRef} style={{ position: "relative" }}>
+      <button
+        type="button"
+        className="session-cap-trigger"
+        onClick={() => setOpen((prev) => !prev)}
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        title="Adjust this session's discussion cap"
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          gap: "4px",
+          alignItems: "stretch",
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+          <span style={monoStyle}>
+            Round {currentRound}/{displayMaxRounds}
+          </span>
+          <div
+            className={`progress-track progress-track-round${roundActive ? " is-active" : ""}`}
+            style={
+              {
+                width: "120px",
+                height: "4px",
+                "--round-fill-pct": `${roundProgressPct}%`,
+              } as CSSProperties
+            }
+          >
+            <div className="progress-fill" style={{ width: `${roundProgressPct}%` }} />
+          </div>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+          <span style={monoStyle}>
+            Turn {currentTurn}/{displayMaxTurns}
+          </span>
+          {maxTurns === Infinity ? (
+            <div style={{ width: "120px" }} aria-hidden="true" />
+          ) : (
+            <div className="progress-track" style={{ width: "120px", height: "4px" }}>
+              <div className="progress-fill" style={{ width: `${turnProgressPct}%` }} />
+            </div>
+          )}
+        </div>
+      </button>
+      {open && (
+        <div className="session-cap-popover" role="dialog" aria-label="Adjust session cap">
+          <div
+            style={{
+              fontSize: "0.66rem",
+              fontWeight: 600,
+              letterSpacing: "0.2em",
+              textTransform: "uppercase",
+              color: "rgba(245, 197, 66, 0.72)",
+              marginBottom: "8px",
+            }}
+          >
+            Adjust this session
+          </div>
+          <p
+            style={{
+              fontSize: "0.78rem",
+              color: "rgba(232, 232, 239, 0.65)",
+              margin: "0 0 12px",
+              lineHeight: 1.45,
+            }}
+          >
+            Lowering below the current turn count ({currentTurn}) is blocked.
+          </p>
+          <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+            {presets.map((preset) => {
+              const allowed = isAllowed(preset.value);
+              const current = preset.value === sessionCap;
+              return (
+                <button
+                  key={String(preset.value)}
+                  type="button"
+                  disabled={!allowed}
+                  className={`app-dropdown-item${current ? " is-selected" : ""}`}
+                  style={{
+                    opacity: allowed ? 1 : 0.35,
+                    cursor: allowed ? "pointer" : "not-allowed",
+                  }}
+                  onClick={() => {
+                    if (!allowed) return;
+                    onChangeCap(preset.value);
+                    setOpen(false);
+                  }}
+                >
+                  {preset.label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 /** Slim vertical divider between header action groups. Decorative. */
 function HeaderGroupDivider() {
   return (
@@ -1549,8 +1707,14 @@ export function Chat({ session, onNavigate, onPersistSession }: ChatProps) {
   );
   const lastPersistSignatureRef = useRef("");
 
-  const { config, getMaxTurns, getConfiguredProviders } = useConfig();
-  const maxTurns = getMaxTurns();
+  const { config, getConfiguredProviders } = useConfig();
+  // Per-session cap (snapshot at creation). Falls back to no-cap for
+  // legacy sessions that predate this field. Editable via setSessionCap;
+  // persists onto the session blob via the regular snapshot pipeline.
+  const initialSessionCap: number | null =
+    normalizedSession.maxTurnsCap === undefined ? null : normalizedSession.maxTurnsCap;
+  const [sessionCap, setSessionCap] = useState<number | null>(initialSessionCap);
+  const maxTurns = sessionCap === null ? Infinity : sessionCap;
   const configuredProviders = getConfiguredProviders();
   const attachmentsById = useMemo(
     () => new Map(normalizedSession.attachments.map((attachment) => [attachment.id, attachment])),
@@ -5189,6 +5353,7 @@ Write the official moderator wrap-up in 4 short sentences:
       messageFingerprint,
       persistedMessages.length,
       sessionTitle,
+      sessionCap === null ? "infinity" : String(sessionCap),
     ].join("::");
 
     if (lastPersistSignatureRef.current === signature) {
@@ -5235,6 +5400,7 @@ Write the official moderator wrap-up in 4 short sentences:
         canvasStates: canvasStatesRef.current,
         argGraph: argGraphRef.current,
         argmapExtractedIds: Array.from(argmapExtractedIdsRef.current),
+        maxTurnsCap: sessionCap,
         ...(normalizedSession.argmapConsolidationLastRunAt !== undefined
           ? { argmapConsolidationLastRunAt: normalizedSession.argmapConsolidationLastRunAt }
           : {}),
@@ -5275,6 +5441,7 @@ Write the official moderator wrap-up in 4 short sentences:
     totalTokens,
     duoLogue,
     argGraph,
+    sessionCap,
   ]);
 
   // Fix 3.8: debounce persistSessionSnapshot during streaming so we don't
@@ -6252,49 +6419,21 @@ Write the official moderator wrap-up in 4 short sentences:
           </div>
 
           <div className="flex flex-wrap items-center gap-3 justify-start xl:justify-end">
-            <div
-              className="flex flex-col gap-1"
-              title={
-                maxTurns === Infinity
-                  ? `Round ${currentRound} · Turn ${currentTurn} (no cap)`
-                  : `Round ${currentRound}/${displayMaxRounds} · Turn ${currentTurn}/${displayMaxTurns}`
-              }
-            >
-              <div className="flex items-center gap-2">
-                <div
-                  className="text-xs text-ink-500"
-                  style={{
-                    fontFamily: "var(--font-mono)",
-                    minWidth: "78px",
-                    textAlign: "right",
-                  }}
-                >
-                  Round {currentRound}/{displayMaxRounds}
-                </div>
-                <div className="progress-track" style={{ width: "120px", height: "4px" }}>
-                  <div className="progress-fill" style={{ width: `${roundProgressPct}%` }} />
-                </div>
-              </div>
-              <div className="flex items-center gap-2">
-                <div
-                  className="text-xs text-ink-500"
-                  style={{
-                    fontFamily: "var(--font-mono)",
-                    minWidth: "78px",
-                    textAlign: "right",
-                  }}
-                >
-                  Turn {currentTurn}/{displayMaxTurns}
-                </div>
-                {maxTurns === Infinity ? (
-                  <div style={{ width: "120px" }} aria-hidden="true" />
-                ) : (
-                  <div className="progress-track" style={{ width: "120px", height: "4px" }}>
-                    <div className="progress-fill" style={{ width: `${turnProgressPct}%` }} />
-                  </div>
-                )}
-              </div>
-            </div>
+            <SessionCapIndicator
+              currentTurn={currentTurn}
+              currentRound={currentRound}
+              displayMaxRounds={displayMaxRounds}
+              displayMaxTurns={displayMaxTurns}
+              roundProgressPct={roundProgressPct}
+              turnProgressPct={turnProgressPct}
+              roundActive={turnsInCurrentRound > 0 && turnsInCurrentRound < TURNS_PER_ROUND}
+              maxTurns={maxTurns}
+              sessionCap={sessionCap}
+              onChangeCap={(nextCap) => {
+                if (nextCap !== null && nextCap < currentTurnRef.current) return;
+                setSessionCap(nextCap);
+              }}
+            />
 
             <div className="badge badge-info">{totalTokens.input + totalTokens.output} tokens</div>
 
