@@ -1,73 +1,155 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 360" role="img" aria-labelledby="title desc">
-  <title id="title">First build profile</title>
-  <desc id="desc">A timeline-style chart showing the sequence of prerequisites, dependencies, TypeScript and Vite build, Rust and Tauri bundle, then install and launch.</desc>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 480" role="img" aria-labelledby="title desc" preserveAspectRatio="xMidYMid meet">
+  <title id="title">First-build profile</title>
+  <desc id="desc">A timing chart of the first production build on a fresh machine. Five phases run in sequence; the native Rust bundle dominates because Cargo must compile every crate from scratch the first time.</desc>
   <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0%" stop-color="#07111f"/>
-      <stop offset="100%" stop-color="#0f172a"/>
-    </linearGradient>
+    <radialGradient id="page" cx="50%" cy="50%" r="80%">
+      <stop offset="0%" stop-color="#0d1117"/>
+      <stop offset="60%" stop-color="#080a10"/>
+      <stop offset="100%" stop-color="#04050a"/>
+    </radialGradient>
+    <pattern id="dotgrid" width="22" height="22" patternUnits="userSpaceOnUse">
+      <circle cx="1" cy="1" r="0.7" fill="#1c2434" fill-opacity="0.55"/>
+    </pattern>
     <style>
-      text { font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
-      .title { font-size: 24px; font-weight: 700; fill: #f8fafc; }
-      .subtitle { font-size: 14px; fill: #94a3b8; }
-      .axis { stroke: #334155; stroke-width: 1.5; }
-      .grid { stroke: #1e293b; stroke-width: 1; stroke-dasharray: 4 8; }
-      .row { font-size: 15px; fill: #cbd5e1; }
-      .tick { font-size: 12px; fill: #94a3b8; text-anchor: middle; }
-      .chip { fill: #0f172a; stroke: #334155; stroke-width: 1.5; }
-      .chip-text { font-size: 12px; font-weight: 700; fill: #e2e8f0; text-anchor: middle; }
-      .bar-text { font-size: 13px; font-weight: 700; fill: #f8fafc; }
+      .display { font-family: 'Cormorant Garamond', 'Hoefler Text', Garamond, 'Times New Roman', serif; }
+      .body    { font-family: 'Manrope', -apple-system, BlinkMacSystemFont, 'Helvetica Neue', sans-serif; }
+      .mono    { font-family: 'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace; }
+      .ink     { fill: #ecf0f6; }
+      .body-c  { fill: #b9c2d6; }
+      .muted   { fill: #5d667a; }
+      .gold    { fill: #f5c542; }
+      .stroke-hair { stroke: #20283c; stroke-width: 1; fill: none; }
+      .stroke-hair-strong { stroke: #344166; stroke-width: 1.2; fill: none; }
+      .stroke-rule { stroke: #1a2233; stroke-width: 1; fill: none; }
+      .axis { stroke: #344166; stroke-width: 1; fill: none; }
+      .axis-tick { stroke: #2a3550; stroke-width: 1; fill: none; }
+      .grid { stroke: #1a2233; stroke-width: 1; stroke-dasharray: 1 5; fill: none; }
+      .bar  { fill: #2a3651; }
+      .bar-gold { fill: #5a4716; }
+      .range { stroke: #4a5878; stroke-width: 1; fill: none; }
+      .range-gold { stroke: #b08820; stroke-width: 1; fill: none; }
+      .cap   { stroke: #4a5878; stroke-width: 1; fill: none; }
+      .cap-gold { stroke: #b08820; stroke-width: 1; fill: none; }
     </style>
   </defs>
 
-  <rect width="1200" height="360" rx="28" fill="url(#bg)"/>
-  <text x="56" y="44" class="title">First Build Profile</text>
-  <text x="56" y="68" class="subtitle">Illustrative first-run shape on a fresh machine. Rust and Tauri bundling usually dominates the timeline.</text>
+  <rect width="1280" height="480" fill="url(#page)"/>
+  <rect width="1280" height="480" fill="url(#dotgrid)"/>
 
-  <rect x="56" y="82" width="82" height="28" rx="14" class="chip"/>
-  <text x="97" y="100" class="chip-text">Setup</text>
-  <rect x="150" y="82" width="78" height="28" rx="14" class="chip"/>
-  <text x="189" y="100" class="chip-text">Build</text>
-  <rect x="240" y="82" width="84" height="28" rx="14" class="chip"/>
-  <text x="282" y="100" class="chip-text">Finish</text>
+  <!-- masthead -->
+  <line x1="64" y1="60" x2="1216" y2="60" class="stroke-hair"/>
+  <text x="64" y="48" class="mono ink" font-size="10" font-weight="600" letter-spacing="2">FIG. 06 / FIRST BUILD</text>
+  <text x="1216" y="48" class="mono muted" font-size="10" letter-spacing="2" text-anchor="end">illustrative · MacBook Air M2 reference</text>
 
-  <line x1="220" y1="130" x2="1060" y2="130" class="axis"/>
-  <line x1="220" y1="310" x2="1060" y2="310" class="axis"/>
+  <!-- title -->
+  <text x="64" y="118" class="display ink" font-style="italic" font-size="42">A First Build, in Time</text>
+  <text x="64" y="146" class="body body-c" font-size="13">The native bundle is where the minutes go. Cargo compiles roughly three hundred crates the first time, and never again.</text>
 
-  <line x1="220" y1="130" x2="220" y2="310" class="axis"/>
-  <line x1="360" y1="130" x2="360" y2="310" class="grid"/>
-  <line x1="500" y1="130" x2="500" y2="310" class="grid"/>
-  <line x1="640" y1="130" x2="640" y2="310" class="grid"/>
-  <line x1="780" y1="130" x2="780" y2="310" class="grid"/>
-  <line x1="920" y1="130" x2="920" y2="310" class="grid"/>
-  <line x1="1060" y1="130" x2="1060" y2="310" class="axis"/>
+  <!-- ============ CHART BODY ============ -->
+  <!-- chart frame: x from 360 to 1180 represents 0 to 16 minutes (820 px / 16 min = 51.25 px/min) -->
+  <!-- y rows: 5 rows from 220 to 380, spacing 40 -->
 
-  <text x="220" y="326" class="tick">0</text>
-  <text x="360" y="326" class="tick">1</text>
-  <text x="500" y="326" class="tick">2</text>
-  <text x="640" y="326" class="tick">3</text>
-  <text x="780" y="326" class="tick">4</text>
-  <text x="920" y="326" class="tick">5</text>
-  <text x="1060" y="326" class="tick">6</text>
+  <!-- top + bottom rule -->
+  <line x1="360" y1="208" x2="1180" y2="208" class="stroke-hair-strong"/>
+  <line x1="360" y1="400" x2="1180" y2="400" class="stroke-hair-strong"/>
 
-  <text x="56" y="162" class="row">Prerequisites</text>
-  <text x="56" y="202" class="row">Dependencies</text>
-  <text x="56" y="242" class="row">TypeScript + Vite</text>
-  <text x="56" y="282" class="row">Rust + Tauri bundle</text>
-  <text x="56" y="322" class="row">Install + launch</text>
+  <!-- axis -->
+  <line x1="360" y1="208" x2="360" y2="400" class="axis"/>
+  <line x1="1180" y1="208" x2="1180" y2="400" class="axis"/>
 
-  <rect x="220" y="144" width="140" height="24" rx="12" fill="#0f766e"/>
-  <text x="234" y="160" class="bar-text">Setup</text>
+  <!-- minute gridlines and tick labels -->
+  <g class="grid">
+    <line x1="411.25" y1="208" x2="411.25" y2="400"/>
+    <line x1="462.5"  y1="208" x2="462.5"  y2="400"/>
+    <line x1="513.75" y1="208" x2="513.75" y2="400"/>
+    <line x1="565"    y1="208" x2="565"    y2="400"/>
+    <line x1="616.25" y1="208" x2="616.25" y2="400"/>
+    <line x1="667.5"  y1="208" x2="667.5"  y2="400"/>
+    <line x1="718.75" y1="208" x2="718.75" y2="400"/>
+    <line x1="770"    y1="208" x2="770"    y2="400"/>
+    <line x1="821.25" y1="208" x2="821.25" y2="400"/>
+    <line x1="872.5"  y1="208" x2="872.5"  y2="400"/>
+    <line x1="923.75" y1="208" x2="923.75" y2="400"/>
+    <line x1="975"    y1="208" x2="975"    y2="400"/>
+    <line x1="1026.25" y1="208" x2="1026.25" y2="400"/>
+    <line x1="1077.5" y1="208" x2="1077.5" y2="400"/>
+    <line x1="1128.75" y1="208" x2="1128.75" y2="400"/>
+  </g>
 
-  <rect x="360" y="184" width="140" height="24" rx="12" fill="#15803d"/>
-  <text x="374" y="200" class="bar-text">Dependencies</text>
+  <!-- tick labels every 4 minutes -->
+  <g class="mono muted" font-size="10" letter-spacing="1.4" text-anchor="middle">
+    <text x="360"  y="424">0</text>
+    <text x="565"  y="424">4 min</text>
+    <text x="770"  y="424">8</text>
+    <text x="975"  y="424">12</text>
+    <text x="1180" y="424">16</text>
+  </g>
+  <text x="770" y="450" class="mono muted" font-size="9.5" letter-spacing="2" text-anchor="middle">ELAPSED · WALL TIME</text>
 
-  <rect x="500" y="224" width="140" height="24" rx="12" fill="#2563eb"/>
-  <text x="514" y="240" class="bar-text">Frontend build</text>
+  <!-- ============ ROWS ============ -->
+  <!-- conversion: x = 360 + minutes * 51.25 -->
 
-  <rect x="640" y="264" width="280" height="24" rx="12" fill="#c2410c"/>
-  <text x="654" y="280" class="bar-text">Native bundle</text>
+  <!-- Row 01: Prerequisites (0.0 .. 0.5) -->
+  <g transform="translate(0,228)">
+    <text x="64"  y="-4" class="mono muted" font-size="10" letter-spacing="1.4">01</text>
+    <text x="100" y="-4" class="display ink" font-style="italic" font-size="16">Prerequisites</text>
+    <text x="320" y="-4" class="mono muted" font-size="10" letter-spacing="1.4" text-anchor="end">~30s</text>
+    <line x1="100" y1="-22" x2="320" y2="-22" class="stroke-rule"/>
+    <!-- bar: 0 -> 0.5 min => 360 to 385.6 -->
+    <rect x="360" y="-14" width="25.6" height="14" class="bar"/>
+    <!-- range cap (small, since fast) -->
+    <line x1="360" y1="-7" x2="360" y2="-7" class="cap"/>
+  </g>
 
-  <rect x="920" y="304" width="140" height="24" rx="12" fill="#ca8a04"/>
-  <text x="934" y="320" class="bar-text">Install</text>
+  <!-- Row 02: Dependencies (0.5 .. 1.5) -->
+  <g transform="translate(0,268)">
+    <text x="64"  y="-4" class="mono muted" font-size="10" letter-spacing="1.4">02</text>
+    <text x="100" y="-4" class="display ink" font-style="italic" font-size="16">Dependencies</text>
+    <text x="320" y="-4" class="mono muted" font-size="10" letter-spacing="1.4" text-anchor="end">~1 min</text>
+    <line x1="100" y1="-22" x2="320" y2="-22" class="stroke-rule"/>
+    <!-- 0.5 to 1.5 min => x 385.6 to 436.9 -->
+    <rect x="385.6" y="-14" width="51.3" height="14" class="bar"/>
+    <line x1="436.9" y1="-9" x2="462.5" y2="-9" class="range"/>
+    <line x1="462.5" y1="-13" x2="462.5" y2="-5" class="cap"/>
+  </g>
+
+  <!-- Row 03: Frontend build (1.5 .. 2.0) -->
+  <g transform="translate(0,308)">
+    <text x="64"  y="-4" class="mono muted" font-size="10" letter-spacing="1.4">03</text>
+    <text x="100" y="-4" class="display ink" font-style="italic" font-size="16">TypeScript &amp; Vite</text>
+    <text x="320" y="-4" class="mono muted" font-size="10" letter-spacing="1.4" text-anchor="end">~30s</text>
+    <line x1="100" y1="-22" x2="320" y2="-22" class="stroke-rule"/>
+    <!-- 1.5 to 2.0 => 436.9 to 462.5 -->
+    <rect x="436.9" y="-14" width="25.6" height="14" class="bar"/>
+  </g>
+
+  <!-- Row 04: Rust + Tauri bundle (2.0 .. 13.0), gold accent -->
+  <g transform="translate(0,348)">
+    <text x="64"  y="-4" class="mono gold" font-size="10" letter-spacing="1.4">04</text>
+    <text x="100" y="-4" class="display ink" font-style="italic" font-size="16">Rust + Tauri bundle</text>
+    <text x="320" y="-4" class="mono gold" font-size="10" letter-spacing="1.4" text-anchor="end">5–15 min</text>
+    <line x1="100" y1="-22" x2="320" y2="-22" class="stroke-rule"/>
+    <!-- typical 2.0 to 8.0 (median 6 min) => 462.5 to 770 -->
+    <rect x="462.5" y="-14" width="307.5" height="14" class="bar-gold"/>
+    <!-- range to 15 min (uppy) => 770 to 1129 -->
+    <line x1="770" y1="-9" x2="1129" y2="-9" class="range-gold"/>
+    <line x1="1129" y1="-13" x2="1129" y2="-5" class="cap-gold"/>
+    <!-- range labels -->
+    <text x="616.25" y="14" class="mono muted" font-size="10" letter-spacing="1.4" text-anchor="middle">TYPICAL</text>
+    <text x="950"    y="14" class="mono muted" font-size="10" letter-spacing="1.4" text-anchor="middle">WORST · cold cache · weak CPU</text>
+  </g>
+
+  <!-- Row 05: Install + launch (last 30s of total) -->
+  <g transform="translate(0,400)">
+    <text x="64"  y="-4" class="mono muted" font-size="10" letter-spacing="1.4">05</text>
+    <text x="100" y="-4" class="display ink" font-style="italic" font-size="16">Install &amp; launch</text>
+    <text x="320" y="-4" class="mono muted" font-size="10" letter-spacing="1.4" text-anchor="end">~30s</text>
+    <line x1="100" y1="-22" x2="320" y2="-22" class="stroke-rule"/>
+    <!-- placed at end of typical: ~8 min start, 0.5 min wide -->
+    <rect x="770" y="-14" width="25.6" height="14" class="bar"/>
+  </g>
+
+  <!-- footer -->
+  <text x="64" y="468" class="mono muted" font-size="9.5" letter-spacing="2">SUBSEQUENT BUILDS RUN INCREMENTALLY · CARGO REUSES TARGET/</text>
+  <text x="1216" y="468" class="display muted" font-size="13" font-style="italic" text-anchor="end">first time only</text>
 </svg>
