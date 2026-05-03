@@ -4,29 +4,30 @@
 
 # Socratic Council
 
-Socratic Council is a local-first desktop app that runs an eight-agent seminar on any topic. You bring provider API keys, type a topic, optionally attach files, and watch eight agents debate in a turn-taking group chat with search, quoting, export, conflict visualization, and token/cost tracking built in.
+Socratic Council is a local-first desktop app that runs a sixteen-agent seminar on any topic. You bring provider API keys, type a topic, optionally attach files, and watch eight council members debate in public while eight paired advisors slip private notes to their partners. Live conflict detection, an evolving argument map, fact-check badges, deep-research synthesis, and per-message cost accounting are built in.
 
-This repo ships **source only** (no installer downloads). Follow this guide to build it from source.
+This repo ships source only (no installer downloads). Follow this guide to build it from source.
 
-> Use `install.sh` as the **quick install script** on macOS, or follow the **manual installation guide in this README** for the current step-by-step setup on macOS, Windows, or Linux.
+> Use `install.sh` as the quick install script on macOS, or follow the manual installation guide in this README for the current step-by-step setup on macOS, Windows, or Linux.
 
 ## Snapshot
 
-| Dimension        | Details                                                               |
-| ---------------- | --------------------------------------------------------------------- |
-| Product          | Local-first Tauri desktop app                                         |
-| Stack            | React + TypeScript frontend, Rust backend, pnpm monorepo              |
-| Discussion model | Eight council members plus an optional moderator                      |
-| Providers        | OpenAI, Anthropic, Google Gemini, DeepSeek, Kimi, Qwen, MiniMax, Z.AI |
-| Research tools   | File search, web search, verification, citations                      |
-| Outputs          | Searchable transcript, logs, conflict graph, structured exports       |
+| Dimension        | Details                                                                                  |
+| ---------------- | ---------------------------------------------------------------------------------------- |
+| Product          | Local-first Tauri desktop app                                                            |
+| Stack            | React + TypeScript frontend, Rust backend, pnpm monorepo                                 |
+| Discussion model | Eight council debaters, eight silent advisors paired one-to-one, optional moderator      |
+| Providers        | OpenAI, Anthropic, Google Gemini, DeepSeek, Kimi, Qwen, MiniMax, Z.AI                    |
+| Research tools   | File search, web search, claim verification, source-anchored citations                   |
+| Outputs          | Searchable transcript, argument map, fact-check badges, conflict graph, exports, bundles |
 
-| Workflow Surface   | Included                                                   |
-| ------------------ | ---------------------------------------------------------- |
-| Live discussion    | Turn-taking responses, quotes, reactions, moderator nudges |
-| Evidence gathering | Attachments, tool results, source-aware follow-up          |
-| Observability      | Latency, tokens, cost tracking, logs                       |
-| Review and sharing | Search, export, conflict graph, transcript summaries       |
+| Workflow Surface   | Included                                                                                |
+| ------------------ | --------------------------------------------------------------------------------------- |
+| Live discussion    | Turn-taking responses, secret advisor notes, quotes, reactions, moderator nudges        |
+| Evidence gathering | Attachments, tool results, source-aware follow-up, deep-research reports                |
+| Sense-making       | Argument map, fact-check badges, pairwise conflict graph, end-of-session vote           |
+| Observability      | Latency, tokens, cost tracking, daily and per-session budgets, redacted diagnostics     |
+| Review and sharing | Search, branch points, structured exports, portable `.scbundle` archive                 |
 
 ## Experience Map
 
@@ -34,17 +35,19 @@ This repo ships **source only** (no installer downloads). Follow this guide to b
 
 ## Council Lineup
 
-| Agent     | Default provider | Default model     |
-| --------- | ---------------- | ----------------- |
-| George    | OpenAI           | GPT-5.4           |
-| Cathy     | Anthropic        | Claude Opus 4.6   |
-| Grace     | Google           | Gemini 3.1 Pro    |
-| Douglas   | DeepSeek         | DeepSeek Reasoner |
-| Kate      | Kimi             | Kimi K2.5         |
-| Quinn     | Qwen             | Qwen 3.5 Plus     |
-| Mary      | MiniMax          | MiniMax M2.5      |
-| Zara      | Z.AI             | GLM-5             |
-| Moderator | OpenAI           | GPT-5.3 Instant   |
+The eight council debaters speak in public. Each is shadowed by a silent advisor on the same provider that can pass them private notes.
+
+| Agent     | Advisor | Provider  | Default model         |
+| --------- | ------- | --------- | --------------------- |
+| George    | Greta   | OpenAI    | GPT-5.5               |
+| Cathy     | Clara   | Anthropic | Claude Opus 4.7       |
+| Grace     | Gaia    | Google    | Gemini 3.1 Pro        |
+| Douglas   | Dara    | DeepSeek  | DeepSeek V4 Pro       |
+| Kate      | Kira    | Kimi      | Kimi K2.6             |
+| Quinn     | Quincy  | Qwen      | Qwen 3.6 Max          |
+| Mary      | Mila    | MiniMax   | MiniMax M2.7 Highspeed |
+| Zara      | Zoe     | Z.AI      | GLM-5.1               |
+| Moderator |         | Google    | Gemini 3.1 Pro (falls back to whatever provider is configured) |
 
 ## Installation Paths
 
@@ -75,7 +78,7 @@ cd socratic-council
 ./install.sh
 ```
 
-The script automatically checks for (and installs if missing) Xcode CLT, Homebrew, Node.js 22+, pnpm, and Rust — then builds the production `.app` bundle, copies `Socratic Council.app` to `/Applications`, and opens the app.
+The script automatically checks for (and installs if missing) Xcode CLT, Homebrew, Node.js 22+, pnpm, and Rust, then builds the production `.app` bundle, copies `Socratic Council.app` to `/Applications`, and opens the app.
 
 | Quick install behavior | What happens                                        |
 | ---------------------- | --------------------------------------------------- |
@@ -99,18 +102,18 @@ For the current manual installation guide, see [Build from source (manual instal
 - [Quick install (macOS)](#quick-install-macos)
 - [Build from source (manual install guide)](#build-from-source-manual-install-guide)
   - [Requirements summary](#requirements-summary)
-  - [Step 1 — Install system prerequisites](#step-1--install-system-prerequisites)
+  - [Step 1: Install system prerequisites](#step-1-install-system-prerequisites)
     - [macOS](#macos)
     - [Windows](#windows)
     - [Linux (Debian / Ubuntu)](#linux-debian--ubuntu)
     - [Linux (Fedora)](#linux-fedora)
     - [Linux (Arch)](#linux-arch)
-  - [Step 2 — Install Node.js](#step-2--install-nodejs)
-  - [Step 3 — Install Rust](#step-3--install-rust)
-  - [Step 4 — Enable pnpm](#step-4--enable-pnpm)
-  - [Step 5 — Clone and install](#step-5--clone-and-install)
-  - [Step 6 — Run in development mode](#step-6--run-in-development-mode)
-  - [Step 7 — Build a production binary](#step-7--build-a-production-binary)
+  - [Step 2: Install Node.js](#step-2-install-nodejs)
+  - [Step 3: Install Rust](#step-3-install-rust)
+  - [Step 4: Enable pnpm](#step-4-enable-pnpm)
+  - [Step 5: Clone and install](#step-5-clone-and-install)
+  - [Step 6: Run in development mode](#step-6-run-in-development-mode)
+  - [Step 7: Build a production binary](#step-7-build-a-production-binary)
   - [Verification checklist](#verification-checklist)
 - [How it works](#how-it-works)
   - [Architecture](#architecture)
@@ -153,15 +156,15 @@ This is the current manual installation guide for the repo. If you do not want t
 | ------------------------ | -------------------------------- | ------------------------------------------------------------------------------- |
 | **Git**                  | any recent                       | Clone the repository                                                            |
 | **Node.js**              | **≥ 22.0.0**                     | Run the frontend toolchain (Vite, TypeScript, build scripts)                    |
-| **pnpm**                 | **9.15.0** (exact, via corepack) | Workspace package manager — the repo's `packageManager` field pins this version |
+| **pnpm**                 | **9.15.0** (exact, via corepack) | Workspace package manager. The repo's `packageManager` field pins this version |
 | **Rust**                 | **stable ≥ 1.77.2**              | Compile the Tauri v2 native backend                                             |
 | **Tauri v2 system deps** | (per OS, see below)              | WebView, native build tools                                                     |
 
-The Tauri CLI (`@tauri-apps/cli ^2.5.0`) is declared as a devDependency and installed automatically by `pnpm install` — you do **not** install it globally.
+The Tauri CLI (`@tauri-apps/cli ^2.5.0`) is declared as a devDependency and installed automatically by `pnpm install`, so you do **not** install it globally.
 
 ---
 
-### Step 1 — Install system prerequisites
+### Step 1: Install system prerequisites
 
 These are OS-level packages that Tauri needs to compile its native code and embed a WebView. Pick **your platform** below.
 
@@ -189,11 +192,11 @@ These are OS-level packages that Tauri needs to compile its native code and embe
 
    > **Tip:** If you see errors about missing SDKs or headers when building later, open the full Xcode IDE once and accept the license. Then re-run `xcode-select --install`.
 
-No other system packages are required on macOS — the WebView is provided by the OS (WKWebView).
+No other system packages are required on macOS. The WebView is provided by the OS (WKWebView).
 
 #### Windows
 
-1. **Microsoft Visual Studio C++ Build Tools** — Rust on Windows requires the MSVC toolchain.
+1. **Microsoft Visual Studio C++ Build Tools.** Rust on Windows requires the MSVC toolchain.
    - Download **Visual Studio Build Tools** from <https://visualstudio.microsoft.com/visual-cpp-build-tools/>.
    - In the installer, select the **"Desktop development with C++"** workload. This installs:
      - MSVC v143 (or later) C++ compiler
@@ -209,7 +212,7 @@ No other system packages are required on macOS — the WebView is provided by th
 
    If `cl` is not on your PATH, use the "Developer Command Prompt for VS" or the "x64 Native Tools Command Prompt".
 
-2. **WebView2 Runtime** — Tauri embeds a WebView2-based window.
+2. **WebView2 Runtime.** Tauri embeds a WebView2-based window.
    - **Windows 11** and **Windows 10 ≥ 1803** ship with WebView2 pre-installed. Verify:
 
      ```powershell
@@ -220,7 +223,7 @@ No other system packages are required on macOS — the WebView is provided by th
 
    - If not present, download the **Evergreen Bootstrapper** from <https://developer.microsoft.com/en-us/microsoft-edge/webview2/> and run it.
 
-3. **Rust toolchain target** — ensure Rust uses the MSVC backend:
+3. **Rust toolchain target.** Ensure Rust uses the MSVC backend:
 
    ```powershell
    rustup default stable-msvc
@@ -284,11 +287,11 @@ sudo pacman -S --needed --noconfirm \
 
 ---
 
-### Step 2 — Install Node.js
+### Step 2: Install Node.js
 
 This project requires **Node.js ≥ 22.0.0** (enforced in the root `package.json` `engines` field). Node.js ships with `corepack`, which is used to activate pnpm in the next step.
 
-**Option A — nvm (recommended for macOS / Linux):**
+**Option A. nvm (recommended for macOS / Linux):**
 
 ```bash
 # Install nvm (if you don't have it)
@@ -299,7 +302,7 @@ nvm install 22
 nvm use 22
 ```
 
-**Option B — fnm (cross-platform alternative):**
+**Option B. fnm (cross-platform alternative):**
 
 ```bash
 # macOS / Linux
@@ -313,7 +316,7 @@ fnm install 22
 fnm use 22
 ```
 
-**Option C — Direct download:**
+**Option C. Direct download:**
 
 Download from <https://nodejs.org/> (pick the v22 LTS line or later).
 
@@ -331,7 +334,7 @@ corepack -v
 
 ---
 
-### Step 3 — Install Rust
+### Step 3: Install Rust
 
 Tauri v2 compiles a Rust binary as the native backend. You need a **stable** Rust toolchain ≥ 1.77.2.
 
@@ -382,9 +385,9 @@ rustup update stable
 
 ---
 
-### Step 4 — Enable pnpm
+### Step 4: Enable pnpm
 
-This repo uses `pnpm` as its workspace package manager. The exact version (`9.15.0`) is pinned in the root `package.json` `"packageManager"` field. **Corepack** (bundled with Node.js) will automatically download and use the correct version — you do not install pnpm globally.
+This repo uses `pnpm` as its workspace package manager. The exact version (`9.15.0`) is pinned in the root `package.json` `"packageManager"` field. **Corepack** (bundled with Node.js) automatically downloads and uses the correct version, so you do not install pnpm globally.
 
 ```bash
 corepack enable
@@ -401,7 +404,7 @@ pnpm -v
 
 ---
 
-### Step 5 — Clone and install
+### Step 5: Clone and install
 
 ```bash
 git clone https://github.com/richer-richard/socratic-council.git
@@ -416,12 +419,12 @@ pnpm install
 
 This runs pnpm's workspace resolution and installs dependencies for all packages:
 
-| Workspace                   | Path              | What it installs                                                                         |
-| --------------------------- | ----------------- | ---------------------------------------------------------------------------------------- |
-| `@socratic-council/shared`  | `packages/shared` | Shared types, constants, model registry                                                  |
-| `@socratic-council/sdk`     | `packages/sdk`    | Provider SDK (OpenAI, Anthropic, Google, DeepSeek, Kimi, Qwen, MiniMax), transport layer |
-| `@socratic-council/core`    | `packages/core`   | Council orchestration logic (bidding, conflict, cost, memory)                            |
-| `@socratic-council/desktop` | `apps/desktop`    | Tauri v2 + React frontend, Tauri CLI (`@tauri-apps/cli`)                                 |
+| Workspace                   | Path              | What it installs                                                                                       |
+| --------------------------- | ----------------- | ------------------------------------------------------------------------------------------------------ |
+| `@socratic-council/shared`  | `packages/shared` | Shared types, agent and observer rosters, model registry, default prompts                              |
+| `@socratic-council/sdk`     | `packages/sdk`    | Provider SDK (OpenAI, Anthropic, Google, DeepSeek, Kimi, Qwen, MiniMax, Z.AI), streaming transport     |
+| `@socratic-council/core`    | `packages/core`   | Council orchestration: relevance bidding, fairness, conflict, fact-check, argument map, reflection, summarization, cost |
+| `@socratic-council/desktop` | `apps/desktop`    | Tauri v2 + React frontend, Tauri CLI (`@tauri-apps/cli`)                                               |
 
 Verify installation succeeded:
 
@@ -432,7 +435,7 @@ pnpm ls -r --depth 0
 
 ---
 
-### Step 6 — Run in development mode
+### Step 6: Run in development mode
 
 ```bash
 pnpm --filter @socratic-council/desktop tauri:dev
@@ -441,7 +444,7 @@ pnpm --filter @socratic-council/desktop tauri:dev
 **What this command does, in order:**
 
 1. Tauri CLI starts (`tauri dev`).
-2. Tauri runs the `beforeDevCommand` from `tauri.conf.json`, which is `pnpm dev` — this launches **Vite** on `http://localhost:1420`.
+2. Tauri runs the `beforeDevCommand` from `tauri.conf.json`, which is `pnpm dev`. That launches **Vite** on `http://localhost:1420`.
 3. Tauri compiles the Rust backend in `apps/desktop/src-tauri/` using `cargo build`. On the **first run**, Cargo downloads and compiles all Rust crate dependencies (Tauri itself, reqwest, tokio, serde, etc.). This can take **5–15 minutes** depending on your machine.
 4. Once both the frontend dev server and the Rust binary are ready, a native window opens showing the app.
 
@@ -459,7 +462,7 @@ pnpm --filter @socratic-council/desktop tauri:dev
 
 ---
 
-### Step 7 — Build a production binary
+### Step 7: Build a production binary
 
 To produce an optimized, distributable binary:
 
@@ -477,10 +480,10 @@ pnpm --filter @socratic-council/desktop tauri:build
    - Runs `tsc` type-checking on the desktop frontend
    - Runs `vite build` to produce the optimized frontend bundle in `apps/desktop/dist/`
 3. Tauri compiles the Rust backend in **release mode** (`cargo build --release`) with the following optimizations (from `Cargo.toml`):
-   - `lto = true` — link-time optimization
-   - `codegen-units = 1` — single codegen unit for maximum optimization
-   - `opt-level = "s"` — optimize for binary size
-   - `strip = true` — strip debug symbols
+   - `lto = true` (link-time optimization)
+   - `codegen-units = 1` (single codegen unit for maximum optimization)
+   - `opt-level = "s"` (optimize for binary size)
+   - `strip = true` (strip debug symbols)
 4. Tauri bundles the frontend + binary into a platform-specific distributable.
 
 **Build output locations:**
@@ -544,19 +547,19 @@ If any of these fail, revisit the corresponding step above.
 
 ### Architecture
 
-Socratic Council is a pnpm monorepo with a desktop app and shared TypeScript packages.
+Socratic Council is a pnpm monorepo with a desktop app and three shared TypeScript packages. The Tauri Rust backend gates every outbound HTTP call through an allowlist, body-size limit, and rate limiter, and stores an encryption key that the frontend uses for at-rest secrets, sessions, and attachments.
 
 ![Architecture diagram](docs/assets/architecture-diagram.svg)
 
 ### Conversation loop
 
-At runtime the app repeatedly selects a speaker, streams their response, applies structured "actions" in the text, then updates the UI and analytics.
+At runtime the app builds context for each turn, scores the eight council members for relevance, dispatches the winner to its provider as a stream, and folds the streamed response back through reflection, conflict detection, fact-checking, and argument-map extraction before the next turn begins. Silent advisors evaluate the public transcript in parallel and slip notes to their paired debater whenever they have something worth saying.
 
 ![Conversation loop diagram](docs/assets/conversation-loop.svg)
 
 ### Export pipeline
 
-Exports are generated locally from the transcript plus computed statistics (speaker counts, tokens, costs, conflict graph).
+Exports are generated locally from the transcript plus computed artifacts (speaker counts, the cost ledger, the conflict graph, the argument map). The renderer composes one of four document formats or a portable `.scbundle` archive that another Socratic Council install can re-import without any cloud handoff.
 
 ![Export pipeline diagram](docs/assets/export-pipeline.svg)
 
@@ -568,7 +571,7 @@ On first launch, configure providers and models in **Settings**.
 
 ### API keys
 
-Socratic Council uses real provider APIs — you bring your own keys. Supported providers:
+Socratic Council uses real provider APIs. You bring your own keys.
 
 | Provider        | API key source                                  |
 | --------------- | ----------------------------------------------- |
@@ -577,23 +580,28 @@ Socratic Council uses real provider APIs — you bring your own keys. Supported 
 | Google (Gemini) | <https://aistudio.google.com/apikey>            |
 | DeepSeek        | <https://platform.deepseek.com/api_keys>        |
 | Kimi (Moonshot) | <https://platform.moonshot.cn/console/api-keys> |
+| Qwen (DashScope)| <https://dashscope.console.aliyun.com/apiKey>   |
+| MiniMax         | <https://www.minimaxi.com/user-center/basic-information/interface-key> |
+| Z.AI (Zhipu)    | <https://open.bigmodel.cn/usercenter/apikeys>   |
 
-Keys are stored **locally on your machine** in the Tauri plugin-store. This repo does not run a server.
+Keys are encrypted at rest with XChaCha20-Poly1305 using a vault key the app generates on first launch and stores in the platform's app-data directory with `0600` permissions. No server, no keychain prompts, no plaintext on disk.
 
 ### Models
 
-Each provider supports multiple models. The Settings screen lets you choose:
+Each provider exposes several models in the registry. The Settings screen lets you choose:
 
-- The default model per provider
-- The model used by each agent (optional, depending on the UI configuration)
+- The default model per provider that all of that provider's agents use
+- A custom model override for any individual agent
+
+If you have not configured a provider, that agent and its paired advisor are skipped at runtime.
 
 ### Proxy
 
-If you need a proxy (corporate networks, regions requiring proxy access, etc.), configure it in Settings. The app supports HTTP and SOCKS5 proxies (via reqwest) and uses a single global proxy for all providers.
+If you need a proxy (corporate networks, regions requiring proxy access, etc.), configure it in Settings. The app supports HTTP, HTTPS, and SOCKS5 proxies (via reqwest) and routes every provider through one global setting. Proxy passwords go through the same encrypted vault as your API keys.
 
 ### Moderator
 
-The "Moderator" is a system-role agent that can inject short guidance when tension is detected or when the conversation drifts. You can toggle the Moderator on or off in Settings.
+The Moderator is a system-role voice that opens the session, nudges balance and synthesis, intervenes when conflict spikes, prompts an end-of-session ballot, and writes the final summary. By default it runs on Google Gemini 3.1 Pro for grounded, even-handed prose; if you have not configured Google, it falls back to Anthropic, OpenAI, DeepSeek, Kimi, Qwen, MiniMax, or Z.AI in that order. You can toggle the Moderator on or off in Settings.
 
 ---
 
@@ -601,27 +609,36 @@ The "Moderator" is a system-role agent that can inject short guidance when tensi
 
 ### Home
 
-From the home screen you can:
+The home screen is your library. From here you can:
 
-- Start a new discussion (enter a topic)
-- Open settings
+- Type a topic and start a new discussion (with optional file attachments)
+- Browse recent and archived sessions in the sidebar
+- Open or create a Project, which groups related sessions and a shared evidence dossier
+- Import a `.scbundle` archive that someone else exported
+- Open Settings or the global Command Palette (`⌘K` / `Ctrl+K`)
 
 ### Chat
 
-The chat timeline shows:
+The chat surface is built around the council circle. The timeline shows:
 
-- Messages by speaker (color-coded by agent)
-- Per-message token usage (when available)
-- Per-message cost estimate (when available)
+- Public messages from the eight council debaters, color-coded by provider
+- Secret notes from each silent advisor, visible only against their paired debater
 - Inline quotes and reactions between agents
+- Per-message tokens, latency, and cost (when the provider returns usage)
+- Verification badges next to claims that the fact-check pipeline graded
+- A live argument map panel that grows as the debate produces new claims, premises, and rebuttals
+- A pairwise conflict graph that highlights sustained disagreements
+- A cost budget badge with daily and per-session caps
+
+You can also branch the discussion at any message to fork the conversation, or call an end-of-session vote that asks the council to ballot on a resolution.
 
 ### Pause, resume, stop
 
 During a discussion you can:
 
-- **Pause** — temporarily halt generation
-- **Resume** — continue from where you paused
-- **Stop** — end the session early
+- Pause to temporarily halt generation
+- Resume to continue from where you paused
+- Stop to end the session early
 
 ### Search
 
@@ -632,38 +649,35 @@ Search lets you:
 
 ### Export
 
-The app can export a conversation to:
+The app can export a session to four document formats, plus a portable archive of the full session.
 
-- Markdown
-- JSON
-- PDF
-- DOCX
-- PPTX
+| Format        | Best for                          | Notes                                                   |
+| ------------- | --------------------------------- | ------------------------------------------------------- |
+| Markdown      | Sharing in docs and issues        | Plain text, easiest to diff and review                  |
+| PDF           | Printing or sending               | Includes the transcript, conflict graph, and summaries  |
+| DOCX          | Editing in Word                   | Structured sections, tables, full citations             |
+| PPTX          | Slides or executive readouts      | Graphics-first synthesis with key moments highlighted   |
+| `.scbundle`   | Sharing the full session offline  | Zip with manifest, transcript, attachments, argument map (JSON + Mermaid). Re-importable into another Socratic Council install |
 
-Exports are generated locally.
-
-| Format   | Best for                | Notes                         |
-| -------- | ----------------------- | ----------------------------- |
-| Markdown | Sharing in docs/issues  | Plain text, easiest to diff   |
-| JSON     | Programmatic processing | Stable schema for tooling     |
-| PDF      | Printing / sending      | Includes charts and summaries |
-| DOCX     | Editing in Word         | Structured sections, tables   |
-| PPTX     | Slides / presentation   | Graphics-first summary        |
+The argument map can also be exported on its own as JSON, Mermaid, SVG, or PNG. Everything is generated locally; nothing leaves your machine.
 
 ### Logs
 
-Logs are intended for debugging provider calls and app behavior. If something looks wrong, logs often explain why.
+The Diagnostics panel surfaces a redacted ring buffer of the most recent provider calls, plus environment metadata you can copy into a bug report. API keys, proxy passwords, and URL userinfo are scrubbed before any log line is rendered or copied.
 
 ---
 
 ## Tool calling (oracle)
 
-Agents can request web-style lookup/verification via a built-in "oracle" tool call.
+Agents can request web-style lookup and verification through a built-in oracle tool. The same directive syntax also covers inline quoting and reactions between agents.
 
-What an agent writes (inside an AI message):
+What an agent writes inside a message:
 
 ```text
-@tool(oracle.search, {"query":"..."})
+@tool(oracle.search, {"query": "..."})
+@tool(oracle.verify, {"claim": "..."})
+@quote(george, "the exact line being responded to")
+@react(cathy, agree)
 ```
 
 What you see next in the transcript:
@@ -672,7 +686,7 @@ What you see next in the transcript:
 Tool result (oracle.search): ...
 ```
 
-That "Tool result" line is not an error — it is a normal message inserted by the app after the oracle tool returns.
+That "Tool result" line is not an error. It is a normal message inserted by the app after the oracle tool returns. Quotes appear as inline blockquotes and reactions render as small badges next to the targeted message.
 
 ---
 
@@ -713,7 +727,7 @@ corepack enable
 pnpm -v
 ```
 
-If `corepack` itself is not found, your Node.js version is too old — install Node ≥ 22.
+If `corepack` itself is not found, your Node.js version is too old. Install Node ≥ 22.
 
 #### First Cargo build fails with network errors
 
@@ -769,7 +783,7 @@ xcode-select --install
 # If that doesn't help, open the full Xcode IDE and accept the license, then retry.
 ```
 
-#### `ERR_PNPM_UNSUPPORTED_ENGINE` — engine "node" is incompatible
+#### `ERR_PNPM_UNSUPPORTED_ENGINE`: engine "node" is incompatible
 
 **Cause:** Your Node.js version is below 22.
 
@@ -794,7 +808,7 @@ For production builds (`tauri:build`), LTO is enabled in `Cargo.toml`, which inc
 
 ## Developer workflows
 
-### Desktop — development mode
+### Desktop: development mode
 
 ```bash
 pnpm --filter @socratic-council/desktop tauri:dev
@@ -804,7 +818,7 @@ pnpm --filter @socratic-council/desktop tauri:dev
 - Rust changes require restarting the command.
 - DevTools opens automatically in debug builds.
 
-### Desktop — production build
+### Desktop: production build
 
 ```bash
 pnpm --filter @socratic-council/desktop tauri:build
@@ -832,8 +846,8 @@ Runs `vitest` across all workspace packages.
 
 ```bash
 pnpm lint            # ESLint across all packages
-pnpm format          # Prettier — write
-pnpm format:check    # Prettier — check only
+pnpm format          # Prettier (write)
+pnpm format:check    # Prettier (check only)
 pnpm typecheck       # TypeScript type checking (no emit)
 ```
 
@@ -856,29 +870,39 @@ cd apps/desktop/src-tauri && cargo clean && cd -
 ```
 socratic-council/
 ├── apps/
-│   ├── desktop/                 # Tauri v2 + React desktop app
-│   │   ├── src/                 # React frontend (TypeScript, TSX)
-│   │   ├── src-tauri/           # Rust backend (Tauri commands, HTTP proxy)
-│   │   │   ├── src/             # Rust source (lib.rs, main.rs, http.rs)
-│   │   │   ├── Cargo.toml       # Rust dependencies
-│   │   │   └── tauri.conf.json  # Tauri configuration
-│   │   ├── vite.config.ts       # Vite bundler config
-│   │   └── package.json
+│   └── desktop/                                # Tauri v2 + React desktop app
+│       ├── src/                                # React frontend (TypeScript, TSX)
+│       ├── src-tauri/                          # Rust backend
+│       │   ├── src/
+│       │   │   ├── lib.rs                      # IPC handler registration
+│       │   │   ├── http.rs                     # Streaming HTTP with proxy and cancellation
+│       │   │   ├── allowlist.rs                # Host allowlist, body cap, rate limiter
+│       │   │   ├── vault_file.rs               # File-backed encryption key (DEK) lifecycle
+│       │   │   └── redact.rs                   # Credential and URL userinfo scrubbing
+│       │   ├── capabilities/                   # Per-window Tauri ACLs
+│       │   ├── entitlements.plist              # macOS sandbox + hardened runtime
+│       │   ├── Cargo.toml
+│       │   └── tauri.conf.json
+│       ├── vite.config.ts
+│       └── package.json
 ├── packages/
-│   ├── shared/                  # Types, constants, model registry
-│   ├── sdk/                     # Provider SDK (transport, streaming, SSE)
-│   └── core/                    # Council logic (bidding, conflict, cost, memory)
-├── install.sh                   # One-command quick install (macOS)
-├── package.json                 # Root workspace config
-├── pnpm-workspace.yaml          # Workspace package globs
-├── tsconfig.base.json           # Shared TypeScript base config
-├── vitest.config.ts             # Shared test config
-├── eslint.config.js             # Shared ESLint config
-└── LICENSE                      # Apache-2.0
+│   ├── shared/                                 # Types, agent and observer rosters, model registry
+│   ├── sdk/                                    # Provider SDK + streaming transport
+│   └── core/                                   # Council orchestration (provider-agnostic)
+├── docs/                                       # Diagrams and the code-signing playbook
+├── scripts/                                    # Static-site builder for GitHub Pages
+├── website/                                    # Source for the marketing site
+├── install.sh                                  # One-command quick install (macOS)
+├── package.json
+├── pnpm-workspace.yaml
+├── tsconfig.base.json
+├── vitest.config.ts
+├── eslint.config.js
+└── LICENSE                                     # Apache-2.0
 ```
 
 ---
 
 ## License
 
-Apache-2.0 — see [`LICENSE`](LICENSE).
+Apache-2.0. See [`LICENSE`](LICENSE).

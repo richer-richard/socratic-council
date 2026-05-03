@@ -1,53 +1,169 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1120 270" role="img" aria-labelledby="title desc">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 540" role="img" aria-labelledby="title desc" preserveAspectRatio="xMidYMid meet">
   <title id="title">Export pipeline</title>
-  <desc id="desc">A diagram showing transcript data feeding statistics and conflict calculations, then entering the export renderer and writing files to disk.</desc>
+  <desc id="desc">Sources on the left feed into a local renderer. The renderer composes one of four document formats or a portable bundle archive. Nothing leaves the machine.</desc>
   <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0%" stop-color="#07111f"/>
-      <stop offset="100%" stop-color="#0f172a"/>
-    </linearGradient>
-    <marker id="arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
-      <path d="M0 0L12 6L0 12z" fill="#7dd3fc"/>
-    </marker>
+    <radialGradient id="page" cx="35%" cy="50%" r="80%">
+      <stop offset="0%" stop-color="#0d1117"/>
+      <stop offset="60%" stop-color="#080a10"/>
+      <stop offset="100%" stop-color="#04050a"/>
+    </radialGradient>
+    <pattern id="dotgrid" width="22" height="22" patternUnits="userSpaceOnUse">
+      <circle cx="1" cy="1" r="0.7" fill="#1c2434" fill-opacity="0.55"/>
+    </pattern>
     <style>
-      text { font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
-      .title { font-size: 24px; font-weight: 700; fill: #f8fafc; }
-      .subtitle { font-size: 14px; fill: #94a3b8; }
-      .node { fill: #0f172a; stroke: #334155; stroke-width: 2; rx: 22; }
-      .node-strong { fill: #10253c; stroke: #38bdf8; stroke-width: 2.5; rx: 22; }
-      .edge { stroke: #7dd3fc; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; fill: none; marker-end: url(#arrow); }
-      .label { font-size: 18px; font-weight: 700; fill: #e2e8f0; text-anchor: middle; }
-      .meta { font-size: 12px; fill: #94a3b8; text-anchor: middle; }
+      .display { font-family: 'Cormorant Garamond', 'Hoefler Text', Garamond, 'Times New Roman', serif; }
+      .body    { font-family: 'Manrope', -apple-system, BlinkMacSystemFont, 'Helvetica Neue', sans-serif; }
+      .mono    { font-family: 'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace; }
+      .ink     { fill: #ecf0f6; }
+      .body-c  { fill: #b9c2d6; }
+      .muted   { fill: #5d667a; }
+      .gold    { fill: #f5c542; }
+      .stroke-hair { stroke: #20283c; stroke-width: 1; fill: none; }
+      .stroke-hair-strong { stroke: #344166; stroke-width: 1.2; fill: none; }
+      .stroke-rule { stroke: #1a2233; stroke-width: 1; fill: none; }
+      .stroke-gold { stroke: #f5c542; stroke-width: 1; fill: none; }
+      .vein  { stroke: #2f3a55; stroke-width: 1; fill: none; }
+      .vein-gold { stroke: #6b5b2c; stroke-width: 1; fill: none; }
+      .vein-dot { stroke: #2f3a55; stroke-width: 1; stroke-dasharray: 1 3; fill: none; }
+      .card  { fill: #0a0e16; stroke: #2c3650; stroke-width: 1; }
+      .card-gold { fill: #0e0c05; stroke: #f5c542; stroke-width: 1.2; }
     </style>
   </defs>
 
-  <rect width="1120" height="270" rx="28" fill="url(#bg)"/>
-  <text x="56" y="44" class="title">Export Pipeline</text>
-  <text x="56" y="68" class="subtitle">Everything stays local: transcript data and computed stats feed the export renderer, which writes files directly to disk.</text>
+  <rect width="1280" height="540" fill="url(#page)"/>
+  <rect width="1280" height="540" fill="url(#dotgrid)"/>
 
-  <rect x="56" y="108" width="210" height="92" class="node"/>
-  <text x="161" y="140" class="label">Transcript</text>
-  <text x="161" y="162" class="meta">messages plus metadata</text>
+  <!-- masthead -->
+  <line x1="64" y1="60" x2="1216" y2="60" class="stroke-hair"/>
+  <text x="64" y="48" class="mono ink" font-size="10" font-weight="600" letter-spacing="2">FIG. 04 / EXPORT</text>
+  <text x="1216" y="48" class="mono muted" font-size="10" letter-spacing="2" text-anchor="end">strictly local · no network</text>
 
-  <rect x="350" y="64" width="220" height="82" class="node"/>
-  <text x="460" y="94" class="label">Stats</text>
-  <text x="460" y="116" class="meta">speaker counts and cost ledger</text>
+  <!-- title -->
+  <text x="64" y="118" class="display ink" font-style="italic" font-size="44">Out of the Chamber</text>
+  <text x="64" y="146" class="body body-c" font-size="13">Five sources are folded into one of four document formats or a portable archive. Every byte of every export is composed on your own machine.</text>
 
-  <rect x="350" y="162" width="220" height="82" class="node"/>
-  <text x="460" y="192" class="label">Conflict graph</text>
-  <text x="460" y="214" class="meta">pairwise disagreement scores</text>
+  <!-- ============ LEFT: SOURCES ============ -->
+  <g transform="translate(64,200)">
+    <text x="0" y="-12" class="mono muted" font-size="10" letter-spacing="2">SOURCES</text>
+    <line x1="0" y1="-2" x2="280" y2="-2" class="stroke-hair-strong"/>
 
-  <rect x="662" y="108" width="252" height="92" class="node-strong"/>
-  <text x="788" y="140" class="label">Export renderer</text>
-  <text x="788" y="162" class="meta">Markdown / JSON / PDF / DOCX / PPTX</text>
+    <!-- 5 source stacks -->
+    <g transform="translate(0,28)">
+      <text x="0" y="0" class="mono ink" font-size="11" letter-spacing="1.6">01 · TRANSCRIPT</text>
+      <text x="0" y="16" class="body muted" font-size="11">messages · quotes · reactions · notes</text>
+    </g>
+    <g transform="translate(0,76)">
+      <text x="0" y="0" class="mono ink" font-size="11" letter-spacing="1.6">02 · ARGUMENT MAP</text>
+      <text x="0" y="16" class="body muted" font-size="11">claims · premises · rebuttals · stance</text>
+    </g>
+    <g transform="translate(0,124)">
+      <text x="0" y="0" class="mono ink" font-size="11" letter-spacing="1.6">03 · COST LEDGER</text>
+      <text x="0" y="16" class="body muted" font-size="11">tokens · latency · USD per agent</text>
+    </g>
+    <g transform="translate(0,172)">
+      <text x="0" y="0" class="mono ink" font-size="11" letter-spacing="1.6">04 · CONFLICT GRAPH</text>
+      <text x="0" y="16" class="body muted" font-size="11">pairwise tension · NLI verdicts</text>
+    </g>
+    <g transform="translate(0,220)">
+      <text x="0" y="0" class="mono ink" font-size="11" letter-spacing="1.6">05 · ATTACHMENTS</text>
+      <text x="0" y="16" class="body muted" font-size="11">pdf · text · images, all encrypted</text>
+    </g>
+  </g>
 
-  <rect x="974" y="108" width="92" height="92" class="node"/>
-  <text x="1020" y="140" class="label">File</text>
-  <text x="1020" y="162" class="meta">on disk</text>
+  <!-- ============ CENTER: COMPOSITOR ============ -->
+  <g transform="translate(540,200)">
+    <text x="100" y="-12" class="mono gold" font-size="10" letter-spacing="2" text-anchor="middle">RENDERER</text>
+    <line x1="0" y1="-2" x2="200" y2="-2" class="stroke-gold"/>
 
-  <path d="M266 154H350V105" class="edge"/>
-  <path d="M266 154H350V203" class="edge"/>
-  <path d="M570 105H662" class="edge"/>
-  <path d="M570 203H662" class="edge"/>
-  <path d="M914 154H974" class="edge"/>
+    <!-- compositor block -->
+    <g transform="translate(0,40)">
+      <line x1="0" y1="0" x2="200" y2="0" class="stroke-rule"/>
+      <line x1="0" y1="180" x2="200" y2="180" class="stroke-rule"/>
+      <line x1="0" y1="0" x2="0" y2="180" class="stroke-rule"/>
+      <line x1="200" y1="0" x2="200" y2="180" class="stroke-rule"/>
+
+      <text x="100" y="40" class="display ink" font-style="italic" font-size="24" text-anchor="middle">Compositor</text>
+      <text x="100" y="68" class="body body-c" font-size="11.5" text-anchor="middle">Builds the document tree</text>
+      <text x="100" y="84" class="body body-c" font-size="11.5" text-anchor="middle">section by section, then</text>
+      <text x="100" y="100" class="body body-c" font-size="11.5" text-anchor="middle">hands it to the format printer.</text>
+
+      <line x1="40" y1="124" x2="160" y2="124" class="stroke-rule"/>
+
+      <text x="100" y="146" class="mono muted" font-size="10" letter-spacing="1.4" text-anchor="middle">exportConversation()</text>
+      <text x="100" y="162" class="mono muted" font-size="10" letter-spacing="1.4" text-anchor="middle">exportBundle()</text>
+    </g>
+  </g>
+
+  <!-- ============ RIGHT: FORMATS ============ -->
+  <g transform="translate(900,200)">
+    <text x="252" y="-12" class="mono muted" font-size="10" letter-spacing="2" text-anchor="end">FORMATS</text>
+    <line x1="0" y1="-2" x2="252" y2="-2" class="stroke-hair-strong"/>
+
+    <!-- 5 format cards in a column, each with a file-tab corner -->
+    <g transform="translate(0,28)" font-size="11">
+      <!-- markdown -->
+      <g>
+        <path d="M0 0 L240 0 L252 12 L252 38 L0 38 Z" class="card"/>
+        <line x1="240" y1="0" x2="240" y2="12" class="stroke-rule"/>
+        <line x1="240" y1="12" x2="252" y2="12" class="stroke-rule"/>
+        <text x="14" y="22" class="display ink" font-style="italic" font-size="17">Markdown</text>
+        <text x="240" y="22" class="mono muted" letter-spacing="1.4" text-anchor="end">.md</text>
+      </g>
+      <g transform="translate(0,52)">
+        <path d="M0 0 L240 0 L252 12 L252 38 L0 38 Z" class="card"/>
+        <line x1="240" y1="0" x2="240" y2="12" class="stroke-rule"/>
+        <line x1="240" y1="12" x2="252" y2="12" class="stroke-rule"/>
+        <text x="14" y="22" class="display ink" font-style="italic" font-size="17">PDF</text>
+        <text x="240" y="22" class="mono muted" letter-spacing="1.4" text-anchor="end">.pdf</text>
+      </g>
+      <g transform="translate(0,104)">
+        <path d="M0 0 L240 0 L252 12 L252 38 L0 38 Z" class="card"/>
+        <line x1="240" y1="0" x2="240" y2="12" class="stroke-rule"/>
+        <line x1="240" y1="12" x2="252" y2="12" class="stroke-rule"/>
+        <text x="14" y="22" class="display ink" font-style="italic" font-size="17">DOCX</text>
+        <text x="240" y="22" class="mono muted" letter-spacing="1.4" text-anchor="end">.docx</text>
+      </g>
+      <g transform="translate(0,156)">
+        <path d="M0 0 L240 0 L252 12 L252 38 L0 38 Z" class="card"/>
+        <line x1="240" y1="0" x2="240" y2="12" class="stroke-rule"/>
+        <line x1="240" y1="12" x2="252" y2="12" class="stroke-rule"/>
+        <text x="14" y="22" class="display ink" font-style="italic" font-size="17">PPTX</text>
+        <text x="240" y="22" class="mono muted" letter-spacing="1.4" text-anchor="end">.pptx</text>
+      </g>
+      <g transform="translate(0,208)">
+        <path d="M0 0 L240 0 L252 12 L252 38 L0 38 Z" class="card-gold"/>
+        <line x1="240" y1="0" x2="240" y2="12" class="stroke-gold"/>
+        <line x1="240" y1="12" x2="252" y2="12" class="stroke-gold"/>
+        <text x="14" y="22" class="display gold" font-style="italic" font-size="17">Bundle</text>
+        <text x="240" y="22" class="mono gold" letter-spacing="1.4" text-anchor="end">.scbundle</text>
+      </g>
+    </g>
+  </g>
+
+  <!-- ============ CONNECTOR VEINS ============ -->
+  <!-- sources fan into the compositor entrance (540,260 entrance) -->
+  <g class="vein">
+    <!-- source y centers in source frame: 218, 266, 314, 362, 410 -->
+    <path d="M 344 218 C 440 218, 460 280, 540 250"/>
+    <path d="M 344 266 C 460 266, 480 270, 540 270"/>
+    <path d="M 344 314 C 460 314, 480 290, 540 290"/>
+    <path d="M 344 362 C 460 362, 480 320, 540 320"/>
+    <path d="M 344 410 C 460 410, 480 360, 540 350"/>
+  </g>
+
+  <!-- compositor exits fan into formats (740,? -> 900, format y centers 240, 292, 344, 396, 448) -->
+  <g class="vein">
+    <path d="M 740 250 C 800 240, 840 240, 900 240"/>
+    <path d="M 740 270 C 800 286, 850 292, 900 292"/>
+    <path d="M 740 290 C 800 320, 850 344, 900 344"/>
+    <path d="M 740 310 C 800 376, 850 396, 900 396"/>
+  </g>
+  <g class="vein-gold">
+    <path d="M 740 330 C 800 420, 850 448, 900 448"/>
+  </g>
+
+  <!-- footer -->
+  <line x1="64" y1="500" x2="1216" y2="500" class="stroke-hair"/>
+  <text x="64" y="522" class="mono muted" font-size="9.5" letter-spacing="2">RENDER LOCALLY · WRITE TO ~/Documents/SocraticCouncil OR ~/Downloads</text>
+  <text x="1216" y="522" class="display muted" font-size="13" font-style="italic" text-anchor="end">no cloud handoff</text>
 </svg>
