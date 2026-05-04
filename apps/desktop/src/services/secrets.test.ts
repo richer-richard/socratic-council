@@ -79,8 +79,7 @@ describe("secrets — localStorage + vault", () => {
 
   it("THROWS when the vault isn't ready instead of writing plaintext (fix 1.2)", () => {
     // initVault never called — dek null.
-    expect(() => secretsPut(apiKeyAccount("qwen"), "sk-qwen-plain"))
-      .toThrowError(SecretStoreError);
+    expect(() => secretsPut(apiKeyAccount("qwen"), "sk-qwen-plain")).toThrowError(SecretStoreError);
     expect(localStorage.getItem("socratic-council-secret:apiKey:qwen")).toBeNull();
   });
 
@@ -123,8 +122,7 @@ describe("secrets — localStorage + vault", () => {
   it("rejects values larger than MAX_SECRET_VALUE_BYTES (fix 1.9)", () => {
     vault.__setDekForTests(fixedDek());
     const oversize = "a".repeat(MAX_SECRET_VALUE_BYTES + 1);
-    expect(() => secretsPut(apiKeyAccount("openai"), oversize))
-      .toThrowError(/exceeds.*byte limit/);
+    expect(() => secretsPut(apiKeyAccount("openai"), oversize)).toThrowError(/exceeds.*byte limit/);
     // A value just at the limit should be accepted.
     const atLimit = "b".repeat(MAX_SECRET_VALUE_BYTES);
     secretsPut(apiKeyAccount("openai"), atLimit);

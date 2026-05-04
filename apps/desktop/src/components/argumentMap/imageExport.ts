@@ -33,9 +33,7 @@ function findCaptureNode(view: PanelView): HTMLElement | null {
     if (vp) return vp;
   }
   // Fall back to the panel content region.
-  const aside = document.querySelector<HTMLElement>(
-    'aside[aria-label="Argument map"]',
-  );
+  const aside = document.querySelector<HTMLElement>('aside[aria-label="Argument map"]');
   return aside;
 }
 

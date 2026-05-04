@@ -22,10 +22,7 @@ export function OutlineView({
   onNavigateToMessage,
   search,
 }: ViewProps) {
-  const visibleIdSet = useMemo(
-    () => new Set(visibleNodes.map((n) => n.id)),
-    [visibleNodes],
-  );
+  const visibleIdSet = useMemo(() => new Set(visibleNodes.map((n) => n.id)), [visibleNodes]);
   const sections = useMemo(() => {
     type Section = { label: string; key: string; claims: ArgNode[]; questions: ArgNode[] };
     const claimById = new Map<string, ArgNode>();
@@ -182,10 +179,7 @@ export function OutlineView({
                   borderRadius: 8,
                   background: isSelected ? "rgba(28, 24, 18, 0.65)" : "rgba(18, 16, 14, 0.5)",
                   transition: "all 160ms ease",
-                  opacity:
-                    claim.status === "withdrawn" || claim.status === "superseded"
-                      ? 0.55
-                      : 1,
+                  opacity: claim.status === "withdrawn" || claim.status === "superseded" ? 0.55 : 1,
                 }}
               >
                 <button
@@ -219,9 +213,7 @@ export function OutlineView({
                   >
                     <span>Claim · {claim.sourceAgentId}</span>
                     {claim.status !== "active" && (
-                      <span style={{ color: "rgba(232,232,239,0.45)" }}>
-                        ({claim.status})
-                      </span>
+                      <span style={{ color: "rgba(232,232,239,0.45)" }}>({claim.status})</span>
                     )}
                     {verified && (
                       <span
@@ -246,9 +238,7 @@ export function OutlineView({
                     {highlight(claim.text)}
                   </div>
                 </button>
-                {stance !== null && graph.axis && (
-                  <StancePolarityBar polarity={stance} />
-                )}
+                {stance !== null && graph.axis && <StancePolarityBar polarity={stance} />}
                 {children.length > 0 && (
                   <ul
                     style={{
@@ -262,10 +252,7 @@ export function OutlineView({
                       const cs = styleFor(c.kind);
                       const rs = styleForRelation(c.relation);
                       return (
-                        <li
-                          key={c.node.id}
-                          style={{ paddingLeft: "10px", marginTop: "6px" }}
-                        >
+                        <li key={c.node.id} style={{ paddingLeft: "10px", marginTop: "6px" }}>
                           <button
                             type="button"
                             onClick={() => {
@@ -287,8 +274,7 @@ export function OutlineView({
                                 fontSize: "0.55rem",
                                 letterSpacing: "0.18em",
                                 textTransform: "uppercase",
-                                fontFamily:
-                                  "'JetBrains Mono', ui-monospace, monospace",
+                                fontFamily: "'JetBrains Mono', ui-monospace, monospace",
                                 color: `rgb(${rs.rgb})`,
                                 marginRight: "8px",
                               }}
@@ -309,8 +295,7 @@ export function OutlineView({
                                 fontSize: "0.55rem",
                                 color: "rgba(232,232,239,0.4)",
                                 marginLeft: "8px",
-                                fontFamily:
-                                  "'JetBrains Mono', ui-monospace, monospace",
+                                fontFamily: "'JetBrains Mono', ui-monospace, monospace",
                               }}
                             >
                               · {c.node.sourceAgentId}

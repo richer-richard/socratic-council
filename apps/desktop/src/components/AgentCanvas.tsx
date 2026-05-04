@@ -8,7 +8,13 @@ interface AgentCanvasProps {
   onToggleExpand: () => void;
 }
 
-export function AgentCanvas({ canvas, agentColor, isStreaming, isExpanded, onToggleExpand }: AgentCanvasProps) {
+export function AgentCanvas({
+  canvas,
+  agentColor,
+  isStreaming,
+  isExpanded,
+  onToggleExpand,
+}: AgentCanvasProps) {
   if (canvas.sections.length === 0) return null;
 
   const classNames = [
@@ -21,10 +27,7 @@ export function AgentCanvas({ canvas, agentColor, isStreaming, isExpanded, onTog
     .join(" ");
 
   return (
-    <div
-      className={classNames}
-      style={{ "--canvas-accent": agentColor } as React.CSSProperties}
-    >
+    <div className={classNames} style={{ "--canvas-accent": agentColor } as React.CSSProperties}>
       <button type="button" className="canvas-header" onClick={onToggleExpand}>
         <span className="canvas-header-label">Canvas</span>
         <span className="canvas-header-count">{canvas.sections.length}</span>

@@ -340,7 +340,9 @@ function confidenceOrMedium(value: unknown): ResearchConfidence {
 }
 
 function buildTranscriptBlock(transcript: TranscriptMessage[]): string {
-  const lines = transcript.map((msg) => `<${msg.id}> ${msg.speaker}: ${msg.text.replace(/\n+/g, " ").trim()}`);
+  const lines = transcript.map(
+    (msg) => `<${msg.id}> ${msg.speaker}: ${msg.text.replace(/\n+/g, " ").trim()}`,
+  );
   return lines.join("\n");
 }
 
@@ -426,7 +428,8 @@ async function planPhase(input: DeepResearchInput): Promise<{ id: string; questi
   const results: { id: string; question: string }[] = [];
   for (let i = 0; i < parsed.subQuestions.length && results.length < 8; i += 1) {
     const entry = parsed.subQuestions[i];
-    if (!entry || typeof entry.question !== "string" || entry.question.trim().length === 0) continue;
+    if (!entry || typeof entry.question !== "string" || entry.question.trim().length === 0)
+      continue;
     results.push({
       id: entry.id ?? `q${i + 1}`,
       question: entry.question.trim(),
@@ -448,9 +451,10 @@ async function researchPhase(
   const transcriptBlock = buildTranscriptBlock(input.transcript);
   const transcriptIds = new Set(input.transcript.map((m) => m.id));
 
-  const runOne = async (
-    entry: { id: string; question: string },
-  ): Promise<{ subQuestion: ResearchSubQuestion; citations: ResearchCitation[] } | null> => {
+  const runOne = async (entry: {
+    id: string;
+    question: string;
+  }): Promise<{ subQuestion: ResearchSubQuestion; citations: ResearchCitation[] } | null> => {
     const userPrompt = [
       `Sub-question: ${entry.question}`,
       "",
@@ -470,7 +474,10 @@ async function researchPhase(
           if (!c || typeof c.messageId !== "string") continue;
           if (!transcriptIds.has(c.messageId)) continue; // reject invented ids
           localCitations.push({
-            id: typeof c.id === "string" && c.id.trim() ? c.id.trim() : `c${localCitations.length + 1}`,
+            id:
+              typeof c.id === "string" && c.id.trim()
+                ? c.id.trim()
+                : `c${localCitations.length + 1}`,
             messageId: c.messageId,
             quote: typeof c.quote === "string" ? c.quote.trim().slice(0, 280) : "",
           });
@@ -627,9 +634,7 @@ export function parseDelimitedReport(raw: string): FormattedReport {
   let title = "";
   let abstract = "";
   const sections: ResearchSection[] = [];
-  let sectionMeta:
-    | { id: string; heading: string; confidence: ResearchConfidence }
-    | null = null;
+  let sectionMeta: { id: string; heading: string; confidence: ResearchConfidence } | null = null;
 
   const flush = () => {
     const value = buffer.join("\n").trim();
@@ -701,9 +706,7 @@ export function parseDelimitedReport(raw: string): FormattedReport {
   flush();
 
   if (sections.length === 0) {
-    throw new Error(
-      "formatter: could not parse any ===SECTION=== blocks from model output",
-    );
+    throw new Error("formatter: could not parse any ===SECTION=== blocks from model output");
   }
 
   return {
@@ -726,10 +729,7 @@ async function formatterPhase(
     .map((s) => `- ${s.id} ${s.heading} (confidence: ${s.confidence})\n  notes: ${s.notes}`)
     .join("\n");
   const findingsDigest = subQuestions
-    .map(
-      (q) =>
-        `Q ${q.id}: ${q.question}\n${q.findings || "_(no findings)_"}`,
-    )
+    .map((q) => `Q ${q.id}: ${q.question}\n${q.findings || "_(no findings)_"}`)
     .join("\n\n");
 
   const userPrompt = [
@@ -942,7 +942,10 @@ function sanitizeSessionTitle(raw: string): string {
   // Collapse whitespace
   title = title.replace(/\s+/g, " ").trim();
   // Cap to 5 words
-  const words = title.split(" ").filter((word) => word.length > 0).slice(0, 5);
+  const words = title
+    .split(" ")
+    .filter((word) => word.length > 0)
+    .slice(0, 5);
   title = words.join(" ");
   // Hard cap to 60 chars
   return title.slice(0, 60).trim();

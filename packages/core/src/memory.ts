@@ -126,7 +126,8 @@ function containsDirectQuestion(content: string, targetAgent: AgentId): boolean 
   // address ("George, what about ...") or a wh-/aux question pattern within
   // ~120 chars of the name.
   const lines = content.split(/\r?\n/);
-  const QUESTION = /\b(what|how|why|when|where|who|which|would|could|should|do you|does|is it|are you|isn't|aren't|won't|can you)\b/i;
+  const QUESTION =
+    /\b(what|how|why|when|where|who|which|would|could|should|do you|does|is it|are you|isn't|aren't|won't|can you)\b/i;
   for (const line of lines) {
     if (!nameRe.test(line)) continue;
     if (line.includes("?")) return true;
@@ -147,7 +148,10 @@ function containsChallenge(content: string, targetAgent: AgentId): boolean {
 
   const challengePatterns = [
     new RegExp(`disagree\\s+with\\s+${name}`, "i"),
-    new RegExp(`${name}['s]*\\s+(argument|point|claim).*(?:weak|wrong|flawed|mistaken|misguided)`, "i"),
+    new RegExp(
+      `${name}['s]*\\s+(argument|point|claim).*(?:weak|wrong|flawed|mistaken|misguided)`,
+      "i",
+    ),
     new RegExp(`challenge\\s+${name}`, "i"),
     new RegExp(`${name}.*\\b(?:mistaken|wrong|flawed|misguided|missed)\\b`, "i"),
     // "you're wrong, X" / "X, you're wrong" / "no, X, ..."
@@ -259,18 +263,11 @@ export class ConversationMemoryManager {
     // they mention by name in this message. Previously the only clearing
     // path was `recordQuote` (i.e. requiring a literal @quote token), so a
     // verbal response carried a debt forward indefinitely.
-    if (
-      message.agentId !== "system" &&
-      message.agentId !== "user" &&
-      message.agentId !== "tool"
-    ) {
+    if (message.agentId !== "system" && message.agentId !== "user" && message.agentId !== "tool") {
       const speaker = message.agentId as AgentId;
       const remaining: EngagementDebt[] = [];
       for (const debt of this.engagementDebts) {
-        if (
-          debt.debtor === speaker &&
-          mentionsAgent(message.content, debt.creditor)
-        ) {
+        if (debt.debtor === speaker && mentionsAgent(message.content, debt.creditor)) {
           continue; // resolved by this verbal response
         }
         remaining.push(debt);

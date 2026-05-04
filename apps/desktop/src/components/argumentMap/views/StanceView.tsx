@@ -23,10 +23,7 @@ export function StanceView({
   search,
 }: ViewProps) {
   const claims = useMemo(
-    () =>
-      visibleNodes.filter(
-        (n) => n.kind === "claim" && typeof n.stance?.polarity === "number",
-      ),
+    () => visibleNodes.filter((n) => n.kind === "claim" && typeof n.stance?.polarity === "number"),
     [visibleNodes],
   );
 
@@ -155,9 +152,7 @@ export function StanceView({
                 border: `1.5px solid ${
                   isSelected ? `rgba(${ARGMAP_GOLD}, 0.95)` : "rgba(8, 7, 12, 0.65)"
                 }`,
-                boxShadow: isSelected
-                  ? `0 0 14px rgba(${ARGMAP_GOLD}, 0.6)`
-                  : `0 0 8px ${color}55`,
+                boxShadow: isSelected ? `0 0 14px rgba(${ARGMAP_GOLD}, 0.6)` : `0 0 8px ${color}55`,
                 cursor: "pointer",
                 opacity: dim ? 0.2 : 1,
                 transition: "all 160ms ease",

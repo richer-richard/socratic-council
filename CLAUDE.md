@@ -52,47 +52,49 @@ Provider-agnostic orchestration helpers — callers inject a completion fn
 (typically Gemini 3.1 Flash via `callProvider`) so `core` stays
 transport-free.
 
-| Export | Purpose |
-|---|---|
-| `summarizeOlderMessages`, `setSessionSummary` | LLM memory summarization when transcript exceeds window |
-| `semanticConflictCheck`, `SEMANTIC_CHECK_REGEX_FLOOR` | NLI pass over regex conflict hits to dampen false positives |
-| `scoreAgentsRelevance` | Single-call relevance scoring for bidding (0–100 per agent) |
-| `reflectAndRevise` | Draft → critique → revise loop; `off`/`light`/`deep` modes |
-| `factCheckMessage`, `VerificationBadge` | Claim extraction + oracle grading into UI-ready badges |
-| `emptyGraph`, `updateArgumentMap`, `parseExtractResponse`, `ArgGraph` | Incremental argument-map extraction + graph merging |
+| Export                                                                | Purpose                                                     |
+| --------------------------------------------------------------------- | ----------------------------------------------------------- |
+| `summarizeOlderMessages`, `setSessionSummary`                         | LLM memory summarization when transcript exceeds window     |
+| `semanticConflictCheck`, `SEMANTIC_CHECK_REGEX_FLOOR`                 | NLI pass over regex conflict hits to dampen false positives |
+| `scoreAgentsRelevance`                                                | Single-call relevance scoring for bidding (0–100 per agent) |
+| `reflectAndRevise`                                                    | Draft → critique → revise loop; `off`/`light`/`deep` modes  |
+| `factCheckMessage`, `VerificationBadge`                               | Claim extraction + oracle grading into UI-ready badges      |
+| `emptyGraph`, `updateArgumentMap`, `parseExtractResponse`, `ArgGraph` | Incremental argument-map extraction + graph merging         |
 
 All have unit tests in `packages/core/src/*.test.ts`.
 
 ### `apps/desktop/src/services/`
 
-| Module | Purpose |
-|---|---|
-| `vault.ts` | File-backed DEK + XChaCha20-Poly1305 envelope |
-| `secrets.ts` | Encrypted `localStorage` secret store (sync API) |
-| `bundle.ts` | Portable `.scbundle` zip round-trip for session sharing |
+| Module       | Purpose                                                 |
+| ------------ | ------------------------------------------------------- |
+| `vault.ts`   | File-backed DEK + XChaCha20-Poly1305 envelope           |
+| `secrets.ts` | Encrypted `localStorage` secret store (sync API)        |
+| `bundle.ts`  | Portable `.scbundle` zip round-trip for session sharing |
 
 ### `apps/desktop/src/utils/`
 
-| Module | Purpose |
-|---|---|
-| `redact.ts` | `redact()` / `redactValue()` scrubbers for logs + errors |
-| `budgetEnforcer.ts` | `evaluateBudget` + rolling daily cost tracking |
-| `messageVisibility.ts` | §1.8 inner/outer visibility predicates + tests |
-| `commandPalette.ts` | Command registry + fuzzy scorer for ⌘K |
-| `diagnostics.ts` | `buildDiagnosticsSnapshot` — redacted system dossier |
+| Module                 | Purpose                                                  |
+| ---------------------- | -------------------------------------------------------- |
+| `redact.ts`            | `redact()` / `redactValue()` scrubbers for logs + errors |
+| `budgetEnforcer.ts`    | `evaluateBudget` + rolling daily cost tracking           |
+| `messageVisibility.ts` | §1.8 inner/outer visibility predicates + tests           |
+| `commandPalette.ts`    | Command registry + fuzzy scorer for ⌘K                   |
+| `diagnostics.ts`       | `buildDiagnosticsSnapshot` — redacted system dossier     |
 
 ### `apps/desktop/src/components/`
 
 Additive UI surfaces (see `ChamberSurface` for the shared primitive):
 `CommandPalette`, `CostBudgetBadge`, `DiagnosticsPanel`,
 `FactCheckBadge` + `FactCheckStrip`, `ArgumentMapPanel`, `BranchAction`
-+ `BranchCrumb`, `BundleExportButton` + `BundleImportButton`,
-`ErrorBoundary`.
+
+- `BranchCrumb`, `BundleExportButton` + `BundleImportButton`,
+  `ErrorBoundary`.
 
 Match the app's cinematic-dark aesthetic (gold accent `#F5C542`, Manrope
-+ JetBrains Mono + Cormorant Garamond). Optimize for max performance —
-60fps animations, lazy renders, virtualized long lists, no idle CPU
-burn.
+
+- JetBrains Mono + Cormorant Garamond). Optimize for max performance —
+  60fps animations, lazy renders, virtualized long lists, no idle CPU
+  burn.
 
 ---
 

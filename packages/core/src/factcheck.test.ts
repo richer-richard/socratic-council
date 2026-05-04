@@ -73,7 +73,9 @@ describe("verdictFromOracle", () => {
 });
 
 describe("factCheckMessage — end-to-end", () => {
-  function makeOracle(results: Record<string, Awaited<ReturnType<OracleHandle["verify"]>>>): OracleHandle {
+  function makeOracle(
+    results: Record<string, Awaited<ReturnType<OracleHandle["verify"]>>>,
+  ): OracleHandle {
     return {
       async verify(claim) {
         return results[claim] ?? null;
@@ -95,9 +97,7 @@ describe("factCheckMessage — end-to-end", () => {
   it("grades each claim through the oracle and produces badges", async () => {
     const extractor = vi
       .fn()
-      .mockResolvedValue(
-        '["The sun orbits Earth.","Paris is the capital of France."]',
-      );
+      .mockResolvedValue('["The sun orbits Earth.","Paris is the capital of France."]');
     const oracle = makeOracle({
       "The sun orbits Earth.": {
         verdict: "false",

@@ -45,10 +45,7 @@ export const MAX_SECRET_VALUE_BYTES = 64 * 1024;
 export class SecretStoreError extends Error {
   readonly code: "vault_not_ready" | "value_too_large" | "invalid_account";
 
-  constructor(
-    code: "vault_not_ready" | "value_too_large" | "invalid_account",
-    message: string,
-  ) {
+  constructor(code: "vault_not_ready" | "value_too_large" | "invalid_account", message: string) {
     super(message);
     this.name = "SecretStoreError";
     this.code = code;

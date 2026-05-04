@@ -54,8 +54,7 @@ export function FactCheckBadge({ badge, index }: FactCheckBadgeProps) {
           background: tint.background,
           color: tint.foreground,
           borderRadius: "10px",
-          fontFamily:
-            "'JetBrains Mono', ui-monospace, SFMono-Regular, monospace",
+          fontFamily: "'JetBrains Mono', ui-monospace, SFMono-Regular, monospace",
           fontSize: "0.62rem",
           fontWeight: 600,
           lineHeight: 1,
@@ -63,9 +62,7 @@ export function FactCheckBadge({ badge, index }: FactCheckBadgeProps) {
           outline: "none",
           transition: "all 120ms ease",
         }}
-        onFocus={(e) =>
-          (e.currentTarget.style.boxShadow = `0 0 0 2px ${tint.glow}`)
-        }
+        onFocus={(e) => (e.currentTarget.style.boxShadow = `0 0 0 2px ${tint.glow}`)}
         onBlur={(e) => (e.currentTarget.style.boxShadow = "none")}
       >
         <span
@@ -79,9 +76,7 @@ export function FactCheckBadge({ badge, index }: FactCheckBadgeProps) {
           }}
         />
         <span aria-hidden="true">{glyph}</span>
-        {index != null && (
-          <span style={{ opacity: 0.75, marginLeft: "1px" }}>{index}</span>
-        )}
+        {index != null && <span style={{ opacity: 0.75, marginLeft: "1px" }}>{index}</span>}
       </button>
 
       {hovered && (
@@ -100,8 +95,7 @@ export function FactCheckBadge({ badge, index }: FactCheckBadgeProps) {
               "linear-gradient(180deg, rgba(24, 22, 18, 0.97) 0%, rgba(18, 16, 14, 0.97) 100%)",
             backdropFilter: "blur(10px)",
             boxShadow: `0 16px 36px -10px rgba(0,0,0,0.55), 0 0 18px ${tint.glow}`,
-            fontFamily:
-              "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
+            fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
             fontSize: "0.78rem",
             lineHeight: 1.55,
             color: "rgba(232, 232, 239, 0.9)",

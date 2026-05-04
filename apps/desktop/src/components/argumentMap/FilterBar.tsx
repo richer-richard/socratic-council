@@ -86,8 +86,7 @@ export function FilterBar({ graph, filters, setFilters }: FilterBarProps) {
         <Label>Agents</Label>
         {allAgents.length === 0 && <Hint>none yet</Hint>}
         {allAgents.map(([id, count]) => {
-          const active =
-            filters.agentIds.length === 0 || filters.agentIds.includes(id);
+          const active = filters.agentIds.length === 0 || filters.agentIds.includes(id);
           return (
             <button
               key={id}
@@ -137,23 +136,17 @@ export function FilterBar({ graph, filters, setFilters }: FilterBarProps) {
         <Label>Show</Label>
         <ToggleChip
           active={filters.onlyContested}
-          onClick={() =>
-            setFilters({ ...filters, onlyContested: !filters.onlyContested })
-          }
+          onClick={() => setFilters({ ...filters, onlyContested: !filters.onlyContested })}
           label="contested"
         />
         <ToggleChip
           active={filters.onlyVerified}
-          onClick={() =>
-            setFilters({ ...filters, onlyVerified: !filters.onlyVerified })
-          }
+          onClick={() => setFilters({ ...filters, onlyVerified: !filters.onlyVerified })}
           label="verified"
         />
         <ToggleChip
           active={filters.onlyUnresolved}
-          onClick={() =>
-            setFilters({ ...filters, onlyUnresolved: !filters.onlyUnresolved })
-          }
+          onClick={() => setFilters({ ...filters, onlyUnresolved: !filters.onlyUnresolved })}
           label="unresolved"
         />
         <span style={{ flex: 1 }} />
@@ -260,11 +253,7 @@ function ToggleChip({
   label: string;
 }) {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      style={chipStyle(active, `rgba(${ARGMAP_GOLD}, 0.6)`)}
-    >
+    <button type="button" onClick={onClick} style={chipStyle(active, `rgba(${ARGMAP_GOLD}, 0.6)`)}>
       {label}
     </button>
   );

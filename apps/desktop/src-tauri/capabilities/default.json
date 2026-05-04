@@ -14,24 +14,15 @@
     "opener:allow-open-path",
     {
       "identifier": "fs:allow-write-text-file",
-      "allow": [
-        { "path": "$DOWNLOAD/**" },
-        { "path": "$DOCUMENT/SocraticCouncil/**" }
-      ]
+      "allow": [{ "path": "$DOWNLOAD/**" }, { "path": "$DOCUMENT/SocraticCouncil/**" }]
     },
     {
       "identifier": "fs:allow-write-file",
-      "allow": [
-        { "path": "$DOWNLOAD/**" },
-        { "path": "$DOCUMENT/SocraticCouncil/**" }
-      ]
+      "allow": [{ "path": "$DOWNLOAD/**" }, { "path": "$DOCUMENT/SocraticCouncil/**" }]
     },
     {
       "identifier": "fs:allow-exists",
-      "allow": [
-        { "path": "$DOWNLOAD/**" },
-        { "path": "$DOCUMENT/SocraticCouncil/**" }
-      ]
+      "allow": [{ "path": "$DOWNLOAD/**" }, { "path": "$DOCUMENT/SocraticCouncil/**" }]
     }
   ]
 }

@@ -23,14 +23,7 @@ export function TimelineView({
   search,
 }: ViewProps) {
   const claimLikeKinds = useMemo(
-    () =>
-      new Set([
-        "claim",
-        "question",
-        "assumption",
-        "definition",
-        "proposal",
-      ] as const),
+    () => new Set(["claim", "question", "assumption", "definition", "proposal"] as const),
     [],
   );
 
@@ -104,9 +97,7 @@ export function TimelineView({
         );
         const oppositeConns = conns.filter(
           (c) =>
-            c.relation === "rebuts" ||
-            c.relation === "concedes" ||
-            c.relation === "contradicts",
+            c.relation === "rebuts" || c.relation === "concedes" || c.relation === "contradicts",
         );
         const ts = messageIndex.get(row.sourceMessageId)?.timestamp ?? null;
         return (
@@ -164,7 +155,7 @@ function Row({
 
   const accent = onSpine
     ? `rgb(${ARGMAP_GOLD})`
-    : agentColors[node.sourceAgentId] ?? "rgba(232, 232, 239, 0.72)";
+    : (agentColors[node.sourceAgentId] ?? "rgba(232, 232, 239, 0.72)");
 
   useLayoutEffect(() => {
     const measure = () => {
@@ -176,9 +167,7 @@ function Row({
       const claimX = claimRect.left + claimRect.width / 2 - rowRect.left;
       const claimY = claimRect.bottom - rowRect.top;
       const next: Array<{ id: string; d: string; relation: ArgEdge["relation"] }> = [];
-      const layoutSide = (
-        list: Array<{ node: ArgNode; relation: ArgEdge["relation"] }>,
-      ) => {
+      const layoutSide = (list: Array<{ node: ArgNode; relation: ArgEdge["relation"] }>) => {
         for (const item of list) {
           const el = chipRefs.current.get(item.node.id);
           if (!el) continue;
@@ -302,8 +291,7 @@ function Row({
               fontFamily: "'JetBrains Mono', ui-monospace, monospace",
             }}
           >
-            {node.kind === "claim" ? "Claim" : node.kind.toUpperCase()} ·{" "}
-            {node.sourceAgentId}
+            {node.kind === "claim" ? "Claim" : node.kind.toUpperCase()} · {node.sourceAgentId}
           </div>
           <div style={{ fontSize: "0.86rem", lineHeight: 1.42 }}>{node.text}</div>
         </button>

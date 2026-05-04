@@ -550,15 +550,12 @@ export function useConfig() {
   const snapshot = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
   const { config, vaultReady } = snapshot;
 
-  const setConfig = useCallback(
-    (updater: AppConfig | ((prev: AppConfig) => AppConfig)) => {
-      setSnapshot((prev) => ({
-        ...prev,
-        config: typeof updater === "function" ? updater(prev.config) : updater,
-      }));
-    },
-    [],
-  );
+  const setConfig = useCallback((updater: AppConfig | ((prev: AppConfig) => AppConfig)) => {
+    setSnapshot((prev) => ({
+      ...prev,
+      config: typeof updater === "function" ? updater(prev.config) : updater,
+    }));
+  }, []);
 
   const updateCredential = useCallback(
     (provider: Provider, credential: ProviderCredential | null) => {

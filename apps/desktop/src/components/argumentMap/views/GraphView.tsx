@@ -198,8 +198,7 @@ function ArgmapNode({ data }: NodeProps<ArgmapRFNode>) {
           background: "rgba(18, 16, 14, 0.84)",
           backdropFilter: "blur(6px)",
           border: `1px solid ${accent}`,
-          borderStyle:
-            isWithdrawn || node.kind === "assumption" ? "dashed" : "solid",
+          borderStyle: isWithdrawn || node.kind === "assumption" ? "dashed" : "solid",
           boxShadow: `0 0 ${selected ? 22 : spine ? 14 : 0}px rgba(${haloRgb}, ${haloOpacity}), 0 4px 14px -8px rgba(0,0,0,0.55)`,
           opacity: dimmed ? 0.45 : 1,
           color: "rgba(248, 248, 252, 0.94)",
@@ -285,7 +284,15 @@ interface ArgmapEdgeData {
 
 type ArgmapRFEdge = RFEdge<ArgmapEdgeData>;
 
-function ArgmapEdge({ id, sourceX, sourceY, targetX, targetY, data, markerEnd }: EdgeProps<ArgmapRFEdge>) {
+function ArgmapEdge({
+  id,
+  sourceX,
+  sourceY,
+  targetX,
+  targetY,
+  data,
+  markerEnd,
+}: EdgeProps<ArgmapRFEdge>) {
   if (!data) return null;
   const { edge, style: relStyle, highlighted, faded } = data;
   // Smooth quadratic curve — control point pulled along the perpendicular
@@ -401,10 +408,12 @@ export function GraphView({
       visibleEdges.map((e) => {
         const relStyle = styleForRelation(e.relation);
         const isHighlighted =
-          selectedNodeId !== null &&
-          (e.from === selectedNodeId || e.to === selectedNodeId);
+          selectedNodeId !== null && (e.from === selectedNodeId || e.to === selectedNodeId);
         const isFaded =
-          neighborSet !== null && !isHighlighted && !neighborSet.has(e.from) && !neighborSet.has(e.to);
+          neighborSet !== null &&
+          !isHighlighted &&
+          !neighborSet.has(e.from) &&
+          !neighborSet.has(e.to);
         return {
           id: e.id,
           source: e.from,

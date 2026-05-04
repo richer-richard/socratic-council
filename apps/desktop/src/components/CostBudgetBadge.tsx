@@ -22,10 +22,7 @@ export interface CostBudgetBadgeProps {
 }
 
 export function CostBudgetBadge({ sessionUSD, policy, compact = false }: CostBudgetBadgeProps) {
-  const snapshot = useMemo(
-    () => evaluateBudget(sessionUSD, policy),
-    [sessionUSD, policy],
-  );
+  const snapshot = useMemo(() => evaluateBudget(sessionUSD, policy), [sessionUSD, policy]);
 
   // Hide entirely when there's no cap configured AND no spend yet.
   if (policy.perSession <= 0 && policy.perDay <= 0 && sessionUSD <= 0) return null;
@@ -33,10 +30,7 @@ export function CostBudgetBadge({ sessionUSD, policy, compact = false }: CostBud
   const tint = tintForVerdict(snapshot.verdict);
 
   const sessionCap = policy.perSession;
-  const sessionPercent =
-    sessionCap > 0
-      ? Math.min(100, (sessionUSD / sessionCap) * 100)
-      : null;
+  const sessionPercent = sessionCap > 0 ? Math.min(100, (sessionUSD / sessionCap) * 100) : null;
 
   return (
     <div
@@ -52,17 +46,14 @@ export function CostBudgetBadge({ sessionUSD, policy, compact = false }: CostBud
         background: tint.background,
         border: `1px solid ${tint.border}`,
         color: tint.foreground,
-        fontFamily:
-          "'Manrope', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+        fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
         fontSize: compact ? "0.68rem" : "0.72rem",
         fontWeight: 600,
         letterSpacing: "0.02em",
         whiteSpace: "nowrap",
         transition: "all 200ms ease",
         animation:
-          snapshot.verdict === "warn"
-            ? "budget-breathe 2.4s ease-in-out infinite"
-            : undefined,
+          snapshot.verdict === "warn" ? "budget-breathe 2.4s ease-in-out infinite" : undefined,
       }}
     >
       <BudgetRing percent={sessionPercent} color={tint.ring} />

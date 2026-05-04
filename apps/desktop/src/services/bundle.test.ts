@@ -1,3 +1,4 @@
+import { strFromU8, strToU8, unzipSync, zipSync } from "fflate";
 import { describe, it, expect, beforeAll } from "vitest";
 
 import { BUNDLE_SCHEMA_VERSION, exportBundle, parseBundle, type BundleAttachment } from "./bundle";
@@ -123,9 +124,7 @@ describe("bundle — export/import round-trip", () => {
     expect(parsed.attachments).toHaveLength(2);
 
     const byId = Object.fromEntries(parsed.attachments.map((a) => [a.id, a]));
-    expect(new TextDecoder().decode(byId["att_1"]!.bytes)).toBe(
-      "hello world — this is file one",
-    );
+    expect(new TextDecoder().decode(byId["att_1"]!.bytes)).toBe("hello world — this is file one");
     expect(new TextDecoder().decode(byId["att_2"]!.bytes)).toBe(
       "the quick brown fox jumps over the lazy dog",
     );
@@ -136,7 +135,6 @@ describe("bundle — export/import round-trip", () => {
     const bytes = exportBundle({ session, attachments: new Map() });
 
     // Corrupt the manifest version.
-    const { strFromU8, strToU8, unzipSync, zipSync } = require("fflate");
     const entries = unzipSync(bytes);
     const manifest = JSON.parse(strFromU8(entries["manifest.json"]));
     manifest.schemaVersion = 999;
@@ -161,9 +159,7 @@ describe("bundle — export/import round-trip", () => {
             kind: "claim",
             text: "Test that exports survive a bundle round-trip.",
             aliases: [],
-            sources: [
-              { messageId: "m1", agentId: "george", timestamp: 1 },
-            ],
+            sources: [{ messageId: "m1", agentId: "george", timestamp: 1 }],
             strength: 0.6,
             status: "active",
             sourceMessageId: "m1",
@@ -179,7 +175,6 @@ describe("bundle — export/import round-trip", () => {
       },
     };
     const bytes = exportBundle({ session, attachments: new Map() });
-    const { strFromU8, unzipSync } = require("fflate") as typeof import("fflate");
     const entries = unzipSync(bytes);
     expect(entries["argmap.json"]).toBeDefined();
     expect(entries["argmap.mmd"]).toBeDefined();
@@ -194,18 +189,12 @@ describe("bundle — export/import round-trip", () => {
   it("omits argmap artifacts when the session has no ArgGraph", () => {
     const session = tinySession();
     const bytes = exportBundle({ session, attachments: new Map() });
-    const { unzipSync } = require("fflate") as typeof import("fflate");
     const entries = unzipSync(bytes);
     expect(entries["argmap.json"]).toBeUndefined();
     expect(entries["argmap.mmd"]).toBeUndefined();
   });
 
   it("rejects bundles missing the session payload", () => {
-    const {
-      strFromU8,
-      strToU8,
-      zipSync,
-    } = require("fflate");
     const manifest = {
       schemaVersion: 1,
       exportedAt: Date.now(),
@@ -217,7 +206,6 @@ describe("bundle — export/import round-trip", () => {
     const broken = zipSync({
       "manifest.json": strToU8(JSON.stringify(manifest)),
     });
-    void strFromU8; // avoid unused-import warning
     expect(() => parseBundle(broken)).toThrow(/session\.json/);
   });
 });

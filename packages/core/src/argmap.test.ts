@@ -198,11 +198,11 @@ describe("parseExtractResponse", () => {
 
 describe("updateArgumentMap", () => {
   it("adds a claim with v2 fields populated", () => {
-    const g = updateArgumentMap(
-      emptyGraph(),
-      [{ kind: "claim", text: "A is true." }],
-      { messageId: "m1", agentId: "george", timestamp: 100 },
-    );
+    const g = updateArgumentMap(emptyGraph(), [{ kind: "claim", text: "A is true." }], {
+      messageId: "m1",
+      agentId: "george",
+      timestamp: 100,
+    });
     expect(g.nodes).toHaveLength(1);
     const node = g.nodes[0]!;
     expect(node).toMatchObject({
@@ -246,11 +246,10 @@ describe("updateArgumentMap", () => {
 
   it("does NOT merge two unrelated claims even when both are short", () => {
     let g: ArgGraph = emptyGraph();
-    g = updateArgumentMap(
-      g,
-      [{ kind: "claim", text: "Nuclear is safest per TWh." }],
-      { messageId: "m1", agentId: "grace" },
-    );
+    g = updateArgumentMap(g, [{ kind: "claim", text: "Nuclear is safest per TWh." }], {
+      messageId: "m1",
+      agentId: "grace",
+    });
     g = updateArgumentMap(
       g,
       [{ kind: "claim", text: "Carbon pricing reduces emissions efficiently." }],
@@ -261,11 +260,10 @@ describe("updateArgumentMap", () => {
 
   it("links evidence to an existing claim via paraphrased text reference", () => {
     let g: ArgGraph = emptyGraph();
-    g = updateArgumentMap(
-      g,
-      [{ kind: "claim", text: "Nuclear is safest per TWh." }],
-      { messageId: "m1", agentId: "grace" },
-    );
+    g = updateArgumentMap(g, [{ kind: "claim", text: "Nuclear is safest per TWh." }], {
+      messageId: "m1",
+      agentId: "grace",
+    });
     g = updateArgumentMap(
       g,
       [{ kind: "evidence", text: "OWID 2023", targetClaim: "Nuclear is safest" }],
@@ -418,16 +416,14 @@ describe("updateArgumentMap", () => {
 
   it("dedupes a question repeated by the same author", () => {
     let g: ArgGraph = emptyGraph();
-    g = updateArgumentMap(
-      g,
-      [{ kind: "question", text: "What about cost?" }],
-      { messageId: "m1", agentId: "george" },
-    );
-    g = updateArgumentMap(
-      g,
-      [{ kind: "question", text: "what about cost?" }],
-      { messageId: "m2", agentId: "george" },
-    );
+    g = updateArgumentMap(g, [{ kind: "question", text: "What about cost?" }], {
+      messageId: "m1",
+      agentId: "george",
+    });
+    g = updateArgumentMap(g, [{ kind: "question", text: "what about cost?" }], {
+      messageId: "m2",
+      agentId: "george",
+    });
     expect(g.nodes.filter((n) => n.kind === "question")).toHaveLength(1);
   });
 

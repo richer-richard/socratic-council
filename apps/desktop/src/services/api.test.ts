@@ -25,10 +25,7 @@ vi.mock("@socratic-council/sdk", () => ({
   },
   // Sync no-op replay so the buffered-retry test still observes a single
   // chunk callback per replay; we just call onChunk once with the buffer.
-  replayBufferedStream: async (
-    text: string,
-    onChunk: (chunk: string) => void,
-  ): Promise<void> => {
+  replayBufferedStream: async (text: string, onChunk: (chunk: string) => void): Promise<void> => {
     if (text) onChunk(text);
   },
 }));

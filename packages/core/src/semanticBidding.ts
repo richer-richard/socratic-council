@@ -60,9 +60,7 @@ function buildUserPrompt(ctx: RelevanceContext, agents: AgentRelevanceDescriptor
     lines.push(`- id="${a.id}" — ${a.name}: ${a.blurb}`);
   }
   lines.push("");
-  lines.push(
-    "Score each agent's relevance for speaking NEXT. Return the JSON object.",
-  );
+  lines.push("Score each agent's relevance for speaking NEXT. Return the JSON object.");
   return lines.join("\n");
 }
 

@@ -9,10 +9,7 @@ import {
   type Provider,
 } from "../stores/config";
 import { callProvider, apiLogger, type ChatMessage as APIChatMessage } from "../services/api";
-import {
-  loadSessionAttachmentBlobs,
-  type SessionAttachment,
-} from "../services/attachments";
+import { loadSessionAttachmentBlobs, type SessionAttachment } from "../services/attachments";
 import {
   getBranchLineage,
   listChildBranches,
@@ -68,16 +65,16 @@ import {
 import { calculateMessageCost } from "../utils/cost";
 import { evaluateBudget, recordDailyCostDelta } from "../utils/budgetEnforcer";
 import { extractHandoffDirective } from "../utils/handoff";
-import { createStreamingToolCallDetector, extractActions, stripProviderToolSyntax } from "../utils/toolActions";
+import {
+  createStreamingToolCallDetector,
+  extractActions,
+  stripProviderToolSyntax,
+} from "../utils/toolActions";
 import { splitIntoInlineQuoteSegments, stripQuoteTokens } from "../utils/inlineQuotes";
 import { CostBudgetBadge } from "../components/CostBudgetBadge";
 import { ArgumentMapPanel } from "../components/ArgumentMapPanel";
 import { BundleExportButton } from "../components/BundleActions";
-import {
-  BranchAction,
-  BranchPointBadge,
-  type BranchPointEntry,
-} from "../components/BranchAction";
+import { BranchAction, BranchPointBadge, type BranchPointEntry } from "../components/BranchAction";
 import { FactCheckStrip } from "../components/FactCheckBadge";
 import {
   applyFactCheckBadgesToGraph,
@@ -142,7 +139,16 @@ type PendingHandoffState = HandoffSnapshot;
 // of chasing yet another component file. No emoji.
 function HeaderIconLogs() {
   return (
-    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" aria-hidden="true">
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.4"
+      strokeLinecap="round"
+      aria-hidden="true"
+    >
       <line x1="3" y1="4.5" x2="13" y2="4.5" />
       <line x1="3" y1="8" x2="13" y2="8" />
       <line x1="3" y1="11.5" x2="10" y2="11.5" />
@@ -152,7 +158,16 @@ function HeaderIconLogs() {
 
 function HeaderIconSearch() {
   return (
-    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" aria-hidden="true">
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.4"
+      strokeLinecap="round"
+      aria-hidden="true"
+    >
       <circle cx="7" cy="7" r="4.5" />
       <line x1="10.5" y1="10.5" x2="13.5" y2="13.5" />
     </svg>
@@ -161,7 +176,17 @@ function HeaderIconSearch() {
 
 function HeaderIconExport() {
   return (
-    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.4"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
       <path d="M3 9.5v2.5a1.5 1.5 0 0 0 1.5 1.5h7a1.5 1.5 0 0 0 1.5-1.5V9.5" />
       <line x1="8" y1="2.5" x2="8" y2="10" />
       <polyline points="5.2 5.2 8 2.5 10.8 5.2" />
@@ -171,7 +196,16 @@ function HeaderIconExport() {
 
 function HeaderIconDossier() {
   return (
-    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" aria-hidden="true">
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.4"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
       <path d="M2.4 5a1.5 1.5 0 0 1 1.5-1.5h2.6a1 1 0 0 1 .7.3l1.4 1.4h4.5a1.5 1.5 0 0 1 1.5 1.5V12a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 2.4 12V5Z" />
     </svg>
   );
@@ -179,7 +213,16 @@ function HeaderIconDossier() {
 
 function HeaderIconMap() {
   return (
-    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" aria-hidden="true">
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.4"
+      strokeLinecap="round"
+      aria-hidden="true"
+    >
       <circle cx="4" cy="4" r="1.5" />
       <circle cx="12" cy="4" r="1.5" />
       <circle cx="8" cy="11.5" r="1.5" />
@@ -513,13 +556,17 @@ ${getToolPrompt()}
 
 // Map from agent display name to their outer-circle partner name
 const AGENT_NAME_TO_PARTNER: Record<string, string> = {
-  George: "Greta", Cathy: "Clara", Grace: "Gaia", Douglas: "Dara",
-  Kate: "Kira", Quinn: "Quincy", Mary: "Mila", Zara: "Zoe",
+  George: "Greta",
+  Cathy: "Clara",
+  Grace: "Gaia",
+  Douglas: "Dara",
+  Kate: "Kira",
+  Quinn: "Quincy",
+  Mary: "Mila",
+  Zara: "Zoe",
 };
 
-const BASE_SYSTEM_PROMPT = (
-  name: string,
-) => {
+const BASE_SYSTEM_PROMPT = (name: string) => {
   const partnerName = AGENT_NAME_TO_PARTNER[name];
   const partnerLine = partnerName
     ? `\nOuter-circle partner: You have a silent partner named ${partnerName} who observes the discussion and may send you private notes marked "[Private note from ${partnerName}]". When ${partnerName} raises a substantive point worth sharing, naturally weave it into your argument — e.g. "my partner ${partnerName} points out…" or "as ${partnerName} noted…". If the note is only about your delivery or strategy (not a new argument), follow the advice silently without mentioning it. Reference your partner's idea by paraphrase only — NEVER use @quote(...) on a private note. Those notes are invisible to the other agents and have no shareable id; quoting one would either fail or leak its content publicly.\n`
@@ -1143,23 +1190,19 @@ function renderBodyWithCitations(
   // Rewrite [cN] and [cN, cM, ...] tokens as markdown links so ReactMarkdown
   // treats them as INLINE elements. Multi-citation brackets become adjacent
   // pills separated by a comma. Unknown ids keep the original bracket form.
-  const withLinks = body.replace(
-    /\[(c\d+(?:\s*,\s*c\d+)*)\]/g,
-    (match, ids: string) => {
-      const idList = ids.split(",").map((s) => s.trim());
-      if (!idList.every((id) => citationById.has(id))) return match;
-      if (idList.length === 1) return `[${match}](#cite-${idList[0]})`;
-      return idList.map((id) => `[[${id}]](#cite-${id})`).join(", ");
-    },
-  );
+  const withLinks = body.replace(/\[(c\d+(?:\s*,\s*c\d+)*)\]/g, (match, ids: string) => {
+    const idList = ids.split(",").map((s) => s.trim());
+    if (!idList.every((id) => citationById.has(id))) return match;
+    if (idList.length === 1) return `[${match}](#cite-${idList[0]})`;
+    return idList.map((id) => `[[${id}]](#cite-${id})`).join(", ");
+  });
   return (
     <Markdown
       content={withLinks}
       className="research-section-body-chunk"
       components={{
         a: ({ href, children }) => {
-          const m =
-            typeof href === "string" ? href.match(/^#cite-(c\d+)$/) : null;
+          const m = typeof href === "string" ? href.match(/^#cite-(c\d+)$/) : null;
           const cite = m ? citationById.get(m[1]!) : undefined;
           if (cite) {
             return (
@@ -1247,7 +1290,9 @@ function DeepResearchReportCard({
         {report.phase === "error" && (
           <div className="deep-research-report-error">
             Unable to generate report.
-            {report.error ? <div className="deep-research-report-error-detail">{report.error}</div> : null}
+            {report.error ? (
+              <div className="deep-research-report-error-detail">{report.error}</div>
+            ) : null}
           </div>
         )}
 
@@ -1273,9 +1318,7 @@ function DeepResearchReportCard({
           </div>
         )}
 
-        {report.abstract && (
-          <p className="deep-research-report-abstract">{report.abstract}</p>
-        )}
+        {report.abstract && <p className="deep-research-report-abstract">{report.abstract}</p>}
 
         {report.sections.length > 0 && (
           <div className="deep-research-report-sections">
@@ -1303,7 +1346,10 @@ function DeepResearchReportCard({
             <summary>Sub-questions explored ({report.subQuestions.length})</summary>
             <ol>
               {report.subQuestions.map((q) => (
-                <li key={q.id} className={`deep-research-report-subquestion confidence-${q.confidence}`}>
+                <li
+                  key={q.id}
+                  className={`deep-research-report-subquestion confidence-${q.confidence}`}
+                >
                   <div className="deep-research-report-subquestion-header">
                     <span className="deep-research-report-subquestion-q">{q.question}</span>
                     <span className={`deep-research-confidence confidence-${q.confidence}`}>
@@ -1630,7 +1676,11 @@ export function Chat({ session, onNavigate, onPersistSession }: ChatProps) {
   const [conflictState, setConflictState] = useState<ConflictDetection | null>(null);
   const [allConflicts, setAllConflicts] = useState<PairwiseConflict[]>([]);
   const [canvasStates, setCanvasStates] = useState<Partial<Record<CouncilAgentId, CanvasState>>>(
-    (normalizedSession as DiscussionSession & { canvasStates?: Partial<Record<CouncilAgentId, CanvasState>> }).canvasStates ?? {},
+    (
+      normalizedSession as DiscussionSession & {
+        canvasStates?: Partial<Record<CouncilAgentId, CanvasState>>;
+      }
+    ).canvasStates ?? {},
   );
   const canvasStatesRef = useRef(canvasStates);
   canvasStatesRef.current = canvasStates;
@@ -2018,7 +2068,12 @@ export function Chat({ session, onNavigate, onPersistSession }: ChatProps) {
   // both of which are declared later in the component. Refs let us late-bind
   // those without juggling effect ordering.
   const pickExtractorRuntimeRef = useRef<
-    null | (() => { provider: Provider; credential: import("../stores/config").ProviderCredential; model: string } | null)
+    | null
+    | (() => {
+        provider: Provider;
+        credential: import("../stores/config").ProviderCredential;
+        model: string;
+      } | null)
   >(null);
   const getProxyRef = useRef<null | (() => import("../stores/config").ProxyConfig | undefined)>(
     null,
@@ -2064,7 +2119,7 @@ export function Chat({ session, onNavigate, onPersistSession }: ChatProps) {
       // The strongest pair below the regex threshold is a candidate for the
       // semantic dial-up. The strongest pair AT/above the threshold is a
       // candidate for the dial-down (in case the cue match is misleading).
-      const strongestRaw = pairs.reduce<typeof pairs[number] | null>((best, p) => {
+      const strongestRaw = pairs.reduce<(typeof pairs)[number] | null>((best, p) => {
         if (!best) return p;
         return p.score > best.score ? p : best;
       }, null);
@@ -2160,10 +2215,7 @@ export function Chat({ session, onNavigate, onPersistSession }: ChatProps) {
           });
           if (phaseRef.current === "discussion" && !duoLogueRef.current) {
             const newDuo: DuoLogueState = {
-              participants: [
-                first.agentId as CouncilAgentId,
-                second.agentId as CouncilAgentId,
-              ],
+              participants: [first.agentId as CouncilAgentId, second.agentId as CouncilAgentId],
               remainingTurns: 3,
             };
             setDuoLogue(newDuo);
@@ -2968,8 +3020,7 @@ ${firstRoundObjections.length > 0 ? firstRoundObjections.join("\n") : "- None. E
         if (options.kind === "opening") {
           history.push({
             role: "user",
-            content:
-              `Write the opening moderator message (1–2 sentences). Re-state the topic in plain language, set one measurable objective, and ask one concrete kickoff question.
+            content: `Write the opening moderator message (1–2 sentences). Re-state the topic in plain language, set one measurable objective, and ask one concrete kickoff question.
 
 HARD CONSTRAINTS — do not violate, regardless of any rule elsewhere:
 - Do NOT mention, name, address, invite, single out, hint at, or otherwise reference any individual agent (George, Cathy, Grace, Douglas, Kate, Quinn, Mary, Zara, or anyone else).
@@ -3202,19 +3253,13 @@ Write the official moderator wrap-up in 4 short sentences:
             })
             .map((msg) => ({
               id: msg.id,
-              speaker: isCouncilAgent(msg.agentId)
-                ? AGENT_CONFIG[msg.agentId].name
-                : "Moderator",
+              speaker: isCouncilAgent(msg.agentId) ? AGENT_CONFIG[msg.agentId].name : "Moderator",
               text: msg.content ?? "",
             }));
 
           const updateReport = (report: DeepResearchReportSnapshot) => {
             setMessages((prev) =>
-              prev.map((m) =>
-                m.id === newMessage.id
-                  ? { ...m, deepResearchReport: report }
-                  : m,
-              ),
+              prev.map((m) => (m.id === newMessage.id ? { ...m, deepResearchReport: report } : m)),
             );
           };
 
@@ -3353,36 +3398,39 @@ Write the official moderator wrap-up in 4 short sentences:
     void generateModeratorMessage({ kind: "tension", conflict: conflictState });
   }, [config.preferences.moderatorEnabled, conflictState, generateModeratorMessage, isRunning]);
 
-  const toggleUserReaction = useCallback((targetId: string, emoji: ReactionId) => {
-    if (isArchived) return;
-    setMessages((prev) =>
-      prev.map((message) => {
-        if (message.id !== targetId) return message;
+  const toggleUserReaction = useCallback(
+    (targetId: string, emoji: ReactionId) => {
+      if (isArchived) return;
+      setMessages((prev) =>
+        prev.map((message) => {
+          if (message.id !== targetId) return message;
 
-        const existingBar = (message.reactions ?? {}) as Partial<
-          Record<ReactionId, { count: number; by: string[] }>
-        >;
-        const nextBar = { ...existingBar };
+          const existingBar = (message.reactions ?? {}) as Partial<
+            Record<ReactionId, { count: number; by: string[] }>
+          >;
+          const nextBar = { ...existingBar };
 
-        const existing = nextBar[emoji] ?? { count: 0, by: [] };
-        const alreadyReacted = existing.by.includes("user");
+          const existing = nextBar[emoji] ?? { count: 0, by: [] };
+          const alreadyReacted = existing.by.includes("user");
 
-        if (alreadyReacted) {
-          const nextBy = existing.by.filter((id) => id !== "user");
-          const nextCount = Math.max(0, existing.count - 1);
-          if (nextCount === 0) {
-            delete nextBar[emoji];
+          if (alreadyReacted) {
+            const nextBy = existing.by.filter((id) => id !== "user");
+            const nextCount = Math.max(0, existing.count - 1);
+            if (nextCount === 0) {
+              delete nextBar[emoji];
+            } else {
+              nextBar[emoji] = { count: nextCount, by: nextBy };
+            }
           } else {
-            nextBar[emoji] = { count: nextCount, by: nextBy };
+            nextBar[emoji] = { count: existing.count + 1, by: [...existing.by, "user"] };
           }
-        } else {
-          nextBar[emoji] = { count: existing.count + 1, by: [...existing.by, "user"] };
-        }
 
-        return { ...message, reactions: nextBar };
-      }),
-    );
-  }, [isArchived]);
+          return { ...message, reactions: nextBar };
+        }),
+      );
+    },
+    [isArchived],
+  );
 
   const copyQuoteToken = useCallback(async (messageId: string) => {
     const token = `@quote(${messageId})`;
@@ -3580,18 +3628,24 @@ Write the official moderator wrap-up in 4 short sentences:
                 // the line-oriented streaming detector (e.g., mid-prose occurrences
                 // like "Let me look this up: @tool(...)"). extractActions handles
                 // mid-line tool directives via a brace-aware parser.
-                let displayText = extractActions(canvasCleaned, REACTION_IDS).cleaned
-                  .replace(/^[ \t]*@done\(\)[ \t]*$/gm, "")
+                let displayText = extractActions(canvasCleaned, REACTION_IDS)
+                  .cleaned.replace(/^[ \t]*@done\(\)[ \t]*$/gm, "")
                   .replace(/\n{3,}/g, "\n\n")
                   .trim();
                 // Hide partial @canvas( or @tool( still being streamed (incomplete directive)
                 const partialCanvasIdx = displayText.lastIndexOf("@canvas(");
                 if (partialCanvasIdx >= 0 && !displayText.slice(partialCanvasIdx).includes(")")) {
-                  displayText = displayText.slice(0, partialCanvasIdx).replace(/\n{3,}/g, "\n\n").trim();
+                  displayText = displayText
+                    .slice(0, partialCanvasIdx)
+                    .replace(/\n{3,}/g, "\n\n")
+                    .trim();
                 }
                 const partialToolIdx = displayText.lastIndexOf("@tool(");
                 if (partialToolIdx >= 0 && !displayText.slice(partialToolIdx).includes(")")) {
-                  displayText = displayText.slice(0, partialToolIdx).replace(/\n{3,}/g, "\n\n").trim();
+                  displayText = displayText
+                    .slice(0, partialToolIdx)
+                    .replace(/\n{3,}/g, "\n\n")
+                    .trim();
                 }
                 streamingContent = displayText;
                 // Apply only NEW canvas directives (cumulative text re-parses old ones)
@@ -3599,7 +3653,12 @@ Write the official moderator wrap-up in 4 short sentences:
                   const directive = canvasDirectives[ci]!;
                   setCanvasStates((prev) => ({
                     ...prev,
-                    [agentId]: applyCanvasDirective(prev[agentId], directive, agentId, currentTurnRef.current),
+                    [agentId]: applyCanvasDirective(
+                      prev[agentId],
+                      directive,
+                      agentId,
+                      currentTurnRef.current,
+                    ),
                   }));
                 }
                 canvasDirectivesApplied = canvasDirectives.length;
@@ -3619,24 +3678,35 @@ Write the official moderator wrap-up in 4 short sentences:
                   // any partials, but if a malformed directive made it to
                   // the finish, this keeps the UI from flickering between
                   // a partially-rendered and fully-cleaned state.
-                  let displayText = extractActions(finalCleaned, REACTION_IDS).cleaned
-                    .replace(/^[ \t]*@done\(\)[ \t]*$/gm, "")
+                  let displayText = extractActions(finalCleaned, REACTION_IDS)
+                    .cleaned.replace(/^[ \t]*@done\(\)[ \t]*$/gm, "")
                     .replace(/\n{3,}/g, "\n\n")
                     .trim();
                   const pcIdx = displayText.lastIndexOf("@canvas(");
                   if (pcIdx >= 0 && !displayText.slice(pcIdx).includes(")")) {
-                    displayText = displayText.slice(0, pcIdx).replace(/\n{3,}/g, "\n\n").trim();
+                    displayText = displayText
+                      .slice(0, pcIdx)
+                      .replace(/\n{3,}/g, "\n\n")
+                      .trim();
                   }
                   const ptIdx = displayText.lastIndexOf("@tool(");
                   if (ptIdx >= 0 && !displayText.slice(ptIdx).includes(")")) {
-                    displayText = displayText.slice(0, ptIdx).replace(/\n{3,}/g, "\n\n").trim();
+                    displayText = displayText
+                      .slice(0, ptIdx)
+                      .replace(/\n{3,}/g, "\n\n")
+                      .trim();
                   }
                   streamingContent = displayText;
                   for (let ci = canvasDirectivesApplied; ci < finalDirectives.length; ci++) {
                     const directive = finalDirectives[ci]!;
                     setCanvasStates((prev) => ({
                       ...prev,
-                      [agentId]: applyCanvasDirective(prev[agentId], directive, agentId, currentTurnRef.current),
+                      [agentId]: applyCanvasDirective(
+                        prev[agentId],
+                        directive,
+                        agentId,
+                        currentTurnRef.current,
+                      ),
                     }));
                   }
                   canvasDirectivesApplied = finalDirectives.length;
@@ -3744,7 +3814,12 @@ Write the official moderator wrap-up in 4 short sentences:
             const directive = canvasFromRound.directives[ci]!;
             setCanvasStates((prev) => ({
               ...prev,
-              [agentId]: applyCanvasDirective(prev[agentId], directive, agentId, currentTurnRef.current),
+              [agentId]: applyCanvasDirective(
+                prev[agentId],
+                directive,
+                agentId,
+                currentTurnRef.current,
+              ),
             }));
           }
 
@@ -3806,7 +3881,8 @@ Write the official moderator wrap-up in 4 short sentences:
               ...(priorAssistant ? [{ role: "assistant" as const, content: priorAssistant }] : []),
               {
                 role: "user" as const,
-                content: "Continue your response. When you are finished, emit @done() on its own line.",
+                content:
+                  "Continue your response. When you are finished, emit @done() on its own line.",
               },
             ];
           }
@@ -3834,7 +3910,12 @@ Write the official moderator wrap-up in 4 short sentences:
           const directive = canvasFromFinal.directives[ci]!;
           setCanvasStates((prev) => ({
             ...prev,
-            [agentId]: applyCanvasDirective(prev[agentId], directive, agentId, currentTurnRef.current),
+            [agentId]: applyCanvasDirective(
+              prev[agentId],
+              directive,
+              agentId,
+              currentTurnRef.current,
+            ),
           }));
         }
 
@@ -3931,11 +4012,11 @@ Write the official moderator wrap-up in 4 short sentences:
             : parsedReactions;
         const initialDisplayContent = stripProviderToolSyntax(
           finalVisibleContent ||
-          parsed.cleaned ||
-          (parsed.endRequested ? "I think we're ready to wrap this up." : "") ||
-          (toolEvents.length > 0
-            ? "Research completed, but no final answer was generated."
-            : "[No response received]"),
+            parsed.cleaned ||
+            (parsed.endRequested ? "I think we're ready to wrap this up." : "") ||
+            (toolEvents.length > 0
+              ? "Research completed, but no final answer was generated."
+              : "[No response received]"),
         );
         const { cleaned: strippedDisplayContent, handoff } = extractHandoffDirective({
           raw: initialDisplayContent,
@@ -4043,9 +4124,7 @@ Write the official moderator wrap-up in 4 short sentences:
                         disableThinking: true,
                       },
                     );
-                    return revRes.success && revRes.content
-                      ? revRes.content
-                      : null;
+                    return revRes.success && revRes.content ? revRes.content : null;
                   } catch {
                     return null;
                   }
@@ -4208,7 +4287,8 @@ Write the official moderator wrap-up in 4 short sentences:
         const { cleaned: resCanvasCleaned } = extractCanvasDirectives(result.content || "");
         const { cleaned } = extractActions(resCanvasCleaned, REACTION_IDS);
         const displayContent =
-          cleaned || normalizeMessageText(
+          cleaned ||
+          normalizeMessageText(
             extractCanvasDirectives(result.content || streamingContent || "").cleaned,
           );
 
@@ -4555,9 +4635,7 @@ Write the official moderator wrap-up in 4 short sentences:
           const safeChoice: EndVoteChoice = choice ?? "abstain";
           const safeReason =
             reason ||
-            (choice == null
-              ? "Did not return a vote in time — recorded as abstain."
-              : "");
+            (choice == null ? "Did not return a vote in time — recorded as abstain." : "");
           const reasonPatch: Partial<Record<CouncilAgentId, string>> = safeReason
             ? { [agentId]: safeReason }
             : {};
@@ -5135,8 +5213,7 @@ Write the official moderator wrap-up in 4 short sentences:
     // the sidebar should NOT auto-debate — that surprised users who created
     // a session, didn't start it, and later browsed back to read the topic
     // only to have eight agents fire off a real-money debate unprompted.
-    const isFreshlyCreated =
-      normalizedSession.lastOpenedAt === normalizedSession.createdAt;
+    const isFreshlyCreated = normalizedSession.lastOpenedAt === normalizedSession.createdAt;
     if (
       configuredProviders.length > 0 &&
       normalizedSession.status === "draft" &&
@@ -5327,8 +5404,7 @@ Write the official moderator wrap-up in 4 short sentences:
       const overrides = Object.keys(overridesEntries)
         .sort()
         .map(
-          (k) =>
-            `${k}@${Math.round(overridesEntries[k]!.x)},${Math.round(overridesEntries[k]!.y)}`,
+          (k) => `${k}@${Math.round(overridesEntries[k]!.x)},${Math.round(overridesEntries[k]!.y)}`,
         )
         .join("|");
       return `${n}:${e}:${last}:${argmapExtractedIdsRef.current.size}:${cv}:${orphans}:${clusters}:${axis}:${consol}:${overrides}`;
@@ -5406,8 +5482,7 @@ Write the official moderator wrap-up in 4 short sentences:
           : {}),
         ...(argmapConsolidatorLastMessageCountRef.current > 0
           ? {
-              argmapConsolidationLastMessageCount:
-                argmapConsolidatorLastMessageCountRef.current,
+              argmapConsolidationLastMessageCount: argmapConsolidatorLastMessageCountRef.current,
             }
           : {}),
       });
@@ -5485,16 +5560,13 @@ Write the official moderator wrap-up in 4 short sentences:
   // 1 round = 8 turns (one inner-ring round-robin). Round 1 covers turns
   // 1-8, round 2 covers 9-16, etc. Before any turn fires we consider the
   // session "in" round 1 with 0 turns done.
-  const currentRound =
-    currentTurn === 0 ? 1 : Math.floor((currentTurn - 1) / TURNS_PER_ROUND) + 1;
-  const turnsInCurrentRound =
-    currentTurn === 0 ? 0 : ((currentTurn - 1) % TURNS_PER_ROUND) + 1;
+  const currentRound = currentTurn === 0 ? 1 : Math.floor((currentTurn - 1) / TURNS_PER_ROUND) + 1;
+  const turnsInCurrentRound = currentTurn === 0 ? 0 : ((currentTurn - 1) % TURNS_PER_ROUND) + 1;
   const maxRounds =
     maxTurns === Infinity ? Infinity : Math.max(1, Math.ceil(maxTurns / TURNS_PER_ROUND));
   const displayMaxRounds = maxRounds === Infinity ? "\u221E" : maxRounds;
   const roundProgressPct = (turnsInCurrentRound / TURNS_PER_ROUND) * 100;
-  const turnProgressPct =
-    maxTurns === Infinity ? 0 : Math.min((currentTurn / maxTurns) * 100, 100);
+  const turnProgressPct = maxTurns === Infinity ? 0 : Math.min((currentTurn / maxTurns) * 100, 100);
   const formattedLastSavedAt = new Date(lastSavedAt).toLocaleTimeString([], {
     hour: "2-digit",
     minute: "2-digit",
@@ -5537,11 +5609,14 @@ Write the official moderator wrap-up in 4 short sentences:
       });
   }, [messages, getModelDisplayName]);
 
-  const totalEstimatedCostUSD = (costState?.totalEstimatedUSD ?? 0) + moderatorUsage.estimatedUSD + observerUsage.estimatedUSD;
+  const totalEstimatedCostUSD =
+    (costState?.totalEstimatedUSD ?? 0) + moderatorUsage.estimatedUSD + observerUsage.estimatedUSD;
   const hasAnyPricing =
     (costState
       ? Object.values(costState.agentCosts).some((agent) => agent.pricingAvailable)
-      : false) || moderatorUsage.pricingAvailable || observerUsage.pricingAvailable;
+      : false) ||
+    moderatorUsage.pricingAvailable ||
+    observerUsage.pricingAvailable;
 
   // Live argument map (wave 2.6 UI). Toggle state; the extractor pipeline is
   // wired separately at the orchestrator level (core/argmap.ts).
@@ -5558,7 +5633,9 @@ Write the official moderator wrap-up in 4 short sentences:
   // speaks, runArgumentMapExtraction reads the entry, threads the whisperId
   // into updateArgumentMap, and clears the slot so the influence applies
   // to exactly one message.
-  const lastWhisperByAgentRef = useRef<Partial<Record<CouncilAgentId, { id: string; deliveredAt: number }>>>({});
+  const lastWhisperByAgentRef = useRef<
+    Partial<Record<CouncilAgentId, { id: string; deliveredAt: number }>>
+  >({});
   // Consolidation pass (Phase 2): a single global re-think pass that runs
   // every CONSOLIDATION_INTERVAL council messages OR on demand. Bumps
   // graph.consolidationVersion when it actually changes the graph.
@@ -5660,7 +5737,9 @@ Write the official moderator wrap-up in 4 short sentences:
               attempts,
             });
           }
-          setArgmapLastError(`extractor returned no result (attempt ${attempts}/${ARGMAP_MAX_ATTEMPTS})`);
+          setArgmapLastError(
+            `extractor returned no result (attempt ${attempts}/${ARGMAP_MAX_ATTEMPTS})`,
+          );
           return;
         }
         const fragments = parseExtractResponse(result.content);
@@ -5837,8 +5916,7 @@ Write the official moderator wrap-up in 4 short sentences:
           .map((m) => ({
             id: m.id,
             agentId: m.agentId,
-            agentName:
-              AGENT_CONFIG[m.agentId as CouncilAgentId]?.name ?? m.agentId,
+            agentName: AGENT_CONFIG[m.agentId as CouncilAgentId]?.name ?? m.agentId,
             content: stripQuoteTokens(m.content ?? "").slice(0, 1000),
             timestamp: m.timestamp,
           }));
@@ -5846,10 +5924,7 @@ Write the official moderator wrap-up in 4 short sentences:
           new Set(
             messagesRef.current
               .filter((m) => isCouncilAgent(m.agentId))
-              .map(
-                (m) =>
-                  AGENT_CONFIG[m.agentId as CouncilAgentId]?.name ?? m.agentId,
-              ),
+              .map((m) => AGENT_CONFIG[m.agentId as CouncilAgentId]?.name ?? m.agentId),
           ),
         );
 
@@ -5972,14 +6047,13 @@ Write the official moderator wrap-up in 4 short sentences:
     };
   }, [runArgmapConsolidation]);
 
-  const argmapStatus: "no-credential" | "extracting" | "empty" | "failed" =
-    !pickExtractorRuntime()
-      ? "no-credential"
-      : argmapBusy
-        ? "extracting"
-        : argmapLastError
-          ? "failed"
-          : "empty";
+  const argmapStatus: "no-credential" | "extracting" | "empty" | "failed" = !pickExtractorRuntime()
+    ? "no-credential"
+    : argmapBusy
+      ? "extracting"
+      : argmapLastError
+        ? "failed"
+        : "empty";
 
   const retryArgmap = useCallback(() => {
     argmapAttemptsByIdRef.current = new Map();
@@ -6013,9 +6087,7 @@ Write the official moderator wrap-up in 4 short sentences:
           )
           .slice(-8)
           .map((m) => {
-            const speaker = isCouncilAgent(m.agentId)
-              ? AGENT_CONFIG[m.agentId].name
-              : "Moderator";
+            const speaker = isCouncilAgent(m.agentId) ? AGENT_CONFIG[m.agentId].name : "Moderator";
             return `${speaker}: ${m.content.slice(0, 320)}`;
           })
           .join("\n\n");
@@ -6176,9 +6248,7 @@ Write the official moderator wrap-up in 4 short sentences:
           // Phase 4 — overlay verification verdicts onto matching ArgNodes
           // so the panel renders ✓ / ✗ / uncertain marks. The mapper picks
           // the closest evidence/claim in the SAME message at cosine ≥ 0.7.
-          setArgGraph((prev) =>
-            applyFactCheckBadgesToGraph(prev, badges, pending.id),
-          );
+          setArgGraph((prev) => applyFactCheckBadgesToGraph(prev, badges, pending.id));
         }
       } catch (error) {
         apiLogger.log("warn", "factcheck", "factCheckMessage failed", {
@@ -6189,13 +6259,7 @@ Write the official moderator wrap-up in 4 short sentences:
         factCheckBusyRef.current = false;
       }
     })();
-  }, [
-    messages,
-    pickExtractorRuntime,
-    getProxy,
-    topic,
-    buildToolRuntimeContext,
-  ]);
+  }, [messages, pickExtractorRuntime, getProxy, topic, buildToolRuntimeContext]);
 
   // Fix 5.1a: wire LLM-driven memory summarization. Long debates overflow
   // the sliding window inside ConversationMemoryManager; without this pass,
@@ -6531,9 +6595,7 @@ Write the official moderator wrap-up in 4 short sentences:
                 display: "inline-flex",
                 alignItems: "center",
                 gap: "6px",
-                borderColor: argmapOpen
-                  ? "rgba(245, 197, 66, 0.55)"
-                  : "rgba(245, 197, 66, 0.32)",
+                borderColor: argmapOpen ? "rgba(245, 197, 66, 0.55)" : "rgba(245, 197, 66, 0.32)",
               }}
             >
               <HeaderIconMap />
@@ -6571,7 +6633,15 @@ Write the official moderator wrap-up in 4 short sentences:
                         <polygon points="8 6 18 12 8 18 8 6" fill="currentColor" />
                       </svg>
                     ) : (
-                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.25" strokeLinecap="round">
+                      <svg
+                        width="18"
+                        height="18"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2.25"
+                        strokeLinecap="round"
+                      >
                         <line x1="10" y1="7" x2="10" y2="17" />
                         <line x1="14" y1="7" x2="14" y2="17" />
                       </svg>
@@ -6585,7 +6655,12 @@ Write the official moderator wrap-up in 4 short sentences:
                       title="Gracefully end discussion"
                     >
                       <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
-                        <path d="M5 5v14" stroke="currentColor" strokeWidth="2.25" strokeLinecap="round" />
+                        <path
+                          d="M5 5v14"
+                          stroke="currentColor"
+                          strokeWidth="2.25"
+                          strokeLinecap="round"
+                        />
                         <path d="m9 7 10 5-10 5V7Z" fill="currentColor" />
                       </svg>
                     </button>
@@ -6616,15 +6691,14 @@ Write the official moderator wrap-up in 4 short sentences:
             components={virtuosoComponents}
             itemContent={(_, message) => {
               // Observer note — compact inline card
-              const obsNote = (message as ChatMessage & { observerNote?: ObserverNoteSnapshot }).observerNote;
+              const obsNote = (message as ChatMessage & { observerNote?: ObserverNoteSnapshot })
+                .observerNote;
               if (obsNote) {
-                const partnerColor = AGENT_CONFIG[obsNote.partnerId as CouncilAgentId]?.color ?? "text-ink-500";
+                const partnerColor =
+                  AGENT_CONFIG[obsNote.partnerId as CouncilAgentId]?.color ?? "text-ink-500";
                 const partnerAccent = `var(--color-${obsNote.partnerId})`;
                 return (
-                  <div
-                    className="observer-note-card"
-                    style={{ borderLeftColor: partnerAccent }}
-                  >
+                  <div className="observer-note-card" style={{ borderLeftColor: partnerAccent }}>
                     <div className="observer-note-header">
                       <span className="observer-note-label">private note</span>
                       <span className="observer-note-names">
@@ -6633,7 +6707,10 @@ Write the official moderator wrap-up in 4 short sentences:
                         <span className={partnerColor}>{obsNote.partnerName}</span>
                       </span>
                       <span className="observer-note-time">
-                        {new Date(message.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                        {new Date(message.timestamp).toLocaleTimeString([], {
+                          hour: "2-digit",
+                          minute: "2-digit",
+                        })}
                       </span>
                     </div>
                     <div className="observer-note-body">{message.content}</div>
@@ -6801,20 +6878,25 @@ Write the official moderator wrap-up in 4 short sentences:
                             </div>
                           </details>
                         )}
-                      {isAgent && (canvasStates[message.agentId as CouncilAgentId]?.sections?.length ?? 0) > 0 && (
-                        <AgentCanvas
-                          canvas={canvasStates[message.agentId as CouncilAgentId]!}
-                          agentColor={AGENT_CONFIG[message.agentId as CouncilAgentId]?.color ?? "var(--ink-500)"}
-                          isStreaming={!!message.isStreaming}
-                          isExpanded={expandedCanvases[message.agentId] ?? !!message.isStreaming}
-                          onToggleExpand={() =>
-                            setExpandedCanvases((prev) => ({
-                              ...prev,
-                              [message.agentId]: !(prev[message.agentId] ?? false),
-                            }))
-                          }
-                        />
-                      )}
+                      {isAgent &&
+                        (canvasStates[message.agentId as CouncilAgentId]?.sections?.length ?? 0) >
+                          0 && (
+                          <AgentCanvas
+                            canvas={canvasStates[message.agentId as CouncilAgentId]!}
+                            agentColor={
+                              AGENT_CONFIG[message.agentId as CouncilAgentId]?.color ??
+                              "var(--ink-500)"
+                            }
+                            isStreaming={!!message.isStreaming}
+                            isExpanded={expandedCanvases[message.agentId] ?? !!message.isStreaming}
+                            onToggleExpand={() =>
+                              setExpandedCanvases((prev) => ({
+                                ...prev,
+                                [message.agentId]: !(prev[message.agentId] ?? false),
+                              }))
+                            }
+                          />
+                        )}
                       {message.endVoteBoard ? (
                         <EndVoteBoardCard board={message.endVoteBoard} />
                       ) : message.endVoteBallot ? (
@@ -6834,15 +6916,10 @@ Write the official moderator wrap-up in 4 short sentences:
                           {message.content}
                         </div>
                       ) : isModerator ? (
-                        <Markdown
-                          content={message.content}
-                          className="markdown-content"
-                        />
+                        <Markdown content={message.content} className="markdown-content" />
                       ) : (
                         (() => {
-                          const rawSegments = splitIntoInlineQuoteSegments(
-                            message.content,
-                          );
+                          const rawSegments = splitIntoInlineQuoteSegments(message.content);
                           // Drop whitespace-only text segments sandwiched
                           // between two quote segments so consecutive quotes
                           // stack tightly (the existing .message-quote :has(+
@@ -6853,134 +6930,131 @@ Write the official moderator wrap-up in 4 short sentences:
                             if (seg.text.trim().length > 0) return true;
                             const prev = rawSegments[i - 1];
                             const next = rawSegments[i + 1];
-                            return !(
-                              prev?.type === "quote" && next?.type === "quote"
-                            );
+                            return !(prev?.type === "quote" && next?.type === "quote");
                           });
                           return segments.map((segment, idx) => {
-                          if (segment.type === "quote") {
-                            const qm = messageById.get(segment.id);
-                            if (!qm) {
-                              return (
-                                <div key={`${message.id}-quote-${idx}`} className="message-quote">
-                                  <div className="message-quote-header">
-                                    Missing quote · @quote({segment.id})
+                            if (segment.type === "quote") {
+                              const qm = messageById.get(segment.id);
+                              if (!qm) {
+                                return (
+                                  <div key={`${message.id}-quote-${idx}`} className="message-quote">
+                                    <div className="message-quote-header">
+                                      Missing quote · @quote({segment.id})
+                                    </div>
+                                    <div className="message-quote-body">Message not found.</div>
                                   </div>
-                                  <div className="message-quote-body">Message not found.</div>
-                                </div>
-                              );
-                            }
-                            // Defense in depth for the private-note rule in the
-                            // system prompt: if an agent ever @quote()s a real
-                            // observer-note message id, refuse to render its
-                            // content into the public transcript.
-                            if (
-                              (qm as ChatMessage & { observerNote?: ObserverNoteSnapshot })
-                                .observerNote
-                            ) {
+                                );
+                              }
+                              // Defense in depth for the private-note rule in the
+                              // system prompt: if an agent ever @quote()s a real
+                              // observer-note message id, refuse to render its
+                              // content into the public transcript.
+                              if (
+                                (qm as ChatMessage & { observerNote?: ObserverNoteSnapshot })
+                                  .observerNote
+                              ) {
+                                return (
+                                  <div key={`${message.id}-quote-${idx}`} className="message-quote">
+                                    <div className="message-quote-header">
+                                      Missing quote · @quote({segment.id})
+                                    </div>
+                                    <div className="message-quote-body">
+                                      Private note — not shareable.
+                                    </div>
+                                  </div>
+                                );
+                              }
+
+                              const qReactions = qm.reactions
+                                ? (
+                                    Object.entries(qm.reactions) as [
+                                      ReactionId,
+                                      { count: number; by: string[] },
+                                    ][]
+                                  ).filter(([, r]) => r?.count)
+                                : [];
+
+                              const strippedContent = stripQuoteTokens(qm.content);
+                              const truncated = strippedContent.slice(0, 200);
+                              const ellipsis = strippedContent.length > 200 ? "\u2026" : "";
+
                               return (
-                                <div key={`${message.id}-quote-${idx}`} className="message-quote">
+                                <div
+                                  key={`${message.id}-quote-${idx}`}
+                                  className="message-quote message-quote-clickable"
+                                  onClick={() => jumpToMessage(segment.id)}
+                                  role="button"
+                                  tabIndex={0}
+                                  onKeyDown={(e) => {
+                                    if (e.key === "Enter" || e.key === " ")
+                                      jumpToMessage(segment.id);
+                                  }}
+                                >
                                   <div className="message-quote-header">
-                                    Missing quote · @quote({segment.id})
+                                    {qm.displayName ?? AGENT_CONFIG[qm.agentId].name} ·{" "}
+                                    {formatTime(qm.timestamp)}
                                   </div>
                                   <div className="message-quote-body">
-                                    Private note — not shareable.
+                                    {truncated}
+                                    {ellipsis}
                                   </div>
+                                  {qReactions.length > 0 && (
+                                    <div className="message-quote-reactions">
+                                      {qReactions.map(([reactionId, reaction]) => {
+                                        const reactorColor =
+                                          reaction.by.length === 1 && isCouncilAgent(reaction.by[0])
+                                            ? `var(--color-${reaction.by[0]})`
+                                            : undefined;
+                                        return (
+                                          <div
+                                            key={reactionId}
+                                            className="reaction-chip"
+                                            style={
+                                              reactorColor
+                                                ? {
+                                                    borderColor: reactorColor,
+                                                    background: `color-mix(in srgb, ${reactorColor} 12%, transparent)`,
+                                                  }
+                                                : undefined
+                                            }
+                                          >
+                                            <ReactionIcon type={reactionId} size={14} />
+                                            <span>{reaction.count}</span>
+                                          </div>
+                                        );
+                                      })}
+                                    </div>
+                                  )}
                                 </div>
                               );
                             }
 
-                            const qReactions = qm.reactions
-                              ? (
-                                  Object.entries(qm.reactions) as [
-                                    ReactionId,
-                                    { count: number; by: string[] },
-                                  ][]
-                                ).filter(([, r]) => r?.count)
-                              : [];
-
-                            const strippedContent = stripQuoteTokens(qm.content);
-                            const truncated = strippedContent.slice(0, 200);
-                            const ellipsis = strippedContent.length > 200 ? "\u2026" : "";
+                            if (!segment.text) return null;
+                            if (segment.text.trim() === "") {
+                              return (
+                                <div
+                                  key={`${message.id}-text-${idx}`}
+                                  className="markdown-content"
+                                  style={{ whiteSpace: "pre-wrap" }}
+                                >
+                                  {segment.text}
+                                </div>
+                              );
+                            }
 
                             return (
-                              <div
-                                key={`${message.id}-quote-${idx}`}
-                                className="message-quote message-quote-clickable"
-                                onClick={() => jumpToMessage(segment.id)}
-                                role="button"
-                                tabIndex={0}
-                                onKeyDown={(e) => {
-                                  if (e.key === "Enter" || e.key === " ") jumpToMessage(segment.id);
-                                }}
-                              >
-                                <div className="message-quote-header">
-                                  {qm.displayName ?? AGENT_CONFIG[qm.agentId].name} ·{" "}
-                                  {formatTime(qm.timestamp)}
-                                </div>
-                                <div className="message-quote-body">
-                                  {truncated}
-                                  {ellipsis}
-                                </div>
-                                {qReactions.length > 0 && (
-                                  <div className="message-quote-reactions">
-                                    {qReactions.map(([reactionId, reaction]) => {
-                                      const reactorColor =
-                                        reaction.by.length === 1 && isCouncilAgent(reaction.by[0])
-                                          ? `var(--color-${reaction.by[0]})`
-                                          : undefined;
-                                      return (
-                                        <div
-                                          key={reactionId}
-                                          className="reaction-chip"
-                                          style={
-                                            reactorColor
-                                              ? {
-                                                  borderColor: reactorColor,
-                                                  background: `color-mix(in srgb, ${reactorColor} 12%, transparent)`,
-                                                }
-                                              : undefined
-                                          }
-                                        >
-                                          <ReactionIcon type={reactionId} size={14} />
-                                          <span>{reaction.count}</span>
-                                        </div>
-                                      );
-                                    })}
-                                  </div>
-                                )}
-                              </div>
-                            );
-                          }
-
-                          if (!segment.text) return null;
-                          if (segment.text.trim() === "") {
-                            return (
-                              <div
+                              <Markdown
                                 key={`${message.id}-text-${idx}`}
+                                content={segment.text}
                                 className="markdown-content"
-                                style={{ whiteSpace: "pre-wrap" }}
-                              >
-                                {segment.text}
-                              </div>
+                              />
                             );
-                          }
-
-                          return (
-                            <Markdown
-                              key={`${message.id}-text-${idx}`}
-                              content={segment.text}
-                              className="markdown-content"
-                            />
-                          );
                           });
                         })()
                       )}
                       {message.factCheckBadges && message.factCheckBadges.length > 0 ? (
                         <div style={{ marginTop: "0.4rem" }}>
-                          <FactCheckStrip
-                            badges={message.factCheckBadges as VerificationBadge[]}
-                          />
+                          <FactCheckStrip badges={message.factCheckBadges as VerificationBadge[]} />
                         </div>
                       ) : null}
                       {messageAttachments.length > 0 && (
@@ -7159,7 +7233,10 @@ Write the official moderator wrap-up in 4 short sentences:
             // Logs panel
             <div className="scale-in">
               <div className="flex items-center justify-between mb-4">
-                <h3 className="text-xs font-semibold text-ink-500 uppercase tracking-[0.24em]" style={{ fontFamily: "var(--font-mono)" }}>
+                <h3
+                  className="text-xs font-semibold text-ink-500 uppercase tracking-[0.24em]"
+                  style={{ fontFamily: "var(--font-mono)" }}
+                >
                   API Logs
                 </h3>
                 <button
@@ -7221,7 +7298,10 @@ Write the official moderator wrap-up in 4 short sentences:
             </>
           ) : (
             <>
-              <h3 className="text-xs font-semibold text-ink-500 uppercase tracking-[0.24em] mb-4" style={{ fontFamily: "var(--font-mono)" }}>
+              <h3
+                className="text-xs font-semibold text-ink-500 uppercase tracking-[0.24em] mb-4"
+                style={{ fontFamily: "var(--font-mono)" }}
+              >
                 Council Members
               </h3>
 
@@ -7243,7 +7323,8 @@ Write the official moderator wrap-up in 4 short sentences:
                       </div>
                       <div className="flex-1 min-w-0">
                         <div className={`text-sm font-medium truncate ${agent.color}`}>
-                          {agent.name}<span className="opacity-40"> & {AGENT_PARTNERS[agentId]}</span>
+                          {agent.name}
+                          <span className="opacity-40"> & {AGENT_PARTNERS[agentId]}</span>
                         </div>
                         <div className="text-xs text-ink-500 truncate">
                           {hasApiKey ? modelName : "No API key"}
@@ -7267,7 +7348,10 @@ Write the official moderator wrap-up in 4 short sentences:
               {/* Bidding display */}
               {showBidding && currentBidding && (
                 <div className="scale-in">
-                  <h3 className="text-xs font-semibold text-ink-500 uppercase tracking-[0.24em] mb-3" style={{ fontFamily: "var(--font-mono)" }}>
+                  <h3
+                    className="text-xs font-semibold text-ink-500 uppercase tracking-[0.24em] mb-3"
+                    style={{ fontFamily: "var(--font-mono)" }}
+                  >
                     Bidding Round
                   </h3>
                   <div className="panel-card p-3 space-y-2">
@@ -7311,7 +7395,10 @@ Write the official moderator wrap-up in 4 short sentences:
 
               <div className="panel-card p-4 mb-6">
                 <div className="flex items-center justify-between mb-3">
-                  <h3 className="text-[10px] font-semibold text-ink-500 uppercase tracking-[0.24em]" style={{ fontFamily: "var(--font-mono)" }}>
+                  <h3
+                    className="text-[10px] font-semibold text-ink-500 uppercase tracking-[0.24em]"
+                    style={{ fontFamily: "var(--font-mono)" }}
+                  >
                     Cost Ledger
                   </h3>
                   <span className="badge text-[10px]">
@@ -7378,7 +7465,10 @@ Write the official moderator wrap-up in 4 short sentences:
               {/* Discussion stats */}
               {!isRunning && currentTurn > 0 && (
                 <div className="mt-6 scale-in">
-                  <h3 className="text-xs font-semibold text-ink-500 uppercase tracking-[0.24em] mb-3" style={{ fontFamily: "var(--font-mono)" }}>
+                  <h3
+                    className="text-xs font-semibold text-ink-500 uppercase tracking-[0.24em] mb-3"
+                    style={{ fontFamily: "var(--font-mono)" }}
+                  >
                     Summary
                   </h3>
                   <div className="panel-card p-4 space-y-3">
@@ -7421,7 +7511,10 @@ Write the official moderator wrap-up in 4 short sentences:
       {/* Footer - Current speaker indicator */}
       {typingAgents.length > 0 && (
         <div className="app-footer px-6 py-3">
-          <div className="flex items-center justify-center gap-3 text-sm" style={{ fontFamily: "var(--font-mono)" }}>
+          <div
+            className="flex items-center justify-center gap-3 text-sm"
+            style={{ fontFamily: "var(--font-mono)" }}
+          >
             {typingAgents.slice(0, 3).map((agentId) => (
               <span key={agentId} className="flex items-center gap-2">
                 <ProviderIcon provider={AGENT_CONFIG[agentId].provider} size={18} />
@@ -7449,14 +7542,24 @@ Write the official moderator wrap-up in 4 short sentences:
             onClick={(e) => e.stopPropagation()}
           >
             <div className="graceful-end-confirm-icon">
-              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#fb923c" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <svg
+                width="28"
+                height="28"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="#fb923c"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
                 <path d="M5 5v14" />
                 <path d="m9 7 10 5-10 5V7Z" fill="#fb923c" stroke="none" />
               </svg>
             </div>
             <h3 className="graceful-end-confirm-title">End discussion?</h3>
             <p className="graceful-end-confirm-copy">
-              This will move to closing summaries. Each agent will give a final reflection, then the moderator will score the discussion. This action cannot be undone.
+              This will move to closing summaries. Each agent will give a final reflection, then the
+              moderator will score the discussion. This action cannot be undone.
             </p>
             <div className="graceful-end-confirm-actions">
               <button
@@ -7511,9 +7614,7 @@ Write the official moderator wrap-up in 4 short sentences:
               },
             }));
           }}
-          contradictionsCount={
-            argGraph.edges.filter((e) => e.relation === "contradicts").length
-          }
+          contradictionsCount={argGraph.edges.filter((e) => e.relation === "contradicts").length}
           onClose={() => setArgmapOpen(false)}
           onNavigateToMessage={jumpToMessage}
           messages={messages}

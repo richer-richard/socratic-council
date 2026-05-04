@@ -266,7 +266,11 @@ export function extractActions(raw: string, allowedReactions: readonly string[])
   const reactions: Array<{ targetId: string; emoji: string }> = [];
   const quoteTargets: string[] = [];
   const { cleaned: withoutTools, toolCalls } = extractToolCalls(raw);
-  const { cleaned: withoutEndDirective, endRequested, doneRequested } = stripEndDirective(withoutTools);
+  const {
+    cleaned: withoutEndDirective,
+    endRequested,
+    doneRequested,
+  } = stripEndDirective(withoutTools);
 
   let cleaned = withoutEndDirective.replace(/@quote\(([^)]+)\)/g, (_, target) => {
     const targetId = String(target).trim();

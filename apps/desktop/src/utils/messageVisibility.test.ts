@@ -69,18 +69,14 @@ describe("isPublicContextMessage — what every agent may see", () => {
   });
 
   it("excludes observer notes", () => {
-    expect(
-      isPublicContextMessage(observerNote("gavin", "Gavin", "george", "George")),
-    ).toBe(false);
+    expect(isPublicContextMessage(observerNote("gavin", "Gavin", "george", "George"))).toBe(false);
   });
 
   it("excludes streaming, errored, empty, and placeholder messages", () => {
-    expect(
-      isPublicContextMessage({ agentId: "george", content: "hi", isStreaming: true }),
-    ).toBe(false);
-    expect(
-      isPublicContextMessage({ agentId: "george", content: "", error: "boom" }),
-    ).toBe(false);
+    expect(isPublicContextMessage({ agentId: "george", content: "hi", isStreaming: true })).toBe(
+      false,
+    );
+    expect(isPublicContextMessage({ agentId: "george", content: "", error: "boom" })).toBe(false);
     expect(isPublicContextMessage({ agentId: "george", content: "   " })).toBe(false);
     expect(
       isPublicContextMessage({
@@ -130,13 +126,7 @@ describe("full transcript — isolation scenarios", () => {
     councilMsg("george", "I propose X."),
     councilMsg("cathy", "X is ethically questionable."),
     observerNote("gavin", "Gavin", "george", "George", "lean on empirical precedent"),
-    observerNote(
-      "celeste",
-      "Celeste",
-      "cathy",
-      "Cathy",
-      "press on the deontological edge case",
-    ),
+    observerNote("celeste", "Celeste", "cathy", "Cathy", "press on the deontological edge case"),
     councilMsg("grace", "Empirical data supports X with caveats."),
     observerNote("gideon", "Gideon", "grace", "Grace", "remind them about the 2024 study"),
     { agentId: "george", content: "still drafting", isStreaming: true },

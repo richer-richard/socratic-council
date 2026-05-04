@@ -1,10 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import {
-  OBSERVER_CONFIG,
-  OBSERVER_IDS,
-  PARTNER_TO_OBSERVER,
-} from "@socratic-council/shared";
+import { OBSERVER_CONFIG, OBSERVER_IDS, PARTNER_TO_OBSERVER } from "@socratic-council/shared";
 import type { AgentId, ObserverId } from "@socratic-council/shared";
 
 import type { ObserverNote } from "./useObserverCircle";

@@ -184,9 +184,7 @@ describe("saveDiscussionSession (fix 2.5 atomicity)", () => {
       value: { localStorage: storage },
     });
 
-    expect(() => saveDiscussionSession(createSessionFixture())).toThrow(
-      SessionPersistenceError,
-    );
+    expect(() => saveDiscussionSession(createSessionFixture())).toThrow(SessionPersistenceError);
 
     // The session blob was written, then rolled back.
     expect(writes).toHaveLength(1);
@@ -263,9 +261,7 @@ describe("session round-trip (fix 2.17)", () => {
             kind: "claim",
             text: "Severity is the dominant deterrent.",
             aliases: [],
-            sources: [
-              { messageId: "msg_2", agentId: "george", timestamp: 1000 },
-            ],
+            sources: [{ messageId: "msg_2", agentId: "george", timestamp: 1000 }],
             strength: 0.7,
             status: "active",
             sourceMessageId: "msg_2",
@@ -276,9 +272,7 @@ describe("session round-trip (fix 2.17)", () => {
             kind: "evidence",
             text: "Helland & Tabarrok 2007.",
             aliases: [],
-            sources: [
-              { messageId: "msg_2", agentId: "george", timestamp: 1000 },
-            ],
+            sources: [{ messageId: "msg_2", agentId: "george", timestamp: 1000 }],
             strength: 0.5,
             status: "active",
             sourceMessageId: "msg_2",
@@ -363,9 +357,7 @@ describe("session round-trip (fix 2.17)", () => {
             kind: "claim",
             text: "Anchor claim.",
             aliases: [],
-            sources: [
-              { messageId: "msg_2", agentId: "george", timestamp: 1000 },
-            ],
+            sources: [{ messageId: "msg_2", agentId: "george", timestamp: 1000 }],
             strength: 0.5,
             status: "active",
             sourceMessageId: "msg_2",
@@ -403,10 +395,7 @@ describe("session round-trip (fix 2.17)", () => {
 
     // Corrupt the session blob in storage.
     const win = (globalThis as { window?: { localStorage: Storage } }).window!;
-    win.localStorage.setItem(
-      "socratic-council-session:session_corrupt",
-      "this is not valid JSON",
-    );
+    win.localStorage.setItem("socratic-council-session:session_corrupt", "this is not valid JSON");
     __resetSessionLoadFailureCountForTests();
 
     const loaded = loadDiscussionSession("session_corrupt");
@@ -490,10 +479,7 @@ describe("stabilizeStoredSessions (fix 2.3 preserve failing entries)", () => {
 
     // Corrupt the second session's stored blob so loadDiscussionSession returns null.
     const win = (globalThis as { window?: { localStorage: Storage } }).window!;
-    win.localStorage.setItem(
-      "socratic-council-session:session_corrupt",
-      "{not json}",
-    );
+    win.localStorage.setItem("socratic-council-session:session_corrupt", "{not json}");
 
     const stabilized = stabilizeStoredSessions();
     const ids = stabilized.map((s) => s.id);

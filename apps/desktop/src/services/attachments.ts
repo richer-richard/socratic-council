@@ -291,10 +291,7 @@ function readProjectIds(record: StoredAttachmentBlob): string[] {
   return record.projectId ? [record.projectId] : [];
 }
 
-function withSessionIds(
-  record: StoredAttachmentBlob,
-  sessionIds: string[],
-): StoredAttachmentBlob {
+function withSessionIds(record: StoredAttachmentBlob, sessionIds: string[]): StoredAttachmentBlob {
   return {
     ...record,
     sessionIds,
@@ -302,10 +299,7 @@ function withSessionIds(
   };
 }
 
-function withProjectIds(
-  record: StoredAttachmentBlob,
-  projectIds: string[],
-): StoredAttachmentBlob {
+function withProjectIds(record: StoredAttachmentBlob, projectIds: string[]): StoredAttachmentBlob {
   return {
     ...record,
     projectIds,
@@ -616,8 +610,8 @@ async function getOcrWorker(): Promise<OcrWorker> {
   if (!promise) {
     // Fix 2.14: clear the cached promise on failure so a transient bundle
     // load error doesn't permanently disable OCR until app restart.
-    promise = import("tesseract.js").then(({ createWorker }) =>
-      createWorker(TESSERACT_LANGS) as unknown as OcrWorker,
+    promise = import("tesseract.js").then(
+      ({ createWorker }) => createWorker(TESSERACT_LANGS) as unknown as OcrWorker,
     );
     ocrWorkerPromise = promise;
     const tracked = promise;
@@ -1360,9 +1354,7 @@ export async function createComposerAttachments(
   }
 
   if (attachments.length === 0 && failures.length > 0) {
-    throw new Error(
-      failures.map((f) => `${f.name}: ${f.message}`).join("\n"),
-    );
+    throw new Error(failures.map((f) => `${f.name}: ${f.message}`).join("\n"));
   }
 
   return { attachments, failures };
@@ -1467,9 +1459,7 @@ export async function persistRawAttachmentsForSession(
       sessionId,
       sessionIds: [sessionId],
       blob: enc.blob,
-      ...(enc.encrypted
-        ? { encrypted: true, originalMimeType: enc.originalMimeType }
-        : {}),
+      ...(enc.encrypted ? { encrypted: true, originalMimeType: enc.originalMimeType } : {}),
     });
   }
 
@@ -1639,9 +1629,8 @@ async function loadStoredAttachmentRecords(
       })),
     );
     return settled
-      .filter(
-        (entry): entry is { attachment: SessionAttachment; record: StoredAttachmentBlob } =>
-          Boolean(entry.record?.blob),
+      .filter((entry): entry is { attachment: SessionAttachment; record: StoredAttachmentBlob } =>
+        Boolean(entry.record?.blob),
       )
       .map(({ attachment, record }) => ({ attachment, record }));
   });
@@ -1663,24 +1652,22 @@ export async function deleteSessionAttachmentBlobs(sessionId: string): Promise<v
     const seen = new Set<string>();
 
     // Pull all candidate records via both indexes.
-    const newIndexHasIt = Array.from(store.indexNames).includes(
-      ATTACHMENT_BY_SESSION_IDS_INDEX,
-    );
+    const newIndexHasIt = Array.from(store.indexNames).includes(ATTACHMENT_BY_SESSION_IDS_INDEX);
     const lookups: Array<Promise<StoredAttachmentBlob[]>> = [];
     if (newIndexHasIt) {
       lookups.push(
         requestToPromise(
-          store
-            .index(ATTACHMENT_BY_SESSION_IDS_INDEX)
-            .getAll(sessionId) as IDBRequest<StoredAttachmentBlob[]>,
+          store.index(ATTACHMENT_BY_SESSION_IDS_INDEX).getAll(sessionId) as IDBRequest<
+            StoredAttachmentBlob[]
+          >,
         ),
       );
     }
     lookups.push(
       requestToPromise(
-        store
-          .index(ATTACHMENT_BY_SESSION_INDEX)
-          .getAll(sessionId) as IDBRequest<StoredAttachmentBlob[]>,
+        store.index(ATTACHMENT_BY_SESSION_INDEX).getAll(sessionId) as IDBRequest<
+          StoredAttachmentBlob[]
+        >,
       ),
     );
 
@@ -1842,24 +1829,22 @@ export async function loadProjectAttachmentBlobs(
 export async function deleteProjectAttachmentBlobs(projectId: string): Promise<void> {
   await withStore("readwrite", async (store) => {
     const seen = new Set<string>();
-    const newIndexHasIt = Array.from(store.indexNames).includes(
-      ATTACHMENT_BY_PROJECT_IDS_INDEX,
-    );
+    const newIndexHasIt = Array.from(store.indexNames).includes(ATTACHMENT_BY_PROJECT_IDS_INDEX);
     const lookups: Array<Promise<StoredAttachmentBlob[]>> = [];
     if (newIndexHasIt) {
       lookups.push(
         requestToPromise(
-          store
-            .index(ATTACHMENT_BY_PROJECT_IDS_INDEX)
-            .getAll(projectId) as IDBRequest<StoredAttachmentBlob[]>,
+          store.index(ATTACHMENT_BY_PROJECT_IDS_INDEX).getAll(projectId) as IDBRequest<
+            StoredAttachmentBlob[]
+          >,
         ),
       );
     }
     lookups.push(
       requestToPromise(
-        store
-          .index(ATTACHMENT_BY_PROJECT_INDEX)
-          .getAll(projectId) as IDBRequest<StoredAttachmentBlob[]>,
+        store.index(ATTACHMENT_BY_PROJECT_INDEX).getAll(projectId) as IDBRequest<
+          StoredAttachmentBlob[]
+        >,
       ),
     );
 

@@ -126,9 +126,8 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
               marginBottom: "1.4rem",
             }}
           >
-            Your sessions are still saved locally. Choose one of the paths
-            below — <em>Reset view</em> returns you to the home page,{" "}
-            <em>Reload</em> restarts the app.
+            Your sessions are still saved locally. Choose one of the paths below —{" "}
+            <em>Reset view</em> returns you to the home page, <em>Reload</em> restarts the app.
           </p>
 
           <details style={{ marginBottom: "1.5rem" }}>
@@ -176,12 +175,8 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
                 letterSpacing: "0.02em",
                 transition: "all 120ms ease",
               }}
-              onMouseEnter={(e) =>
-                (e.currentTarget.style.background = "rgba(245, 197, 66, 0.16)")
-              }
-              onMouseLeave={(e) =>
-                (e.currentTarget.style.background = "rgba(245, 197, 66, 0.08)")
-              }
+              onMouseEnter={(e) => (e.currentTarget.style.background = "rgba(245, 197, 66, 0.16)")}
+              onMouseLeave={(e) => (e.currentTarget.style.background = "rgba(245, 197, 66, 0.08)")}
             >
               Reset view
             </button>
@@ -201,12 +196,8 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
                 letterSpacing: "0.02em",
                 transition: "all 120ms ease",
               }}
-              onMouseEnter={(e) =>
-                (e.currentTarget.style.background = "rgba(232, 232, 239, 0.1)")
-              }
-              onMouseLeave={(e) =>
-                (e.currentTarget.style.background = "rgba(232, 232, 239, 0.04)")
-              }
+              onMouseEnter={(e) => (e.currentTarget.style.background = "rgba(232, 232, 239, 0.1)")}
+              onMouseLeave={(e) => (e.currentTarget.style.background = "rgba(232, 232, 239, 0.04)")}
             >
               Reload app
             </button>

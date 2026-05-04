@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { createStreamingToolCallDetector, extractActions, stripProviderToolSyntax } from "./toolActions";
+import {
+  createStreamingToolCallDetector,
+  extractActions,
+  stripProviderToolSyntax,
+} from "./toolActions";
 
 describe("toolActions", () => {
   it("extracts tool directives and removes them from visible content", () => {
@@ -81,9 +85,7 @@ describe("toolActions", () => {
       ["👍"],
     );
     expect(parsed.cleaned).toBe("Let me search the registry:  for context.");
-    expect(parsed.toolCalls).toEqual([
-      { name: "oracle.web_search", args: { query: "test" } },
-    ]);
+    expect(parsed.toolCalls).toEqual([{ name: "oracle.web_search", args: { query: "test" } }]);
   });
 
   it("strips standalone @tool directives that appear after prose on earlier lines", () => {
@@ -100,9 +102,7 @@ describe("toolActions", () => {
     expect(parsed.cleaned).toBe(
       ["First, some context that the council needs.", "", "Then my response."].join("\n"),
     );
-    expect(parsed.toolCalls).toEqual([
-      { name: "oracle.web_search", args: { query: "another" } },
-    ]);
+    expect(parsed.toolCalls).toEqual([{ name: "oracle.web_search", args: { query: "another" } }]);
   });
 });
 
@@ -145,10 +145,7 @@ describe("extractActions — malformed directives", () => {
   });
 
   it("strips inline @end() at the end of a sentence and sets endRequested", () => {
-    const parsed = extractActions(
-      "...operationalizable cutoff. @end()",
-      [],
-    );
+    const parsed = extractActions("...operationalizable cutoff. @end()", []);
     expect(parsed.cleaned).not.toContain("@end");
     expect(parsed.cleaned).toBe("...operationalizable cutoff.");
     expect(parsed.endRequested).toBe(true);
@@ -169,13 +166,8 @@ describe("extractActions — malformed directives", () => {
   });
 
   it("still parses a valid @tool(...) directive (regression)", () => {
-    const parsed = extractActions(
-      '@tool(oracle.web_search, {"query":"foo"})',
-      [],
-    );
-    expect(parsed.toolCalls).toEqual([
-      { name: "oracle.web_search", args: { query: "foo" } },
-    ]);
+    const parsed = extractActions('@tool(oracle.web_search, {"query":"foo"})', []);
+    expect(parsed.toolCalls).toEqual([{ name: "oracle.web_search", args: { query: "foo" } }]);
     expect(parsed.cleaned).toBe("");
   });
 });

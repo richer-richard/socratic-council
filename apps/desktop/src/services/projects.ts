@@ -1,8 +1,5 @@
 import type { AttachmentKind } from "./attachments";
-import {
-  aliasAttachmentRecordToProject,
-  deleteProjectAttachmentBlobs,
-} from "./attachments";
+import { aliasAttachmentRecordToProject, deleteProjectAttachmentBlobs } from "./attachments";
 import type { SessionSummary } from "./sessions";
 import { listSessionSummaries } from "./sessions";
 import { decryptString, encryptString, isEnvelopedCiphertext } from "./vault";
@@ -254,11 +251,7 @@ export function saveProject(project: Project): Project {
   }
 
   try {
-    writeSecureItem(
-      storage,
-      createProjectStorageKey(normalized.id),
-      JSON.stringify(normalized),
-    );
+    writeSecureItem(storage, createProjectStorageKey(normalized.id), JSON.stringify(normalized));
     writeProjectIndex(
       replaceProjectIndexEntry(readProjectIndex(), buildProjectSummary(normalized)),
     );
