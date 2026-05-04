@@ -1,6 +1,6 @@
 {
   "name": "socratic-council",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "description": "A real-time multi-agent group chat where seven AI agents debate any topic",
   "private": true,
   "type": "module",
