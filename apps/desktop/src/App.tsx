@@ -207,12 +207,7 @@ export default function App() {
       try {
         const liveCap = getMaxTurnsLive();
         const capSnapshot = liveCap === Infinity ? null : liveCap;
-        const session = await createDiscussionSession(
-          topic,
-          attachments,
-          projectId,
-          capSnapshot,
-        );
+        const session = await createDiscussionSession(topic, attachments, projectId, capSnapshot);
         setAppError(null);
         setActiveSession(session);
         if (projectId) {
@@ -399,9 +394,8 @@ export default function App() {
           >
             <h2 className="text-lg font-semibold text-red-300">Encryption is unavailable</h2>
             <p className="text-sm text-gray-300 leading-relaxed">
-              The encryption key file couldn't be initialized on this machine.
-              Sessions and API keys can't be safely stored right now. This
-              usually means filesystem permissions on{" "}
+              The encryption key file couldn't be initialized on this machine. Sessions and API keys
+              can't be safely stored right now. This usually means filesystem permissions on{" "}
               <code className="text-gray-200">
                 ~/Library/Application Support/com.socratic-council.desktop/
               </code>{" "}
@@ -419,10 +413,7 @@ export default function App() {
                 type="button"
                 onClick={() => {
                   try {
-                    sessionStorage.setItem(
-                      "socratic-council-encryption-bypass-acked",
-                      "1",
-                    );
+                    sessionStorage.setItem("socratic-council-encryption-bypass-acked", "1");
                   } catch {
                     /* sessionStorage unavailable; bypass stays in-memory only */
                   }
@@ -434,9 +425,8 @@ export default function App() {
               </button>
             </div>
             <p className="text-xs text-gray-500 leading-relaxed">
-              Continuing without encryption stores keys and sessions in plain
-              text on disk for this session only. The setting resets when you
-              relaunch the app.
+              Continuing without encryption stores keys and sessions in plain text on disk for this
+              session only. The setting resets when you relaunch the app.
             </p>
           </div>
         </div>
@@ -455,11 +445,12 @@ export default function App() {
         {vaultRecoveryNotice ? (
           <div className="border-b border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-100 flex items-start gap-3">
             <div style={{ flex: 1 }}>
-              <strong>Encrypted data may be unrecoverable.</strong>{" "}
-              The vault DEK file was unreadable on this boot
+              <strong>Encrypted data may be unrecoverable.</strong> The vault DEK file was
+              unreadable on this boot
               {vaultRecoveryNotice.quarantinePath ? (
                 <>
-                  {" "}and was quarantined to{" "}
+                  {" "}
+                  and was quarantined to{" "}
                   <code style={{ wordBreak: "break-all" }}>
                     {vaultRecoveryNotice.quarantinePath}
                   </code>
@@ -469,12 +460,12 @@ export default function App() {
               {vaultRecoveryNotice.failedDecrypts > 0 ? (
                 <>
                   {vaultRecoveryNotice.failedDecrypts} encrypted entr
-                  {vaultRecoveryNotice.failedDecrypts === 1 ? "y" : "ies"} failed to decrypt
-                  during startup.
+                  {vaultRecoveryNotice.failedDecrypts === 1 ? "y" : "ies"} failed to decrypt during
+                  startup.
                 </>
               ) : null}{" "}
-              If you have a backup of the original{" "}
-              <code>vault.key</code> file, restoring it should recover your data.
+              If you have a backup of the original <code>vault.key</code> file, restoring it should
+              recover your data.
             </div>
             <button
               type="button"

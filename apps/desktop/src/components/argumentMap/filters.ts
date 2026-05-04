@@ -1,9 +1,4 @@
-import type {
-  ArgEdge,
-  ArgEdgeRelation,
-  ArgGraph,
-  ArgNode,
-} from "@socratic-council/core";
+import type { ArgEdge, ArgEdgeRelation, ArgGraph, ArgNode } from "@socratic-council/core";
 
 import type { PanelFilters } from "./types";
 
@@ -16,8 +11,15 @@ export function applyFilters(
   graph: ArgGraph,
   filters: PanelFilters,
 ): { nodes: ArgNode[]; edges: ArgEdge[] } {
-  const { agentIds, hiddenRelations, onlyContested, onlyVerified, onlyUnresolved, sinceTurnTimestamp, search } =
-    filters;
+  const {
+    agentIds,
+    hiddenRelations,
+    onlyContested,
+    onlyVerified,
+    onlyUnresolved,
+    sinceTurnTimestamp,
+    search,
+  } = filters;
   const agentSet = agentIds.length > 0 ? new Set(agentIds) : null;
   const needle = search.trim().toLowerCase();
 
@@ -77,9 +79,7 @@ export function applyFilters(
   }
 
   // Re-prune edges after onlyContested may have removed nodes.
-  const finalEdges = visibleEdges.filter(
-    (e) => passedById.has(e.from) && passedById.has(e.to),
-  );
+  const finalEdges = visibleEdges.filter((e) => passedById.has(e.from) && passedById.has(e.to));
 
   return {
     nodes: Array.from(passedById.values()),

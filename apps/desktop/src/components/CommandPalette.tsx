@@ -54,9 +54,7 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
   useEffect(() => {
     // Scroll the active row into view.
     if (!listRef.current) return;
-    const row = listRef.current.querySelector<HTMLElement>(
-      `[data-row-index="${selectedIndex}"]`,
-    );
+    const row = listRef.current.querySelector<HTMLElement>(`[data-row-index="${selectedIndex}"]`);
     row?.scrollIntoView({ block: "nearest", behavior: "smooth" });
   }, [selectedIndex]);
 
@@ -199,9 +197,7 @@ function CommandRow({
         borderRadius: "8px",
         cursor: "pointer",
         background: active ? "rgba(245, 197, 66, 0.1)" : "transparent",
-        border: active
-          ? "1px solid rgba(245, 197, 66, 0.32)"
-          : "1px solid transparent",
+        border: active ? "1px solid rgba(245, 197, 66, 0.32)" : "1px solid transparent",
         transition: "background 120ms ease, border-color 120ms ease",
       }}
     >

@@ -40,7 +40,10 @@ export interface CanvasDirective {
 // Parsing helpers
 // ---------------------------------------------------------------------------
 
-function parseCanvasDirectiveAt(raw: string, start: number): { directive: CanvasDirective | null; end: number } | null {
+function parseCanvasDirectiveAt(
+  raw: string,
+  start: number,
+): { directive: CanvasDirective | null; end: number } | null {
   if (!raw.startsWith(CANVAS_PREFIX, start)) return null;
 
   let cursor = start + CANVAS_PREFIX.length;
@@ -52,22 +55,44 @@ function parseCanvasDirectiveAt(raw: string, start: number): { directive: Canvas
     const char = raw[cursor];
 
     if (inString) {
-      if (escaped) { escaped = false; continue; }
-      if (char === "\\") { escaped = true; continue; }
-      if (char === '"') { inString = false; }
+      if (escaped) {
+        escaped = false;
+        continue;
+      }
+      if (char === "\\") {
+        escaped = true;
+        continue;
+      }
+      if (char === '"') {
+        inString = false;
+      }
       continue;
     }
 
-    if (char === '"') { inString = true; continue; }
-    if (char === "{") { braceDepth += 1; continue; }
-    if (char === "}") { braceDepth = Math.max(0, braceDepth - 1); continue; }
+    if (char === '"') {
+      inString = true;
+      continue;
+    }
+    if (char === "{") {
+      braceDepth += 1;
+      continue;
+    }
+    if (char === "}") {
+      braceDepth = Math.max(0, braceDepth - 1);
+      continue;
+    }
 
     if (char === ")" && braceDepth === 0) {
       const argsText = raw.slice(start + CANVAS_PREFIX.length, cursor).trim();
       let directive: CanvasDirective | null = null;
 
       const tryExtractDirective = (obj: unknown): CanvasDirective | null => {
-        if (!obj || typeof obj !== "object" || typeof (obj as Record<string, unknown>).op !== "string") return null;
+        if (
+          !obj ||
+          typeof obj !== "object" ||
+          typeof (obj as Record<string, unknown>).op !== "string"
+        )
+          return null;
         const rec = obj as Record<string, unknown>;
         const op = rec.op as string;
         if (op !== "append" && op !== "replace" && op !== "clear") return null;
@@ -108,7 +133,10 @@ function parseCanvasDirectiveAt(raw: string, start: number): { directive: Canvas
 // Static extraction (post-stream)
 // ---------------------------------------------------------------------------
 
-export function extractCanvasDirectives(raw: string): { cleaned: string; directives: CanvasDirective[] } {
+export function extractCanvasDirectives(raw: string): {
+  cleaned: string;
+  directives: CanvasDirective[];
+} {
   const directives: CanvasDirective[] = [];
   let cleaned = "";
   let cursor = 0;
@@ -202,7 +230,8 @@ export function createStreamingCanvasDetector() {
 
       return {
         directives,
-        visibleText: committedVisible + (pendingLine.trim().startsWith(CANVAS_PREFIX) ? "" : pendingLine),
+        visibleText:
+          committedVisible + (pendingLine.trim().startsWith(CANVAS_PREFIX) ? "" : pendingLine),
       };
     },
     finish() {
@@ -218,7 +247,11 @@ export function createStreamingCanvasDetector() {
 
       return {
         directives,
-        visibleText: committedVisible.replace(/\r\n/g, "\n").replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim(),
+        visibleText: committedVisible
+          .replace(/\r\n/g, "\n")
+          .replace(/[ \t]+\n/g, "\n")
+          .replace(/\n{3,}/g, "\n\n")
+          .trim(),
       };
     },
     getVisibleText() {
@@ -271,7 +304,12 @@ export function applyCanvasDirective(
       ...base,
       sections: [
         ...base.sections,
-        { id: `cs_${now}_${Math.random().toString(36).slice(2, 7)}`, label: directive.section, text: directive.text.slice(0, MAX_SECTION_LENGTH), updatedAt: now },
+        {
+          id: `cs_${now}_${Math.random().toString(36).slice(2, 7)}`,
+          label: directive.section,
+          text: directive.text.slice(0, MAX_SECTION_LENGTH),
+          updatedAt: now,
+        },
       ],
       lastUpdatedTurn: turn,
       lastUpdatedAt: now,
@@ -295,7 +333,12 @@ export function applyCanvasDirective(
       ...base,
       sections: [
         ...base.sections,
-        { id: `cs_${now}_${Math.random().toString(36).slice(2, 7)}`, label: directive.section, text: directive.text.slice(0, MAX_SECTION_LENGTH), updatedAt: now },
+        {
+          id: `cs_${now}_${Math.random().toString(36).slice(2, 7)}`,
+          label: directive.section,
+          text: directive.text.slice(0, MAX_SECTION_LENGTH),
+          updatedAt: now,
+        },
       ],
       lastUpdatedTurn: turn,
       lastUpdatedAt: now,

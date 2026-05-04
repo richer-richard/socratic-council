@@ -134,10 +134,7 @@ function classify(
  * whenever `sessionUSD` changes (e.g., after each turn). The highest-severity
  * verdict wins: `stop` > `pause` > `warn` > `ok`.
  */
-export function evaluateBudget(
-  sessionUSD: number,
-  policy: BudgetPolicy,
-): BudgetSnapshot {
+export function evaluateBudget(sessionUSD: number, policy: BudgetPolicy): BudgetSnapshot {
   const dailyUSD = getDailyCostUSD();
   const session = classify(sessionUSD, policy.perSession, "session", policy.action);
   const daily = classify(dailyUSD, policy.perDay, "day", policy.action);

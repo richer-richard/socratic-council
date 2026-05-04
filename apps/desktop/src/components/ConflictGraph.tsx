@@ -68,7 +68,10 @@ export function ConflictGraph({ conflicts, agents }: ConflictGraphProps) {
 
   return (
     <div className="panel-card p-4 mb-6">
-      <h3 className="text-xs font-semibold text-ink-500 uppercase tracking-[0.24em] mb-3" style={{ fontFamily: "var(--font-mono)" }}>
+      <h3
+        className="text-xs font-semibold text-ink-500 uppercase tracking-[0.24em] mb-3"
+        style={{ fontFamily: "var(--font-mono)" }}
+      >
         Conflict Graph
       </h3>
       <svg viewBox="0 0 240 230" width="100%" style={{ maxWidth: 280 }}>
@@ -119,19 +122,25 @@ export function ConflictGraph({ conflicts, agents }: ConflictGraphProps) {
       </svg>
       {/* Legend */}
       <div className="flex items-center justify-between mt-2 px-1">
-        <span className="text-[10px] text-ink-400" style={{ fontFamily: "var(--font-mono)" }}>Low</span>
+        <span className="text-[10px] text-ink-400" style={{ fontFamily: "var(--font-mono)" }}>
+          Low
+        </span>
         <div
           className="flex-1 mx-2 h-1.5 rounded-full"
           style={{
             background: `linear-gradient(to right, ${scoreToColor(0)}, ${scoreToColor(0.5)}, ${scoreToColor(1)})`,
           }}
         />
-        <span className="text-[10px] text-ink-400" style={{ fontFamily: "var(--font-mono)" }}>High</span>
+        <span className="text-[10px] text-ink-400" style={{ fontFamily: "var(--font-mono)" }}>
+          High
+        </span>
       </div>
 
       {sortedPairs.length > 0 && (
         <div className="mt-3">
-          <div className="text-[11px] text-ink-500" style={{ fontFamily: "var(--font-mono)" }}>Top tension</div>
+          <div className="text-[11px] text-ink-500" style={{ fontFamily: "var(--font-mono)" }}>
+            Top tension
+          </div>
           <div className="mt-2 space-y-1">
             {sortedPairs.map((pair) => {
               const key = `${pair.agents[0]}-${pair.agents[1]}`;
@@ -141,7 +150,10 @@ export function ConflictGraph({ conflicts, agents }: ConflictGraphProps) {
                   className="grid grid-cols-[1fr,3.25rem] items-center gap-3 text-[11px]"
                 >
                   <div className="truncate">{renderPairLabel(pair)}</div>
-                  <div className="text-ink-400 tabular-nums text-right" style={{ fontFamily: "var(--font-mono)" }}>
+                  <div
+                    className="text-ink-400 tabular-nums text-right"
+                    style={{ fontFamily: "var(--font-mono)" }}
+                  >
                     {pair.score.toFixed(6)}
                   </div>
                 </div>
@@ -151,7 +163,10 @@ export function ConflictGraph({ conflicts, agents }: ConflictGraphProps) {
         </div>
       )}
 
-      <p className="mt-2 text-[11px] text-ink-400 leading-relaxed" style={{ fontFamily: "var(--font-mono)" }}>
+      <p
+        className="mt-2 text-[11px] text-ink-400 leading-relaxed"
+        style={{ fontFamily: "var(--font-mono)" }}
+      >
         Scores are heuristic: they weight disagreement cues (e.g. “wrong”, “not convinced”) plus
         back-and-forth alternation over recent turns. Use as a vibe check, not a verdict.
       </p>

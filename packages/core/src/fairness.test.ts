@@ -3,16 +3,7 @@ import { describe, expect, it } from "vitest";
 import { FairnessManager } from "./fairness.js";
 import type { AgentId } from "@socratic-council/shared";
 
-const ALL: AgentId[] = [
-  "george",
-  "cathy",
-  "grace",
-  "douglas",
-  "kate",
-  "quinn",
-  "mary",
-  "zara",
-];
+const ALL: AgentId[] = ["george", "cathy", "grace", "douglas", "kate", "quinn", "mary", "zara"];
 
 describe("FairnessManager", () => {
   it("heavily penalizes the most recent speaker", () => {

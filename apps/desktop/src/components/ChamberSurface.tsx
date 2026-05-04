@@ -98,8 +98,7 @@ export function ChamberSurface({
           backdropFilter: "blur(12px)",
           boxShadow:
             "0 24px 60px -12px rgba(0, 0, 0, 0.6), 0 0 36px rgba(245, 197, 66, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.04)",
-          fontFamily:
-            "'Manrope', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+          fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
           color: "rgba(232, 232, 239, 0.92)",
           animation:
             anchor === "top"
@@ -141,8 +140,7 @@ export function ChamberSurface({
               <div
                 style={{
                   fontSize: "0.68rem",
-                  fontFamily:
-                    "'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace",
+                  fontFamily: "'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace",
                   color: "rgba(232, 232, 239, 0.44)",
                   whiteSpace: "nowrap",
                 }}

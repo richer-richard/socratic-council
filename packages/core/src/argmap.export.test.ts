@@ -1,9 +1,6 @@
 import { describe, it, expect } from "vitest";
 
-import {
-  exportArgGraphToJSON,
-  exportArgGraphToMermaid,
-} from "./argmap.export.js";
+import { exportArgGraphToJSON, exportArgGraphToMermaid } from "./argmap.export.js";
 import { emptyGraph, updateArgumentMap, type ArgGraph } from "./argmap.js";
 
 function buildGraph(): ArgGraph {

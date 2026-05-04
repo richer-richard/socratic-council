@@ -160,16 +160,14 @@ describe("consolidateArgGraph", () => {
 
   it("adds a contradicts edge ONLY after semanticConflictCheck confirms it", async () => {
     let g: ArgGraph = emptyGraph();
-    g = updateArgumentMap(
-      g,
-      [{ kind: "claim", text: "Markets allocate better." }],
-      { messageId: "m1", agentId: "george" },
-    );
-    g = updateArgumentMap(
-      g,
-      [{ kind: "claim", text: "Central planning beats markets." }],
-      { messageId: "m2", agentId: "cathy" },
-    );
+    g = updateArgumentMap(g, [{ kind: "claim", text: "Markets allocate better." }], {
+      messageId: "m1",
+      agentId: "george",
+    });
+    g = updateArgumentMap(g, [{ kind: "claim", text: "Central planning beats markets." }], {
+      messageId: "m2",
+      agentId: "cathy",
+    });
 
     // Path 1: NLI says contradicts → edge added.
     let nliCalls = 0;
@@ -237,11 +235,10 @@ describe("consolidateArgGraph", () => {
       messageId: "m1",
       agentId: "george",
     });
-    g = updateArgumentMap(
-      g,
-      [{ kind: "evidence", text: "stray", targetClaim: "nonexistent" }],
-      { messageId: "m2", agentId: "douglas" },
-    );
+    g = updateArgumentMap(g, [{ kind: "evidence", text: "stray", targetClaim: "nonexistent" }], {
+      messageId: "m2",
+      agentId: "douglas",
+    });
     expect(g.orphans).toHaveLength(1);
     const orphanId = g.orphans[0]!.id;
 
@@ -273,11 +270,10 @@ describe("consolidateArgGraph", () => {
 
   it("drops an orphan whose anchorClaimId is null", async () => {
     let g: ArgGraph = emptyGraph();
-    g = updateArgumentMap(
-      g,
-      [{ kind: "evidence", text: "loose", targetClaim: "nope" }],
-      { messageId: "m1", agentId: "kate" },
-    );
+    g = updateArgumentMap(g, [{ kind: "evidence", text: "loose", targetClaim: "nope" }], {
+      messageId: "m1",
+      agentId: "kate",
+    });
     const orphanId = g.orphans[0]!.id;
     const out = await consolidateArgGraph(
       { topic: "x", graph: g, recentMessages: [], knownAgentNames: [] },
@@ -300,11 +296,10 @@ describe("consolidateArgGraph", () => {
 
   it("sets the axis and stance polarity from the model's proposal", async () => {
     let g: ArgGraph = emptyGraph();
-    g = updateArgumentMap(
-      g,
-      [{ kind: "claim", text: "Markets allocate better." }],
-      { messageId: "m1", agentId: "george" },
-    );
+    g = updateArgumentMap(g, [{ kind: "claim", text: "Markets allocate better." }], {
+      messageId: "m1",
+      agentId: "george",
+    });
 
     const out = await consolidateArgGraph(
       {
@@ -409,10 +404,7 @@ describe("extractPremisesFromSummary", () => {
 
   it("supports * and bullet symbols too", () => {
     const summary = "PREMISES:\n* A premise.\n• Another.";
-    expect(extractPremisesFromSummary(summary)).toEqual([
-      "A premise.",
-      "Another.",
-    ]);
+    expect(extractPremisesFromSummary(summary)).toEqual(["A premise.", "Another."]);
   });
 
   it("returns [] when there is no PREMISES section", () => {

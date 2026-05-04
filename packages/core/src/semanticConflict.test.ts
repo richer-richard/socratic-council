@@ -15,16 +15,14 @@ describe("parseSemanticResponse", () => {
   });
 
   it("handles code-fenced output", () => {
-    const res = parseSemanticResponse(
-      "```json\n{\"verdict\":\"entails\",\"confidence\":0.7}\n```",
-    );
+    const res = parseSemanticResponse('```json\n{"verdict":"entails","confidence":0.7}\n```');
     expect(res.verdict).toBe("entails");
     expect(res.confidence).toBeCloseTo(0.7);
   });
 
   it("tolerates leading prose then the JSON object", () => {
     const res = parseSemanticResponse(
-      "Here is my verdict: {\"verdict\":\"neutral\",\"confidence\":0.2} — that's my answer.",
+      'Here is my verdict: {"verdict":"neutral","confidence":0.2} — that\'s my answer.',
     );
     expect(res.verdict).toBe("neutral");
     expect(res.confidence).toBeCloseTo(0.2);
@@ -63,9 +61,7 @@ describe("adjustmentFor", () => {
 
 describe("semanticConflictCheck — end-to-end with an injected completion", () => {
   it("returns structured result from a well-formed response", async () => {
-    const complete = vi
-      .fn()
-      .mockResolvedValue('{"verdict":"contradicts","confidence":0.85}');
+    const complete = vi.fn().mockResolvedValue('{"verdict":"contradicts","confidence":0.85}');
     const result = await semanticConflictCheck(
       {
         topic: "AI rights",
@@ -90,9 +86,7 @@ describe("semanticConflictCheck — end-to-end with an injected completion", () 
 
   it("catches the quoted-disagreement false positive", async () => {
     // The classic regex false positive: both agents agree about a third party.
-    const complete = vi
-      .fn()
-      .mockResolvedValue('{"verdict":"entails","confidence":0.9}');
+    const complete = vi.fn().mockResolvedValue('{"verdict":"entails","confidence":0.9}');
     const result = await semanticConflictCheck(
       {
         topic: "X",

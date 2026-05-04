@@ -57,9 +57,7 @@ describe("ConversationMemoryManager engagement debt (fixes 5.3, 5.5, 5.6, 5.8)",
 
     // Pile up many "X mentioned by name" debts.
     for (let i = 0; i < 200; i++) {
-      memory.addMessage(
-        msg(`m${i}`, "cathy", `George, point ${i}.`, i),
-      );
+      memory.addMessage(msg(`m${i}`, "cathy", `George, point ${i}.`, i));
     }
     const debts = memory.getEngagementDebts("george");
     // The cap is 64; older entries should be evicted.

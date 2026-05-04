@@ -358,9 +358,7 @@ export function buildExtractPrompt(input: ExtractInput): {
 
   if (input.clusterLabels && input.clusterLabels.length > 0) {
     lines.push("");
-    lines.push(
-      `Current camps: ${input.clusterLabels.map((l) => `"${l}"`).join(", ")}`,
-    );
+    lines.push(`Current camps: ${input.clusterLabels.map((l) => `"${l}"`).join(", ")}`);
   }
 
   lines.push("");
@@ -369,19 +367,14 @@ export function buildExtractPrompt(input: ExtractInput): {
     lines.push("(none yet)");
   } else {
     for (const c of input.priorClaims) {
-      const polarity =
-        typeof c.polarity === "number"
-          ? ` [polarity=${c.polarity.toFixed(2)}]`
-          : "";
+      const polarity = typeof c.polarity === "number" ? ` [polarity=${c.polarity.toFixed(2)}]` : "";
       lines.push(`- [${c.id}] ${c.text}${polarity}`);
     }
   }
 
   if (input.openQuestions && input.openQuestions.length > 0) {
     lines.push("");
-    lines.push(
-      "OPEN QUESTIONS (an emitted node can answer or address one of these):",
-    );
+    lines.push("OPEN QUESTIONS (an emitted node can answer or address one of these):");
     for (const q of input.openQuestions) {
       lines.push(`- [${q.id}] ${q.text}`);
     }
@@ -440,8 +433,7 @@ export function parseExtractResponse(raw: string | null): ExtractedFragment[] {
       if (typeof relation !== "string" || !EDGE_RELATION_SET.has(relation)) {
         continue;
       }
-      const confidence =
-        typeof rec.confidence === "number" ? clamp(rec.confidence, 0, 1) : 0.5;
+      const confidence = typeof rec.confidence === "number" ? clamp(rec.confidence, 0, 1) : 0.5;
       const rationale =
         typeof rec.rationale === "string" && rec.rationale.trim().length > 0
           ? rec.rationale.trim().slice(0, 200)
@@ -464,10 +456,8 @@ export function parseExtractResponse(raw: string | null): ExtractedFragment[] {
       typeof rec.targetClaim === "string" && rec.targetClaim.trim().length > 0
         ? rec.targetClaim.trim().slice(0, 240)
         : undefined;
-    const polarity =
-      typeof rec.polarity === "number" ? clamp(rec.polarity, -1, 1) : undefined;
-    const strength =
-      typeof rec.strength === "number" ? clamp(rec.strength, 0, 1) : undefined;
+    const polarity = typeof rec.polarity === "number" ? clamp(rec.polarity, -1, 1) : undefined;
+    const strength = typeof rec.strength === "number" ? clamp(rec.strength, 0, 1) : undefined;
     out.push({
       kind: kind as ArgNodeKind,
       text: text.slice(0, 240),
@@ -575,8 +565,7 @@ function findClaimMergeTarget(graph: ArgGraph, text: string): ArgNode | null {
   const exact = graph.nodes.find(
     (n) =>
       n.kind === "claim" &&
-      (n.text.toLowerCase() === lower ||
-        n.aliases.some((a) => a.toLowerCase() === lower)),
+      (n.text.toLowerCase() === lower || n.aliases.some((a) => a.toLowerCase() === lower)),
   );
   if (exact) return exact;
   for (const n of graph.nodes) {
@@ -812,9 +801,7 @@ export function migrateArgGraphV1ToV2(input: unknown): ArgGraph {
     }));
 
   const lastMessageId =
-    typeof v1.lastMessageId === "string" && v1.lastMessageId.length > 0
-      ? v1.lastMessageId
-      : null;
+    typeof v1.lastMessageId === "string" && v1.lastMessageId.length > 0 ? v1.lastMessageId : null;
 
   return {
     nodes,
@@ -1008,9 +995,7 @@ export function buildConsolidationPrompt(input: ConsolidationInput): {
  * null when the response can't be parsed at all (so the caller leaves the
  * graph untouched).
  */
-export function parseConsolidationResponse(
-  raw: string | null,
-): ConsolidationOps | null {
+export function parseConsolidationResponse(raw: string | null): ConsolidationOps | null {
   if (!raw) return null;
   const trimmed = raw
     .trim()
@@ -1097,8 +1082,7 @@ export function parseConsolidationResponse(
       const from = c.from.trim();
       const to = c.to.trim();
       if (!from || !to || from === to) continue;
-      const confidence =
-        typeof c.confidence === "number" ? clamp(c.confidence, 0, 1) : 0.5;
+      const confidence = typeof c.confidence === "number" ? clamp(c.confidence, 0, 1) : 0.5;
       const rationale =
         typeof c.rationale === "string" && c.rationale.trim().length > 0
           ? c.rationale.trim().slice(0, 200)
@@ -1164,7 +1148,9 @@ function structuralFingerprint(graph: ArgGraph): string {
     .sort()
     .join("|");
   const orphans = graph.orphans.map((o) => `${o.id}:${o.kind}:${o.text}`).join("|");
-  const clusters = graph.clusters.map((c) => `${c.label}:${c.nodeIds.slice().sort().join(",")}`).join("|");
+  const clusters = graph.clusters
+    .map((c) => `${c.label}:${c.nodeIds.slice().sort().join(",")}`)
+    .join("|");
   const axis = graph.axis ? `${graph.axis.name}|${graph.axis.poles.join("/")}` : "";
   return [nodeIds, aliases, sources, stances, supers, edges, orphans, clusters, axis].join("\n");
 }
@@ -1378,9 +1364,7 @@ export async function consolidateArgGraph(
     const to = resolveId(c.to);
     if (from === to) continue;
     if (!validIds.has(from) || !validIds.has(to)) continue;
-    const dup = edges.find(
-      (e) => e.from === from && e.to === to && e.relation === "contradicts",
-    );
+    const dup = edges.find((e) => e.from === from && e.to === to && e.relation === "contradicts");
     if (dup) continue;
     const fromNode = nodes.find((n) => n.id === from)!;
     const toNode = nodes.find((n) => n.id === to)!;
@@ -1414,9 +1398,7 @@ export async function consolidateArgGraph(
       .map((c, i) => ({
         id: c.id || `cluster_${i}`,
         label: c.label,
-        nodeIds: c.nodeIds
-          .map(resolveId)
-          .filter((id) => validIds.has(id)),
+        nodeIds: c.nodeIds.map(resolveId).filter((id) => validIds.has(id)),
       }))
       .filter((c) => c.nodeIds.length > 0);
   }
@@ -1500,9 +1482,7 @@ export interface FactCheckMappableBadge {
  *   "contradicted" → "false"
  *   "unverified"   → "uncertain"
  */
-export function mapFactCheckVerdict(
-  v: FactCheckMappableVerdict,
-): "true" | "false" | "uncertain" {
+export function mapFactCheckVerdict(v: FactCheckMappableVerdict): "true" | "false" | "uncertain" {
   if (v === "verified") return "true";
   if (v === "contradicted") return "false";
   return "uncertain";
@@ -1530,14 +1510,10 @@ export function applyFactCheckBadgesToGraph(
 ): ArgGraph {
   if (badges.length === 0) return graph;
   const inMessageEvidence = graph.nodes.filter(
-    (n) =>
-      n.kind === "evidence" &&
-      n.sources.some((s) => s.messageId === messageId),
+    (n) => n.kind === "evidence" && n.sources.some((s) => s.messageId === messageId),
   );
   const inMessageClaims = graph.nodes.filter(
-    (n) =>
-      n.kind === "claim" &&
-      n.sources.some((s) => s.messageId === messageId),
+    (n) => n.kind === "claim" && n.sources.some((s) => s.messageId === messageId),
   );
   if (inMessageEvidence.length === 0 && inMessageClaims.length === 0) {
     return graph;

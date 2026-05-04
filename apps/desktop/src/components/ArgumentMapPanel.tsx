@@ -32,12 +32,7 @@ import { downloadBytes, downloadText } from "./argumentMap/download";
 import { applyFilters } from "./argumentMap/filters";
 import { computeSpineNodeIds } from "./argumentMap/centrality";
 import { FilterBar } from "./argumentMap/FilterBar";
-import {
-  ARGMAP_GOLD,
-  ARGMAP_GOLD_HEX,
-  styleFor,
-  styleForRelation,
-} from "./argumentMap/kindStyle";
+import { ARGMAP_GOLD, ARGMAP_GOLD_HEX, styleFor, styleForRelation } from "./argumentMap/kindStyle";
 import { SelectionDrawer } from "./argumentMap/SelectionDrawer";
 import {
   DEFAULT_FILTERS,
@@ -187,10 +182,7 @@ function ArgumentMapPanelInner({
       const delta = dragStartRef.current.x - ev.clientX;
       const next = Math.max(
         PANEL_MIN_WIDTH,
-        Math.min(
-          window.innerWidth * PANEL_MAX_WIDTH_VW,
-          dragStartRef.current.width + delta,
-        ),
+        Math.min(window.innerWidth * PANEL_MAX_WIDTH_VW, dragStartRef.current.width + delta),
       );
       setPanelWidth(next);
     };
@@ -247,9 +239,7 @@ function ArgumentMapPanelInner({
   const visible = useMemo(() => {
     const base = applyFilters(graph, filters);
     if (!contradictionFocus) return base;
-    const contradictsEdges = base.edges.filter(
-      (e) => e.relation === "contradicts",
-    );
+    const contradictsEdges = base.edges.filter((e) => e.relation === "contradicts");
     const keep = new Set<string>();
     for (const e of contradictsEdges) {
       keep.add(e.from);
@@ -268,9 +258,9 @@ function ArgumentMapPanelInner({
   const selectedNode = useMemo(
     () =>
       selectedNodeId
-        ? graph.nodes.find((n) => n.id === selectedNodeId) ??
+        ? (graph.nodes.find((n) => n.id === selectedNodeId) ??
           graph.orphans.find((n) => n.id === selectedNodeId) ??
-          null
+          null)
         : null,
     [selectedNodeId, graph.nodes, graph.orphans],
   );
@@ -516,9 +506,7 @@ function Header({
                 padding: "2px 7px",
                 borderRadius: 5,
                 border: `1px solid rgba(230, 90, 200, ${contradictionFocus ? 0.85 : 0.4})`,
-                background: contradictionFocus
-                  ? "rgba(230, 90, 200, 0.18)"
-                  : "transparent",
+                background: contradictionFocus ? "rgba(230, 90, 200, 0.18)" : "transparent",
                 fontSize: "0.6rem",
                 letterSpacing: "0.16em",
                 textTransform: "uppercase",
@@ -575,14 +563,34 @@ function Header({
           }}
         >
           {isFullscreen ? (
-            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 16 16"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.4"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
               <polyline points="6 3 6 6 3 6" />
               <polyline points="10 3 10 6 13 6" />
               <polyline points="6 13 6 10 3 10" />
               <polyline points="10 13 10 10 13 10" />
             </svg>
           ) : (
-            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 16 16"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.4"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
               <polyline points="3 6 3 3 6 3" />
               <polyline points="13 6 13 3 10 3" />
               <polyline points="3 10 3 13 6 13" />
@@ -650,13 +658,7 @@ function UpdatingPill() {
 // Tabs
 // ---------------------------------------------------------------------------
 
-function Tabs({
-  view,
-  setView,
-}: {
-  view: PanelView;
-  setView: (v: PanelView) => void;
-}) {
+function Tabs({ view, setView }: { view: PanelView; setView: (v: PanelView) => void }) {
   return (
     <div
       role="tablist"
@@ -681,9 +683,7 @@ function Tabs({
               background: "transparent",
               border: "none",
               padding: "6px 12px 8px",
-              color: active
-                ? "rgba(248,248,252,0.95)"
-                : "rgba(232,232,239,0.55)",
+              color: active ? "rgba(248,248,252,0.95)" : "rgba(232,232,239,0.55)",
               fontFamily: "'JetBrains Mono', ui-monospace, monospace",
               fontSize: "0.7rem",
               letterSpacing: "0.16em",
@@ -780,11 +780,7 @@ function Footer({
         </button>
       )}
       {onRetryExtraction && (
-        <button
-          type="button"
-          onClick={onRetryExtraction}
-          style={footerButtonStyle}
-        >
+        <button type="button" onClick={onRetryExtraction} style={footerButtonStyle}>
           Re-extract turn
         </button>
       )}
@@ -894,8 +890,7 @@ function EmptyState({
   let secondary = "";
   if (status === "no-credential") {
     primary = "Extractor offline";
-    secondary =
-      "Add a Gemini-compatible model in Settings to start building the argument map.";
+    secondary = "Add a Gemini-compatible model in Settings to start building the argument map.";
   } else if (status === "extracting") {
     primary = "Listening to the council";
     secondary = "Fragments will appear here as soon as the extractor lands the first claim.";
@@ -1049,8 +1044,8 @@ function LegendPopover({ onClose }: { onClose: () => void }) {
                 lineHeight: 1.5,
               }}
             >
-              Every fragment the council produces is classified into one of nine
-              node kinds and connected via one of ten edge relations.
+              Every fragment the council produces is classified into one of nine node kinds and
+              connected via one of ten edge relations.
             </p>
           </div>
           <button
@@ -1105,10 +1100,7 @@ function LegendPopover({ onClose }: { onClose: () => void }) {
               {ARG_NODE_KINDS.map((kind) => {
                 const style = styleFor(kind);
                 return (
-                  <li
-                    key={kind}
-                    style={{ display: "flex", alignItems: "flex-start", gap: 10 }}
-                  >
+                  <li key={kind} style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
                     <span
                       aria-hidden="true"
                       style={{
@@ -1120,9 +1112,7 @@ function LegendPopover({ onClose }: { onClose: () => void }) {
                         background: `rgba(${style.accentRgb}, 0.18)`,
                         border: `1px solid rgba(${style.accentRgb}, 0.6)`,
                         transform:
-                          style.variant === "diamond"
-                            ? "rotate(45deg) scale(0.74)"
-                            : undefined,
+                          style.variant === "diamond" ? "rotate(45deg) scale(0.74)" : undefined,
                       }}
                     />
                     <div style={{ flex: 1 }}>
@@ -1177,10 +1167,7 @@ function LegendPopover({ onClose }: { onClose: () => void }) {
               {ARG_EDGE_RELATIONS.map((relation) => {
                 const style = styleForRelation(relation);
                 return (
-                  <li
-                    key={relation}
-                    style={{ display: "flex", alignItems: "flex-start", gap: 10 }}
-                  >
+                  <li key={relation} style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
                     <span
                       aria-hidden="true"
                       style={{

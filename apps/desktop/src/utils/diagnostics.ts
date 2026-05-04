@@ -53,7 +53,10 @@ const APP_VERSION = "1.0.0";
 
 export function buildDiagnosticsSnapshot(config: AppConfig): DiagnosticsSnapshot {
   const logs = apiLogger.getLogs().slice(-50);
-  const byProvider = new Map<string, { lastLog: number; lastError: string | null; count: number }>();
+  const byProvider = new Map<
+    string,
+    { lastLog: number; lastError: string | null; count: number }
+  >();
   for (const entry of logs) {
     const existing = byProvider.get(entry.provider) ?? {
       lastLog: 0,
@@ -94,8 +97,7 @@ export function buildDiagnosticsSnapshot(config: AppConfig): DiagnosticsSnapshot
         ? navigator.platform
         : "unknown",
     userAgent: typeof navigator !== "undefined" ? navigator.userAgent : "unknown",
-    timezoneOffsetMinutes:
-      typeof Date !== "undefined" ? new Date().getTimezoneOffset() : 0,
+    timezoneOffsetMinutes: typeof Date !== "undefined" ? new Date().getTimezoneOffset() : 0,
     configSummary: {
       configuredProviders,
       modelsByProvider,

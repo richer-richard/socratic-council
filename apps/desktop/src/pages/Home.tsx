@@ -65,9 +65,7 @@ const MODEL_DISPLAY_OVERRIDES: Partial<Record<Provider, string>> = {
 
 function getModelDisplayName(provider: Provider): string {
   return (
-    MODEL_DISPLAY_OVERRIDES[provider] ??
-    getModelInfo(LOCKED_MODELS[provider])?.name ??
-    provider
+    MODEL_DISPLAY_OVERRIDES[provider] ?? getModelInfo(LOCKED_MODELS[provider])?.name ?? provider
   );
 }
 
@@ -120,17 +118,45 @@ function CouncilCircleViz({
         </defs>
         <circle cx={cx} cy={cy} r="90" fill="url(#cc-glow)" />
         {/* Rings */}
-        <circle cx={cx} cy={cy} r={rOuter} fill="none" stroke="rgba(148,163,184,0.08)" strokeWidth="0.5" />
-        <circle cx={cx} cy={cy} r={rInner} fill="none" stroke="rgba(148,163,184,0.12)" strokeWidth="0.5" />
+        <circle
+          cx={cx}
+          cy={cy}
+          r={rOuter}
+          fill="none"
+          stroke="rgba(148,163,184,0.08)"
+          strokeWidth="0.5"
+        />
+        <circle
+          cx={cx}
+          cy={cy}
+          r={rInner}
+          fill="none"
+          stroke="rgba(148,163,184,0.12)"
+          strokeWidth="0.5"
+        />
         {/* Connecting lines */}
         {nodes.map((n, i) => (
-          <line key={`line-${i}`} x1={n.inner.x} y1={n.inner.y} x2={n.outer.x} y2={n.outer.y}
-            stroke={n.active ? n.color : "rgba(148,163,184,0.08)"} strokeWidth="0.5" opacity={n.active ? 0.3 : 0.15} />
+          <line
+            key={`line-${i}`}
+            x1={n.inner.x}
+            y1={n.inner.y}
+            x2={n.outer.x}
+            y2={n.outer.y}
+            stroke={n.active ? n.color : "rgba(148,163,184,0.08)"}
+            strokeWidth="0.5"
+            opacity={n.active ? 0.3 : 0.15}
+          />
         ))}
         {/* Outer nodes (observers) */}
         {nodes.map((n, i) => (
-          <circle key={`outer-${i}`} cx={n.outer.x} cy={n.outer.y} r={nodeR * 0.65}
-            fill={n.active ? n.color : "rgba(148,163,184,0.15)"} opacity={n.active ? 0.35 : 0.2} />
+          <circle
+            key={`outer-${i}`}
+            cx={n.outer.x}
+            cy={n.outer.y}
+            r={nodeR * 0.65}
+            fill={n.active ? n.color : "rgba(148,163,184,0.15)"}
+            opacity={n.active ? 0.35 : 0.2}
+          />
         ))}
         {/* Inner nodes (speakers) */}
         {nodes.map((n, i) => (
@@ -138,8 +164,13 @@ function CouncilCircleViz({
             {n.active && (
               <circle cx={n.inner.x} cy={n.inner.y} r={nodeR * 2} fill={n.color} opacity={0.08} />
             )}
-            <circle cx={n.inner.x} cy={n.inner.y} r={nodeR}
-              fill={n.active ? n.color : "rgba(148,163,184,0.2)"} opacity={n.active ? 0.85 : 0.3} />
+            <circle
+              cx={n.inner.x}
+              cy={n.inner.y}
+              r={nodeR}
+              fill={n.active ? n.color : "rgba(148,163,184,0.2)"}
+              opacity={n.active ? 0.85 : 0.3}
+            />
           </g>
         ))}
       </svg>
@@ -271,10 +302,9 @@ function CouncilHelpPopup({ onClose }: { onClose: () => void }) {
             lineHeight: 1.55,
           }}
         >
-          Sixteen agents debate every topic. The eight on the inner ring speak
-          publicly. Each has a silent partner on the outer ring who whispers
-          tactical advice — visible only to their assigned speaker — every few
-          turns.
+          Sixteen agents debate every topic. The eight on the inner ring speak publicly. Each has a
+          silent partner on the outer ring who whispers tactical advice — visible only to their
+          assigned speaker — every few turns.
         </p>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 18 }}>
           <section>
@@ -303,10 +333,7 @@ function CouncilHelpPopup({ onClose }: { onClose: () => void }) {
               }}
             >
               {AGENT_CARDS.map((agent) => (
-                <li
-                  key={agent.name}
-                  style={{ display: "flex", alignItems: "center", gap: 8 }}
-                >
+                <li key={agent.name} style={{ display: "flex", alignItems: "center", gap: 8 }}>
                   <span
                     aria-hidden="true"
                     style={{
@@ -351,10 +378,7 @@ function CouncilHelpPopup({ onClose }: { onClose: () => void }) {
               }}
             >
               {AGENT_CARDS.map((agent) => (
-                <li
-                  key={agent.partner}
-                  style={{ display: "flex", alignItems: "center", gap: 8 }}
-                >
+                <li key={agent.partner} style={{ display: "flex", alignItems: "center", gap: 8 }}>
                   <span
                     aria-hidden="true"
                     style={{
@@ -390,9 +414,7 @@ function CouncilHelpPopup({ onClose }: { onClose: () => void }) {
  */
 function CommandPalettePill() {
   const handleClick = () => {
-    window.dispatchEvent(
-      new KeyboardEvent("keydown", { key: "k", metaKey: true, bubbles: true }),
-    );
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "k", metaKey: true, bubbles: true }));
   };
   return (
     <button
@@ -414,8 +436,7 @@ function CommandPalettePill() {
         background: "rgba(18, 16, 14, 0.78)",
         color: "rgba(232, 232, 239, 0.62)",
         cursor: "pointer",
-        fontFamily:
-          "'JetBrains Mono', ui-monospace, monospace",
+        fontFamily: "'JetBrains Mono', ui-monospace, monospace",
         fontSize: "0.7rem",
         letterSpacing: "0.08em",
         transition: "all 140ms ease",
@@ -1091,7 +1112,16 @@ export function Home({
             <CouncilMark size={36} />
           </div>
           <div>
-            <div className="workstation-brand-label" style={{ fontFamily: "var(--font-mono)", textTransform: "lowercase", letterSpacing: "0.02em" }}>socratic council</div>
+            <div
+              className="workstation-brand-label"
+              style={{
+                fontFamily: "var(--font-mono)",
+                textTransform: "lowercase",
+                letterSpacing: "0.02em",
+              }}
+            >
+              socratic council
+            </div>
           </div>
         </div>
 
@@ -1202,7 +1232,9 @@ export function Home({
                                   >
                                     {STATUS_LABELS[session.status]}
                                   </span>
-                                  <span style={{ fontFamily: "var(--font-mono)" }}>{formatRelativeTime(session.updatedAt)}</span>
+                                  <span style={{ fontFamily: "var(--font-mono)" }}>
+                                    {formatRelativeTime(session.updatedAt)}
+                                  </span>
                                 </div>
                                 <div className="workstation-thread-title">{session.title}</div>
                                 <div className="workstation-thread-foot">
@@ -1296,7 +1328,9 @@ export function Home({
                             <span className={`session-status session-status-${session.status}`}>
                               {STATUS_LABELS[session.status]}
                             </span>
-                            <span style={{ fontFamily: "var(--font-mono)" }}>{formatRelativeTime(session.updatedAt)}</span>
+                            <span style={{ fontFamily: "var(--font-mono)" }}>
+                              {formatRelativeTime(session.updatedAt)}
+                            </span>
                           </div>
                           <div className="workstation-thread-title">{session.title}</div>
                           <div className="workstation-thread-foot">
@@ -1591,7 +1625,7 @@ export function Home({
                 >
                   {/* Fix 8.3: spinner inside the button while opening so the
                       user has visible feedback during the 1-3s create path. */}
-                  {(isOpeningSession || !vaultReady) ? (
+                  {isOpeningSession || !vaultReady ? (
                     <span
                       aria-hidden="true"
                       style={{
@@ -1716,13 +1750,18 @@ export function Home({
           </section>
 
           <aside className="workstation-inspector">
-            <div className="workstation-panel-heading" style={{ fontFamily: "var(--font-mono)", marginBottom: "0.6rem" }}>
+            <div
+              className="workstation-panel-heading"
+              style={{ fontFamily: "var(--font-mono)", marginBottom: "0.6rem" }}
+            >
               Council Rack
             </div>
             <div className="workstation-agent-list">
               {AGENT_CARDS.map((agent) => {
                 const configured = configuredProviders.includes(agent.provider);
-                const modelName = configured ? getModelDisplayName(agent.provider) : "not configured";
+                const modelName = configured
+                  ? getModelDisplayName(agent.provider)
+                  : "not configured";
                 return (
                   <div
                     key={agent.provider}
@@ -1730,8 +1769,12 @@ export function Home({
                   >
                     <ProviderIcon provider={agent.provider} size={20} />
                     <div className="workstation-agent-row-info">
-                      <span className="workstation-agent-row-name" style={{ color: configured ? agent.color : undefined }}>
-                        {agent.name}<span style={{ opacity: 0.35 }}> & {agent.partner}</span>
+                      <span
+                        className="workstation-agent-row-name"
+                        style={{ color: configured ? agent.color : undefined }}
+                      >
+                        {agent.name}
+                        <span style={{ opacity: 0.35 }}> & {agent.partner}</span>
                       </span>
                       <span className="workstation-agent-row-model">{modelName}</span>
                     </div>
@@ -1740,7 +1783,10 @@ export function Home({
               })}
             </div>
             <div className="workstation-inspector-footer">
-              <span className="workstation-inspector-stat" style={{ fontFamily: "var(--font-mono)" }}>
+              <span
+                className="workstation-inspector-stat"
+                style={{ fontFamily: "var(--font-mono)" }}
+              >
                 {configuredProviders.length}/{AGENT_CARDS.length} ready
               </span>
             </div>
@@ -2058,9 +2104,7 @@ export function Home({
         </div>
       )}
 
-      {councilHelpOpen && (
-        <CouncilHelpPopup onClose={() => setCouncilHelpOpen(false)} />
-      )}
+      {councilHelpOpen && <CouncilHelpPopup onClose={() => setCouncilHelpOpen(false)} />}
       <CommandPalettePill />
     </div>
   );

@@ -1039,9 +1039,7 @@ const ARG_V2_EDGE_RELATIONS: readonly ArgEdgeRelation[] = [
 ];
 
 const ARG_V2_NODE_KIND_SET: ReadonlySet<string> = new Set(ARG_V2_NODE_KINDS);
-const ARG_V2_EDGE_RELATION_SET: ReadonlySet<string> = new Set(
-  ARG_V2_EDGE_RELATIONS,
-);
+const ARG_V2_EDGE_RELATION_SET: ReadonlySet<string> = new Set(ARG_V2_EDGE_RELATIONS);
 
 function clamp01(n: unknown, fallback: number): number {
   if (typeof n !== "number" || !Number.isFinite(n)) return fallback;
@@ -1058,10 +1056,7 @@ function coerceArgNodeSource(raw: unknown): ArgNodeSource | null {
   const s = raw as Partial<ArgNodeSource>;
   if (typeof s.messageId !== "string" || s.messageId.length === 0) return null;
   if (typeof s.agentId !== "string" || s.agentId.length === 0) return null;
-  const ts =
-    typeof s.timestamp === "number" && Number.isFinite(s.timestamp)
-      ? s.timestamp
-      : 0;
+  const ts = typeof s.timestamp === "number" && Number.isFinite(s.timestamp) ? s.timestamp : 0;
   const out: ArgNodeSource = {
     messageId: s.messageId,
     agentId: s.agentId,
@@ -1087,9 +1082,7 @@ function coerceArgNodeV2(raw: unknown): ArgNode | null {
   if (typeof n.text !== "string" || n.text.length === 0) return null;
 
   const sources: ArgNodeSource[] = Array.isArray(n.sources)
-    ? n.sources
-        .map(coerceArgNodeSource)
-        .filter((s): s is ArgNodeSource => Boolean(s))
+    ? n.sources.map(coerceArgNodeSource).filter((s): s is ArgNodeSource => Boolean(s))
     : [];
   let primary: ArgNodeSource | null = sources[0] ?? null;
   if (
@@ -1109,18 +1102,12 @@ function coerceArgNodeV2(raw: unknown): ArgNode | null {
   if (!primary) return null;
 
   const aliases: string[] = Array.isArray(n.aliases)
-    ? n.aliases.filter(
-        (a): a is string => typeof a === "string" && a.length > 0,
-      )
+    ? n.aliases.filter((a): a is string => typeof a === "string" && a.length > 0)
     : [];
   const strength = clamp01(n.strength, 0.5);
   const allowedStatus =
-    n.status === "active" ||
-    n.status === "withdrawn" ||
-    n.status === "superseded";
-  const status: ArgNodeStatus = allowedStatus
-    ? (n.status as ArgNodeStatus)
-    : "active";
+    n.status === "active" || n.status === "withdrawn" || n.status === "superseded";
+  const status: ArgNodeStatus = allowedStatus ? (n.status as ArgNodeStatus) : "active";
 
   const out: ArgNode = {
     id: n.id,
@@ -1147,9 +1134,7 @@ function coerceArgNodeV2(raw: unknown): ArgNode | null {
   if (n.verification && typeof n.verification === "object") {
     const v = n.verification as Partial<ArgNodeVerification>;
     if (
-      (v.verdict === "true" ||
-        v.verdict === "false" ||
-        v.verdict === "uncertain") &&
+      (v.verdict === "true" || v.verdict === "false" || v.verdict === "uncertain") &&
       typeof v.confidence === "number"
     ) {
       const ver: ArgNodeVerification = {
@@ -1256,13 +1241,10 @@ function validateArgGraphV2(input: unknown): ArgGraph | undefined {
   }
 
   const lastMessageId =
-    typeof r.lastMessageId === "string" && r.lastMessageId.length > 0
-      ? r.lastMessageId
-      : null;
+    typeof r.lastMessageId === "string" && r.lastMessageId.length > 0 ? r.lastMessageId : null;
 
   const consolidationVersion =
-    typeof r.consolidationVersion === "number" &&
-    Number.isFinite(r.consolidationVersion)
+    typeof r.consolidationVersion === "number" && Number.isFinite(r.consolidationVersion)
       ? Math.max(0, Math.floor(r.consolidationVersion))
       : 0;
 
@@ -1380,7 +1362,8 @@ export async function branchDiscussionSession(
     }
   }
   const branchAttachments = parent.attachments.filter(
-    (attachment) => referencedAttachmentIds.size === 0 || referencedAttachmentIds.has(attachment.id),
+    (attachment) =>
+      referencedAttachmentIds.size === 0 || referencedAttachmentIds.has(attachment.id),
   );
 
   const branch: DiscussionSession = {
@@ -1600,9 +1583,7 @@ function normalizeDiscussionSession(input: unknown): DiscussionSession | null {
     ...(normalizeArgGraph((record as { argGraph?: unknown }).argGraph)
       ? { argGraph: normalizeArgGraph((record as { argGraph?: unknown }).argGraph) }
       : {}),
-    ...(normalizeArgmapExtractedIds(
-      (record as { argmapExtractedIds?: unknown }).argmapExtractedIds,
-    )
+    ...(normalizeArgmapExtractedIds((record as { argmapExtractedIds?: unknown }).argmapExtractedIds)
       ? {
           argmapExtractedIds: normalizeArgmapExtractedIds(
             (record as { argmapExtractedIds?: unknown }).argmapExtractedIds,
@@ -1612,13 +1593,11 @@ function normalizeDiscussionSession(input: unknown): DiscussionSession | null {
     ...(typeof (record as { argmapConsolidationLastRunAt?: unknown })
       .argmapConsolidationLastRunAt === "number" &&
     Number.isFinite(
-      (record as { argmapConsolidationLastRunAt?: number })
-        .argmapConsolidationLastRunAt,
+      (record as { argmapConsolidationLastRunAt?: number }).argmapConsolidationLastRunAt,
     )
       ? {
-          argmapConsolidationLastRunAt: (
-            record as { argmapConsolidationLastRunAt: number }
-          ).argmapConsolidationLastRunAt,
+          argmapConsolidationLastRunAt: (record as { argmapConsolidationLastRunAt: number })
+            .argmapConsolidationLastRunAt,
         }
       : {}),
     ...(typeof (record as { argmapConsolidationLastMessageCount?: unknown })
@@ -1639,7 +1618,9 @@ function normalizeDiscussionSession(input: unknown): DiscussionSession | null {
       : {}),
     ...(record.maxTurnsCap === null
       ? { maxTurnsCap: null }
-      : typeof record.maxTurnsCap === "number" && Number.isFinite(record.maxTurnsCap) && record.maxTurnsCap > 0
+      : typeof record.maxTurnsCap === "number" &&
+          Number.isFinite(record.maxTurnsCap) &&
+          record.maxTurnsCap > 0
         ? { maxTurnsCap: Math.floor(record.maxTurnsCap) }
         : {}),
     ...(typeof record.parentSessionId === "string" && record.parentSessionId.length > 0
@@ -1699,11 +1680,7 @@ export function saveDiscussionSession(session: DiscussionSession): DiscussionSes
   const sessionKey = createSessionStorageKey(safeSession.id);
   let blobWritten = false;
   try {
-    writeSecureItem(
-      storage,
-      sessionKey,
-      JSON.stringify(safeSession),
-    );
+    writeSecureItem(storage, sessionKey, JSON.stringify(safeSession));
     blobWritten = true;
     writeIndex(replaceIndexEntry(readIndex(), buildSummary(safeSession)));
   } catch (error) {
@@ -1868,10 +1845,7 @@ export async function createDiscussionSession(
       try {
         await deleteSessionAttachmentBlobs(id);
       } catch (rollbackError) {
-        console.warn(
-          "[sessions] createDiscussionSession rollback failed",
-          rollbackError,
-        );
+        console.warn("[sessions] createDiscussionSession rollback failed", rollbackError);
       }
     }
     throw error;

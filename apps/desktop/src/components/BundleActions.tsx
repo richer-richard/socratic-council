@@ -73,12 +73,7 @@ export function BundleExportButton({ session, appVersion }: BundleExportButtonPr
   };
 
   return (
-    <button
-      type="button"
-      onClick={handleClick}
-      disabled={busy}
-      style={neutralActionStyle(busy)}
-    >
+    <button type="button" onClick={handleClick} disabled={busy} style={neutralActionStyle(busy)}>
       <BundleGlyph />
       {busy ? "Packaging…" : "Export as Bundle (.scbundle)"}
     </button>
@@ -156,12 +151,7 @@ export function BundleImportButton({ onImported }: BundleImportButtonProps) {
         onChange={(e) => void handleFile(e.target.files?.[0] ?? null)}
         style={{ display: "none" }}
       />
-      <button
-        type="button"
-        onClick={handlePick}
-        disabled={busy}
-        style={neutralActionStyle(busy)}
-      >
+      <button type="button" onClick={handlePick} disabled={busy} style={neutralActionStyle(busy)}>
         <BundleGlyph />
         {busy ? "Importing…" : "Import Bundle…"}
       </button>
@@ -195,7 +185,15 @@ export function BundleImportButton({ onImported }: BundleImportButtonProps) {
           <strong style={{ fontWeight: 600 }}>
             Imported with {warnings.length} warning{warnings.length === 1 ? "" : "s"}:
           </strong>
-          <ul style={{ margin: 0, paddingLeft: "18px", display: "flex", flexDirection: "column", gap: "2px" }}>
+          <ul
+            style={{
+              margin: 0,
+              paddingLeft: "18px",
+              display: "flex",
+              flexDirection: "column",
+              gap: "2px",
+            }}
+          >
             {warnings.map((w, i) => (
               <li key={i}>{w}</li>
             ))}
@@ -243,18 +241,8 @@ function BundleGlyph() {
         strokeWidth="1.1"
         strokeLinecap="round"
       />
-      <path
-        d="M1.5 6H12.5"
-        stroke="currentColor"
-        strokeWidth="1.1"
-        strokeLinecap="round"
-      />
-      <path
-        d="M7 1V5"
-        stroke="currentColor"
-        strokeWidth="1.1"
-        strokeLinecap="round"
-      />
+      <path d="M1.5 6H12.5" stroke="currentColor" strokeWidth="1.1" strokeLinecap="round" />
+      <path d="M7 1V5" stroke="currentColor" strokeWidth="1.1" strokeLinecap="round" />
     </svg>
   );
 }
@@ -270,8 +258,7 @@ function neutralActionStyle(busy: boolean): React.CSSProperties {
     color: busy ? "rgba(232, 232, 239, 0.55)" : "rgba(232, 232, 239, 0.85)",
     borderRadius: "8px",
     cursor: busy ? "progress" : "pointer",
-    fontFamily:
-      "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
+    fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
     fontSize: "0.82rem",
     fontWeight: 500,
     letterSpacing: "0.01em",

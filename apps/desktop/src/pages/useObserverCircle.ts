@@ -5,15 +5,8 @@
  */
 
 import { useCallback, useRef, useState } from "react";
-import {
-  OBSERVER_CONFIG,
-  OBSERVER_IDS,
-  PARTNER_TO_OBSERVER,
-} from "@socratic-council/shared";
-import type {
-  AgentId as CouncilAgentId,
-  ObserverId,
-} from "@socratic-council/shared";
+import { OBSERVER_CONFIG, OBSERVER_IDS, PARTNER_TO_OBSERVER } from "@socratic-council/shared";
+import type { AgentId as CouncilAgentId, ObserverId } from "@socratic-council/shared";
 import { callProvider, apiLogger } from "../services/api";
 import type { ChatMessage as APIChatMessage } from "../services/api";
 import type { Provider, ProviderCredential, ProxyConfig } from "../stores/config";
@@ -257,12 +250,9 @@ export function useObserverCircle({
 
         return note;
       } catch (error) {
-        apiLogger.log(
-          "warn",
-          cfg.provider,
-          `Observer ${cfg.name} note generation failed`,
-          { error: error instanceof Error ? error.message : String(error) },
-        );
+        apiLogger.log("warn", cfg.provider, `Observer ${cfg.name} note generation failed`, {
+          error: error instanceof Error ? error.message : String(error),
+        });
         return null;
       } finally {
         observerControllersRef.current.delete(controller);
@@ -285,10 +275,7 @@ export function useObserverCircle({
 
   // Run a full observer pass — all 8 in parallel
   const runObserverPass = useCallback(
-    (
-      turn: number,
-      addMessages: (msgs: ChatMessage[]) => void,
-    ) => {
+    (turn: number, addMessages: (msgs: ChatMessage[]) => void) => {
       if (observerPassInFlightRef.current) return;
       if (abortRef.current) return;
       // Fix 3.3: skip observers when the session is paused. Without this gate
@@ -307,39 +294,39 @@ export function useObserverCircle({
 
       observerPassInFlightRef.current = true;
 
-      Promise.allSettled(
-        configuredObservers.map((id) => generateObserverNote(id, turn)),
-      ).then((results) => {
-        observerPassInFlightRef.current = false;
-        if (abortRef.current) return;
+      Promise.allSettled(configuredObservers.map((id) => generateObserverNote(id, turn))).then(
+        (results) => {
+          observerPassInFlightRef.current = false;
+          if (abortRef.current) return;
 
-        const newNotes: ObserverNote[] = [];
-        const newMessages: ChatMessage[] = [];
+          const newNotes: ObserverNote[] = [];
+          const newMessages: ChatMessage[] = [];
 
-        for (const result of results) {
-          if (result.status !== "fulfilled" || !result.value) continue;
-          const note = result.value;
-          newNotes.push(note);
-          newMessages.push({
-            id: `msg_${Date.now()}_observer_${note.observerId}_${Math.random().toString(36).slice(2, 5)}`,
-            agentId: "system",
-            displayName: `${note.observerName} → ${note.partnerName}`,
-            content: note.content,
-            timestamp: Date.now(),
-            observerNote: {
-              observerId: note.observerId,
-              observerName: note.observerName,
-              partnerId: note.partnerId,
-              partnerName: note.partnerName,
-            },
-          } as ChatMessage & { observerNote: ObserverNoteSnapshot });
-        }
+          for (const result of results) {
+            if (result.status !== "fulfilled" || !result.value) continue;
+            const note = result.value;
+            newNotes.push(note);
+            newMessages.push({
+              id: `msg_${Date.now()}_observer_${note.observerId}_${Math.random().toString(36).slice(2, 5)}`,
+              agentId: "system",
+              displayName: `${note.observerName} → ${note.partnerName}`,
+              content: note.content,
+              timestamp: Date.now(),
+              observerNote: {
+                observerId: note.observerId,
+                observerName: note.observerName,
+                partnerId: note.partnerId,
+                partnerName: note.partnerName,
+              },
+            } as ChatMessage & { observerNote: ObserverNoteSnapshot });
+          }
 
-        if (newNotes.length > 0) {
-          observerNotesRef.current = [...observerNotesRef.current, ...newNotes];
-          addMessages(newMessages);
-        }
-      });
+          if (newNotes.length > 0) {
+            observerNotesRef.current = [...observerNotesRef.current, ...newNotes];
+            addMessages(newMessages);
+          }
+        },
+      );
     },
     [abortRef, configRef, generateObserverNote, pausedRef],
   );
@@ -350,21 +337,18 @@ export function useObserverCircle({
   // (StrictMode double-render skips the second call). Callers must now
   // explicitly call `markNoteConsumed(note.id)` once they've actually used
   // the note in a prompt.
-  const getLatestNoteFor = useCallback(
-    (agentId: CouncilAgentId): ObserverNote | null => {
-      const observerId = PARTNER_TO_OBSERVER[agentId];
-      if (!observerId) return null;
-      const notes = observerNotesRef.current;
-      for (let i = notes.length - 1; i >= 0; i--) {
-        const note = notes[i]!;
-        if (note.observerId === observerId && !note.consumed) {
-          return note;
-        }
+  const getLatestNoteFor = useCallback((agentId: CouncilAgentId): ObserverNote | null => {
+    const observerId = PARTNER_TO_OBSERVER[agentId];
+    if (!observerId) return null;
+    const notes = observerNotesRef.current;
+    for (let i = notes.length - 1; i >= 0; i--) {
+      const note = notes[i]!;
+      if (note.observerId === observerId && !note.consumed) {
+        return note;
       }
-      return null;
-    },
-    [],
-  );
+    }
+    return null;
+  }, []);
 
   const markNoteConsumed = useCallback((noteId: string) => {
     const notes = observerNotesRef.current;

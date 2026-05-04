@@ -50,20 +50,14 @@ describe("parseRelevanceResponse", () => {
   });
 
   it("defaults missing agents to 0", () => {
-    const scores = parseRelevanceResponse(
-      '{"scores":{"george":80}}',
-      AGENTS,
-    );
+    const scores = parseRelevanceResponse('{"scores":{"george":80}}', AGENTS);
     expect(scores.george).toBe(80);
     expect(scores.cathy).toBe(0);
     expect(scores.zara).toBe(0);
   });
 
   it("coerces numeric strings", () => {
-    const scores = parseRelevanceResponse(
-      '{"scores":{"george":"65","cathy":"10"}}',
-      AGENTS,
-    );
+    const scores = parseRelevanceResponse('{"scores":{"george":"65","cathy":"10"}}', AGENTS);
     expect(scores.george).toBe(65);
     expect(scores.cathy).toBe(10);
   });
@@ -96,11 +90,7 @@ describe("scoreAgentsRelevance", () => {
 
   it("returns all zeros when the completion fails", async () => {
     const complete = vi.fn().mockResolvedValue(null);
-    const scores = await scoreAgentsRelevance(
-      { topic: "X", recentText: "" },
-      AGENTS,
-      complete,
-    );
+    const scores = await scoreAgentsRelevance({ topic: "X", recentText: "" }, AGENTS, complete);
     for (const a of AGENTS) expect(scores[a.id]).toBe(0);
   });
 });

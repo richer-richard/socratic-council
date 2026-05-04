@@ -1,9 +1,4 @@
-import type {
-  ArgEdge,
-  ArgGraph,
-  ArgNode,
-  ArgEdgeRelation,
-} from "@socratic-council/core";
+import type { ArgEdge, ArgGraph, ArgNode, ArgEdgeRelation } from "@socratic-council/core";
 
 export interface MessageLike {
   id: string;

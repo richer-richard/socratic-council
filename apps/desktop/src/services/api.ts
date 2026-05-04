@@ -313,11 +313,7 @@ export async function callProvider(
     // likely content moderation / a silent provider-side rejection rather
     // than a meaningful "agent intentionally said nothing" turn. Treat as
     // failure so the caller can retry / penalize bidding next round.
-    if (
-      finalContent.trim() === "" &&
-      result.tokens.input === 0 &&
-      result.tokens.output === 0
-    ) {
+    if (finalContent.trim() === "" && result.tokens.input === 0 && result.tokens.output === 0) {
       return {
         content: "",
         thinking: result.thinking || fullThinking || undefined,
@@ -341,8 +337,7 @@ export async function callProvider(
     // Surface a stable string for downstream error rendering. Use the typed
     // failure's message when available — TransportFailure messages already
     // carry useful context like timeout values and HTTP statuses.
-    const message =
-      error instanceof Error ? error.message : "Unknown error";
+    const message = error instanceof Error ? error.message : "Unknown error";
 
     apiLogger.log("error", provider, "Request failed", { error: message });
 
@@ -362,10 +357,14 @@ export async function callProvider(
         // the message lands as a wall of text after a confusing pause.
         if (retry.content) {
           try {
-            await replayBufferedStream(retry.content, (chunk) => {
-              fullContent += chunk;
-              onChunk({ content: chunk, done: false });
-            }, options?.signal);
+            await replayBufferedStream(
+              retry.content,
+              (chunk) => {
+                fullContent += chunk;
+                onChunk({ content: chunk, done: false });
+              },
+              options?.signal,
+            );
           } catch (replayError) {
             // Replay aborted by caller — surface as abort below.
             if (options?.signal?.aborted) {

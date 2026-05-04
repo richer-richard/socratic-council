@@ -21,10 +21,7 @@ export interface DiagnosticsPanelProps {
 }
 
 export function DiagnosticsPanel({ open, onClose, config }: DiagnosticsPanelProps) {
-  const snapshot = useMemo(
-    () => (open ? buildDiagnosticsSnapshot(config) : null),
-    [open, config],
-  );
+  const snapshot = useMemo(() => (open ? buildDiagnosticsSnapshot(config) : null), [open, config]);
   const [copyState, setCopyState] = useState<"idle" | "copied" | "error">("idle");
 
   const handleCopy = async () => {
@@ -51,18 +48,11 @@ export function DiagnosticsPanel({ open, onClose, config }: DiagnosticsPanelProp
     >
       {snapshot ? (
         <>
-          <ActionBar
-            copyState={copyState}
-            onCopy={handleCopy}
-            generatedAt={snapshot.generatedAt}
-          />
+          <ActionBar copyState={copyState} onCopy={handleCopy} generatedAt={snapshot.generatedAt} />
           <Section title="System">
             <KeyValue k="App version" v={snapshot.appVersion} />
             <KeyValue k="Platform" v={snapshot.platform} />
-            <KeyValue
-              k="Timezone offset"
-              v={`${snapshot.timezoneOffsetMinutes} min`}
-            />
+            <KeyValue k="Timezone offset" v={`${snapshot.timezoneOffsetMinutes} min`} />
           </Section>
 
           <Section title="Configuration">
@@ -78,14 +68,8 @@ export function DiagnosticsPanel({ open, onClose, config }: DiagnosticsPanelProp
             {snapshot.configSummary.hasProxyCredentials && (
               <KeyValue k="Proxy credentials" v="[redacted]" mono />
             )}
-            <KeyValue
-              k="Moderator"
-              v={snapshot.configSummary.moderatorEnabled ? "on" : "off"}
-            />
-            <KeyValue
-              k="Observers"
-              v={snapshot.configSummary.observersEnabled ? "on" : "off"}
-            />
+            <KeyValue k="Moderator" v={snapshot.configSummary.moderatorEnabled ? "on" : "off"} />
+            <KeyValue k="Observers" v={snapshot.configSummary.observersEnabled ? "on" : "off"} />
             {snapshot.configSummary.budget && (
               <KeyValue
                 k="Budget"
@@ -98,9 +82,7 @@ export function DiagnosticsPanel({ open, onClose, config }: DiagnosticsPanelProp
             {snapshot.providerHealth.length === 0 ? (
               <EmptyLine>No recent provider activity.</EmptyLine>
             ) : (
-              snapshot.providerHealth.map((h) => (
-                <ProviderHealthRow key={h.provider} health={h} />
-              ))
+              snapshot.providerHealth.map((h) => <ProviderHealthRow key={h.provider} health={h} />)
             )}
           </Section>
 
@@ -152,9 +134,7 @@ function ActionBar({
           padding: "6px 14px",
           border: "1px solid rgba(245, 197, 66, 0.45)",
           background:
-            copyState === "copied"
-              ? "rgba(74, 222, 128, 0.12)"
-              : "rgba(245, 197, 66, 0.08)",
+            copyState === "copied" ? "rgba(74, 222, 128, 0.12)" : "rgba(245, 197, 66, 0.08)",
           color: copyState === "copied" ? "rgb(74, 222, 128)" : "#f5c542",
           borderRadius: "6px",
           cursor: copyState === "copied" ? "default" : "pointer",
@@ -229,9 +209,7 @@ function KeyValue({ k, v, mono = false }: { k: string; v: string; mono?: boolean
       <span
         style={{
           color: "rgba(232, 232, 239, 0.9)",
-          fontFamily: mono
-            ? "'JetBrains Mono', ui-monospace, monospace"
-            : "inherit",
+          fontFamily: mono ? "'JetBrains Mono', ui-monospace, monospace" : "inherit",
           textAlign: "right",
         }}
       >
@@ -256,14 +234,8 @@ function EmptyLine({ children }: { children: React.ReactNode }) {
   );
 }
 
-function ProviderHealthRow({
-  health,
-}: {
-  health: DiagnosticsSnapshot["providerHealth"][number];
-}) {
-  const statusColor = health.lastError
-    ? "rgb(239, 80, 80)"
-    : "rgb(74, 222, 128)";
+function ProviderHealthRow({ health }: { health: DiagnosticsSnapshot["providerHealth"][number] }) {
+  const statusColor = health.lastError ? "rgb(239, 80, 80)" : "rgb(74, 222, 128)";
   return (
     <div
       style={{
@@ -339,8 +311,7 @@ function LogStream({ logs }: { logs: DiagnosticsSnapshot["recentLogs"] }) {
             {new Date(entry.timestamp).toISOString().slice(11, 23)}
           </span>{" "}
           <span style={{ opacity: 0.75 }}>[{entry.level}]</span>{" "}
-          <span style={{ opacity: 0.65 }}>[{entry.provider}]</span>{" "}
-          {entry.message}
+          <span style={{ opacity: 0.65 }}>[{entry.provider}]</span> {entry.message}
         </div>
       ))}
     </div>

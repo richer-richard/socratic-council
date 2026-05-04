@@ -51,9 +51,7 @@ export function isModeratorMessage(msg: VisibilityMessage): boolean {
 }
 
 export function isObserverNoteMessage(msg: VisibilityMessage): boolean {
-  return Boolean(
-    msg.agentId === "system" && msg.observerNote && msg.observerNote.partnerId,
-  );
+  return Boolean(msg.agentId === "system" && msg.observerNote && msg.observerNote.partnerId);
 }
 
 /**
@@ -77,9 +75,6 @@ export function isPublicContextMessage(msg: VisibilityMessage): boolean {
  * Whether an observer-note message is addressed to the given inner agent.
  * Used when assembling an inner agent's prompt to pick the right private note.
  */
-export function isObserverNoteFor(
-  msg: VisibilityMessage,
-  innerAgentId: string,
-): boolean {
+export function isObserverNoteFor(msg: VisibilityMessage, innerAgentId: string): boolean {
   return isObserverNoteMessage(msg) && msg.observerNote?.partnerId === innerAgentId;
 }

@@ -12,7 +12,8 @@ import {
 
 describe("extractCanvasDirectives", () => {
   it("extracts a single append directive and cleans text", () => {
-    const raw = 'Some text\n@canvas({"op":"append","section":"Key Points","text":"Point A"})\nMore text';
+    const raw =
+      'Some text\n@canvas({"op":"append","section":"Key Points","text":"Point A"})\nMore text';
     const { cleaned, directives } = extractCanvasDirectives(raw);
     expect(directives).toHaveLength(1);
     expect(directives[0]).toEqual({ op: "append", section: "Key Points", text: "Point A" });
@@ -20,7 +21,8 @@ describe("extractCanvasDirectives", () => {
   });
 
   it("extracts replace and clear directives", () => {
-    const raw = '@canvas({"op":"replace","section":"Draft","text":"New draft"})\n@canvas({"op":"clear"})';
+    const raw =
+      '@canvas({"op":"replace","section":"Draft","text":"New draft"})\n@canvas({"op":"clear"})';
     const { directives } = extractCanvasDirectives(raw);
     expect(directives).toHaveLength(2);
     expect(directives[0]!.op).toBe("replace");
@@ -28,7 +30,7 @@ describe("extractCanvasDirectives", () => {
   });
 
   it("drops malformed JSON silently", () => {
-    const raw = '@canvas({bad json})\nVisible text';
+    const raw = "@canvas({bad json})\nVisible text";
     const { cleaned, directives } = extractCanvasDirectives(raw);
     expect(directives).toHaveLength(0);
     expect(cleaned).toContain("Visible text");
@@ -115,7 +117,12 @@ describe("applyCanvasDirective", () => {
       lastUpdatedTurn: 1,
       lastUpdatedAt: 0,
     };
-    const result = applyCanvasDirective(state, { op: "append", section: "Key Points", text: "Second" }, "george", 2);
+    const result = applyCanvasDirective(
+      state,
+      { op: "append", section: "Key Points", text: "Second" },
+      "george",
+      2,
+    );
     expect(result.sections).toHaveLength(1);
     expect(result.sections[0]!.text).toBe("First\nSecond");
   });
@@ -127,7 +134,12 @@ describe("applyCanvasDirective", () => {
       lastUpdatedTurn: 1,
       lastUpdatedAt: 0,
     };
-    const result = applyCanvasDirective(state, { op: "replace", section: "Draft", text: "New" }, "cathy", 2);
+    const result = applyCanvasDirective(
+      state,
+      { op: "replace", section: "Draft", text: "New" },
+      "cathy",
+      2,
+    );
     expect(result.sections[0]!.text).toBe("New");
   });
 
@@ -157,7 +169,12 @@ describe("applyCanvasDirective", () => {
       lastUpdatedTurn: 1,
       lastUpdatedAt: 0,
     };
-    const result = applyCanvasDirective(state, { op: "append", section: "NewSection", text: "overflow" }, "douglas", 2);
+    const result = applyCanvasDirective(
+      state,
+      { op: "append", section: "NewSection", text: "overflow" },
+      "douglas",
+      2,
+    );
     expect(result.sections).toHaveLength(5);
   });
 });
@@ -180,18 +197,12 @@ describe("hasVisibleReplyContent", () => {
   });
 
   it("returns false when agent emits canvas + @done with no reply", () => {
-    const raw = [
-      '@canvas({"op":"append","section":"Plan","text":"plan"})',
-      "@done()",
-    ].join("\n");
+    const raw = ['@canvas({"op":"append","section":"Plan","text":"plan"})', "@done()"].join("\n");
     expect(hasVisibleReplyContent(raw, reactions)).toBe(false);
   });
 
   it("returns true when reply is a @quote token alone", () => {
-    const raw = [
-      '@canvas({"op":"append","section":"X","text":"x"})',
-      "@quote(msg_abc)",
-    ].join("\n");
+    const raw = ['@canvas({"op":"append","section":"X","text":"x"})', "@quote(msg_abc)"].join("\n");
     expect(hasVisibleReplyContent(raw, reactions)).toBe(true);
   });
 
@@ -227,10 +238,7 @@ describe("deriveFinalMessageMetadata", () => {
   });
 
   it("returns reactions alongside visible text", () => {
-    const raw = [
-      "Thanks for the clarification.",
-      "@react(msg_a, agree)",
-    ].join("\n");
+    const raw = ["Thanks for the clarification.", "@react(msg_a, agree)"].join("\n");
     const result = deriveFinalMessageMetadata(raw, reactions);
     expect(result.reactions).toEqual([{ targetId: "msg_a", emoji: "agree" }]);
     expect(result.visibleText).toContain("Thanks");

@@ -21,13 +21,13 @@ This repo ships source only (no installer downloads). Follow this guide to build
 | Research tools   | File search, web search, claim verification, source-anchored citations                   |
 | Outputs          | Searchable transcript, argument map, fact-check badges, conflict graph, exports, bundles |
 
-| Workflow Surface   | Included                                                                                |
-| ------------------ | --------------------------------------------------------------------------------------- |
-| Live discussion    | Turn-taking responses, secret advisor notes, quotes, reactions, moderator nudges        |
-| Evidence gathering | Attachments, tool results, source-aware follow-up, deep-research reports                |
-| Sense-making       | Argument map, fact-check badges, pairwise conflict graph, end-of-session vote           |
-| Observability      | Latency, tokens, cost tracking, daily and per-session budgets, redacted diagnostics     |
-| Review and sharing | Search, branch points, structured exports, portable `.scbundle` archive                 |
+| Workflow Surface   | Included                                                                            |
+| ------------------ | ----------------------------------------------------------------------------------- |
+| Live discussion    | Turn-taking responses, secret advisor notes, quotes, reactions, moderator nudges    |
+| Evidence gathering | Attachments, tool results, source-aware follow-up, deep-research reports            |
+| Sense-making       | Argument map, fact-check badges, pairwise conflict graph, end-of-session vote       |
+| Observability      | Latency, tokens, cost tracking, daily and per-session budgets, redacted diagnostics |
+| Review and sharing | Search, branch points, structured exports, portable `.scbundle` archive             |
 
 ## Experience Map
 
@@ -37,16 +37,16 @@ This repo ships source only (no installer downloads). Follow this guide to build
 
 The eight council debaters speak in public. Each is shadowed by a silent advisor on the same provider that can pass them private notes.
 
-| Agent     | Advisor | Provider  | Default model         |
-| --------- | ------- | --------- | --------------------- |
-| George    | Greta   | OpenAI    | GPT-5.5               |
-| Cathy     | Clara   | Anthropic | Claude Opus 4.7       |
-| Grace     | Gaia    | Google    | Gemini 3.1 Pro        |
-| Douglas   | Dara    | DeepSeek  | DeepSeek V4 Pro       |
-| Kate      | Kira    | Kimi      | Kimi K2.6             |
-| Quinn     | Quincy  | Qwen      | Qwen 3.6 Max          |
-| Mary      | Mila    | MiniMax   | MiniMax M2.7 Highspeed |
-| Zara      | Zoe     | Z.AI      | GLM-5.1               |
+| Agent     | Advisor | Provider  | Default model                                                  |
+| --------- | ------- | --------- | -------------------------------------------------------------- |
+| George    | Greta   | OpenAI    | GPT-5.5                                                        |
+| Cathy     | Clara   | Anthropic | Claude Opus 4.7                                                |
+| Grace     | Gaia    | Google    | Gemini 3.1 Pro                                                 |
+| Douglas   | Dara    | DeepSeek  | DeepSeek V4 Pro                                                |
+| Kate      | Kira    | Kimi      | Kimi K2.6                                                      |
+| Quinn     | Quincy  | Qwen      | Qwen 3.6 Max                                                   |
+| Mary      | Mila    | MiniMax   | MiniMax M2.7 Highspeed                                         |
+| Zara      | Zoe     | Z.AI      | GLM-5.1                                                        |
 | Moderator |         | Google    | Gemini 3.1 Pro (falls back to whatever provider is configured) |
 
 ## Installation Paths
@@ -152,13 +152,13 @@ This is the current manual installation guide for the repo. If you do not want t
 | Quick install  | You want the macOS app installed as fast as possible           | `./install.sh`  |
 | Manual install | You want explicit control over dependencies and build commands | Steps 1-7 below |
 
-| Dependency               | Minimum version                  | Why                                                                             |
-| ------------------------ | -------------------------------- | ------------------------------------------------------------------------------- |
-| **Git**                  | any recent                       | Clone the repository                                                            |
-| **Node.js**              | **≥ 22.0.0**                     | Run the frontend toolchain (Vite, TypeScript, build scripts)                    |
+| Dependency               | Minimum version                  | Why                                                                            |
+| ------------------------ | -------------------------------- | ------------------------------------------------------------------------------ |
+| **Git**                  | any recent                       | Clone the repository                                                           |
+| **Node.js**              | **≥ 22.0.0**                     | Run the frontend toolchain (Vite, TypeScript, build scripts)                   |
 | **pnpm**                 | **9.15.0** (exact, via corepack) | Workspace package manager. The repo's `packageManager` field pins this version |
-| **Rust**                 | **stable ≥ 1.77.2**              | Compile the Tauri v2 native backend                                             |
-| **Tauri v2 system deps** | (per OS, see below)              | WebView, native build tools                                                     |
+| **Rust**                 | **stable ≥ 1.77.2**              | Compile the Tauri v2 native backend                                            |
+| **Tauri v2 system deps** | (per OS, see below)              | WebView, native build tools                                                    |
 
 The Tauri CLI (`@tauri-apps/cli ^2.5.0`) is declared as a devDependency and installed automatically by `pnpm install`, so you do **not** install it globally.
 
@@ -419,12 +419,12 @@ pnpm install
 
 This runs pnpm's workspace resolution and installs dependencies for all packages:
 
-| Workspace                   | Path              | What it installs                                                                                       |
-| --------------------------- | ----------------- | ------------------------------------------------------------------------------------------------------ |
-| `@socratic-council/shared`  | `packages/shared` | Shared types, agent and observer rosters, model registry, default prompts                              |
-| `@socratic-council/sdk`     | `packages/sdk`    | Provider SDK (OpenAI, Anthropic, Google, DeepSeek, Kimi, Qwen, MiniMax, Z.AI), streaming transport     |
+| Workspace                   | Path              | What it installs                                                                                                        |
+| --------------------------- | ----------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `@socratic-council/shared`  | `packages/shared` | Shared types, agent and observer rosters, model registry, default prompts                                               |
+| `@socratic-council/sdk`     | `packages/sdk`    | Provider SDK (OpenAI, Anthropic, Google, DeepSeek, Kimi, Qwen, MiniMax, Z.AI), streaming transport                      |
 | `@socratic-council/core`    | `packages/core`   | Council orchestration: relevance bidding, fairness, conflict, fact-check, argument map, reflection, summarization, cost |
-| `@socratic-council/desktop` | `apps/desktop`    | Tauri v2 + React frontend, Tauri CLI (`@tauri-apps/cli`)                                               |
+| `@socratic-council/desktop` | `apps/desktop`    | Tauri v2 + React frontend, Tauri CLI (`@tauri-apps/cli`)                                                                |
 
 Verify installation succeeded:
 
@@ -573,16 +573,16 @@ On first launch, configure providers and models in **Settings**.
 
 Socratic Council uses real provider APIs. You bring your own keys.
 
-| Provider        | API key source                                  |
-| --------------- | ----------------------------------------------- |
-| OpenAI          | <https://platform.openai.com/api-keys>          |
-| Anthropic       | <https://console.anthropic.com/settings/keys>   |
-| Google (Gemini) | <https://aistudio.google.com/apikey>            |
-| DeepSeek        | <https://platform.deepseek.com/api_keys>        |
-| Kimi (Moonshot) | <https://platform.moonshot.cn/console/api-keys> |
-| Qwen (DashScope)| <https://dashscope.console.aliyun.com/apiKey>   |
-| MiniMax         | <https://www.minimaxi.com/user-center/basic-information/interface-key> |
-| Z.AI (Zhipu)    | <https://open.bigmodel.cn/usercenter/apikeys>   |
+| Provider         | API key source                                                         |
+| ---------------- | ---------------------------------------------------------------------- |
+| OpenAI           | <https://platform.openai.com/api-keys>                                 |
+| Anthropic        | <https://console.anthropic.com/settings/keys>                          |
+| Google (Gemini)  | <https://aistudio.google.com/apikey>                                   |
+| DeepSeek         | <https://platform.deepseek.com/api_keys>                               |
+| Kimi (Moonshot)  | <https://platform.moonshot.cn/console/api-keys>                        |
+| Qwen (DashScope) | <https://dashscope.console.aliyun.com/apiKey>                          |
+| MiniMax          | <https://www.minimaxi.com/user-center/basic-information/interface-key> |
+| Z.AI (Zhipu)     | <https://open.bigmodel.cn/usercenter/apikeys>                          |
 
 Keys are encrypted at rest with XChaCha20-Poly1305 using a vault key the app generates on first launch and stores in the platform's app-data directory with `0600` permissions. No server, no keychain prompts, no plaintext on disk.
 
@@ -651,13 +651,13 @@ Search lets you:
 
 The app can export a session to four document formats, plus a portable archive of the full session.
 
-| Format        | Best for                          | Notes                                                   |
-| ------------- | --------------------------------- | ------------------------------------------------------- |
-| Markdown      | Sharing in docs and issues        | Plain text, easiest to diff and review                  |
-| PDF           | Printing or sending               | Includes the transcript, conflict graph, and summaries  |
-| DOCX          | Editing in Word                   | Structured sections, tables, full citations             |
-| PPTX          | Slides or executive readouts      | Graphics-first synthesis with key moments highlighted   |
-| `.scbundle`   | Sharing the full session offline  | Zip with manifest, transcript, attachments, argument map (JSON + Mermaid). Re-importable into another Socratic Council install |
+| Format      | Best for                         | Notes                                                                                                                          |
+| ----------- | -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| Markdown    | Sharing in docs and issues       | Plain text, easiest to diff and review                                                                                         |
+| PDF         | Printing or sending              | Includes the transcript, conflict graph, and summaries                                                                         |
+| DOCX        | Editing in Word                  | Structured sections, tables, full citations                                                                                    |
+| PPTX        | Slides or executive readouts     | Graphics-first synthesis with key moments highlighted                                                                          |
+| `.scbundle` | Sharing the full session offline | Zip with manifest, transcript, attachments, argument map (JSON + Mermaid). Re-importable into another Socratic Council install |
 
 The argument map can also be exported on its own as JSON, Mermaid, SVG, or PNG. Everything is generated locally; nothing leaves your machine.
 

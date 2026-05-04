@@ -10,13 +10,7 @@
  * the graph — they need the DOM — so they live in the desktop app.
  */
 
-import type {
-  ArgEdge,
-  ArgEdgeRelation,
-  ArgGraph,
-  ArgNode,
-  ArgNodeKind,
-} from "./argmap.js";
+import type { ArgEdge, ArgEdgeRelation, ArgGraph, ArgNode, ArgNodeKind } from "./argmap.js";
 
 // ---------------------------------------------------------------------------
 // Mermaid
@@ -71,11 +65,7 @@ const KIND_BRACKET_CLOSE: Record<ArgNodeKind, string> = {
 
 function mermaidEscape(text: string): string {
   // Strip newlines, escape quotes for the Mermaid quoted-text form.
-  return text
-    .replace(/\r?\n/g, " ")
-    .replace(/"/g, "&quot;")
-    .replace(/[<>]/g, " ")
-    .trim();
+  return text.replace(/\r?\n/g, " ").replace(/"/g, "&quot;").replace(/[<>]/g, " ").trim();
 }
 
 function mermaidNodeId(node: ArgNode): string {
@@ -95,9 +85,7 @@ function mermaidNodeId(node: ArgNode): string {
 export function exportArgGraphToMermaid(graph: ArgGraph): string {
   const lines: string[] = ["graph TD"];
   if (graph.axis) {
-    lines.push(
-      `  %% Axis: ${graph.axis.name} — ${graph.axis.poles[0]} ↔ ${graph.axis.poles[1]}`,
-    );
+    lines.push(`  %% Axis: ${graph.axis.name} — ${graph.axis.poles[0]} ↔ ${graph.axis.poles[1]}`);
   }
   lines.push(`  %% schemaVersion: 2, consolidationVersion: ${graph.consolidationVersion}`);
 
@@ -131,9 +119,7 @@ export function exportArgGraphToMermaid(graph: ArgGraph): string {
     const to = graph.nodes.find((n) => n.id === e.to);
     if (!from || !to) continue;
     const op = MERMAID_EDGE_OP[e.relation];
-    lines.push(
-      `  ${mermaidNodeId(from)} ${op}|${e.relation}| ${mermaidNodeId(to)}`,
-    );
+    lines.push(`  ${mermaidNodeId(from)} ${op}|${e.relation}| ${mermaidNodeId(to)}`);
   }
 
   // Class-based status hints — viewers can ignore them, but standard

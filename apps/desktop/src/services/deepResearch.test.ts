@@ -69,7 +69,8 @@ There was clear consensus that consent and identity continuity must be centered 
   });
 
   it("tolerates code fence wrapping", () => {
-    const raw = "```\n===TITLE===\nSome title\n===ABSTRACT===\nIntro.\n===SECTION | id=s1 | heading=Only | confidence=low===\nBody.\n===END===\n```";
+    const raw =
+      "```\n===TITLE===\nSome title\n===ABSTRACT===\nIntro.\n===SECTION | id=s1 | heading=Only | confidence=low===\nBody.\n===END===\n```";
     const parsed = parseDelimitedReport(raw);
     expect(parsed.title).toBe("Some title");
     expect(parsed.sections).toHaveLength(1);

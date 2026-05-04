@@ -1073,7 +1073,14 @@ export const PARTNER_TO_OBSERVER: Record<AgentId, ObserverId> = {
 };
 
 export const OBSERVER_IDS: ObserverId[] = [
-  "greta", "clara", "gaia", "dara", "kira", "quincy", "mila", "zoe",
+  "greta",
+  "clara",
+  "gaia",
+  "dara",
+  "kira",
+  "quincy",
+  "mila",
+  "zoe",
 ];
 
 // =============================================================================

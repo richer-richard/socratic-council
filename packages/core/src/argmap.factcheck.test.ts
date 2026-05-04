@@ -135,9 +135,7 @@ describe("applyFactCheckBadgesToGraph", () => {
       ],
       "m1",
     );
-    expect(out.nodes.find((n) => n.kind === "evidence")?.verification?.verdict).toBe(
-      "uncertain",
-    );
+    expect(out.nodes.find((n) => n.kind === "evidence")?.verification?.verdict).toBe("uncertain");
   });
 
   it("is idempotent — re-applying the same badges returns the same reference", () => {
@@ -189,15 +187,11 @@ describe("applyFactCheckBadgesToGraph", () => {
 describe("updateArgumentMap with whisperId", () => {
   it("tags newly-created nodes with influencedBy.whisperId when provided", () => {
     let g: ArgGraph = emptyGraph();
-    g = updateArgumentMap(
-      g,
-      [{ kind: "claim", text: "Push back on storage costs." }],
-      {
-        messageId: "m1",
-        agentId: "george",
-        whisperId: "whisper_42",
-      },
-    );
+    g = updateArgumentMap(g, [{ kind: "claim", text: "Push back on storage costs." }], {
+      messageId: "m1",
+      agentId: "george",
+      whisperId: "whisper_42",
+    });
     expect(g.nodes[0]?.influencedBy?.whisperId).toBe("whisper_42");
   });
 

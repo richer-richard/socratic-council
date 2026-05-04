@@ -19,7 +19,17 @@ import { clearAllAttachmentBlobs } from "../services/attachments";
 // aesthetic.
 function IconGear() {
   return (
-    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.4"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
       <circle cx="8" cy="8" r="2.2" />
       <path d="M8 1.5v1.7 M8 12.8v1.7 M14.5 8h-1.7 M3.2 8H1.5 M12.6 3.4l-1.2 1.2 M4.6 11.4l-1.2 1.2 M12.6 12.6l-1.2-1.2 M4.6 4.6L3.4 3.4" />
     </svg>
@@ -27,7 +37,17 @@ function IconGear() {
 }
 function IconKey() {
   return (
-    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.4"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
       <circle cx="5" cy="8" r="2.4" />
       <path d="M7.4 8h6.6 M11.4 8v2.2 M13.6 8v2.6" />
     </svg>
@@ -35,7 +55,17 @@ function IconKey() {
 }
 function IconChip() {
   return (
-    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.4"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
       <rect x="4" y="4" width="8" height="8" rx="1.4" />
       <line x1="8" y1="1.5" x2="8" y2="3.8" />
       <line x1="8" y1="12.2" x2="8" y2="14.5" />
@@ -50,7 +80,17 @@ function IconChip() {
 }
 function IconGlobe() {
   return (
-    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.4"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
       <circle cx="8" cy="8" r="6" />
       <ellipse cx="8" cy="8" rx="2.6" ry="6" />
       <line x1="2" y1="8" x2="14" y2="8" />
@@ -59,7 +99,17 @@ function IconGlobe() {
 }
 function IconSliders() {
   return (
-    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.4"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
       <line x1="2.5" y1="4.5" x2="13.5" y2="4.5" />
       <circle cx="6" cy="4.5" r="1.4" fill="var(--config-bg, #111)" />
       <line x1="2.5" y1="8" x2="13.5" y2="8" />
@@ -71,7 +121,17 @@ function IconSliders() {
 }
 function IconInfo() {
   return (
-    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.4"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
       <circle cx="8" cy="8" r="6" />
       <line x1="8" y1="7.2" x2="8" y2="11.5" />
       <circle cx="8" cy="4.6" r="0.6" fill="currentColor" stroke="none" />
@@ -80,7 +140,16 @@ function IconInfo() {
 }
 function IconClose() {
   return (
-    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" aria-hidden="true">
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+      aria-hidden="true"
+    >
       <line x1="3.5" y1="3.5" x2="12.5" y2="12.5" />
       <line x1="12.5" y1="3.5" x2="3.5" y2="12.5" />
     </svg>
@@ -89,7 +158,17 @@ function IconClose() {
 
 function IconChevronDown() {
   return (
-    <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <svg
+      width="12"
+      height="12"
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
       <polyline points="4 6 8 10 12 6" />
     </svg>
   );
@@ -188,13 +267,7 @@ interface ConfigModalProps {
   onUpdateModel: (provider: Provider, model: string) => void;
 }
 
-type TabType =
-  | "api-keys"
-  | "models"
-  | "proxy"
-  | "preferences"
-  | "diagnostics"
-  | "about";
+type TabType = "api-keys" | "models" | "proxy" | "preferences" | "diagnostics" | "about";
 
 const PROVIDERS = Object.keys(PROVIDER_INFO) as Provider[];
 
@@ -292,7 +365,11 @@ function mapTestConnectionError(provider: Provider, error: unknown): string {
   ) {
     return `Couldn't reach ${name} — check your proxy or internet connection.`;
   }
-  if (/\b5\d{2}\b/.test(raw) || lower.includes("server error") || lower.includes("internal error")) {
+  if (
+    /\b5\d{2}\b/.test(raw) ||
+    lower.includes("server error") ||
+    lower.includes("internal error")
+  ) {
     return `${name} is having issues server-side. Try again in a few minutes.`;
   }
   return `Test failed: ${raw}`;
@@ -657,10 +734,7 @@ export function ConfigModal({
                 };
 
                 return (
-                  <div
-                    key={provider}
-                    className="settings-card"
-                  >
+                  <div key={provider} className="settings-card">
                     <div className="flex items-center gap-4 mb-4">
                       <ProviderIcon provider={provider} size={32} />
                       <div>
@@ -872,8 +946,8 @@ export function ConfigModal({
               <div className="settings-card">
                 <h3 className="font-medium text-white mb-1">Default discussion cap</h3>
                 <p className="text-xs text-gray-400 mb-4">
-                  New sessions inherit this cap at creation. Existing sessions keep
-                  their original limit unless you adjust it from the chat header.
+                  New sessions inherit this cap at creation. Existing sessions keep their original
+                  limit unless you adjust it from the chat header.
                 </p>
                 <Dropdown<AppConfig["preferences"]["defaultLength"]>
                   value={config.preferences.defaultLength}
@@ -897,7 +971,6 @@ export function ConfigModal({
                   ]}
                 />
                 <div className="mb-4" />
-
 
                 {config.preferences.defaultLength === "custom" && (
                   <div>
@@ -1082,10 +1155,7 @@ export function ConfigModal({
                 <h3 className="font-medium text-white mb-4">Shortcuts</h3>
                 <div className="grid md:grid-cols-2 gap-3">
                   {ABOUT_SHORTCUTS.map((shortcut) => (
-                    <div
-                      key={shortcut.keys}
-                      className="settings-subcard"
-                    >
+                    <div key={shortcut.keys} className="settings-subcard">
                       <div className="text-sm text-white font-medium">{shortcut.keys}</div>
                       <div className="text-sm text-gray-400 mt-1">{shortcut.description}</div>
                     </div>

@@ -78,11 +78,14 @@ function isTauri(): boolean {
 function b64encode(bytes: Uint8Array): string {
   let binary = "";
   for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
-  return typeof btoa === "function" ? btoa(binary) : Buffer.from(binary, "binary").toString("base64");
+  return typeof btoa === "function"
+    ? btoa(binary)
+    : Buffer.from(binary, "binary").toString("base64");
 }
 
 function b64decode(text: string): Uint8Array {
-  const binary = typeof atob === "function" ? atob(text) : Buffer.from(text, "base64").toString("binary");
+  const binary =
+    typeof atob === "function" ? atob(text) : Buffer.from(text, "base64").toString("binary");
   const bytes = new Uint8Array(binary.length);
   for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
   return bytes;
@@ -131,9 +134,8 @@ export async function initVault(): Promise<void> {
       }
       dek = Uint8Array.from(bytes);
       lastStatus = result.status ?? "existing";
-      lastQuarantinePath = typeof result.quarantine_path === "string"
-        ? result.quarantine_path
-        : null;
+      lastQuarantinePath =
+        typeof result.quarantine_path === "string" ? result.quarantine_path : null;
       if (lastStatus === "quarantined") {
         console.warn(
           "[vault] DEK file was unreadable and quarantined. Encrypted data from before this boot may not decrypt with the new key.",

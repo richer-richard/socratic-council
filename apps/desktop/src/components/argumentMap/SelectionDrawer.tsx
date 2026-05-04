@@ -75,9 +75,7 @@ export function SelectionDrawer({
           >
             {style.symbol} {style.label}
             {node.status !== "active" && (
-              <span style={{ color: "rgba(232,232,239,0.5)", marginLeft: 6 }}>
-                · {node.status}
-              </span>
+              <span style={{ color: "rgba(232,232,239,0.5)", marginLeft: 6 }}>· {node.status}</span>
             )}
           </div>
           <div
@@ -117,9 +115,7 @@ export function SelectionDrawer({
               {node.stance.axis}
             </div>
           )}
-          {node.verification && (
-            <VerificationBadge verification={node.verification} />
-          )}
+          {node.verification && <VerificationBadge verification={node.verification} />}
           {node.influencedBy && (
             <div
               style={{
@@ -241,20 +237,12 @@ function SourceRow({
         <span style={{ color: "rgba(232,232,239,0.4)" }}>· {messageId}</span>
         <span style={{ flex: 1 }} />
         {onJump && (
-          <button
-            type="button"
-            onClick={() => onJump(messageId)}
-            style={pillButtonStyle}
-          >
+          <button type="button" onClick={() => onJump(messageId)} style={pillButtonStyle}>
             Jump
           </button>
         )}
         {onRetry && (
-          <button
-            type="button"
-            onClick={() => onRetry(messageId)}
-            style={pillButtonStyle}
-          >
+          <button type="button" onClick={() => onRetry(messageId)} style={pillButtonStyle}>
             Re-extract
           </button>
         )}
@@ -309,8 +297,7 @@ function EdgeRow({
           marginBottom: 4,
         }}
       >
-        {direction === "in" ? "←" : "→"} {rs.label} (
-        {(edge.confidence * 100).toFixed(0)}%)
+        {direction === "in" ? "←" : "→"} {rs.label} ({(edge.confidence * 100).toFixed(0)}%)
       </div>
       <div
         style={{

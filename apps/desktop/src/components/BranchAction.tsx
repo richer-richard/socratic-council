@@ -57,8 +57,7 @@ export function BranchAction({ session, messageId, onBranched, disabled }: Branc
         color: busy ? "rgba(245, 197, 66, 0.5)" : "rgba(245, 197, 66, 0.78)",
         borderRadius: "6px",
         cursor: busy || disabled ? "progress" : "pointer",
-        fontFamily:
-          "'Manrope', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+        fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
         fontSize: "0.78rem",
         fontStyle: "italic",
         fontWeight: 500,
@@ -110,8 +109,7 @@ export function BranchCrumb({
         background: "rgba(245, 197, 66, 0.07)",
         border: "1px solid rgba(245, 197, 66, 0.25)",
         color: "rgba(245, 197, 66, 0.85)",
-        fontFamily:
-          "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
+        fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
         fontSize: "0.7rem",
         fontStyle: "italic",
         letterSpacing: "0.01em",
@@ -358,10 +356,18 @@ export function BranchLineage({
           }}
         >
           {siblings.length > 0 && (
-            <BranchListSection title="Other branches from this fork point" entries={siblings} onNavigate={onNavigate} />
+            <BranchListSection
+              title="Other branches from this fork point"
+              entries={siblings}
+              onNavigate={onNavigate}
+            />
           )}
           {children.length > 0 && (
-            <BranchListSection title="Forks from this session" entries={children} onNavigate={onNavigate} />
+            <BranchListSection
+              title="Forks from this session"
+              entries={children}
+              onNavigate={onNavigate}
+            />
           )}
         </div>
       )}
@@ -464,8 +470,7 @@ export function BranchPointBadge({
           border: "1px solid rgba(245, 197, 66, 0.32)",
           color: "rgba(245, 197, 66, 0.88)",
           cursor: "pointer",
-          fontFamily:
-            "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
+          fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
           fontSize: "0.68rem",
           fontStyle: "italic",
           letterSpacing: "0.01em",
