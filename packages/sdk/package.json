@@ -1,6 +1,6 @@
 {
   "name": "@socratic-council/sdk",
-  "version": "2.1.2",
+  "version": "2.1.3",
   "description": "AI Provider SDK for Socratic Council - handles all API calls",
   "type": "module",
   "main": "./dist/index.js",
