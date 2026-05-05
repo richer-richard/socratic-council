@@ -4689,15 +4689,13 @@ Write the official moderator wrap-up in 4 short sentences:
           `Round 2 is required because ${firstRoundCount.yes}/${configuredAgentIds.length} agents wanted to end (not unanimous, but at least ${advanceThreshold}).`,
         ),
       );
-      const roundTwoState: EndVoteState = {
-        ...voteState,
-        round: 2,
-        queue: [...configuredAgentIds],
-        secondRoundVotes: {},
-        secondRoundReasons: {},
-      };
-      endVoteRef.current = roundTwoState;
-      upsertEndVoteBoardMessage(buildEndVoteBoard(roundTwoState, "active"));
+      // Post the round-1 closure notice BEFORE the round-2 board mounts so
+      // the natural chat ordering reads:
+      //   [round 1 board, complete] → [round 1 closure notice] →
+      //   [round 2 board, active]   → [round 2 closure notice]
+      // Otherwise the upsert would append the round-2 card first and the
+      // round-1 notice would land after it (looks like both notices are
+      // clumped at the end of the transcript).
       setMessages((prev) => [
         ...prev,
         {
@@ -4707,6 +4705,15 @@ Write the official moderator wrap-up in 4 short sentences:
           timestamp: Date.now(),
         },
       ]);
+      const roundTwoState: EndVoteState = {
+        ...voteState,
+        round: 2,
+        queue: [...configuredAgentIds],
+        secondRoundVotes: {},
+        secondRoundReasons: {},
+      };
+      endVoteRef.current = roundTwoState;
+      upsertEndVoteBoardMessage(buildEndVoteBoard(roundTwoState, "active"));
       return;
     }
 
