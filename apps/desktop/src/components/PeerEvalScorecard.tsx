@@ -142,13 +142,13 @@ export function PeerEvalScorecard({ round, agents }: PeerEvalScorecardProps) {
       {!collapsed && (
         <div className="peer-eval-scorecard-body">
           <div
-            className="grid items-center gap-x-2 px-2 py-1 text-[10px] uppercase tracking-[0.2em] text-ink-500"
+            className="grid items-center gap-x-2 px-2 py-1 text-[9px] uppercase tracking-[0.08em] text-ink-500 whitespace-nowrap"
             style={{
               fontFamily: "var(--font-mono)",
               gridTemplateColumns: "1fr repeat(5, 2.4rem) 2.4rem 1.6rem",
             }}
           >
-            <span>Agent</span>
+            <span className="tracking-[0.18em]">Agent</span>
             {DIMENSIONS.map((d) => (
               <span key={d.key} className="text-right">
                 {d.label}
