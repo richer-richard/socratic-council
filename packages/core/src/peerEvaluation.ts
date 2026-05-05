@@ -99,6 +99,12 @@ export interface RunPeerEvaluationArgs {
   maxTranscriptChars?: number;
   /** Optional caller-supplied id; otherwise generated from `generatedAt`. */
   roundId?: string;
+  /**
+   * Called after each evaluator settles (success or failure) so the UI can
+   * stream cell-by-cell color updates instead of waiting for all 8 calls.
+   * Receives a snapshot of the round in its current partial state.
+   */
+  onProgress?: (partial: PeerEvalRound) => void;
 }
 
 // --- Prompt construction -----------------------------------------------------
@@ -434,36 +440,51 @@ export async function runPeerEvaluation(args: RunPeerEvaluationArgs): Promise<Pe
   ).length;
 
   // Run every evaluator in parallel — same pattern as factcheck (parallel
-  // oracle.verify calls). Each evaluator produces up to 7 critiques.
-  const results = await Promise.all(
+  // oracle.verify calls). Each evaluator produces up to 7 critiques. We emit
+  // a partial snapshot via onProgress as each evaluator settles so the UI
+  // can color cells in cell-by-cell instead of waiting for all 8 calls.
+  const allCritiques: PeerCritique[] = [];
+  const failedEvaluators: AgentId[] = [];
+
+  function emitPartial(): void {
+    if (!args.onProgress) return;
+    args.onProgress({
+      id,
+      generatedAt,
+      topic: args.topic,
+      turnsCompleted,
+      agentIds,
+      critiques: [...allCritiques],
+      perAgentSummary: aggregateCritiques(allCritiques, agentIds),
+      failedEvaluators: [...failedEvaluators],
+    });
+  }
+
+  await Promise.all(
     args.agents.map(async (evaluator) => {
       const peers = args.agents.filter((a) => a.id !== evaluator.id);
+      let critiques: PeerCritique[] = [];
       try {
-        const critiques = await runOneEvaluator(
+        critiques = await runOneEvaluator(
           evaluator,
           peers,
           args.topic,
           transcriptBlock,
           args.complete,
         );
-        return { evaluatorId: evaluator.id, critiques };
       } catch {
-        return { evaluatorId: evaluator.id, critiques: [] as PeerCritique[] };
+        critiques = [];
       }
+      // JS is single-threaded between awaits, so these mutations are safe
+      // even though several promises resolve back-to-back.
+      if (critiques.length === 0) {
+        failedEvaluators.push(evaluator.id);
+      } else {
+        allCritiques.push(...critiques);
+      }
+      emitPartial();
     }),
   );
-
-  const allCritiques: PeerCritique[] = [];
-  const failedEvaluators: AgentId[] = [];
-  for (const { evaluatorId, critiques } of results) {
-    if (critiques.length === 0) {
-      failedEvaluators.push(evaluatorId);
-    } else {
-      allCritiques.push(...critiques);
-    }
-  }
-
-  const perAgentSummary = aggregateCritiques(allCritiques, agentIds);
 
   return {
     id,
@@ -472,7 +493,7 @@ export async function runPeerEvaluation(args: RunPeerEvaluationArgs): Promise<Pe
     turnsCompleted,
     agentIds,
     critiques: allCritiques,
-    perAgentSummary,
+    perAgentSummary: aggregateCritiques(allCritiques, agentIds),
     failedEvaluators,
   };
 }
