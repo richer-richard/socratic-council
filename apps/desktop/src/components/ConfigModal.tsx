@@ -12,6 +12,11 @@ import { getModelsByProvider } from "@socratic-council/shared";
 import { ProviderIcon } from "./icons/ProviderIcons";
 import { testProviderConnection } from "../services/api";
 import { clearAllAttachmentBlobs } from "../services/attachments";
+// Single source of truth for the version + identifier shown in the About
+// tab. Reading from the desktop package.json means a version bump in a
+// new release commit (e.g. v2.1.0 → v2.1.1) is automatically reflected
+// here at build time — no separate constant to forget to update.
+import desktopPkg from "../../package.json";
 
 // Stroked SVG icons in the same visual language as the Chat header
 // (HeaderIconLogs / HeaderIconSearch / etc.) — 16x16 viewBox, 1.4 stroke,
@@ -314,7 +319,7 @@ const MODEL_OPTIONS: Record<Provider, { id: string; name: string; description?: 
   })),
 };
 
-const ABOUT_VERSION = "1.0.0";
+const ABOUT_VERSION = desktopPkg.version;
 const ABOUT_IDENTIFIER = "com.socratic-council.desktop";
 const ABOUT_LICENSE = "Apache-2.0";
 const ABOUT_REPOSITORY = "https://github.com/richer-richard/socratic-council";
