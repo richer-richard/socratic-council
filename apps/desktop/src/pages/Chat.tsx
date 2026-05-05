@@ -47,6 +47,8 @@ import { Markdown } from "../components/Markdown";
 import { ConversationSearch } from "../components/ConversationSearch";
 import { ConversationExport } from "../components/ConversationExport";
 import { ConflictGraph } from "../components/ConflictGraph";
+import { PeerEvalScorecard } from "../components/PeerEvalScorecard";
+import { PeerCritiqueGraph } from "../components/PeerCritiqueGraph";
 import {
   ConflictDetector,
   CostTrackerEngine,
@@ -56,9 +58,12 @@ import {
   SEMANTIC_CHECK_REGEX_FLOOR,
   factCheckMessage,
   reflectAndRevise,
+  runPeerEvaluation,
   scoreAgentsRelevance,
   semanticConflictCheck,
   summarizeOlderMessages,
+  type PeerEvalAgent,
+  type PeerEvalRound,
   type RelevanceScores,
   type VerificationBadge,
 } from "@socratic-council/core";
@@ -1751,6 +1756,16 @@ export function Chat({ session, onNavigate, onPersistSession }: ChatProps) {
   const phaseRef = useRef<SessionPhase>(normalizedSession.runtime.phase);
   const resolutionQueueRef = useRef<CouncilAgentId[]>(normalizedSession.runtime.resolutionQueue);
   const resolutionNoticePostedRef = useRef(normalizedSession.runtime.resolutionNoticePosted);
+  // Peer-evaluation: runs once at session end to replace the legacy goodbye
+  // round. Lives in component state so the artifact (scorecard + critique
+  // graph) re-renders when the round is added; ref mirror lets the async
+  // runner read the latest value without waiting for a re-render.
+  const [peerEvalRoundsState, setPeerEvalRoundsState] = useState<Record<string, PeerEvalRound>>(
+    normalizedSession.peerEvalRounds ?? {},
+  );
+  const peerEvalRoundsRef = useRef(peerEvalRoundsState);
+  peerEvalRoundsRef.current = peerEvalRoundsState;
+  const peerEvalInFlightRef = useRef(false);
   const endVoteRef = useRef<EndVoteState | null>(normalizedSession.runtime.endVote);
   const pendingHandoffRef = useRef<PendingHandoffState | null>(
     normalizedSession.runtime.pendingHandoff,
@@ -1967,6 +1982,8 @@ export function Chat({ session, onNavigate, onPersistSession }: ChatProps) {
     whisperBonusesRef.current = createWhisperBonuses();
     cyclePendingRef.current = [];
     recentSpeakersRef.current = [];
+    setPeerEvalRoundsState({});
+    peerEvalInFlightRef.current = false;
   }, [topic]);
 
   const hydrateRuntimeState = useCallback((source: DiscussionSession) => {
@@ -2636,67 +2653,6 @@ This canvas is yours and persists across the entire session. Edit it in place th
       return history;
     },
     [buildAttachmentContext, buildEngagementPrompt, getContextMessages, getLatestNoteFor, topic],
-  );
-
-  const buildResolutionConversationHistory = useCallback(
-    (agentId: CouncilAgentId, turnsCompleted: number): APIChatMessage[] => {
-      const agentConfig = AGENT_CONFIG[agentId];
-      const model = configRef.current.models[agentConfig.provider];
-      const { rawAttachments, attachmentText } = buildAttachmentContext(
-        agentConfig.provider,
-        model,
-      );
-      const history: APIChatMessage[] = [
-        {
-          role: "system",
-          content: agentConfig.systemPrompt,
-        },
-      ];
-
-      history.push({
-        role: "user",
-        content: [`Discussion topic: "${topic}"`, attachmentText].filter(Boolean).join("\n\n"),
-        ...(attachmentText ? { cacheControl: "ephemeral" as const } : {}),
-        ...(rawAttachments.length > 0 ? { attachments: rawAttachments } : {}),
-      });
-
-      const contextMessages = messagesRef.current
-        .filter(
-          (message) =>
-            (isCouncilAgent(message.agentId) || isModeratorMessage(message)) &&
-            !message.isStreaming &&
-            !hasStructuredVoteArtifacts(message),
-        )
-        .filter((message) => (message.content ?? "").trim().length > 0)
-        .slice(-MAX_CONTEXT_MESSAGES);
-
-      for (const msg of contextMessages) {
-        const speaker = isCouncilAgent(msg.agentId) ? AGENT_CONFIG[msg.agentId].name : "Moderator";
-        if (msg.agentId === agentId) {
-          history.push({ role: "assistant", content: msg.content });
-        } else {
-          history.push({
-            role: "user",
-            content: `${speaker}: ${msg.content}`,
-          });
-        }
-      }
-
-      history.push({
-        role: "user",
-        content: `The discussion phase has ended after ${turnsCompleted} turns. You are now in the closing round.
-- Start with a short title on its own line (3–6 words, no punctuation, no dashes). This is the headline of your closing reflection.
-- Then write 2–4 sentences summarizing the conclusion or recommendation you stand by.
-- Give the strongest supporting reason in one short clause.
-- End with a short goodbye or sign-off line to the group.
-- Do NOT ask any questions.
-- Do NOT include @quote(...), @react(...), @tool(...), @vote(...), or @end().
-- Do NOT introduce a brand-new topic.`,
-      });
-
-      return history;
-    },
-    [buildAttachmentContext, topic],
   );
 
   const buildEndVoteConversationHistory = useCallback(
@@ -3446,6 +3402,105 @@ Write the official moderator wrap-up in 4 short sentences:
       apiLogger.log("warn", "ui", "Clipboard copy failed", { error });
     }
   }, []);
+
+  // Closing-round peer-evaluation pass. Replaces the legacy goodbye round +
+  // moderator final-summary message: every council agent privately rates
+  // every other agent on rigor / evidence / novelty / civility / on-topic and
+  // writes a short critique. The aggregate is rendered inline as a scorecard
+  // + interactive critique graph (see PeerEvalScorecard, PeerCritiqueGraph).
+  const runPeerEvaluationPass = useCallback(async (): Promise<void> => {
+    if (abortRef.current) return;
+    const runtime = pickExtractorRuntime();
+    if (!runtime) {
+      // No Google API key configured for the evaluator runtime — post a
+      // brief notice and skip rather than spinning silently.
+      const notice: ChatMessage = {
+        id: `msg_${Date.now()}_peer_eval_unavailable`,
+        agentId: "system",
+        displayName: "Moderator",
+        content:
+          "Peer review pass skipped: a Google API key is required for the evaluator runtime, but none is configured.",
+        timestamp: Date.now(),
+      };
+      setMessages((prev) => [...prev, notice]);
+      if (memoryManagerRef.current) memoryManagerRef.current.addMessage(notice);
+      return;
+    }
+
+    const evaluators: PeerEvalAgent[] = configuredAgentIds.map((id) => ({
+      id,
+      name: AGENT_CONFIG[id].name,
+      blurb: PROVIDER_INFO[AGENT_CONFIG[id].provider].description,
+      systemPrompt: AGENT_CONFIG[id].systemPrompt,
+    }));
+    if (evaluators.length < 2) return;
+
+    const transcript = messagesRef.current.filter(
+      (m) =>
+        isCouncilAgent(m.agentId) &&
+        !m.isStreaming &&
+        (m.content ?? "").trim().length > 0,
+    );
+
+    const proxy = getProxy();
+
+    let round: PeerEvalRound;
+    try {
+      round = await runPeerEvaluation({
+        topic,
+        messages: transcript,
+        agents: evaluators,
+        complete: async ({ system, user }) => {
+          if (abortRef.current) return null;
+          try {
+            const result = await callProvider(
+              runtime.provider,
+              runtime.credential,
+              runtime.model,
+              [
+                { role: "system", content: system },
+                { role: "user", content: user },
+              ],
+              () => undefined,
+              proxy,
+              {
+                requestTimeoutMs: 120000,
+                idleTimeoutMs: 60000,
+                maxTokens: 4096,
+              },
+            );
+            return result.success && result.content ? result.content : null;
+          } catch {
+            return null;
+          }
+        },
+      });
+    } catch (error) {
+      apiLogger.log("warn", "peer-eval", "runPeerEvaluation threw", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return;
+    }
+
+    if (abortRef.current) return;
+
+    setPeerEvalRoundsState((prev) => ({ ...prev, [round.id]: round }));
+
+    const renderMsg: ChatMessage = {
+      id: `msg_${round.generatedAt}_peer_eval`,
+      agentId: "system",
+      displayName: "Moderator",
+      content:
+        round.critiques.length > 0
+          ? "Peer review pass complete."
+          : "Peer review pass complete (no critiques parsed — see settings).",
+      timestamp: round.generatedAt,
+      peerEvalRoundId: round.id,
+      isResolution: true,
+    };
+    setMessages((prev) => [...prev, renderMsg]);
+    if (memoryManagerRef.current) memoryManagerRef.current.addMessage(renderMsg);
+  }, [configuredAgentIds, pickExtractorRuntime, getProxy, topic]);
 
   // Generate agent response using real API
   const generateAgentResponse = useCallback(
@@ -4212,128 +4267,6 @@ Write the official moderator wrap-up in 4 short sentences:
     ],
   );
 
-  const generateResolutionResponse = useCallback(
-    async (agentId: CouncilAgentId, turnsCompleted: number): Promise<ChatMessage | null> => {
-      if (abortRef.current) return null;
-
-      const agentConfig = AGENT_CONFIG[agentId];
-      const credential = config.credentials[agentConfig.provider];
-      const model = config.models[agentConfig.provider];
-
-      if (!credential?.apiKey || !model) return null;
-
-      const proxy = getProxy();
-      const controller = new AbortController();
-      activeRequestsRef.current.set(agentId, controller);
-      setTypingAgents((prev) => (prev.includes(agentId) ? prev : [...prev, agentId]));
-
-      const newMessage: ChatMessage = {
-        id: `msg_${Date.now()}_${agentId}_resolution`,
-        agentId,
-        content: "",
-        timestamp: Date.now(),
-        isStreaming: true,
-        isResolution: true,
-        metadata: { model: model as ModelId, latencyMs: 0 },
-      };
-
-      setMessages((prev) => [...prev, newMessage]);
-
-      let streamingContent = "";
-      let streamingThinking = "";
-      try {
-        const history = buildResolutionConversationHistory(agentId, turnsCompleted);
-        const result = await callProvider(
-          agentConfig.provider,
-          credential,
-          model,
-          history,
-          (chunk) => {
-            if (abortRef.current) return;
-            if (chunk.content) {
-              streamingContent += chunk.content;
-            }
-            if (chunk.thinking) {
-              streamingThinking += chunk.thinking;
-            }
-            if (chunk.content || chunk.thinking) {
-              setMessages((prev) =>
-                prev.map((m) =>
-                  m.id === newMessage.id
-                    ? {
-                        ...m,
-                        content: streamingContent,
-                        thinking: streamingThinking || undefined,
-                      }
-                    : m,
-                ),
-              );
-            }
-          },
-          proxy,
-          {
-            signal: controller.signal,
-            // Resolution notes should be quick; keep timeouts tight.
-            idleTimeoutMs: 60000,
-            requestTimeoutMs: 90000,
-          },
-        );
-
-        if (abortRef.current) {
-          setMessages((prev) => prev.filter((m) => m.id !== newMessage.id));
-          return null;
-        }
-
-        const { cleaned: resCanvasCleaned } = extractCanvasDirectives(result.content || "");
-        const { cleaned } = extractActions(resCanvasCleaned, REACTION_IDS);
-        const displayContent =
-          cleaned ||
-          normalizeMessageText(
-            extractCanvasDirectives(result.content || streamingContent || "").cleaned,
-          );
-
-        const finalMessage: ChatMessage = {
-          ...newMessage,
-          content: displayContent || "[No response received]",
-          thinking: result.thinking || streamingThinking || undefined,
-          fullResponse: displayContent || undefined,
-          isStreaming: false,
-          tokens: result.tokens,
-          latencyMs: result.latencyMs,
-          error: result.error,
-          metadata: {
-            model: model as ModelId,
-            latencyMs: result.latencyMs,
-          },
-        };
-
-        setMessages((prev) => prev.map((m) => (m.id === newMessage.id ? finalMessage : m)));
-
-        if (result.success) {
-          if (memoryManagerRef.current) {
-            memoryManagerRef.current.addMessage(finalMessage);
-          }
-
-          setTotalTokens((prev) => ({
-            input: prev.input + result.tokens.input,
-            output: prev.output + result.tokens.output,
-          }));
-
-          if (costTrackerRef.current) {
-            costTrackerRef.current.recordUsage(agentId, result.tokens, model);
-            setCostState(costTrackerRef.current.getState());
-          }
-        }
-
-        return finalMessage;
-      } finally {
-        activeRequestsRef.current.delete(agentId);
-        setTypingAgents((prev) => prev.filter((id) => id !== agentId));
-      }
-    },
-    [buildResolutionConversationHistory, config, getProxy],
-  );
-
   const generateEndVoteResponse = useCallback(
     async (
       agentId: CouncilAgentId,
@@ -4691,7 +4624,7 @@ Write the official moderator wrap-up in 4 short sentences:
         endVoteRef.current = null;
 
         beginClosingRound(
-          `End vote passed unanimously in round 1 by ${firstRoundCount.yes}-${firstRoundCount.no}. Round 2 is unnecessary and was therefore skipped. The council moves straight to closing summaries and the Moderator's final report.`,
+          `End vote passed unanimously in round 1 by ${firstRoundCount.yes}-${firstRoundCount.no}. Round 2 is unnecessary and was therefore skipped. The council moves straight to the peer review pass — each agent will critique every other agent.`,
         );
         return;
       }
@@ -4761,7 +4694,7 @@ Write the official moderator wrap-up in 4 short sentences:
 
     if (passed) {
       beginClosingRound(
-        `End vote passed in round 2 by ${finalCount.yes}-${finalCount.no}. Closing round: each agent gives a short summary and goodbye, then the Moderator publishes the final summary, score, and explanation.`,
+        `End vote passed in round 2 by ${finalCount.yes}-${finalCount.no}. The council moves to the peer review pass — each agent will critique every other agent.`,
       );
       return;
     }
@@ -4791,7 +4724,10 @@ Write the official moderator wrap-up in 4 short sentences:
       setDuoLogue(null);
       duoLogueRef.current = null;
       setConflictState(null);
-      resolutionQueueRef.current = [...configuredAgentIds];
+      // Peer-evaluation has replaced the per-agent goodbye queue. The closing
+      // pass runs once via runPeerEvaluation in runDiscussion; no per-agent
+      // resolution turns are queued.
+      resolutionQueueRef.current = [];
       moderatorResolutionPromptPostedRef.current = true;
 
       if (!resolutionNoticePostedRef.current) {
@@ -4807,7 +4743,7 @@ Write the official moderator wrap-up in 4 short sentences:
         ]);
       }
     },
-    [configuredAgentIds],
+    [],
   );
 
   // Main discussion loop
@@ -5114,62 +5050,26 @@ Write the official moderator wrap-up in 4 short sentences:
         !endVoteRef.current
       ) {
         beginClosingRound(
-          `Discussion phase ended after ${currentTurnRef.current} turns. Closing round: each agent gives a short summary and goodbye, then the Moderator publishes the final summary, score, and explanation.`,
+          `Discussion phase ended after ${currentTurnRef.current} turns. Closing round: each agent will privately critique every peer. The Peer Review Scorecard and Critique Graph will appear once all evaluations land.`,
         );
-      }
-
-      while (
-        !abortRef.current &&
-        phaseRef.current === "resolution" &&
-        resolutionQueueRef.current.length > 0
-      ) {
-        const nextAgent = resolutionQueueRef.current[0];
-        if (!nextAgent) break;
-
-        await generateResolutionResponse(nextAgent, currentTurnRef.current);
-        if (abortRef.current) break;
-
-        resolutionQueueRef.current = resolutionQueueRef.current.slice(1);
       }
 
       if (
         !abortRef.current &&
         phaseRef.current === "resolution" &&
-        resolutionQueueRef.current.length === 0
+        !moderatorFinalSummaryPostedRef.current &&
+        !peerEvalInFlightRef.current
       ) {
-        if (!moderatorFinalSummaryPostedRef.current) {
-          const summaryMessage = await generateModeratorMessage({
-            kind: "final_summary",
-            turn: currentTurnRef.current,
-          });
-
-          if (summaryMessage) {
-            moderatorFinalSummaryPostedRef.current = true;
-          } else {
-            // Fix 3.16: only post the fallback if the discussion actually had
-            // turns — otherwise the message is misleading ("summary unavailable"
-            // implies an attempt was made, when really the session never ran).
-            const hadDiscussion =
-              currentTurnRef.current > 0 ||
-              messagesRef.current.some((m) => isCouncilAgent(m.agentId));
-            if (hadDiscussion) {
-              const fallbackSummary: ChatMessage = {
-                id: `msg_${Date.now()}_moderator_fallback_summary`,
-                agentId: "system",
-                displayName: "Moderator",
-                content:
-                  "Moderator summary unavailable because no summary provider is configured. Review the closing round above for the final agent summaries and goodbyes.",
-                timestamp: Date.now(),
-              };
-              setMessages((prev) => [...prev, fallbackSummary]);
-              if (memoryManagerRef.current) {
-                memoryManagerRef.current.addMessage(fallbackSummary);
-              }
-            }
-            moderatorFinalSummaryPostedRef.current = true;
-          }
+        moderatorFinalSummaryPostedRef.current = true;
+        peerEvalInFlightRef.current = true;
+        try {
+          await runPeerEvaluationPass();
+        } finally {
+          peerEvalInFlightRef.current = false;
         }
+      }
 
+      if (!abortRef.current && phaseRef.current === "resolution") {
         phaseRef.current = "completed";
         setSessionStatus("completed");
         setIsPaused(false);
@@ -5188,7 +5088,7 @@ Write the official moderator wrap-up in 4 short sentences:
       continueEndVote,
       generateAgentResponse,
       generateModeratorMessage,
-      generateResolutionResponse,
+      runPeerEvaluationPass,
       beginClosingRound,
       configuredAgentIds,
       configuredProviders,
@@ -5312,7 +5212,7 @@ Write the official moderator wrap-up in 4 short sentences:
     stopActiveGeneration();
     setIsGracefullyEnding(true);
     beginClosingRound(
-      "Graceful end requested. Closing round: each agent gives a short summary and goodbye, then the Moderator publishes the final summary, score, and explanation.",
+      "Graceful end requested. Each agent will privately critique every peer; the Peer Review Scorecard and Critique Graph will appear once the evaluations land.",
     );
     scrollToBottom();
 
@@ -5430,6 +5330,7 @@ Write the official moderator wrap-up in 4 short sentences:
       persistedMessages.length,
       sessionTitle,
       sessionCap === null ? "infinity" : String(sessionCap),
+      Object.keys(peerEvalRoundsRef.current).sort().join("|"),
     ].join("::");
 
     if (lastPersistSignatureRef.current === signature) {
@@ -5484,6 +5385,9 @@ Write the official moderator wrap-up in 4 short sentences:
           ? {
               argmapConsolidationLastMessageCount: argmapConsolidatorLastMessageCountRef.current,
             }
+          : {}),
+        ...(Object.keys(peerEvalRoundsRef.current).length > 0
+          ? { peerEvalRounds: peerEvalRoundsRef.current }
           : {}),
       });
 
@@ -7055,6 +6959,26 @@ Write the official moderator wrap-up in 4 short sentences:
                       {message.factCheckBadges && message.factCheckBadges.length > 0 ? (
                         <div style={{ marginTop: "0.4rem" }}>
                           <FactCheckStrip badges={message.factCheckBadges as VerificationBadge[]} />
+                        </div>
+                      ) : null}
+                      {message.peerEvalRoundId && peerEvalRoundsState[message.peerEvalRoundId] ? (
+                        <div style={{ marginTop: "0.6rem" }}>
+                          <PeerEvalScorecard
+                            round={peerEvalRoundsState[message.peerEvalRoundId]!}
+                            agents={AGENT_IDS.map((id) => ({
+                              id,
+                              name: AGENT_CONFIG[id].name,
+                              color: AGENT_CONFIG[id].color,
+                            }))}
+                          />
+                          <PeerCritiqueGraph
+                            round={peerEvalRoundsState[message.peerEvalRoundId]!}
+                            agents={AGENT_IDS.map((id) => ({
+                              id,
+                              name: AGENT_CONFIG[id].name,
+                              color: AGENT_CONFIG[id].color,
+                            }))}
+                          />
                         </div>
                       ) : null}
                       {messageAttachments.length > 0 && (
