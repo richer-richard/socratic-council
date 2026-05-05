@@ -3403,17 +3403,17 @@ Write the official moderator wrap-up in 4 short sentences:
     }
   }, []);
 
-  // Closing-round peer-evaluation pass. Replaces the legacy goodbye round +
-  // moderator final-summary message: every council agent privately rates
-  // every other agent on rigor / evidence / novelty / civility / on-topic and
-  // writes a short critique. The aggregate is rendered inline as a scorecard
-  // + interactive critique graph (see PeerEvalScorecard, PeerCritiqueGraph).
+  // Closing-round peer-evaluation pass. Replaces the legacy per-agent goodbye
+  // round (Moderator final summary + Deep Research Report still run after,
+  // see runDiscussion's resolution branch). Every council agent privately
+  // rates every other agent on rigor / evidence / novelty / civility /
+  // on-topic and writes a short critique. The artifact (scorecard + critique
+  // graph) is mounted as an inline system message right when the pass starts
+  // and updates cell-by-cell as each evaluator lands.
   const runPeerEvaluationPass = useCallback(async (): Promise<void> => {
     if (abortRef.current) return;
     const runtime = pickExtractorRuntime();
     if (!runtime) {
-      // No Google API key configured for the evaluator runtime — post a
-      // brief notice and skip rather than spinning silently.
       const notice: ChatMessage = {
         id: `msg_${Date.now()}_peer_eval_unavailable`,
         agentId: "system",
@@ -3442,14 +3442,43 @@ Write the official moderator wrap-up in 4 short sentences:
         (m.content ?? "").trim().length > 0,
     );
 
+    // Mount the artifact upfront so the UI can stream into it. The empty
+    // round renders the scorecard + graph in their "evaluating…" state.
+    const generatedAt = Date.now();
+    const roundId = `peer_eval_${generatedAt}`;
+    const emptyRound: PeerEvalRound = {
+      id: roundId,
+      generatedAt,
+      topic,
+      turnsCompleted: transcript.length,
+      agentIds: evaluators.map((a) => a.id),
+      critiques: [],
+      perAgentSummary: {},
+      failedEvaluators: [],
+    };
+    setPeerEvalRoundsState((prev) => ({ ...prev, [roundId]: emptyRound }));
+
+    const renderMsg: ChatMessage = {
+      id: `msg_${generatedAt}_peer_eval`,
+      agentId: "system",
+      displayName: "Moderator",
+      content: "Peer review pass running…",
+      timestamp: generatedAt,
+      peerEvalRoundId: roundId,
+      isResolution: true,
+    };
+    setMessages((prev) => [...prev, renderMsg]);
+    if (memoryManagerRef.current) memoryManagerRef.current.addMessage(renderMsg);
+
     const proxy = getProxy();
 
-    let round: PeerEvalRound;
+    let finalRound: PeerEvalRound = emptyRound;
     try {
-      round = await runPeerEvaluation({
+      finalRound = await runPeerEvaluation({
         topic,
         messages: transcript,
         agents: evaluators,
+        roundId,
         complete: async ({ system, user }) => {
           if (abortRef.current) return null;
           try {
@@ -3474,32 +3503,34 @@ Write the official moderator wrap-up in 4 short sentences:
             return null;
           }
         },
+        onProgress: (partial) => {
+          // Stream cell-by-cell into the same round id.
+          setPeerEvalRoundsState((prev) => ({ ...prev, [roundId]: partial }));
+        },
       });
     } catch (error) {
       apiLogger.log("warn", "peer-eval", "runPeerEvaluation threw", {
         error: error instanceof Error ? error.message : String(error),
       });
-      return;
     }
 
     if (abortRef.current) return;
 
-    setPeerEvalRoundsState((prev) => ({ ...prev, [round.id]: round }));
+    setPeerEvalRoundsState((prev) => ({ ...prev, [roundId]: finalRound }));
 
-    const renderMsg: ChatMessage = {
-      id: `msg_${round.generatedAt}_peer_eval`,
-      agentId: "system",
-      displayName: "Moderator",
-      content:
-        round.critiques.length > 0
-          ? "Peer review pass complete."
-          : "Peer review pass complete (no critiques parsed — see settings).",
-      timestamp: round.generatedAt,
-      peerEvalRoundId: round.id,
-      isResolution: true,
-    };
-    setMessages((prev) => [...prev, renderMsg]);
-    if (memoryManagerRef.current) memoryManagerRef.current.addMessage(renderMsg);
+    setMessages((prev) =>
+      prev.map((m) =>
+        m.id === renderMsg.id
+          ? {
+              ...m,
+              content:
+                finalRound.critiques.length > 0
+                  ? "Peer review pass complete."
+                  : "Peer review pass complete (no critiques parsed — see settings).",
+            }
+          : m,
+      ),
+    );
   }, [configuredAgentIds, pickExtractorRuntime, getProxy, topic]);
 
   // Generate agent response using real API
@@ -5060,10 +5091,48 @@ Write the official moderator wrap-up in 4 short sentences:
         !moderatorFinalSummaryPostedRef.current &&
         !peerEvalInFlightRef.current
       ) {
-        moderatorFinalSummaryPostedRef.current = true;
         peerEvalInFlightRef.current = true;
         try {
+          // 1. Peer review (replaces the per-agent goodbye round). The
+          //    scorecard + critique graph mount immediately and stream their
+          //    cells in as each evaluator lands.
           await runPeerEvaluationPass();
+          if (abortRef.current) return;
+
+          // 2. Moderator final summary — produces the session score + reason
+          //    + recommended-next message, and fire-and-forget kicks off the
+          //    Deep Research Report (see generateModeratorMessage:3196-3289).
+          const summaryMessage = await generateModeratorMessage({
+            kind: "final_summary",
+            turn: currentTurnRef.current,
+          });
+
+          if (summaryMessage) {
+            moderatorFinalSummaryPostedRef.current = true;
+          } else {
+            // Fix 3.16: only post the fallback if the discussion actually
+            // had turns — otherwise the message is misleading ("summary
+            // unavailable" implies an attempt was made, when really the
+            // session never ran).
+            const hadDiscussion =
+              currentTurnRef.current > 0 ||
+              messagesRef.current.some((m) => isCouncilAgent(m.agentId));
+            if (hadDiscussion) {
+              const fallbackSummary: ChatMessage = {
+                id: `msg_${Date.now()}_moderator_fallback_summary`,
+                agentId: "system",
+                displayName: "Moderator",
+                content:
+                  "Moderator summary unavailable because no summary provider is configured. Review the peer review scorecard above for the council's evaluation of this session.",
+                timestamp: Date.now(),
+              };
+              setMessages((prev) => [...prev, fallbackSummary]);
+              if (memoryManagerRef.current) {
+                memoryManagerRef.current.addMessage(fallbackSummary);
+              }
+            }
+            moderatorFinalSummaryPostedRef.current = true;
+          }
         } finally {
           peerEvalInFlightRef.current = false;
         }

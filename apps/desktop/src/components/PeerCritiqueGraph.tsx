@@ -97,6 +97,14 @@ export function PeerCritiqueGraph({ round, agents }: PeerCritiqueGraphProps) {
     return map;
   }, [round.critiques]);
 
+  const evaluatorsCompleted = useMemo(() => {
+    const seen = new Set<AgentId>(round.failedEvaluators);
+    for (const c of round.critiques) seen.add(c.evaluatorId);
+    return seen.size;
+  }, [round.critiques, round.failedEvaluators]);
+  const inProgress = evaluatorsCompleted < round.agentIds.length;
+  const expectedCritiques = round.agentIds.length * Math.max(round.agentIds.length - 1, 0);
+
   function handleNodeClick(id: AgentId) {
     if (!selectedFrom) {
       setSelectedFrom(id);
@@ -152,7 +160,9 @@ export function PeerCritiqueGraph({ round, agents }: PeerCritiqueGraphProps) {
           style={{ fontFamily: "var(--font-mono)" }}
           aria-hidden="true"
         >
-          {round.critiques.length} critiques · click two balls{" "}
+          {inProgress
+            ? `${round.critiques.length}/${expectedCritiques} critiques · evaluating…`
+            : `${round.critiques.length} critiques · click two balls`}{" "}
           {collapsed ? "▸" : "▾"}
         </span>
       </button>

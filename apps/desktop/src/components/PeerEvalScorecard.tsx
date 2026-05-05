@@ -101,6 +101,15 @@ export function PeerEvalScorecard({ round, agents }: PeerEvalScorecardProps) {
 
   const totalCritiques = round.critiques.length;
   const failed = round.failedEvaluators.length;
+  // Detect in-progress state: a fully-finished round has every evaluator
+  // accounted for either via critiques or in failedEvaluators.
+  const evaluatorsCompleted = useMemo(() => {
+    const seen = new Set<AgentId>(round.failedEvaluators);
+    for (const c of round.critiques) seen.add(c.evaluatorId);
+    return seen.size;
+  }, [round.critiques, round.failedEvaluators]);
+  const expectedCritiques = round.agentIds.length * Math.max(round.agentIds.length - 1, 0);
+  const inProgress = evaluatorsCompleted < round.agentIds.length;
 
   return (
     <div className="panel-card p-4 mb-6 peer-eval-scorecard">
@@ -122,7 +131,9 @@ export function PeerEvalScorecard({ round, agents }: PeerEvalScorecardProps) {
           style={{ fontFamily: "var(--font-mono)" }}
           aria-hidden="true"
         >
-          {totalCritiques} critiques · {round.turnsCompleted} turns
+          {inProgress
+            ? `${totalCritiques}/${expectedCritiques} critiques · evaluating…`
+            : `${totalCritiques} critiques · ${round.turnsCompleted} turns`}
           {failed > 0 ? ` · ${failed} eval${failed === 1 ? "" : "s"} failed` : ""}{" "}
           {collapsed ? "▸" : "▾"}
         </span>
@@ -198,6 +209,23 @@ export function PeerEvalScorecard({ round, agents }: PeerEvalScorecardProps) {
                     </span>
                     {DIMENSIONS.map((d) => {
                       const score = summary.averageScores[d.key];
+                      const pending = summary.reviewsReceived === 0;
+                      if (pending) {
+                        return (
+                          <span
+                            key={d.key}
+                            className="text-right tabular-nums text-[11px] py-0.5 px-1 rounded"
+                            style={{
+                              fontFamily: "var(--font-mono)",
+                              background: "rgba(255,255,255,0.04)",
+                              color: "rgba(255,255,255,0.35)",
+                            }}
+                            aria-label="evaluating"
+                          >
+                            —
+                          </span>
+                        );
+                      }
                       const { bg, fg } = scoreToCellColor(score);
                       return (
                         <span
@@ -213,22 +241,35 @@ export function PeerEvalScorecard({ round, agents }: PeerEvalScorecardProps) {
                         </span>
                       );
                     })}
-                    <span
-                      className="text-right tabular-nums text-[11px] py-0.5 px-1 rounded"
-                      style={{
-                        fontFamily: "var(--font-mono)",
-                        background: scoreToCellColor(summary.overallAverage).bg,
-                        color: "#fff",
-                        fontWeight: 600,
-                      }}
-                    >
-                      {summary.overallAverage}
-                    </span>
+                    {summary.reviewsReceived === 0 ? (
+                      <span
+                        className="text-right tabular-nums text-[11px] py-0.5 px-1 rounded"
+                        style={{
+                          fontFamily: "var(--font-mono)",
+                          background: "rgba(255,255,255,0.04)",
+                          color: "rgba(255,255,255,0.35)",
+                        }}
+                      >
+                        —
+                      </span>
+                    ) : (
+                      <span
+                        className="text-right tabular-nums text-[11px] py-0.5 px-1 rounded"
+                        style={{
+                          fontFamily: "var(--font-mono)",
+                          background: scoreToCellColor(summary.overallAverage).bg,
+                          color: "#fff",
+                          fontWeight: 600,
+                        }}
+                      >
+                        {summary.overallAverage}
+                      </span>
+                    )}
                     <span
                       className="text-right tabular-nums text-[11px] text-ink-700"
                       style={{ fontFamily: "var(--font-mono)" }}
                     >
-                      #{summary.rank}
+                      {inProgress && summary.reviewsReceived === 0 ? "—" : `#${summary.rank}`}
                     </span>
                   </button>
 

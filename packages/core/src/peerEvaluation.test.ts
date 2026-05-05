@@ -411,6 +411,32 @@ describe("runPeerEvaluation", () => {
     expect(round.perAgentSummary.zara?.reviewsReceived).toBe(6);
   });
 
+  it("emits onProgress after each evaluator settles", async () => {
+    const complete = vi.fn(async ({ system }: { system: string; user: string }) => {
+      const match = system.match(/You are (\w+)\./);
+      const evaluatorName = match ? match[1]! : "Unknown";
+      const evaluatorId = AGENTS.find((a) => a.name === evaluatorName)?.id ?? "george";
+      return makeFullResponse(evaluatorId);
+    });
+
+    const partials: number[] = [];
+    const round = await runPeerEvaluation({
+      topic: "AI safety",
+      messages: baseMessages,
+      agents: AGENTS,
+      complete,
+      onProgress: (p) => partials.push(p.critiques.length),
+    });
+
+    // 8 evaluators → 8 onProgress emissions, monotonically non-decreasing.
+    expect(partials).toHaveLength(8);
+    for (let i = 1; i < partials.length; i += 1) {
+      expect(partials[i]!).toBeGreaterThanOrEqual(partials[i - 1]!);
+    }
+    expect(partials[partials.length - 1]).toBe(56);
+    expect(round.critiques).toHaveLength(56);
+  });
+
   it("survives a transport throw inside one evaluator", async () => {
     const complete = vi.fn(async ({ system }: { system: string; user: string }) => {
       const match = system.match(/You are (\w+)\./);
