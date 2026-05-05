@@ -3868,7 +3868,7 @@ dependencies = [
 
 [[package]]
 name = "socratic-council"
-version = "2.0.0"
+version = "2.1.0"
 dependencies = [
  "futures-util",
  "getrandom 0.2.17",

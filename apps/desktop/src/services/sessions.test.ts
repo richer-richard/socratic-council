@@ -389,6 +389,160 @@ describe("session round-trip (fix 2.17)", () => {
     expect(loaded?.argGraph?.edges).toEqual([]);
   });
 
+  it("round-trips peer-eval rounds + peerEvalRoundId on a system message", () => {
+    installInMemoryStorage();
+    const timestamp = 1_710_000_000_000;
+    const original = createSessionFixture({
+      id: "session_peer_eval",
+      messages: [
+        { id: "msg_1", agentId: "user", content: "hello", timestamp },
+        {
+          id: "msg_2",
+          agentId: "george",
+          content: "First reply",
+          timestamp: timestamp + 1000,
+        },
+        {
+          id: "msg_peer_eval",
+          agentId: "system",
+          content: "Peer review complete.",
+          timestamp: timestamp + 2000,
+          peerEvalRoundId: "round_1",
+        },
+      ],
+      peerEvalRounds: {
+        round_1: {
+          id: "round_1",
+          generatedAt: timestamp + 2000,
+          topic: "Test topic",
+          turnsCompleted: 2,
+          agentIds: ["george", "cathy", "grace", "douglas", "kate", "quinn", "mary", "zara"],
+          critiques: [
+            {
+              evaluatorId: "george",
+              targetId: "cathy",
+              scores: { rigor: 80, evidence: 70, novelty: 60, civility: 90, onTopic: 85 },
+              overall: 77,
+              stance: "mixed",
+              critique: "Solid framing but evidence is thin.",
+            },
+            {
+              evaluatorId: "cathy",
+              targetId: "george",
+              scores: { rigor: 70, evidence: 60, novelty: 50, civility: 80, onTopic: 75 },
+              overall: 67,
+              stance: "disagree",
+              critique: "Rigorous but missed the ethical dimension entirely.",
+            },
+          ],
+          perAgentSummary: {
+            cathy: {
+              averageScores: {
+                rigor: 80,
+                evidence: 70,
+                novelty: 60,
+                civility: 90,
+                onTopic: 85,
+              },
+              overallAverage: 77,
+              rank: 1,
+              reviewsReceived: 1,
+              standoutCritique: "Solid framing but evidence is thin.",
+            },
+            george: {
+              averageScores: {
+                rigor: 70,
+                evidence: 60,
+                novelty: 50,
+                civility: 80,
+                onTopic: 75,
+              },
+              overallAverage: 67,
+              rank: 2,
+              reviewsReceived: 1,
+              standoutCritique: "Rigorous but missed the ethical dimension entirely.",
+            },
+          },
+          failedEvaluators: ["grace", "douglas", "kate", "quinn", "mary", "zara"],
+        },
+      },
+    });
+
+    saveDiscussionSession(original);
+    const loaded = loadDiscussionSession(original.id);
+
+    expect(loaded).not.toBeNull();
+    const renderMsg = loaded?.messages.find((m) => m.id === "msg_peer_eval");
+    expect(renderMsg?.peerEvalRoundId).toBe("round_1");
+
+    const round = loaded?.peerEvalRounds?.round_1;
+    expect(round?.id).toBe("round_1");
+    expect(round?.topic).toBe("Test topic");
+    expect(round?.agentIds).toHaveLength(8);
+    expect(round?.critiques).toHaveLength(2);
+    expect(round?.critiques[0]?.scores.civility).toBe(90);
+    expect(round?.perAgentSummary.cathy?.rank).toBe(1);
+    expect(round?.perAgentSummary.cathy?.standoutCritique).toBe(
+      "Solid framing but evidence is thin.",
+    );
+    expect(round?.failedEvaluators).toContain("grace");
+  });
+
+  it("drops peer-eval critiques whose evaluator/target is not a council agent", () => {
+    installInMemoryStorage();
+    const timestamp = 1_710_000_000_000;
+    const original = createSessionFixture({
+      id: "session_peer_eval_corrupt",
+      peerEvalRounds: {
+        round_corrupt: {
+          id: "round_corrupt",
+          generatedAt: timestamp,
+          topic: "Test topic",
+          turnsCompleted: 1,
+          agentIds: ["george", "cathy", "grace", "douglas", "kate", "quinn", "mary", "zara"],
+          critiques: [
+            // Valid entry
+            {
+              evaluatorId: "george",
+              targetId: "cathy",
+              scores: { rigor: 50, evidence: 50, novelty: 50, civility: 50, onTopic: 50 },
+              overall: 50,
+              stance: "mixed",
+              critique: "Adequate.",
+            },
+            // Self-rating — must be dropped
+            {
+              evaluatorId: "george",
+              targetId: "george",
+              scores: { rigor: 99, evidence: 99, novelty: 99, civility: 99, onTopic: 99 },
+              overall: 99,
+              stance: "agree",
+              critique: "I'm great.",
+            } as never,
+            // Unknown agent id — must be dropped
+            {
+              evaluatorId: "ghost",
+              targetId: "cathy",
+              scores: { rigor: 1, evidence: 1, novelty: 1, civility: 1, onTopic: 1 },
+              overall: 1,
+              stance: "disagree",
+              critique: "Bad.",
+            } as never,
+          ],
+          perAgentSummary: {},
+          failedEvaluators: [],
+        },
+      },
+    });
+
+    saveDiscussionSession(original);
+    const loaded = loadDiscussionSession(original.id);
+
+    expect(loaded?.peerEvalRounds?.round_corrupt?.critiques).toHaveLength(1);
+    expect(loaded?.peerEvalRounds?.round_corrupt?.critiques[0]?.evaluatorId).toBe("george");
+    expect(loaded?.peerEvalRounds?.round_corrupt?.critiques[0]?.targetId).toBe("cathy");
+  });
+
   it("returns null and counts the failure when the blob is corrupt", () => {
     const original = createSessionFixture({ id: "session_corrupt" });
     saveDiscussionSession(original);

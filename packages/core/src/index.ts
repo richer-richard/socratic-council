@@ -27,3 +27,4 @@ export * from "./reflection.js";
 export * from "./factcheck.js";
 export * from "./argmap.js";
 export * from "./argmap.export.js";
+export * from "./peerEvaluation.js";
