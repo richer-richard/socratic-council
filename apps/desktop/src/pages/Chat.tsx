@@ -1236,9 +1236,12 @@ function renderBodyWithCitations(
 function DeepResearchReportCard({
   report,
   onJumpToMessage,
+  onRetry,
 }: {
   report: DeepResearchReportSnapshot;
   onJumpToMessage: (messageId: string) => void;
+  /** Optional retry handler shown in the error state. */
+  onRetry?: () => void;
 }) {
   const isInProgress =
     report.phase === "planning" ||
@@ -1298,6 +1301,30 @@ function DeepResearchReportCard({
             {report.error ? (
               <div className="deep-research-report-error-detail">{report.error}</div>
             ) : null}
+            {onRetry && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onRetry();
+                }}
+                className="deep-research-report-retry"
+                style={{
+                  marginTop: "0.6rem",
+                  padding: "0.35rem 0.85rem",
+                  background: "rgba(245, 197, 66, 0.12)",
+                  color: "#fcd34d",
+                  border: "1px solid rgba(245, 197, 66, 0.32)",
+                  borderRadius: "6px",
+                  fontSize: "0.78rem",
+                  fontFamily: "var(--font-mono)",
+                  letterSpacing: "0.04em",
+                  cursor: "pointer",
+                }}
+              >
+                Retry
+              </button>
+            )}
           </div>
         )}
 
@@ -2898,6 +2925,102 @@ ${firstRoundObjections.length > 0 ? firstRoundObjections.join("\n") : "- None. E
 
     return null;
   }, [config.credentials, config.models]);
+
+  // Retry a failed Deep Research Report on the moderator's final-summary
+  // message. Same pipeline as the original kickoff in generateModeratorMessage
+  // — picks a runtime, rebuilds the transcript snapshot from the current
+  // messages, resets phase to "planning", and streams progress back into the
+  // message via setMessages.
+  const retryDeepResearch = useCallback(
+    async (messageId: string): Promise<void> => {
+      const target = messagesRef.current.find((m) => m.id === messageId);
+      if (!target || !target.moderatorConclusion) return;
+
+      const runtime = pickFinalSummaryRuntime();
+      const updateReport = (next: DeepResearchReportSnapshot) => {
+        setMessages((prev) =>
+          prev.map((m) => (m.id === messageId ? { ...m, deepResearchReport: next } : m)),
+        );
+      };
+
+      if (!runtime) {
+        updateReport({
+          phase: "error",
+          title: "",
+          abstract: "",
+          subQuestions: [],
+          sections: [],
+          citations: [],
+          confidence: "low",
+          generatedAt: Date.now(),
+          modelId: target.deepResearchReport?.modelId ?? "",
+          error:
+            "No provider available for the Deep Research runtime. Configure an API key in Settings → API Keys.",
+        });
+        return;
+      }
+
+      const { provider, credential, model } = runtime;
+      const proxy = getProxy();
+      const moderatorConclusion = target.moderatorConclusion;
+
+      const transcript: DeepResearchTranscriptMessage[] = messagesRef.current
+        .filter((msg) => {
+          if (msg.isStreaming) return false;
+          if (msg.endVoteBallot || msg.endVoteBoard) return false;
+          if (!isCouncilAgent(msg.agentId) && !isModeratorMessage(msg)) return false;
+          const text = (msg.content ?? "").trim();
+          return text.length > 0;
+        })
+        .map((msg) => ({
+          id: msg.id,
+          speaker: isCouncilAgent(msg.agentId) ? AGENT_CONFIG[msg.agentId].name : "Moderator",
+          text: msg.content ?? "",
+        }));
+
+      // Reset to "planning" so the spinner kicks in immediately.
+      updateReport({
+        phase: "planning",
+        title: "",
+        abstract: "",
+        subQuestions: [],
+        sections: [],
+        citations: [],
+        confidence: "medium",
+        generatedAt: Date.now(),
+        modelId: model,
+      });
+
+      try {
+        const report = await generateDeepResearchReport({
+          provider,
+          credential,
+          model,
+          proxy,
+          topic,
+          transcript,
+          conclusion: moderatorConclusion,
+          onPhase: (_phase, partial) => updateReport(partial),
+        });
+        updateReport(report);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        updateReport({
+          phase: "error",
+          title: "",
+          abstract: "",
+          subQuestions: [],
+          sections: [],
+          citations: [],
+          confidence: "low",
+          generatedAt: Date.now(),
+          modelId: model,
+          error: message,
+        });
+      }
+    },
+    [pickFinalSummaryRuntime, getProxy, topic],
+  );
 
   const generateModeratorMessage = useCallback(
     async (options: {
@@ -6888,6 +7011,9 @@ Write the official moderator wrap-up in 4 short sentences:
                             <DeepResearchReportCard
                               report={message.deepResearchReport}
                               onJumpToMessage={jumpToMessage}
+                              onRetry={() => {
+                                void retryDeepResearch(message.id);
+                              }}
                             />
                           )}
                         </>

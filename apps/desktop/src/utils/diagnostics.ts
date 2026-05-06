@@ -15,6 +15,10 @@
 import { apiLogger } from "../services/api";
 import type { AppConfig } from "../stores/config";
 import { redactValue } from "./redact";
+// Single source of truth for the version. The desktop package.json is
+// bumped on every release commit, so importing it directly avoids the
+// drift this file used to have ("1.0.0" hardcoded forever).
+import desktopPkg from "../../package.json";
 
 export interface ProviderHealth {
   provider: string;
@@ -49,7 +53,7 @@ export interface DiagnosticsSnapshot {
   }>;
 }
 
-const APP_VERSION = "1.0.0";
+const APP_VERSION = desktopPkg.version;
 
 export function buildDiagnosticsSnapshot(config: AppConfig): DiagnosticsSnapshot {
   const logs = apiLogger.getLogs().slice(-50);
