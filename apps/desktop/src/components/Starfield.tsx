@@ -35,13 +35,41 @@ export function Starfield() {
     return generated;
   }, []);
 
-  const shootingStars = useMemo(() => {
-    return Array.from({ length: 3 }, (_, i) => ({
-      id: i,
-      top: 10 + Math.random() * 30,
-      delay: i * 5 + Math.random() * 3,
-    }));
-  }, []);
+  const shootingStars = useMemo(
+    () => [
+      {
+        id: 0,
+        startX: -15,
+        startY: -15,
+        endX: 115,
+        endY: 115,
+        angle: 30,
+        duration: 10,
+        delay: 0.5 + Math.random() * 2,
+      },
+      {
+        id: 1,
+        startX: -15,
+        startY: 30,
+        endX: 115,
+        endY: 55,
+        angle: 12,
+        duration: 12,
+        delay: 4 + Math.random() * 2,
+      },
+      {
+        id: 2,
+        startX: 30,
+        startY: -15,
+        endX: 55,
+        endY: 115,
+        angle: 70,
+        duration: 13,
+        delay: 8 + Math.random() * 2,
+      },
+    ],
+    [],
+  );
 
   return (
     <div className="starfield">
@@ -64,11 +92,18 @@ export function Starfield() {
       {shootingStars.map((star) => (
         <div
           key={`shooting-${star.id}`}
-          className="shooting-star"
-          style={{
-            top: `${star.top}%`,
-            animationDelay: `${star.delay}s`,
-          }}
+          className="shooting-star shooting-star-bright"
+          style={
+            {
+              "--shoot-start-x": `${star.startX}vw`,
+              "--shoot-start-y": `${star.startY}vh`,
+              "--shoot-end-x": `${star.endX}vw`,
+              "--shoot-end-y": `${star.endY}vh`,
+              "--shoot-angle": `${star.angle}deg`,
+              "--shoot-duration": `${star.duration}s`,
+              animationDelay: `${star.delay}s`,
+            } as React.CSSProperties
+          }
         />
       ))}
     </div>

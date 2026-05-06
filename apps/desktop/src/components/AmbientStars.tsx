@@ -10,8 +10,8 @@ interface Star {
 }
 
 const STAR_OPACITY = {
-  small: { base: 0.15, peak: 0.35 },
-  medium: { base: 0.25, peak: 0.45 },
+  small: { base: 0.3, peak: 0.55 },
+  medium: { base: 0.45, peak: 0.7 },
 } as const;
 
 export function AmbientStars() {
@@ -33,13 +33,31 @@ export function AmbientStars() {
     return generated;
   }, []);
 
-  const shootingStars = useMemo(() => {
-    return Array.from({ length: 2 }, (_, i) => ({
-      id: i,
-      top: 10 + Math.random() * 45,
-      delay: i * 6 + Math.random() * 4,
-    }));
-  }, []);
+  const shootingStars = useMemo(
+    () => [
+      {
+        id: 0,
+        startX: -15,
+        startY: -10,
+        endX: 115,
+        endY: 110,
+        angle: 32,
+        duration: 14,
+        delay: 2 + Math.random() * 3,
+      },
+      {
+        id: 1,
+        startX: 30,
+        startY: -15,
+        endX: 60,
+        endY: 115,
+        angle: 65,
+        duration: 16,
+        delay: 9 + Math.random() * 3,
+      },
+    ],
+    [],
+  );
 
   return (
     <div className="starfield" aria-hidden="true">
@@ -66,10 +84,17 @@ export function AmbientStars() {
         <div
           key={`shooting-${star.id}`}
           className="shooting-star"
-          style={{
-            top: `${star.top}%`,
-            animationDelay: `${star.delay}s`,
-          }}
+          style={
+            {
+              "--shoot-start-x": `${star.startX}vw`,
+              "--shoot-start-y": `${star.startY}vh`,
+              "--shoot-end-x": `${star.endX}vw`,
+              "--shoot-end-y": `${star.endY}vh`,
+              "--shoot-angle": `${star.angle}deg`,
+              "--shoot-duration": `${star.duration}s`,
+              animationDelay: `${star.delay}s`,
+            } as React.CSSProperties
+          }
         />
       ))}
     </div>
