@@ -34,6 +34,7 @@ import {
   initVault,
 } from "./services/vault";
 import { ErrorBoundary } from "./components/ErrorBoundary";
+import { AmbientStars } from "./components/AmbientStars";
 import { CommandPalette, useCommandPaletteShortcut } from "./components/CommandPalette";
 import { DiagnosticsPanel } from "./components/DiagnosticsPanel";
 import { registerCommand, resetCommandsForTests } from "./utils/commandPalette";
@@ -437,6 +438,7 @@ export default function App() {
   return (
     <ErrorBoundary label="app">
       <div className="h-screen flex flex-col bg-gray-900">
+        <AmbientStars />
         {appError ? (
           <div className="border-b border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200">
             {appError}
