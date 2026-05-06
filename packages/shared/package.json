@@ -1,6 +1,6 @@
 {
   "name": "@socratic-council/shared",
-  "version": "2.1.3",
+  "version": "2.1.4",
   "description": "Shared types, constants, and utilities for Socratic Council",
   "type": "module",
   "main": "./dist/index.js",
