@@ -1572,6 +1572,36 @@ async function blobToBase64(blob: Blob): Promise<string> {
   return btoa(binary);
 }
 
+// Phase set used to detect a Deep Research Report that was persisted while
+// generation was still in flight. Anything in this set is "orphaned" once the
+// session is reloaded — there is no auto-resume, so the spinner would otherwise
+// display forever and look like a perpetual regeneration.
+const RESEARCH_IN_PROGRESS_PHASES = new Set<DeepResearchReportSnapshot["phase"]>([
+  "planning",
+  "research",
+  "synthesis",
+  "formatting",
+]);
+
+function recoverOrphanedDeepResearch(messages: ChatMessage[]): ChatMessage[] {
+  let mutated = false;
+  const next = messages.map((message) => {
+    const drr = message.deepResearchReport;
+    if (!drr || !RESEARCH_IN_PROGRESS_PHASES.has(drr.phase)) return message;
+    mutated = true;
+    return {
+      ...message,
+      deepResearchReport: {
+        ...drr,
+        phase: "error" as const,
+        error:
+          drr.error ?? "Report generation was interrupted before completion. Click Retry to regenerate.",
+      },
+    };
+  });
+  return mutated ? next : messages;
+}
+
 function applyReactions(
   items: ChatMessage[],
   reactions: Array<{ targetId: string; emoji: ReactionId }>,
@@ -1635,7 +1665,9 @@ export function Chat({ session, onNavigate, onPersistSession }: ChatProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [normalizedSession.id]);
 
-  const [messages, setMessages] = useState<ChatMessage[]>(normalizedSession.messages);
+  const [messages, setMessages] = useState<ChatMessage[]>(() =>
+    recoverOrphanedDeepResearch(normalizedSession.messages),
+  );
 
   /**
    * Bumps when a new fork is created from this session, so the
@@ -1775,7 +1807,9 @@ export function Chat({ session, onNavigate, onPersistSession }: ChatProps) {
   );
   const moderatorInFlightRef = useRef(false);
   const duoLogueRef = useRef<DuoLogueState | null>(normalizedSession.duoLogue);
-  const messagesRef = useRef<ChatMessage[]>(normalizedSession.messages);
+  // Initialise from the same recovered list as `messages` so the ref doesn't
+  // serve a stale orphaned snapshot to async callbacks during the first paint.
+  const messagesRef = useRef<ChatMessage[]>(messages);
   const currentTurnRef = useRef(inferredInitialTurn);
   const previousSpeakerRef = useRef<CouncilAgentId | null>(
     normalizedSession.runtime.previousSpeaker,
@@ -5448,6 +5482,33 @@ Write the official moderator wrap-up in 4 short sentences:
         0,
       );
 
+      // Track Deep Research Report state in the per-message fingerprint so
+      // streaming phase transitions (planning → research → synthesis →
+      // formatting → complete) each trigger a persist. Without this the DRR
+      // could finish in React state but never reach disk — the moderator
+      // final-summary message would freeze on the "planning" placeholder
+      // saved during the status="completed" flip, and on reopen the card
+      // would mount as in-progress (perpetual spinner that looks like a
+      // regeneration). Phase is encoded by ordinal × prime so same-length
+      // phase strings (planning/research/complete are all 8 chars) still
+      // shift the hash distinctly; remaining terms cover content growth.
+      const drr = message.deepResearchReport;
+      const drrFingerprint = drr
+        ? ((
+            { planning: 1, research: 2, synthesis: 3, formatting: 4, complete: 5, error: 6 } as const
+          )[drr.phase] ?? 0) *
+            1009 +
+          drr.title.length +
+          drr.abstract.length +
+          drr.subQuestions.reduce(
+            (sum, q) => sum + q.question.length + q.findings.length + q.citations.length,
+            0,
+          ) +
+          drr.sections.reduce((sum, s) => sum + s.heading.length + s.body.length, 0) +
+          drr.citations.length * 3 +
+          (drr.error?.length ?? 0)
+        : 0;
+
       return (
         (hash * 31 +
           message.id.length +
@@ -5455,7 +5516,8 @@ Write the official moderator wrap-up in 4 short sentences:
           (message.error?.length ?? 0) +
           (message.thinking?.length ?? 0) +
           (message.fullResponse?.length ?? 0) +
-          reactionCount) %
+          reactionCount +
+          drrFingerprint) %
         2147483647
       );
     }, 7);
