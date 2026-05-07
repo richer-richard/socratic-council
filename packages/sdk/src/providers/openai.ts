@@ -51,6 +51,9 @@ const NO_TEMPERATURE_MODELS: OpenAIModel[] = [
   "gpt-5-nano",
 ];
 
+// Models that reject prompt_cache_retention="in_memory" with HTTP 400 and require "24h".
+const EXTENDED_CACHE_ONLY_MODELS: OpenAIModel[] = ["gpt-5.5", "gpt-5.4"];
+
 interface OpenAIResponsesRequest {
   model: string;
   input: string | OpenAIInputMessage[];
@@ -564,7 +567,9 @@ export class OpenAIProvider implements BaseProvider {
     const promptCacheKey = this.buildPromptCacheKey(messages);
     if (promptCacheKey) {
       request.prompt_cache_key = promptCacheKey;
-      request.prompt_cache_retention = "in_memory";
+      request.prompt_cache_retention = EXTENDED_CACHE_ONLY_MODELS.includes(model)
+        ? "24h"
+        : "in_memory";
     }
 
     return request;

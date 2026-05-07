@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { CouncilMark } from "../components/CouncilMark";
 import { ConfigModal } from "../components/ConfigModal";
@@ -763,6 +763,7 @@ export function Home({
   const mediaStreamRef = useRef<MediaStream | null>(null);
   const composerAttachmentsRef = useRef<ComposerAttachment[]>([]);
   const attachShellRef = useRef<HTMLDivElement | null>(null);
+  const topicTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const {
     config,
     updateCredential,
@@ -1013,6 +1014,16 @@ export function Home({
       setPendingSessionAction(null);
     }
   }, [pendingSessionAction, sessions]);
+
+  // Auto-resize the topic textarea: grows with content up to a clamp set by
+  // CSS max-height, then scrolls inside. Layout effect runs before paint so
+  // the user never sees an unsized intermediate frame.
+  useLayoutEffect(() => {
+    const ta = topicTextareaRef.current;
+    if (!ta) return;
+    ta.style.height = "auto";
+    ta.style.height = `${ta.scrollHeight}px`;
+  }, [topic]);
 
   useEffect(() => {
     if (!showCameraCapture || !videoRef.current || !mediaStreamRef.current) return;
@@ -1601,17 +1612,25 @@ export function Home({
                     </div>
                   )}
                 </div>
-                <input
+                <textarea
                   id="topic-input"
-                  type="text"
+                  ref={topicTextareaRef}
+                  rows={1}
                   value={topic}
                   onChange={(event) => setTopic(event.target.value)}
                   onKeyDown={(event) => {
-                    if (event.key === "Enter") {
+                    // Enter sends; Shift+Enter inserts a newline. Skip while an
+                    // IME composition is active so CJK input doesn't fire send.
+                    if (
+                      event.key === "Enter" &&
+                      !event.shiftKey &&
+                      !event.nativeEvent.isComposing
+                    ) {
+                      event.preventDefault();
                       void handleStart();
                     }
                   }}
-                  placeholder="What should the council pressure-test next?"
+                  placeholder="What should the council pressure-test next? Shift+Enter for a new line."
                   className="elegant-input workstation-input"
                 />
                 <button

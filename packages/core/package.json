@@ -1,6 +1,6 @@
 {
   "name": "@socratic-council/core",
-  "version": "2.1.6",
+  "version": "2.1.7",
   "description": "Core engine for Socratic Council - bidding, orchestration, and state management",
   "type": "module",
   "main": "./dist/index.js",

@@ -210,6 +210,55 @@ describe("provider request safety", () => {
     expect(request.prompt_cache_retention).toBe("in_memory");
   });
 
+  it("uses 24h prompt cache retention for GPT-5.5 (rejects in_memory)", () => {
+    const provider = new OpenAIProvider("test-key");
+    const request = (
+      provider as unknown as {
+        buildRequestBody: (...args: unknown[]) => Record<string, unknown>;
+      }
+    ).buildRequestBody(
+      createAgent({ provider: "openai", model: "gpt-5.5" }),
+      [
+        { role: "system" as const, content: "System prompt" },
+        {
+          role: "user" as const,
+          content: 'Discussion topic: "Cached prompt"',
+          cacheControl: "ephemeral" as const,
+        },
+        { role: "user" as const, content: "Your turn." },
+      ],
+      "gpt-5.5",
+      { stream: false },
+    );
+
+    expect(request.prompt_cache_key).toMatch(/^sc-prefix-/);
+    expect(request.prompt_cache_retention).toBe("24h");
+  });
+
+  it("uses 24h prompt cache retention for GPT-5.4 (rejects in_memory)", () => {
+    const provider = new OpenAIProvider("test-key");
+    const request = (
+      provider as unknown as {
+        buildRequestBody: (...args: unknown[]) => Record<string, unknown>;
+      }
+    ).buildRequestBody(
+      createAgent({ provider: "openai", model: "gpt-5.4" }),
+      [
+        { role: "system" as const, content: "System prompt" },
+        {
+          role: "user" as const,
+          content: 'Discussion topic: "Cached prompt"',
+          cacheControl: "ephemeral" as const,
+        },
+        { role: "user" as const, content: "Your turn." },
+      ],
+      "gpt-5.4",
+      { stream: false },
+    );
+
+    expect(request.prompt_cache_retention).toBe("24h");
+  });
+
   it("marks Anthropic attachment prefix blocks as cacheable", () => {
     const provider = new AnthropicProvider("test-key");
     const request = (

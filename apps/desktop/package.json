@@ -1,6 +1,6 @@
 {
   "name": "@socratic-council/desktop",
-  "version": "2.1.6",
+  "version": "2.1.7",
   "description": "Desktop application for Socratic Council - Tauri 2.0 + React",
   "type": "module",
   "private": true,

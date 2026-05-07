@@ -3548,7 +3548,9 @@ details[open] > .deep-research-report-summary .deep-research-report-expand::befo
 .workstation-input-shell {
   display: flex;
   gap: 0.85rem;
-  align-items: stretch;
+  /* The textarea grows upward as the user types; the attach + launch buttons
+     stay pinned to the baseline so the bottom edge of the row never shifts. */
+  align-items: flex-end;
 }
 
 .workstation-attach-shell {
@@ -3637,6 +3639,25 @@ details[open] > .deep-research-report-summary .deep-research-report-expand::befo
 .workstation-input {
   flex: 1;
   min-width: 0;
+}
+
+/* Topic composer textarea: single-line by default, grows with content up to
+   a 6-ish-line cap, then scrolls internally. The height transition is short
+   so the row expands fluidly with each new line instead of snapping. */
+textarea.workstation-input {
+  min-height: 3.2rem; /* matches the attach pill so the row starts level */
+  max-height: 12rem;
+  resize: none;
+  overflow-y: auto;
+  line-height: 1.5;
+  /* Override .elegant-input's transition: all 0.2s — animating height from
+     "all" causes layout thrash on every keystroke. Keep height crisp; let
+     focus/border still ease through their dedicated transitions. */
+  transition:
+    height 0.16s cubic-bezier(0.2, 0.8, 0.2, 1),
+    border-color 0.2s ease,
+    box-shadow 0.2s ease,
+    background 0.2s ease;
 }
 
 .workstation-input-help {
