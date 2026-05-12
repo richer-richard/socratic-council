@@ -19,13 +19,13 @@ This repo ships source only (no installer downloads). Follow this guide to build
 | Discussion model | Eight council debaters, eight silent advisors paired one-to-one, optional moderator      |
 | Providers        | OpenAI, Anthropic, Google Gemini, DeepSeek, Kimi, Qwen, MiniMax, Z.AI                    |
 | Research tools   | File search, web search, claim verification, source-anchored citations                   |
-| Outputs          | Searchable transcript, argument map, fact-check badges, conflict graph, exports, bundles |
+| Outputs          | Searchable transcript, argument map, fact-check badges, conflict graph, peer evaluation, deep research report, exports, bundles |
 
 | Workflow Surface   | Included                                                                            |
 | ------------------ | ----------------------------------------------------------------------------------- |
 | Live discussion    | Turn-taking responses, secret advisor notes, quotes, reactions, moderator nudges    |
 | Evidence gathering | Attachments, tool results, source-aware follow-up, deep-research reports            |
-| Sense-making       | Argument map, fact-check badges, pairwise conflict graph, end-of-session vote       |
+| Sense-making       | Argument map, fact-check badges, pairwise conflict graph, peer evaluation scorecard |
 | Observability      | Latency, tokens, cost tracking, daily and per-session budgets, redacted diagnostics |
 | Review and sharing | Search, branch points, structured exports, portable `.scbundle` archive             |
 
@@ -553,7 +553,7 @@ Socratic Council is a pnpm monorepo with a desktop app and three shared TypeScri
 
 ### Conversation loop
 
-At runtime the app builds context for each turn, scores the eight council members for relevance, dispatches the winner to its provider as a stream, and folds the streamed response back through reflection, conflict detection, fact-checking, and argument-map extraction before the next turn begins. Silent advisors evaluate the public transcript in parallel and slip notes to their paired debater whenever they have something worth saying.
+At runtime the app builds context for each turn, scores the eight council members for relevance, dispatches the winner to its provider as a stream, and folds the streamed response back through reflection, conflict detection, fact-checking, and argument-map extraction before the next turn begins. Silent advisors evaluate the public transcript in parallel and slip notes to their paired debater whenever they have something worth saying. When the discussion ends, every council agent independently scores and critiques every other agent on a five-dimension rubric (rigor, evidence, novelty, civility, on-topic); the results are rendered as a heatmap scorecard and an interactive critique graph.
 
 ![Conversation loop diagram](docs/assets/conversation-loop.svg)
 
@@ -611,7 +611,7 @@ The Moderator is a system-role voice that opens the session, nudges balance and 
 
 The home screen is your library. From here you can:
 
-- Type a topic and start a new discussion (with optional file attachments)
+- Type a topic (multi-line supported) and start a new discussion (with optional file attachments)
 - Browse recent and archived sessions in the sidebar
 - Open or create a Project, which groups related sessions and a shared evidence dossier
 - Import a `.scbundle` archive that someone else exported
@@ -630,7 +630,7 @@ The chat surface is built around the council circle. The timeline shows:
 - A pairwise conflict graph that highlights sustained disagreements
 - A cost budget badge with daily and per-session caps
 
-You can also branch the discussion at any message to fork the conversation, or call an end-of-session vote that asks the council to ballot on a resolution.
+You can also branch the discussion at any message to fork the conversation, or call an end-of-session vote that asks the council to ballot on a resolution. After voting concludes, a peer evaluation round runs: every council agent independently scores and critiques every other agent across five dimensions (rigor, evidence, novelty, civility, on-topic), producing a heatmap scorecard and an interactive critique graph. You can also generate a deep research report that synthesizes the full discussion into a structured analytical document with inline citations.
 
 ### Pause, resume, stop
 
@@ -659,7 +659,7 @@ The app can export a session to four document formats, plus a portable archive o
 | PPTX        | Slides or executive readouts     | Graphics-first synthesis with key moments highlighted                                                                          |
 | `.scbundle` | Sharing the full session offline | Zip with manifest, transcript, attachments, argument map (JSON + Mermaid). Re-importable into another Socratic Council install |
 
-The argument map can also be exported on its own as JSON, Mermaid, SVG, or PNG. Everything is generated locally; nothing leaves your machine.
+The argument map can also be exported on its own as JSON, Mermaid, SVG, or PNG. Deep research reports and the peer evaluation scorecard are included when present. Everything is generated locally; nothing leaves your machine.
 
 ### Logs
 
