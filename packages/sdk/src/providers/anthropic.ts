@@ -119,15 +119,17 @@ function supportsExtendedThinking(model: AnthropicModel): boolean {
 }
 
 function supportsAdaptiveThinking(model: AnthropicModel): boolean {
-  // Claude Opus 4.6 introduced adaptive thinking; Opus 4.7 made it the ONLY
+  // Claude Opus 4.6 introduced adaptive thinking; Opus 4.7+ made it the ONLY
   // thinking-on mode (extended thinking budgets removed → 400 error).
-  return model === "claude-opus-4-6" || model === "claude-opus-4-7";
+  return (
+    model === "claude-opus-4-6" || model === "claude-opus-4-7" || model === "claude-opus-4-8"
+  );
 }
 
 function prohibitsSamplingParams(model: AnthropicModel): boolean {
   // Starting with Opus 4.7, setting temperature/top_p/top_k to any non-default
   // value returns a 400 error. Safest path is to omit them entirely.
-  return model === "claude-opus-4-7";
+  return model === "claude-opus-4-7" || model === "claude-opus-4-8";
 }
 
 function buildThinkingConfig(

@@ -86,6 +86,8 @@ export interface OpenAIRequest {
 // =============================================================================
 
 export const AnthropicModels = [
+  // Claude 4.8 model (latest flagship)
+  "claude-opus-4-8",
   // Claude 4.7 model
   "claude-opus-4-7",
   // Claude 4.6 model
@@ -141,6 +143,7 @@ export interface AnthropicRequest {
 // =============================================================================
 
 export const GeminiModels = [
+  "gemini-3.2-pro-preview",
   "gemini-3.1-pro-preview",
   // Legacy alias retained for migration/back-compat
   "gemini-3-pro-preview",
@@ -215,6 +218,7 @@ export interface GeminiRequest {
 // =============================================================================
 
 export const DeepSeekModels = [
+  "deepseek-v4.1-pro",
   "deepseek-v4-pro",
   "deepseek-v4-flash",
   "deepseek-reasoner",
@@ -255,6 +259,7 @@ export interface DeepSeekRequest {
 // =============================================================================
 
 export const KimiModels = [
+  "kimi-k2.7",
   "kimi-k2.6",
   "kimi-k2.5",
   "kimi-k2-thinking",
@@ -323,7 +328,12 @@ export interface KimiRequest {
 // QWEN MODELS & PARAMETERS
 // =============================================================================
 
-export const QwenModels = ["qwen3.6-max-preview", "qwen3.6-plus", "qwen3.5-plus"] as const;
+export const QwenModels = [
+  "qwen3.7-max",
+  "qwen3.6-max-preview",
+  "qwen3.6-plus",
+  "qwen3.5-plus",
+] as const;
 
 export type QwenModel = (typeof QwenModels)[number];
 
@@ -358,8 +368,11 @@ export interface QwenRequest {
 // =============================================================================
 
 export const MiniMaxModels = [
-  "MiniMax-M2.7-highspeed",
+  "MiniMax-M2.8-highspeed",
   // Lowercase alias retained for migration/back-compat.
+  "minimax-m2.8-highspeed",
+  // Previous flagship, retained for migration/back-compat.
+  "MiniMax-M2.7-highspeed",
   "minimax-m2.7-highspeed",
 ] as const;
 
@@ -400,7 +413,7 @@ export interface MiniMaxRequest {
 // ZHIPU (Z.AI) MODELS & PARAMETERS
 // =============================================================================
 
-export const ZhipuModels = ["glm-5.1", "glm-5", "glm-4.7"] as const;
+export const ZhipuModels = ["glm-5.2", "glm-5.1", "glm-5", "glm-4.7"] as const;
 
 export type ZhipuModel = (typeof ZhipuModels)[number];
 

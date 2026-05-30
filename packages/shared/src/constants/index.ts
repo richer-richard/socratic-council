@@ -232,6 +232,22 @@ export const MODEL_REGISTRY: ModelInfo[] = [
   // Anthropic Models (latest first) - Using full model IDs for reliability
   // Pricing from https://docs.anthropic.com/en/docs/about-claude/models (Apr 2026)
   {
+    id: "claude-opus-4-8",
+    provider: "anthropic",
+    name: "Claude Opus 4.8",
+    description:
+      "Most capable Claude model; 1M context, adaptive thinking only, hi-res vision (3.75MP)",
+    contextWindow: 1_000_000,
+    maxOutputTokens: 128000,
+    supportsThinking: true,
+    supportsVision: true,
+    supportsStreaming: true,
+    pricing: {
+      inputCostPer1M: 5.0,
+      outputCostPer1M: 25.0,
+    },
+  },
+  {
     id: "claude-opus-4-7",
     provider: "anthropic",
     name: "Claude Opus 4.7",
@@ -385,6 +401,21 @@ export const MODEL_REGISTRY: ModelInfo[] = [
 
   // Google Gemini Models (latest first)
   {
+    id: "gemini-3.2-pro-preview",
+    provider: "google",
+    name: "Gemini 3.2 Pro",
+    description: "Best multimodal and agentic model",
+    contextWindow: 1000000,
+    maxOutputTokens: 65536,
+    supportsThinking: true,
+    supportsVision: true,
+    supportsStreaming: true,
+    pricing: {
+      inputCostPer1M: 2.0,
+      outputCostPer1M: 12.0,
+    },
+  },
+  {
     id: "gemini-3.1-pro-preview",
     provider: "google",
     name: "Gemini 3.1 Pro",
@@ -537,6 +568,22 @@ export const MODEL_REGISTRY: ModelInfo[] = [
 
   // DeepSeek Models (latest first)
   {
+    id: "deepseek-v4.1-pro",
+    provider: "deepseek",
+    name: "DeepSeek V4.1 Pro",
+    description: "V4.1 flagship, 1M context, 384K output, dual thinking/non-thinking modes",
+    contextWindow: 1_000_000,
+    maxOutputTokens: 384000,
+    supportsThinking: true,
+    supportsVision: false,
+    supportsStreaming: true,
+    pricing: {
+      inputCostPer1M: 1.74,
+      outputCostPer1M: 3.48,
+      reasoningCostPer1M: 3.48,
+    },
+  },
+  {
     id: "deepseek-v4-pro",
     provider: "deepseek",
     name: "DeepSeek V4 Pro",
@@ -600,6 +647,22 @@ export const MODEL_REGISTRY: ModelInfo[] = [
   },
 
   // Kimi/Moonshot Models (latest first)
+  {
+    id: "kimi-k2.7",
+    provider: "kimi",
+    name: "Kimi K2.7",
+    description:
+      "Latest flagship K2.7 — long-horizon agentic coding, agent-swarm scaling, multimodal",
+    contextWindow: 262144,
+    maxOutputTokens: 8192,
+    supportsThinking: true,
+    supportsVision: true,
+    supportsStreaming: true,
+    pricing: {
+      inputCostPer1M: 0.95,
+      outputCostPer1M: 4.0,
+    },
+  },
   {
     id: "kimi-k2.6",
     provider: "kimi",
@@ -799,6 +862,22 @@ export const MODEL_REGISTRY: ModelInfo[] = [
 
   // Qwen models (Alibaba Cloud Bailian / DashScope compatible mode)
   {
+    id: "qwen3.7-max",
+    provider: "qwen",
+    name: "Qwen 3.7 Max",
+    description:
+      "Flagship Qwen Max tier — top SWE-Bench / Terminal-Bench scores, 1M context, thinking",
+    contextWindow: 1_000_000,
+    maxOutputTokens: 32768,
+    supportsThinking: true,
+    supportsVision: false,
+    supportsStreaming: true,
+    pricing: {
+      inputCostPer1M: 1.3,
+      outputCostPer1M: 7.8,
+    },
+  },
+  {
     id: "qwen3.6-max-preview",
     provider: "qwen",
     name: "Qwen 3.6 Max Preview",
@@ -847,6 +926,36 @@ export const MODEL_REGISTRY: ModelInfo[] = [
 
   // MiniMax models
   {
+    id: "MiniMax-M2.8-highspeed",
+    provider: "minimax",
+    name: "MiniMax M2.8 Highspeed",
+    description: "Latest flagship text model",
+    contextWindow: 1000000,
+    maxOutputTokens: 64000,
+    supportsThinking: true,
+    supportsVision: false,
+    supportsStreaming: true,
+    pricing: {
+      inputCostPer1M: 0.6,
+      outputCostPer1M: 2.4,
+    },
+  },
+  {
+    id: "minimax-m2.8-highspeed",
+    provider: "minimax",
+    name: "MiniMax M2.8 Highspeed (Alias)",
+    description: "Lowercase alias retained for compatibility",
+    contextWindow: 1000000,
+    maxOutputTokens: 64000,
+    supportsThinking: true,
+    supportsVision: false,
+    supportsStreaming: true,
+    pricing: {
+      inputCostPer1M: 0.6,
+      outputCostPer1M: 2.4,
+    },
+  },
+  {
     id: "MiniMax-M2.7-highspeed",
     provider: "minimax",
     name: "MiniMax M2.7 Highspeed",
@@ -878,6 +987,21 @@ export const MODEL_REGISTRY: ModelInfo[] = [
   },
 
   // Zhipu (Z.AI) models
+  {
+    id: "glm-5.2",
+    provider: "zhipu",
+    name: "GLM-5.2",
+    description: "Latest flagship with improved reasoning and coding",
+    contextWindow: 200000,
+    maxOutputTokens: 16384,
+    supportsThinking: true,
+    supportsVision: true,
+    supportsStreaming: true,
+    pricing: {
+      inputCostPer1M: 1.4,
+      outputCostPer1M: 4.4,
+    },
+  },
   {
     id: "glm-5.1",
     provider: "zhipu",
@@ -982,7 +1106,7 @@ export const DEFAULT_AGENTS: Record<AgentId, AgentConfig> = {
     id: "cathy",
     name: "Cathy",
     provider: "anthropic",
-    model: "claude-opus-4-7",
+    model: "claude-opus-4-8",
     systemPrompt: baseSystemPrompt("Cathy"),
     temperature: 1,
     maxTokens: 8192,
@@ -991,7 +1115,7 @@ export const DEFAULT_AGENTS: Record<AgentId, AgentConfig> = {
     id: "grace",
     name: "Grace",
     provider: "google",
-    model: "gemini-3.1-pro-preview",
+    model: "gemini-3.2-pro-preview",
     systemPrompt: baseSystemPrompt("Grace"),
     temperature: 1,
     maxTokens: 4096,
@@ -1000,7 +1124,7 @@ export const DEFAULT_AGENTS: Record<AgentId, AgentConfig> = {
     id: "douglas",
     name: "Douglas",
     provider: "deepseek",
-    model: "deepseek-v4-pro",
+    model: "deepseek-v4.1-pro",
     systemPrompt: baseSystemPrompt("Douglas"),
     temperature: 1,
     maxTokens: 4096,
@@ -1009,7 +1133,7 @@ export const DEFAULT_AGENTS: Record<AgentId, AgentConfig> = {
     id: "kate",
     name: "Kate",
     provider: "kimi",
-    model: "kimi-k2.6",
+    model: "kimi-k2.7",
     systemPrompt: baseSystemPrompt("Kate"),
     temperature: 1,
     maxTokens: 4096,
@@ -1018,7 +1142,7 @@ export const DEFAULT_AGENTS: Record<AgentId, AgentConfig> = {
     id: "quinn",
     name: "Quinn",
     provider: "qwen",
-    model: "qwen3.6-max-preview",
+    model: "qwen3.7-max",
     systemPrompt: baseSystemPrompt("Quinn"),
     temperature: 1,
     maxTokens: 4096,
@@ -1027,7 +1151,7 @@ export const DEFAULT_AGENTS: Record<AgentId, AgentConfig> = {
     id: "mary",
     name: "Mary",
     provider: "minimax",
-    model: "minimax-m2.7-highspeed",
+    model: "minimax-m2.8-highspeed",
     systemPrompt: baseSystemPrompt("Mary"),
     temperature: 1,
     maxTokens: 4096,
@@ -1036,7 +1160,7 @@ export const DEFAULT_AGENTS: Record<AgentId, AgentConfig> = {
     id: "zara",
     name: "Zara",
     provider: "zhipu",
-    model: "glm-5.1",
+    model: "glm-5.2",
     systemPrompt: baseSystemPrompt("Zara"),
     temperature: 1,
     maxTokens: 4096,

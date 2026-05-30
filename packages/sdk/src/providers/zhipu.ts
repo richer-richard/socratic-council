@@ -44,8 +44,9 @@ export class ZhipuProvider implements BaseProvider {
   }
 
   private normalizeModel(model: string): ZhipuModel {
-    if (model === "glm-5.1" || model === "glm-5" || model === "glm-4.7") return model;
-    return "glm-5.1";
+    if (model === "glm-5.2" || model === "glm-5.1" || model === "glm-5" || model === "glm-4.7")
+      return model;
+    return "glm-5.2";
   }
 
   private buildRequestBody(
@@ -233,7 +234,7 @@ export class ZhipuProvider implements BaseProvider {
         method: "POST",
         headers: createHeaders("zhipu", this.apiKey),
         body: JSON.stringify({
-          model: model ?? "glm-5.1",
+          model: model ?? "glm-5.2",
           messages: [{ role: "user", content: "Hello" }],
           max_tokens: 10,
         }),
