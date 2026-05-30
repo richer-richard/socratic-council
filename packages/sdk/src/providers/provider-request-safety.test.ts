@@ -6,6 +6,7 @@ import { MiniMaxProvider } from "./minimax.js";
 import { GoogleProvider } from "./google.js";
 import { DeepSeekProvider } from "./deepseek.js";
 import { ZhipuProvider } from "./zhipu.js";
+import { QwenProvider } from "./qwen.js";
 import { createHeaders } from "./base.js";
 
 const messages = [
@@ -410,5 +411,79 @@ describe("DeepSeek + Zhipu request shapes (fix 12.1)", () => {
       false,
     );
     expect(body.temperature).toBe(2);
+  });
+
+  it("uses adaptive thinking and omits sampling params for Claude Opus 4.8", () => {
+    const provider = new AnthropicProvider("test-key");
+    const request = (
+      provider as unknown as {
+        buildRequestBody: (...args: unknown[]) => Record<string, unknown>;
+      }
+    ).buildRequestBody(
+      createAgent({
+        id: "cathy",
+        name: "Cathy",
+        provider: "anthropic",
+        model: "claude-opus-4-8",
+        maxTokens: 8192,
+      }),
+      messages,
+      "claude-opus-4-8",
+      { stream: false },
+    );
+
+    expect(request.thinking).toEqual({ type: "adaptive" });
+    expect(request.temperature).toBeUndefined();
+    expect(request.top_p).toBeUndefined();
+  });
+
+  it("routes Quinn's qwen3.7-max through without falling back to an older model", () => {
+    const provider = new QwenProvider("test-key");
+    const body = (
+      provider as unknown as {
+        buildRequestBody: (...args: unknown[]) => Record<string, unknown>;
+      }
+    ).buildRequestBody(
+      createAgent({ id: "quinn", name: "Quinn", provider: "qwen", model: "qwen3.7-max" }),
+      messages,
+      {},
+      false,
+    );
+    expect(body.model).toBe("qwen3.7-max");
+  });
+
+  it("normalizes minimax-m2.8-highspeed to the canonical MiniMax-M2.8-highspeed id", () => {
+    const provider = new MiniMaxProvider("test-key");
+    const body = (
+      provider as unknown as {
+        buildRequestBody: (...args: unknown[]) => Record<string, unknown>;
+      }
+    ).buildRequestBody(
+      createAgent({
+        id: "mary",
+        name: "Mary",
+        provider: "minimax",
+        model: "minimax-m2.8-highspeed",
+      }),
+      messages,
+      {},
+      false,
+    );
+    expect(body.model).toBe("MiniMax-M2.8-highspeed");
+  });
+
+  it("routes Zara's glm-5.2 through without falling back to an older model", () => {
+    const provider = new ZhipuProvider("test-key");
+    const body = (
+      provider as unknown as {
+        buildRequestBody: (...args: unknown[]) => Record<string, unknown>;
+      }
+    ).buildRequestBody(
+      createAgent({ provider: "zhipu", model: "glm-5.2" }),
+      messages,
+      {},
+      false,
+    );
+    expect(body.model).toBe("glm-5.2");
   });
 });

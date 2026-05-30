@@ -444,6 +444,7 @@ const MODEL_DISPLAY_NAMES: Record<string, string> = {
   "o4-mini": "o4-mini",
   "gpt-4o": "GPT-4o",
   // Anthropic - Full dated IDs (recommended for production)
+  "claude-opus-4-8": "Claude Opus 4.8",
   "claude-opus-4-7": "Claude Opus 4.7",
   "claude-opus-4-6": "Claude Opus 4.6",
   "claude-opus-4-5-20251101": "Claude Opus 4.5",
@@ -459,29 +460,36 @@ const MODEL_DISPLAY_NAMES: Record<string, string> = {
   "claude-3-5-haiku-20241022": "Claude 3.5 Haiku",
   "claude-3-opus-20240229": "Claude 3 Opus",
   // Google
+  "gemini-3.2-pro-preview": "Gemini 3.2 Pro",
   "gemini-3.1-pro-preview": "Gemini 3.1 Pro",
   "gemini-3-pro-preview": "Gemini 3.1 Pro",
   "gemini-3-flash-preview": "Gemini 3 Flash",
   "gemini-2.5-pro": "Gemini 2.5 Pro",
   "gemini-2.5-flash": "Gemini 2.5 Flash",
   // DeepSeek
+  "deepseek-v4.1-pro": "DeepSeek V4.1 Pro",
   "deepseek-v4-pro": "DeepSeek V4 Pro",
   "deepseek-v4-flash": "DeepSeek V4 Flash",
   "deepseek-reasoner": "DeepSeek Reasoner",
   "deepseek-chat": "DeepSeek Chat",
   // Kimi
+  "kimi-k2.7": "Kimi K2.7",
   "kimi-k2.6": "Kimi K2.6",
   "kimi-k2.5": "Kimi K2.5",
   "kimi-k2-thinking": "Kimi K2 Thinking",
   "moonshot-v1-128k": "Moonshot V1 128K",
   // Qwen
+  "qwen3.7-max": "Qwen 3.7 Max",
   "qwen3.6-max-preview": "Qwen 3.6 Max",
   "qwen3.6-plus": "Qwen 3.6 Plus",
   "qwen3.5-plus": "Qwen 3.5 Plus",
   // MiniMax
+  "MiniMax-M2.8-highspeed": "MiniMax M2.8",
+  "minimax-m2.8-highspeed": "MiniMax M2.8",
   "MiniMax-M2.7-highspeed": "MiniMax M2.7",
   "minimax-m2.7-highspeed": "MiniMax M2.7",
   // Zhipu
+  "glm-5.2": "GLM-5.2",
   "glm-5.1": "GLM-5.1",
   "glm-5": "GLM-5",
   "glm-4.7": "GLM-4.7",
@@ -2885,11 +2893,11 @@ ${firstRoundObjections.length > 0 ? firstRoundObjections.join("\n") : "- None. E
     if (!config.preferences.moderatorEnabled) return null;
     const googleCredential = config.credentials.google;
     if (googleCredential?.apiKey) {
-      // Moderator runs on Gemini 3.1 Pro Preview by default (same model Grace uses).
+      // Moderator runs on Gemini 3.2 Pro Preview by default (same model Grace uses).
       return {
         provider: "google" as const,
         credential: googleCredential,
-        model: "gemini-3.1-pro-preview" as const,
+        model: "gemini-3.2-pro-preview" as const,
       };
     }
     // Fix 3.19: fall back to other providers when Google isn't configured
@@ -2936,7 +2944,7 @@ ${firstRoundObjections.length > 0 ? firstRoundObjections.join("\n") : "- None. E
       return {
         provider: "google" as const,
         credential: googleCredential,
-        model: "gemini-3.1-pro-preview" as const,
+        model: "gemini-3.2-pro-preview" as const,
       };
     }
 

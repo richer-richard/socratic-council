@@ -117,13 +117,13 @@ export interface AppConfig {
 // Each character is locked to one model.
 export const LOCKED_MODELS: Record<Provider, string> = {
   openai: "gpt-5.5",
-  anthropic: "claude-opus-4-7",
-  google: "gemini-3.1-pro-preview",
-  deepseek: "deepseek-v4-pro",
-  kimi: "kimi-k2.6",
-  qwen: "qwen3.6-max-preview",
-  minimax: "minimax-m2.7-highspeed",
-  zhipu: "glm-5.1",
+  anthropic: "claude-opus-4-8",
+  google: "gemini-3.2-pro-preview",
+  deepseek: "deepseek-v4.1-pro",
+  kimi: "kimi-k2.7",
+  qwen: "qwen3.7-max",
+  minimax: "minimax-m2.8-highspeed",
+  zhipu: "glm-5.2",
 };
 
 /**
@@ -131,7 +131,7 @@ export const LOCKED_MODELS: Record<Provider, string> = {
  * model fails. Centralized here (per fix 3.17) so model rotations update
  * the fallback alongside `LOCKED_MODELS`.
  */
-export const ANTHROPIC_OPUS_FALLBACK_MODEL = "claude-opus-4-6";
+export const ANTHROPIC_OPUS_FALLBACK_MODEL = "claude-opus-4-7";
 
 export function isProvider(value: unknown): value is Provider {
   return typeof value === "string" && VALID_PROVIDERS.includes(value as Provider);
@@ -683,7 +683,7 @@ export const PROVIDER_INFO: Record<
     agent: "Cathy",
     avatar: "💜",
     color: "text-cathy",
-    description: "Claude Opus 4.7 (default), Sonnet, Haiku",
+    description: "Claude Opus 4.8 (default), Sonnet, Haiku",
     keyPrefix: "sk-ant-",
     defaultBaseUrl: "https://api.anthropic.com",
     signupUrl: "https://console.anthropic.com/settings/keys",
@@ -693,7 +693,7 @@ export const PROVIDER_INFO: Record<
     agent: "Grace",
     avatar: "🌱",
     color: "text-grace",
-    description: "Gemini 3.1 Pro, Flash models",
+    description: "Gemini 3.2 Pro, Flash models",
     keyPrefix: "AIza",
     defaultBaseUrl: "https://generativelanguage.googleapis.com",
     signupUrl: "https://aistudio.google.com/app/apikey",
@@ -703,7 +703,7 @@ export const PROVIDER_INFO: Record<
     agent: "Douglas",
     avatar: "🔶",
     color: "text-douglas",
-    description: "DeepSeek V4 Pro (default), V4 Flash, Reasoner, Chat",
+    description: "DeepSeek V4.1 Pro (default), V4 Flash, Reasoner, Chat",
     keyPrefix: "sk-",
     defaultBaseUrl: "https://api.deepseek.com",
     signupUrl: "https://platform.deepseek.com/api_keys",
@@ -713,7 +713,7 @@ export const PROVIDER_INFO: Record<
     agent: "Kate",
     avatar: "📚",
     color: "text-kate",
-    description: "Kimi K2.6 (default), Moonshot models",
+    description: "Kimi K2.7 (default), Moonshot models",
     keyPrefix: "sk-",
     defaultBaseUrl: "https://api.moonshot.cn",
     signupUrl: "https://platform.moonshot.cn/console/api-keys",
@@ -723,7 +723,7 @@ export const PROVIDER_INFO: Record<
     agent: "Quinn",
     avatar: "🧠",
     color: "text-quinn",
-    description: "Qwen 3.6 Max Preview (Alibaba Cloud Bailian)",
+    description: "Qwen 3.7 Max (Alibaba Cloud Bailian)",
     keyPrefix: "sk-",
     defaultBaseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1",
     signupUrl: "https://dashscope.console.aliyun.com/apiKey",
@@ -733,7 +733,7 @@ export const PROVIDER_INFO: Record<
     agent: "Mary",
     avatar: "🟢",
     color: "text-mary",
-    description: "MiniMax M2.7 (Anthropic-compatible endpoint)",
+    description: "MiniMax M2.8 (Anthropic-compatible endpoint)",
     keyPrefix: "sk-",
     defaultBaseUrl: "https://api.minimaxi.com/anthropic",
     signupUrl: "https://api.minimaxi.com/user-center/basic-information/interface-key",
@@ -743,7 +743,7 @@ export const PROVIDER_INFO: Record<
     agent: "Zara",
     avatar: "💠",
     color: "text-zara",
-    description: "GLM-5.1 (Zhipu AI, bigmodel.cn)",
+    description: "GLM-5.2 (Zhipu AI, bigmodel.cn)",
     keyPrefix: "",
     defaultBaseUrl: "https://open.bigmodel.cn/api/paas/v4",
     signupUrl: "https://open.bigmodel.cn/usercenter/proj-mgmt/apikeys",
