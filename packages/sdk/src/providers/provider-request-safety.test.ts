@@ -452,38 +452,4 @@ describe("DeepSeek + Zhipu request shapes (fix 12.1)", () => {
     expect(body.model).toBe("qwen3.7-max");
   });
 
-  it("normalizes minimax-m2.8-highspeed to the canonical MiniMax-M2.8-highspeed id", () => {
-    const provider = new MiniMaxProvider("test-key");
-    const body = (
-      provider as unknown as {
-        buildRequestBody: (...args: unknown[]) => Record<string, unknown>;
-      }
-    ).buildRequestBody(
-      createAgent({
-        id: "mary",
-        name: "Mary",
-        provider: "minimax",
-        model: "minimax-m2.8-highspeed",
-      }),
-      messages,
-      {},
-      false,
-    );
-    expect(body.model).toBe("MiniMax-M2.8-highspeed");
-  });
-
-  it("routes Zara's glm-5.2 through without falling back to an older model", () => {
-    const provider = new ZhipuProvider("test-key");
-    const body = (
-      provider as unknown as {
-        buildRequestBody: (...args: unknown[]) => Record<string, unknown>;
-      }
-    ).buildRequestBody(
-      createAgent({ provider: "zhipu", model: "glm-5.2" }),
-      messages,
-      {},
-      false,
-    );
-    expect(body.model).toBe("glm-5.2");
-  });
 });

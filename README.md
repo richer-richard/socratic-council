@@ -41,13 +41,13 @@ The eight council debaters speak in public. Each is shadowed by a silent advisor
 | --------- | ------- | --------- | -------------------------------------------------------------- |
 | George    | Greta   | OpenAI    | GPT-5.5                                                        |
 | Cathy     | Clara   | Anthropic | Claude Opus 4.8                                                |
-| Grace     | Gaia    | Google    | Gemini 3.2 Pro                                                 |
-| Douglas   | Dara    | DeepSeek  | DeepSeek V4.1 Pro                                                |
-| Kate      | Kira    | Kimi      | Kimi K2.7                                                      |
+| Grace     | Gaia    | Google    | Gemini 3.1 Pro                                                 |
+| Douglas   | Dara    | DeepSeek  | DeepSeek V4 Pro                                                |
+| Kate      | Kira    | Kimi      | Kimi K2.6                                                      |
 | Quinn     | Quincy  | Qwen      | Qwen 3.7 Max                                                   |
-| Mary      | Mila    | MiniMax   | MiniMax M2.8 Highspeed                                         |
-| Zara      | Zoe     | Z.AI      | GLM-5.2                                                        |
-| Moderator |         | Google    | Gemini 3.2 Pro (falls back to whatever provider is configured) |
+| Mary      | Mila    | MiniMax   | MiniMax M2.7 Highspeed                                         |
+| Zara      | Zoe     | Z.AI      | GLM-5.1                                                        |
+| Moderator |         | Google    | Gemini 3.1 Pro (falls back to whatever provider is configured) |
 
 ## Installation Paths
 
@@ -601,7 +601,7 @@ If you need a proxy (corporate networks, regions requiring proxy access, etc.), 
 
 ### Moderator
 
-The Moderator is a system-role voice that opens the session, nudges balance and synthesis, intervenes when conflict spikes, prompts an end-of-session ballot, and writes the final summary. By default it runs on Google Gemini 3.2 Pro for grounded, even-handed prose; if you have not configured Google, it falls back to Anthropic, OpenAI, DeepSeek, Kimi, Qwen, MiniMax, or Z.AI in that order. You can toggle the Moderator on or off in Settings.
+The Moderator is a system-role voice that opens the session, nudges balance and synthesis, intervenes when conflict spikes, prompts an end-of-session ballot, and writes the final summary. By default it runs on Google Gemini 3.1 Pro for grounded, even-handed prose; if you have not configured Google, it falls back to Anthropic, OpenAI, DeepSeek, Kimi, Qwen, MiniMax, or Z.AI in that order. You can toggle the Moderator on or off in Settings.
 
 ---
 

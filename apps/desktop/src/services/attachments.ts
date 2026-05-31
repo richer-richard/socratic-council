@@ -206,9 +206,8 @@ const TEXT_FILE_EXTENSIONS = new Set([
 const RAW_IMAGE_MODEL_SUPPORT: Partial<Record<Provider, string[]>> = {
   openai: ["gpt-5.5", "gpt-5.4"],
   anthropic: ["claude-opus-4-8", "claude-opus-4-7", "claude-opus-4-6"],
-  google: ["gemini-3.2-pro-preview", "gemini-3.1-pro-preview", "gemini-3-pro-preview"],
+  google: ["gemini-3.1-pro-preview", "gemini-3-pro-preview"],
   kimi: [
-    "kimi-k2.7",
     "kimi-k2.6",
     "kimi-k2.5",
     "moonshot-v1-128k-vision-preview",

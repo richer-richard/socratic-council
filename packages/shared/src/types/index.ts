@@ -143,7 +143,6 @@ export interface AnthropicRequest {
 // =============================================================================
 
 export const GeminiModels = [
-  "gemini-3.2-pro-preview",
   "gemini-3.1-pro-preview",
   // Legacy alias retained for migration/back-compat
   "gemini-3-pro-preview",
@@ -218,7 +217,6 @@ export interface GeminiRequest {
 // =============================================================================
 
 export const DeepSeekModels = [
-  "deepseek-v4.1-pro",
   "deepseek-v4-pro",
   "deepseek-v4-flash",
   "deepseek-reasoner",
@@ -259,7 +257,6 @@ export interface DeepSeekRequest {
 // =============================================================================
 
 export const KimiModels = [
-  "kimi-k2.7",
   "kimi-k2.6",
   "kimi-k2.5",
   "kimi-k2-thinking",
@@ -368,11 +365,8 @@ export interface QwenRequest {
 // =============================================================================
 
 export const MiniMaxModels = [
-  "MiniMax-M2.8-highspeed",
-  // Lowercase alias retained for migration/back-compat.
-  "minimax-m2.8-highspeed",
-  // Previous flagship, retained for migration/back-compat.
   "MiniMax-M2.7-highspeed",
+  // Lowercase alias retained for migration/back-compat.
   "minimax-m2.7-highspeed",
 ] as const;
 
@@ -413,7 +407,7 @@ export interface MiniMaxRequest {
 // ZHIPU (Z.AI) MODELS & PARAMETERS
 // =============================================================================
 
-export const ZhipuModels = ["glm-5.2", "glm-5.1", "glm-5", "glm-4.7"] as const;
+export const ZhipuModels = ["glm-5.1", "glm-5", "glm-4.7"] as const;
 
 export type ZhipuModel = (typeof ZhipuModels)[number];
 
