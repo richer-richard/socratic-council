@@ -58,9 +58,9 @@ const AGENT_CARDS: Array<{
   { provider: "zhipu", name: "Zara", partner: "Zoe", color: "var(--color-zara)" },
 ];
 
-// Highspeed and non-highspeed M2.8 are the same model — show the short label.
+// Highspeed and non-highspeed M2.7 are the same model — show the short label.
 const MODEL_DISPLAY_OVERRIDES: Partial<Record<Provider, string>> = {
-  minimax: "MiniMax M2.8",
+  minimax: "MiniMax M2.7",
 };
 
 function getModelDisplayName(provider: Provider): string {
