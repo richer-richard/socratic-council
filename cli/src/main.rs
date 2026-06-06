@@ -1,13 +1,13 @@
 //! `socratic-council` CLI entry point.
 
 use clap::{Parser, Subcommand};
-use socratic_council::catalog::{catalog_models, resolve_model, DiscoveredModel, ModelSource};
+use socratic_council::catalog::{catalog_models, DiscoveredModel, ModelSource};
 use socratic_council::config::Config;
 use socratic_council::engine::{default_agents, DebateEvent, Engine};
-use socratic_council::providers::scan::scan_models;
-use socratic_council::tui::{self, AgentMeta};
-use socratic_council::types::{Provider, ReasoningTier};
 use socratic_council::http_client;
+use socratic_council::providers::scan::scan_models;
+use socratic_council::tui::{self, AppContext};
+use socratic_council::types::{Agent, Provider, ReasoningTier};
 use std::collections::HashMap;
 use std::io::Write;
 
@@ -26,7 +26,7 @@ struct Cli {
 enum Command {
     /// Start a debate on a topic (default action).
     Run {
-        /// The debate topic (omit to be prompted).
+        /// The debate topic (omit to open the Home view, or to be prompted with --no-tui).
         topic: Vec<String>,
         /// Restrict to these providers (comma-separated slugs).
         #[arg(long)]
@@ -118,9 +118,76 @@ fn parse_provider_filter(spec: &Option<String>) -> Option<Vec<Provider>> {
 }
 
 async fn cmd_run(args: RunArgs) -> anyhow::Result<()> {
-    let config = Config::load()?;
+    let mut config = Config::load()?;
+    // CLI flags override the inherited / default config.
+    if let Some(tier) = args.tier {
+        config.council_tier = tier;
+    }
+    if let Some(n) = args.max_turns {
+        config.max_turns = n;
+    }
 
-    let mut topic = args.topic;
+    let configured = config.configured_providers();
+    if configured.is_empty() {
+        anyhow::bail!(
+            "no API keys configured. Set one with `socratic-council config set-key <provider>`, \
+             a <PROVIDER>_API_KEY env var, or open the desktop app once."
+        );
+    }
+
+    // Providers to prepare models for: configured ∩ --providers filter.
+    let filter = parse_provider_filter(&args.providers);
+    let providers: Vec<Provider> = configured
+        .into_iter()
+        .filter(|p| filter.as_ref().map(|f| f.contains(p)).unwrap_or(true))
+        .collect();
+    if providers.is_empty() {
+        anyhow::bail!("none of the requested providers have a key configured");
+    }
+
+    let http = http_client(config.proxy.as_deref());
+
+    // Build the available-models map (scan or catalog) for those providers.
+    // A `--scan` pass resolves each key anyway, so capture them to avoid
+    // re-prompting the keychain when the debate launches.
+    let mut available: HashMap<Provider, Vec<DiscoveredModel>> = HashMap::new();
+    let mut prefetched_keys: HashMap<Provider, String> = HashMap::new();
+    for provider in &providers {
+        let models = if args.scan {
+            let key = config.resolve_api_key(*provider).unwrap_or_default();
+            if !key.is_empty() {
+                prefetched_keys.insert(*provider, key.clone());
+            }
+            match scan_models(&http, *provider, &config.base_url(*provider), &key).await {
+                Ok(m) => m,
+                Err(_) => catalog_models(*provider),
+            }
+        } else {
+            catalog_models(*provider)
+        };
+        available.insert(*provider, models);
+    }
+
+    if args.no_tui {
+        return run_plain_debate(config, http, available, prefetched_keys, &args, &providers).await;
+    }
+
+    let initial_topic =
+        if args.topic.trim().is_empty() { None } else { Some(args.topic.clone()) };
+    let ctx = AppContext { http, config, available, providers, prefetched_keys };
+    tui::run(ctx, initial_topic).await
+}
+
+/// Plain (non-TUI) streaming debate for piping / scripting.
+async fn run_plain_debate(
+    config: Config,
+    http: reqwest::Client,
+    available: HashMap<Provider, Vec<DiscoveredModel>>,
+    mut keys: HashMap<Provider, String>,
+    args: &RunArgs,
+    providers: &[Provider],
+) -> anyhow::Result<()> {
+    let mut topic = args.topic.clone();
     if topic.trim().is_empty() {
         print!("Debate topic> ");
         std::io::stdout().flush()?;
@@ -132,82 +199,34 @@ async fn cmd_run(args: RunArgs) -> anyhow::Result<()> {
         anyhow::bail!("no topic given");
     }
 
-    let tier = args.tier.unwrap_or(config.council_tier);
-    let configured = config.configured_providers();
-    if configured.is_empty() {
-        anyhow::bail!(
-            "no API keys configured. Set one with `socratic-council config set-key <provider>` \
-             or a <PROVIDER>_API_KEY env var."
-        );
-    }
-    let filter = parse_provider_filter(&args.providers);
-
-    let mut agents: Vec<_> = default_agents(tier)
+    let mut agents: Vec<Agent> = default_agents(config.council_tier)
         .into_iter()
-        .filter(|a| configured.contains(&a.provider))
-        .filter(|a| filter.as_ref().map(|f| f.contains(&a.provider)).unwrap_or(true))
+        .filter(|a| providers.contains(&a.provider))
         .collect();
-    if agents.is_empty() {
-        anyhow::bail!("none of the requested providers have a key configured");
-    }
-    // Stable speaking order.
-    agents.sort_by_key(|a| a.name.clone());
+    agents.sort_by(|a, b| a.name.cmp(&b.name));
 
-    let http = http_client(config.proxy.as_deref());
-
-    // Build the available-models map per provider (scan or catalog).
-    let mut available: HashMap<Provider, Vec<DiscoveredModel>> = HashMap::new();
+    // Resolve any key not already prefetched (reads the keychain at most once
+    // per provider), then drop agents whose key couldn't be resolved.
     for agent in &agents {
-        if available.contains_key(&agent.provider) {
+        if keys.contains_key(&agent.provider) {
             continue;
         }
-        let models = if args.scan {
-            match scan_models(
-                &http,
-                agent.provider,
-                &config.base_url(agent.provider),
-                config.api_key(agent.provider).unwrap_or_default(),
-            )
-            .await
-            {
-                Ok(m) => m,
-                Err(_) => catalog_models(agent.provider),
-            }
-        } else {
-            catalog_models(agent.provider)
-        };
-        available.insert(agent.provider, models);
+        if let Some(key) = config.resolve_api_key(agent.provider) {
+            keys.insert(agent.provider, key);
+        }
+    }
+    agents.retain(|a| keys.contains_key(&a.provider));
+    if agents.is_empty() {
+        anyhow::bail!("could not read an API key for any selected provider");
     }
 
-    // Roster (resolved model per agent) for display.
-    let roster: Vec<AgentMeta> = agents
-        .iter()
-        .map(|a| {
-            let empty = Vec::new();
-            let avail = available.get(&a.provider).unwrap_or(&empty);
-            let model = resolve_model(
-                a.provider,
-                a.tier,
-                avail,
-                config.selection(a.provider, a.tier).as_deref(),
-            );
-            AgentMeta { name: a.name.clone(), provider: a.provider, model }
-        })
-        .collect();
-
-    let max_turns = match args.max_turns.unwrap_or(config.max_turns) {
+    let max_turns = match config.max_turns {
         0 => 1000,
         n => n,
     };
-
-    let engine = Engine::new(http, config, topic.clone(), agents, available, max_turns);
-
-    if args.no_tui {
-        run_plain(engine).await;
-        Ok(())
-    } else {
-        tui::run(engine, roster, topic).await
-    }
+    let engine = Engine::new(http, config, topic, agents, available, keys, max_turns);
+    run_plain(engine).await;
+    Ok(())
 }
 
 async fn run_plain(engine: Engine) {
@@ -266,8 +285,9 @@ async fn cmd_models(provider: Option<String>, scan: bool) -> anyhow::Result<()> 
     for provider in providers {
         println!("\n{} ({})", provider.display_name(), provider.slug());
         let models = if scan {
-            match config.api_key(provider) {
-                Some(key) => match scan_models(&http, provider, &config.base_url(provider), key).await
+            // resolve_api_key may read the keychain — fine, the user asked to scan.
+            match config.resolve_api_key(provider) {
+                Some(key) => match scan_models(&http, provider, &config.base_url(provider), &key).await
                 {
                     Ok(m) => m,
                     Err(e) => {
@@ -295,11 +315,12 @@ fn cmd_providers() -> anyhow::Result<()> {
     let config = Config::load()?;
     println!("Providers:");
     for provider in Provider::ALL {
-        let mark = if config.api_key(provider).is_some() { "✓" } else { " " };
+        let configured = config.is_configured(provider);
+        let mark = if configured { "✓" } else { " " };
         println!(
             "  [{mark}] {:<10} {}",
             provider.slug(),
-            if config.api_key(provider).is_some() { "configured" } else { "no key" }
+            if configured { "configured" } else { "no key" }
         );
     }
     Ok(())

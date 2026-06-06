@@ -38,6 +38,30 @@ Standalone Rust crate (`socratic-council`, `cargo install`), ratatui TUI.
 providers (4 client styles), and the reasoning-tier knobs from the TS SDK.
 Subcommands: `run`, `models [--scan]`, `providers`, `config`.
 
+### TUI (`cli/src/tui/`, June 2026 redesign)
+
+App-faithful three-surface TUI (see `docs/cli-tui-design.md`): **Home**
+(`home.rs` — animated council-mark Canvas logo + topic composer + roster),
+a collapsible **history** sidebar (`sidebar.rs`, `Tab`), the **Chat** debate
+chamber (`chat.rs`), and a **Settings/Models** panel (`settings.rs`).
+`mod.rs` owns the `App` state machine, the event loop, and spawns the engine on
+a tokio task. `theme.rs` holds the palette (gold `#F5C542`) + the 8 agents'
+provider colors. Render paths are smoke-tested with `TestBackend` down to 1×1.
+
+### Desktop bridge (`cli/src/bridge.rs`, feature `desktop-bridge`, default on)
+
+Shares the **desktop app's keys + config + sessions** so the user never
+re-enters a key. Reads `<app_data_dir>/vault.key` (file-vault build) and the
+WebView localStorage sqlite (`rusqlite`, read-only/immutable; WebKit BLOBs are
+UTF-16LE/UTF-8); opens `ENC1:` XChaCha20-Poly1305 envelopes
+(`chacha20poly1305`). **Older keychain build:** no `vault.key` — keys live in
+the macOS Keychain (service `socratic-council`, account `apiKey:<provider>`) and
+the session DEK at `vault:dek` (base64). Keychain reads are **lazy** (keys on
+debate launch, DEK on opening history) and cached; config `hasKey` markers drive
+listing so `providers`/roster never prompt. `Config::load()` merges the bridge
+at lowest precedence (env / `keys.toml` win). **Never logs secret values**
+(`SC_BRIDGE_DEBUG=1` prints only paths / presence / counts).
+
 ---
 
 ## Commands
