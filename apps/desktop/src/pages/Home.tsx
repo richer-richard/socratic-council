@@ -770,8 +770,14 @@ export function Home({
     updateProxy,
     updatePreferences,
     updateModel,
+    updateModelSelection,
+    updateAgentTier,
+    updateCouncilTier,
+    updateUtilityTier,
+    refreshResolvedModels,
     hasAnyApiKey,
     getConfiguredProviders,
+    getProxy,
     vaultReady,
   } = useConfig();
 
@@ -1817,10 +1823,17 @@ export function Home({
         isOpen={showSettings}
         onClose={() => setShowSettings(false)}
         config={config}
+        proxy={getProxy()}
         onUpdateCredential={updateCredential}
         onUpdateProxy={updateProxy}
         onUpdatePreferences={updatePreferences}
         onUpdateModel={updateModel}
+        onUpdateModelSelection={updateModelSelection}
+        onUpdateAgentTier={updateAgentTier}
+        onUpdateCouncilTier={updateCouncilTier}
+        onUpdateUtilityTier={updateUtilityTier}
+        onModelsScanned={refreshResolvedModels}
+        vaultReady={vaultReady}
       />
 
       <input

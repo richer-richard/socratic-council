@@ -29,6 +29,15 @@
 
 import { useCallback, useSyncExternalStore } from "react";
 import {
+  AUTO_MODEL,
+  type AgentId,
+  type DiscoveredModel,
+  type ReasoningTier,
+  catalogModelsForProvider,
+  mergeDiscoveredWithCatalog,
+  resolveModel,
+} from "@socratic-council/shared";
+import {
   apiKeyAccount,
   isSecretStoreReady,
   secretsDelete,
@@ -36,6 +45,8 @@ import {
   secretsPut,
 } from "../services/secrets";
 import { initVault } from "../services/vault";
+
+export type { ReasoningTier } from "@socratic-council/shared";
 
 export type Provider =
   | "openai"
@@ -107,14 +118,39 @@ export interface DiscussionPreferences {
   observerInterval: number;
 }
 
+/** Per-tier model choice for one provider; a value is a model id or `"auto"`. */
+export type ProviderModelTiers = Record<ReasoningTier, string>;
+
 export interface AppConfig {
   credentials: Partial<Record<Provider, ProviderCredential>>;
   proxy: ProxyConfig;
   preferences: DiscussionPreferences;
+  /**
+   * Per-provider, per-reasoning-tier model selection. Defaults to `"auto"`
+   * for every tier, which lets the resolver pick the best available model
+   * (catalog flagship, or a newer one once a scan surfaces it).
+   */
+  modelSelection: Partial<Record<Provider, ProviderModelTiers>>;
+  /** Reasoning tier each character debates at (defaults to `councilTier`). */
+  agentTiers: Partial<Record<AgentId, ReasoningTier>>;
+  /** Default reasoning tier for debate turns. */
+  councilTier: ReasoningTier;
+  /** Reasoning tier for fast background tasks (moderator utility, summaries…). */
+  utilityTier: ReasoningTier;
+  /**
+   * DERIVED, do not edit directly: the resolved debate model per provider,
+   * recomputed from `modelSelection` + live scans. Kept on the config object
+   * so the many `config.models[provider]` read sites keep working.
+   */
   models: Partial<Record<Provider, string>>;
 }
 
-// Each character is locked to one model.
+/**
+ * Catalog fallback flagship per provider — the model "Auto" lands on when no
+ * scan has run and nothing newer is known. Formerly the hard per-character
+ * lock; now just the default the resolver falls back to. These ids must stay
+ * real (no fabricated bumps); newer ids arrive via live scanning instead.
+ */
 export const LOCKED_MODELS: Record<Provider, string> = {
   openai: "gpt-5.5",
   anthropic: "claude-opus-4-8",
@@ -122,9 +158,78 @@ export const LOCKED_MODELS: Record<Provider, string> = {
   deepseek: "deepseek-v4-pro",
   kimi: "kimi-k2.6",
   qwen: "qwen3.7-max",
-  minimax: "minimax-m2.7-highspeed",
+  // Canonical TitleCase id (matches MODEL_REGISTRY + the provider's testConnection).
+  minimax: "MiniMax-M2.7-highspeed",
   zhipu: "glm-5.1",
 };
+
+/** Which inner-circle character runs on each provider (for per-agent tiers). */
+const PROVIDER_TO_AGENT: Record<Provider, AgentId> = {
+  openai: "george",
+  anthropic: "cathy",
+  google: "grace",
+  deepseek: "douglas",
+  kimi: "kate",
+  qwen: "quinn",
+  minimax: "mary",
+  zhipu: "zara",
+};
+
+export const REASONING_TIER_OPTIONS: { value: ReasoningTier; label: string; hint: string }[] = [
+  { value: "low", label: "Low", hint: "Fast & cheap — light reasoning" },
+  { value: "medium", label: "Medium", hint: "Balanced capability and speed" },
+  { value: "high", label: "High", hint: "Deepest reasoning — flagship models" },
+];
+
+// Live-scan cache key prefix (written by services/modelScan.ts). Read here so
+// model resolution can see scanned models without importing modelScan (which
+// would create an import cycle).
+const SCAN_CACHE_PREFIX = "socratic-council-models:";
+
+function readScannedModels(provider: Provider): DiscoveredModel[] {
+  try {
+    const raw = typeof localStorage !== "undefined" && localStorage.getItem(SCAN_CACHE_PREFIX + provider);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as { models?: DiscoveredModel[] };
+    return Array.isArray(parsed?.models) ? parsed.models : [];
+  } catch {
+    return [];
+  }
+}
+
+/** Models available for a provider: live scan ∪ catalog, or catalog only. */
+export function availableModelsForProvider(provider: Provider): DiscoveredModel[] {
+  const scanned = readScannedModels(provider);
+  return scanned.length > 0
+    ? mergeDiscoveredWithCatalog(provider, scanned)
+    : catalogModelsForProvider(provider);
+}
+
+function defaultProviderTiers(): ProviderModelTiers {
+  return { low: AUTO_MODEL, medium: AUTO_MODEL, high: AUTO_MODEL };
+}
+
+function tierForProvider(provider: Provider, config: AppConfig): ReasoningTier {
+  return config.agentTiers[PROVIDER_TO_AGENT[provider]] ?? config.councilTier;
+}
+
+function resolveModelForTier(provider: Provider, tier: ReasoningTier, config: AppConfig): string {
+  const selection = config.modelSelection[provider]?.[tier];
+  return resolveModel(provider, tier, availableModelsForProvider(provider), selection);
+}
+
+function computeResolvedModels(config: AppConfig): Partial<Record<Provider, string>> {
+  const out: Partial<Record<Provider, string>> = {};
+  for (const provider of VALID_PROVIDERS) {
+    out[provider] = resolveModelForTier(provider, tierForProvider(provider, config), config);
+  }
+  return out;
+}
+
+/** Return a copy of the config with its derived `models` map recomputed. */
+function withResolvedModels(config: AppConfig): AppConfig {
+  return { ...config, models: computeResolvedModels(config) };
+}
 
 /**
  * Anthropic Opus fallback model — used by Chat.tsx when the primary Opus
@@ -159,6 +264,12 @@ const DEFAULT_CONFIG: AppConfig = {
     reflection: "off",
     observerInterval: 2,
   },
+  modelSelection: Object.fromEntries(
+    VALID_PROVIDERS.map((p) => [p, defaultProviderTiers()]),
+  ) as Record<Provider, ProviderModelTiers>,
+  agentTiers: {},
+  councilTier: "high",
+  utilityTier: "low",
   models: { ...LOCKED_MODELS },
 };
 
@@ -258,9 +369,36 @@ function stripSecretsForPersistence(
   return persisted;
 }
 
-function sanitizeModels(_input: unknown): Partial<Record<Provider, string>> {
-  // Model selection is locked per character, so persisted values are ignored.
-  return { ...LOCKED_MODELS };
+function sanitizeReasoningTier(value: unknown, fallback: ReasoningTier): ReasoningTier {
+  return value === "low" || value === "medium" || value === "high" ? value : fallback;
+}
+
+function sanitizeModelSelection(input: unknown): Partial<Record<Provider, ProviderModelTiers>> {
+  const result: Partial<Record<Provider, ProviderModelTiers>> = {};
+  const obj = (input && typeof input === "object" ? input : {}) as Record<string, unknown>;
+  for (const provider of VALID_PROVIDERS) {
+    const tiers = defaultProviderTiers();
+    const raw = obj[provider];
+    if (raw && typeof raw === "object") {
+      for (const tier of ["low", "medium", "high"] as ReasoningTier[]) {
+        const value = (raw as Record<string, unknown>)[tier];
+        if (typeof value === "string" && value.trim() !== "") tiers[tier] = value;
+      }
+    }
+    result[provider] = tiers;
+  }
+  return result;
+}
+
+function sanitizeAgentTiers(input: unknown): Partial<Record<AgentId, ReasoningTier>> {
+  const result: Partial<Record<AgentId, ReasoningTier>> = {};
+  if (!input || typeof input !== "object") return result;
+  for (const [key, value] of Object.entries(input)) {
+    if (value === "low" || value === "medium" || value === "high") {
+      result[key as AgentId] = value;
+    }
+  }
+  return result;
 }
 
 const STORAGE_KEY = "socratic-council-config";
@@ -334,13 +472,15 @@ function loadConfig(): AppConfig {
           DEFAULT_CONFIG.preferences.observersEnabled,
         ),
       },
-      // Models are always locked to LOCKED_MODELS regardless of what's
-      // persisted (fix 1.6 — the previous needsMigration branch was dead
-      // code because of the unconditional reset that followed it).
-      models: { ...LOCKED_MODELS, ...sanitizeModels(parsed.models) },
+      modelSelection: sanitizeModelSelection(parsed.modelSelection),
+      agentTiers: sanitizeAgentTiers(parsed.agentTiers),
+      councilTier: sanitizeReasoningTier(parsed.councilTier, "high"),
+      utilityTier: sanitizeReasoningTier(parsed.utilityTier, "low"),
+      // Derived; recomputed from modelSelection + live scans just below.
+      models: {},
     };
 
-    return merged;
+    return withResolvedModels(merged);
   } catch (error) {
     console.error("Failed to load config:", error);
     return DEFAULT_CONFIG;
@@ -430,12 +570,14 @@ function notify(): void {
 }
 
 function setSnapshot(updater: (prev: StoreSnapshot) => StoreSnapshot): void {
-  const next = updater(storeSnapshot);
+  let next = updater(storeSnapshot);
   if (next === storeSnapshot) return;
 
   // Persist non-secret config + sync credentials to encrypted secret store
   // whenever the config field actually changed.
   if (next.config !== storeSnapshot.config) {
+    // Keep the derived `models` map in sync with any selection/tier change.
+    next = { ...next, config: withResolvedModels(next.config) };
     saveConfig(next.config);
     if (next.vaultReady) {
       syncCredentialsToStorage(storeSnapshot.config.credentials, next.config.credentials);
@@ -444,6 +586,50 @@ function setSnapshot(updater: (prev: StoreSnapshot) => StoreSnapshot): void {
 
   storeSnapshot = next;
   notify();
+}
+
+// --- Model selection / resolution (module scope) ----------------------------
+
+function updateModelSelectionImpl(provider: Provider, tier: ReasoningTier, model: string): void {
+  setSnapshot((prev) => {
+    const current = prev.config.modelSelection[provider] ?? defaultProviderTiers();
+    return {
+      ...prev,
+      config: {
+        ...prev.config,
+        modelSelection: {
+          ...prev.config.modelSelection,
+          [provider]: { ...current, [tier]: model || AUTO_MODEL },
+        },
+      },
+    };
+  });
+}
+
+/**
+ * Recompute the derived `models` map. Live scans write to localStorage out of
+ * band, so after a scan we bump the snapshot to pull the newly-available
+ * models into resolution and re-render subscribers.
+ */
+function refreshResolvedModelsStore(): void {
+  setSnapshot((prev) => ({ ...prev, config: { ...prev.config } }));
+}
+
+/** Resolve the debate model for a provider (its agent's tier). Non-hook. */
+export function resolveDebateModel(provider: Provider): string {
+  const config = getStoreConfig();
+  return resolveModelForTier(provider, tierForProvider(provider, config), config);
+}
+
+/** Resolve the fast background-task model for a provider. Non-hook. */
+export function resolveUtilityModel(provider: Provider): string {
+  const config = getStoreConfig();
+  return resolveModelForTier(provider, config.utilityTier, config);
+}
+
+/** The reasoning tier a provider's agent debates at. Non-hook. */
+export function getAgentReasoningTier(provider: Provider): ReasoningTier {
+  return tierForProvider(provider, getStoreConfig());
 }
 
 let initStarted = false;
@@ -590,15 +776,39 @@ export function useConfig() {
     }));
   }, []);
 
-  const updateModel = useCallback((provider: Provider, _model: string) => {
+  // Legacy single-model setter (kept for settings import/export). Maps the id
+  // onto the provider's "high" tier selection.
+  const updateModel = useCallback((provider: Provider, model: string) => {
     if (!isProvider(provider)) return;
+    updateModelSelectionImpl(provider, "high", model || AUTO_MODEL);
+  }, []);
+
+  const updateModelSelection = useCallback(
+    (provider: Provider, tier: ReasoningTier, model: string) => {
+      if (!isProvider(provider)) return;
+      updateModelSelectionImpl(provider, tier, model);
+    },
+    [],
+  );
+
+  const updateAgentTier = useCallback((agentId: AgentId, tier: ReasoningTier) => {
     setSnapshot((prev) => ({
       ...prev,
-      config: {
-        ...prev.config,
-        models: { ...prev.config.models, [provider]: LOCKED_MODELS[provider] },
-      },
+      config: { ...prev.config, agentTiers: { ...prev.config.agentTiers, [agentId]: tier } },
     }));
+  }, []);
+
+  const updateCouncilTier = useCallback((tier: ReasoningTier) => {
+    setSnapshot((prev) => ({ ...prev, config: { ...prev.config, councilTier: tier } }));
+  }, []);
+
+  const updateUtilityTier = useCallback((tier: ReasoningTier) => {
+    setSnapshot((prev) => ({ ...prev, config: { ...prev.config, utilityTier: tier } }));
+  }, []);
+
+  /** Recompute the derived `models` map (call after a live model scan). */
+  const refreshResolvedModels = useCallback(() => {
+    refreshResolvedModelsStore();
   }, []);
 
   const getConfiguredProviders = useCallback((): Provider[] => {
@@ -637,6 +847,11 @@ export function useConfig() {
     updateProxy,
     updatePreferences,
     updateModel,
+    updateModelSelection,
+    updateAgentTier,
+    updateCouncilTier,
+    updateUtilityTier,
+    refreshResolvedModels,
     getConfiguredProviders,
     hasAnyApiKey,
     getMaxTurns,

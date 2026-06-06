@@ -1,16 +1,27 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   type Provider,
   type ProxyType,
   type AppConfig,
+  type ProxyConfig,
+  type ReasoningTier,
   PROVIDER_INFO,
   LOCKED_MODELS,
   DISCUSSION_LENGTHS,
+  REASONING_TIER_OPTIONS,
+  availableModelsForProvider,
   isProvider,
 } from "../stores/config";
-import { getModelsByProvider } from "@socratic-council/shared";
+import {
+  AUTO_MODEL,
+  REASONING_TIERS,
+  resolveModel,
+  type AgentId,
+  type DiscoveredModel,
+} from "@socratic-council/shared";
 import { ProviderIcon } from "./icons/ProviderIcons";
 import { testProviderConnection } from "../services/api";
+import { scanProviderModels, getCachedScan, type ScanResult } from "../services/modelScan";
 import { clearAllAttachmentBlobs } from "../services/attachments";
 // Single source of truth for the version + identifier shown in the About
 // tab. Reading from the desktop package.json means a version bump in a
@@ -270,54 +281,44 @@ interface ConfigModalProps {
   onUpdateProxy: (proxy: AppConfig["proxy"]) => void;
   onUpdatePreferences: (preferences: Partial<AppConfig["preferences"]>) => void;
   onUpdateModel: (provider: Provider, model: string) => void;
+  /** Per-provider, per-tier model selection. */
+  onUpdateModelSelection: (provider: Provider, tier: ReasoningTier, model: string) => void;
+  /** Reasoning tier a character debates at. */
+  onUpdateAgentTier: (agentId: AgentId, tier: ReasoningTier) => void;
+  onUpdateCouncilTier: (tier: ReasoningTier) => void;
+  onUpdateUtilityTier: (tier: ReasoningTier) => void;
+  /** Called after a successful live scan so the store re-resolves models. */
+  onModelsScanned: () => void;
+  /** Resolved proxy (for routing scan requests). */
+  proxy?: ProxyConfig;
+  vaultReady: boolean;
 }
 
 type TabType = "api-keys" | "models" | "proxy" | "preferences" | "diagnostics" | "about";
 
 const PROVIDERS = Object.keys(PROVIDER_INFO) as Provider[];
 
-const MODEL_OPTIONS: Record<Provider, { id: string; name: string; description?: string }[]> = {
-  openai: getModelsByProvider("openai").map((model) => ({
-    id: model.id,
-    name: model.name,
-    description: model.description,
-  })),
-  anthropic: getModelsByProvider("anthropic").map((model) => ({
-    id: model.id,
-    name: model.name,
-    description: model.description,
-  })),
-  google: getModelsByProvider("google").map((model) => ({
-    id: model.id,
-    name: model.name,
-    description: model.description,
-  })),
-  deepseek: getModelsByProvider("deepseek").map((model) => ({
-    id: model.id,
-    name: model.name,
-    description: model.description,
-  })),
-  kimi: getModelsByProvider("kimi").map((model) => ({
-    id: model.id,
-    name: model.name,
-    description: model.description,
-  })),
-  qwen: getModelsByProvider("qwen").map((model) => ({
-    id: model.id,
-    name: model.name,
-    description: model.description,
-  })),
-  minimax: getModelsByProvider("minimax").map((model) => ({
-    id: model.id,
-    name: model.name,
-    description: model.description,
-  })),
-  zhipu: getModelsByProvider("zhipu").map((model) => ({
-    id: model.id,
-    name: model.name,
-    description: model.description,
-  })),
+/** Which inner-circle character runs on each provider. */
+const PROVIDER_AGENT_ID: Record<Provider, AgentId> = {
+  openai: "george",
+  anthropic: "cathy",
+  google: "grace",
+  deepseek: "douglas",
+  kimi: "kate",
+  qwen: "quinn",
+  minimax: "mary",
+  zhipu: "zara",
 };
+
+function relativeTime(ts: number): string {
+  const secs = Math.max(0, Math.round((Date.now() - ts) / 1000));
+  if (secs < 60) return "just now";
+  const mins = Math.round(secs / 60);
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.round(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  return `${Math.round(hours / 24)}d ago`;
+}
 
 const ABOUT_VERSION = desktopPkg.version;
 const ABOUT_IDENTIFIER = "com.socratic-council.desktop";
@@ -388,8 +389,21 @@ export function ConfigModal({
   onUpdateProxy,
   onUpdatePreferences,
   onUpdateModel,
+  onUpdateModelSelection,
+  onUpdateAgentTier,
+  onUpdateCouncilTier,
+  onUpdateUtilityTier,
+  onModelsScanned,
+  proxy,
+  vaultReady,
 }: ConfigModalProps) {
   const [activeTab, setActiveTab] = useState<TabType>("api-keys");
+  // Scan status per provider + a counter bumped after each scan so the
+  // available-model lists (read from localStorage) recompute.
+  const [scanStatus, setScanStatus] = useState<
+    Partial<Record<Provider, { status: "scanning" | "ok" | "error"; result?: ScanResult }>>
+  >({});
+  const [modelsVersion, setModelsVersion] = useState(0);
   const [editingProvider, setEditingProvider] = useState<Provider | null>(null);
   const [apiKeyInput, setApiKeyInput] = useState("");
   const [baseUrlInput, setBaseUrlInput] = useState("");
@@ -469,6 +483,33 @@ export function ConfigModal({
     onUpdateCredential(provider, null);
     setTestResults((prev) => ({ ...prev, [provider]: null }));
   };
+
+  const handleScan = async (provider: Provider) => {
+    const credential = config.credentials[provider];
+    if (!credential?.apiKey) return;
+    setScanStatus((prev) => ({ ...prev, [provider]: { status: "scanning" } }));
+    const result = await scanProviderModels(provider, credential, proxy);
+    setScanStatus((prev) => ({
+      ...prev,
+      [provider]: { status: result.ok ? "ok" : "error", result },
+    }));
+    setModelsVersion((v) => v + 1);
+    onModelsScanned();
+  };
+
+  const handleScanAll = async () => {
+    const configured = PROVIDERS.filter((p) => config.credentials[p]?.apiKey);
+    await Promise.all(configured.map((p) => handleScan(p)));
+  };
+
+  // Available models per provider (live scan ∪ catalog), recomputed after a scan.
+  const availableByProvider = useMemo(() => {
+    const map = {} as Record<Provider, DiscoveredModel[]>;
+    for (const provider of PROVIDERS) map[provider] = availableModelsForProvider(provider);
+    return map;
+    // modelsVersion/isOpen are the recompute triggers; the body reads only stable module refs.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [modelsVersion, isOpen]);
 
   return (
     <div className="modal-overlay" onClick={(e) => e.target === e.currentTarget && onClose()}>
@@ -583,7 +624,9 @@ export function ConfigModal({
                           </div>
                           <p className="text-sm text-gray-400 mt-0.5">
                             Used by <span className={info.color}>{info.agent}</span> ·{" "}
-                            <code className="text-gray-300">{LOCKED_MODELS[provider]}</code>
+                            <code className="text-gray-300">
+                              {config.models[provider] ?? LOCKED_MODELS[provider]}
+                            </code>
                           </p>
                         </div>
                       </div>
@@ -724,40 +767,170 @@ export function ConfigModal({
 
           {activeTab === "models" && (
             <div className="space-y-4 scale-in">
-              <p className="text-gray-400 text-sm mb-4">
-                Models are locked to one fixed model per character to keep council behavior
-                consistent.
-              </p>
+              {/* Intro + global reasoning levels */}
+              <div className="settings-card">
+                <div className="flex items-start justify-between gap-4 flex-wrap">
+                  <div className="min-w-0">
+                    <h3 className="font-medium text-white mb-1">Models &amp; reasoning levels</h3>
+                    <p className="text-sm text-gray-400 max-w-2xl">
+                      Choose a model for each reasoning level, or leave it on{" "}
+                      <span className="text-primary">Auto</span> to always use the best available —
+                      newer flagships are adopted automatically once you scan. Scanning queries each
+                      provider&apos;s own endpoint with your key (Chinese endpoints for Chinese
+                      models).
+                    </p>
+                  </div>
+                  <button
+                    onClick={handleScanAll}
+                    disabled={!vaultReady || configuredCount === 0}
+                    className="bg-primary/10 hover:bg-primary/20 disabled:opacity-40 text-primary
+                      px-4 py-2 rounded-lg text-sm whitespace-nowrap transition-colors"
+                  >
+                    ⟳ Scan all keys
+                  </button>
+                </div>
+                <div className="grid sm:grid-cols-2 gap-4 mt-4">
+                  <div>
+                    <label className="block text-xs uppercase tracking-wider text-gray-400 mb-2">
+                      Debate reasoning level
+                    </label>
+                    <Dropdown<ReasoningTier>
+                      value={config.councilTier}
+                      onChange={onUpdateCouncilTier}
+                      ariaLabel="Debate reasoning level"
+                      options={REASONING_TIER_OPTIONS.map((t) => ({
+                        value: t.value,
+                        label: `${t.label} — ${t.hint}`,
+                      }))}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs uppercase tracking-wider text-gray-400 mb-2">
+                      Background tasks
+                    </label>
+                    <Dropdown<ReasoningTier>
+                      value={config.utilityTier}
+                      onChange={onUpdateUtilityTier}
+                      ariaLabel="Background task reasoning level"
+                      options={REASONING_TIER_OPTIONS.map((t) => ({
+                        value: t.value,
+                        label: `${t.label} — ${t.hint}`,
+                      }))}
+                    />
+                  </div>
+                </div>
+              </div>
 
               {PROVIDERS.map((provider) => {
                 const info = PROVIDER_INFO[provider];
-                const models = MODEL_OPTIONS[provider];
-                const currentModel = LOCKED_MODELS[provider];
-                const model = models.find((m) => m.id === currentModel) ?? {
-                  id: currentModel,
-                  name: currentModel,
-                };
+                const agentId = PROVIDER_AGENT_ID[provider];
+                const available = availableByProvider[provider];
+                const status = scanStatus[provider];
+                const cached = getCachedScan(provider);
+                const hasKey = !!config.credentials[provider]?.apiKey;
+                const agentTier = config.agentTiers[agentId] ?? config.councilTier;
+
+                const modelOptions = [
+                  { value: AUTO_MODEL, label: "Auto (best available)" },
+                  ...available.map((m) => ({
+                    value: m.id,
+                    label:
+                      m.displayName && m.displayName !== m.id ? `${m.displayName} · ${m.id}` : m.id,
+                  })),
+                ];
 
                 return (
                   <div key={provider} className="settings-card">
-                    <div className="flex items-center gap-4 mb-4">
-                      <ProviderIcon provider={provider} size={32} />
-                      <div>
-                        <div className={`font-semibold ${info.color}`}>{info.agent}</div>
-                        <div className="text-sm text-gray-400">{info.name} models</div>
+                    <div className="flex items-center justify-between gap-3 mb-4 flex-wrap">
+                      <div className="flex items-center gap-3 min-w-0">
+                        <ProviderIcon provider={provider} size={28} />
+                        <div className="min-w-0">
+                          <div className={`font-semibold ${info.color}`}>{info.agent}</div>
+                          <div className="text-xs text-gray-400 truncate">{info.name}</div>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <span className="text-xs text-gray-500">
+                          {status?.status === "scanning"
+                            ? "Scanning…"
+                            : cached
+                              ? `${cached.models.length} models · scanned ${relativeTime(
+                                  cached.scannedAt,
+                                )}`
+                              : `${available.length} catalog models`}
+                        </span>
+                        <button
+                          onClick={() => handleScan(provider)}
+                          disabled={!hasKey || !vaultReady || status?.status === "scanning"}
+                          className="text-xs text-blue-400 hover:text-blue-300 disabled:opacity-40
+                            px-3 py-1.5 rounded-lg hover:bg-blue-500/10 transition-colors"
+                          title={
+                            hasKey ? `Scan ${info.name} for available models` : "Add an API key first"
+                          }
+                        >
+                          {status?.status === "scanning" ? "Scanning…" : "⟳ Scan"}
+                        </button>
                       </div>
                     </div>
 
-                    <div className="w-full bg-gray-900 border border-gray-600 rounded-lg px-4 py-3 text-white">
-                      <div className="flex items-center justify-between gap-3">
-                        <div className="min-w-0">
-                          <div className="font-medium truncate">{model.name}</div>
-                          <div className="text-xs text-gray-400 truncate">
-                            {model.description ? `${model.description} ` : ""}({model.id})
+                    {status?.status === "error" && status.result?.error && (
+                      <div className="text-xs text-yellow-400/90 mb-3">{status.result.error}</div>
+                    )}
+
+                    <div className="space-y-2">
+                      {REASONING_TIERS.map((tier) => {
+                        const selection = config.modelSelection[provider]?.[tier] ?? AUTO_MODEL;
+                        const resolved = resolveModel(provider, tier, available, selection);
+                        const tierLabel =
+                          REASONING_TIER_OPTIONS.find((t) => t.value === tier)?.label ?? tier;
+                        const isDebateTier = tier === agentTier;
+                        return (
+                          <div key={tier} className="flex items-center gap-3">
+                            <div className="w-16 shrink-0 text-sm text-gray-300 flex items-center gap-1">
+                              {tierLabel}
+                              {isDebateTier && (
+                                <span
+                                  className="text-primary"
+                                  title="This character debates at this level"
+                                >
+                                  ●
+                                </span>
+                              )}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <Dropdown<string>
+                                value={selection}
+                                ariaLabel={`${info.agent} ${tierLabel} model`}
+                                onChange={(next) => onUpdateModelSelection(provider, tier, next)}
+                                options={modelOptions}
+                              />
+                            </div>
+                            <div
+                              className="w-40 shrink-0 text-xs text-gray-500 truncate text-right"
+                              title={resolved}
+                            >
+                              {selection === AUTO_MODEL ? `→ ${resolved}` : ""}
+                            </div>
                           </div>
-                        </div>
-                        <span className="badge badge-info">Locked</span>
-                      </div>
+                        );
+                      })}
+                    </div>
+
+                    <div className="mt-4 flex items-center gap-2 flex-wrap">
+                      <span className="text-xs text-gray-400">{info.agent} debates at:</span>
+                      {REASONING_TIER_OPTIONS.map((t) => (
+                        <button
+                          key={t.value}
+                          onClick={() => onUpdateAgentTier(agentId, t.value)}
+                          className={`text-xs px-3 py-1 rounded-full border transition-colors ${
+                            agentTier === t.value
+                              ? "border-primary text-primary bg-primary/10"
+                              : "border-gray-700 text-gray-400 hover:text-white hover:border-gray-500"
+                          }`}
+                        >
+                          {t.label}
+                        </button>
+                      ))}
                     </div>
                   </div>
                 );

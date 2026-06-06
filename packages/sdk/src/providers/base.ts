@@ -3,7 +3,7 @@
  * Each provider must implement this interface with their specific API format
  */
 
-import type { AgentConfig, Message, Provider } from "@socratic-council/shared";
+import type { AgentConfig, Message, Provider, ReasoningTier } from "@socratic-council/shared";
 
 export type ChatAttachmentKind = "image" | "pdf";
 
@@ -30,6 +30,14 @@ export interface CompletionOptions {
   idleTimeoutMs?: number;
   signal?: AbortSignal;
   disableThinking?: boolean;
+  /**
+   * Council reasoning level for this call. Providers map it to their own
+   * reasoning-effort knob (OpenAI `reasoning.effort`, Anthropic thinking
+   * profile, Google `thinkingBudget`, Qwen `enable_thinking`, MiniMax
+   * `budget_tokens`). When omitted, providers keep their prior hardcoded
+   * default so existing behavior (and tests) are unchanged.
+   */
+  reasoningTier?: ReasoningTier;
 }
 
 export interface CompletionResult {

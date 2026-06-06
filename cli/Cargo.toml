@@ -1,0 +1,46 @@
+[package]
+name = "socratic-council"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.82"
+description = "A terminal multi-agent debate workstation — eight AI agents from eight providers argue any topic in a ratatui TUI."
+authors = ["Socratic Council Team"]
+license = "Apache-2.0"
+repository = "https://github.com/richer-richard/socratic-council"
+homepage = "https://github.com/richer-richard/socratic-council"
+readme = "README.md"
+keywords = ["ai", "agents", "debate", "tui", "llm"]
+categories = ["command-line-utilities"]
+exclude = ["tests/fixtures/*"]
+
+[[bin]]
+name = "socratic-council"
+path = "src/main.rs"
+
+[lib]
+name = "socratic_council"
+path = "src/lib.rs"
+
+[dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "io-std", "io-util", "signal"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls", "socks"] }
+futures-util = "0.3"
+ratatui = "0.29"
+crossterm = "0.28"
+clap = { version = "4", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+regex = "1"
+thiserror = "2"
+anyhow = "1"
+directories = "5"
+unicode-width = "0.2"
+textwrap = "0.16"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["rt", "macros"] }
+
+[profile.release]
+lto = "thin"
+strip = true

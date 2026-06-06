@@ -4,7 +4,7 @@
  * https://api.minimaxi.com/anthropic/v1/messages
  */
 
-import type { AgentConfig, MiniMaxModel, MiniMaxRequest } from "@socratic-council/shared";
+import type { AgentConfig, MiniMaxRequest, ReasoningTier } from "@socratic-council/shared";
 import { API_ENDPOINTS } from "@socratic-council/shared";
 import type {
   BaseProvider,
@@ -80,14 +80,20 @@ function extractContentText(block: MiniMaxContentBlock | undefined): string {
 const THINK_OPEN_TAG = "<think>";
 const THINK_CLOSE_TAG = "</think>";
 
-function buildSafeThinking(maxTokens: number):
+function buildSafeThinking(
+  maxTokens: number,
+  tier?: ReasoningTier,
+):
   | {
       type: "enabled";
       budget_tokens: number;
     }
   | undefined {
-  // Keep budget strictly below max_tokens to avoid Anthropic-style validation failures.
-  const budgetTokens = Math.min(32768, maxTokens - 256);
+  // Low tier skips extended thinking; medium/high (and the default) scale the
+  // budget. Keep budget strictly below max_tokens to avoid validation failures.
+  if (tier === "low") return undefined;
+  const cap = tier === "medium" ? 8192 : 32768;
+  const budgetTokens = Math.min(cap, maxTokens - 256);
   if (budgetTokens < 1024) return undefined;
   return {
     type: "enabled",
@@ -201,10 +207,10 @@ export class MiniMaxProvider implements BaseProvider {
     this.transport = options?.transport ?? createFetchTransport();
   }
 
-  private normalizeModel(model: string): MiniMaxModel {
-    if (model === "MiniMax-M2.7-highspeed") return "MiniMax-M2.7-highspeed";
-    if (model === "minimax-m2.7-highspeed") return "MiniMax-M2.7-highspeed";
-    return "MiniMax-M2.7-highspeed";
+  private normalizeModel(model: string): string {
+    // Pass any non-empty id through (including live-scanned ids); only fall
+    // back to the flagship when nothing was supplied.
+    return model && model.trim() !== "" ? model : "MiniMax-M2.7-highspeed";
   }
 
   private buildRequestBody(
@@ -216,7 +222,7 @@ export class MiniMaxProvider implements BaseProvider {
     const systemMessage = messages.find((m) => m.role === "system");
     const maxTokens = options.maxTokens ?? agent.maxTokens ?? 4096;
     const temperature = options.temperature ?? agent.temperature ?? 1;
-    const thinking = buildSafeThinking(maxTokens);
+    const thinking = buildSafeThinking(maxTokens, options.reasoningTier);
 
     const request: MiniMaxRequest = {
       model: this.normalizeModel(agent.model),

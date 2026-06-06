@@ -2,10 +2,41 @@
 
 Local-first Tauri v2 desktop app: multi-agent debate workstation. pnpm
 monorepo with a React + TypeScript frontend, a Rust backend, and three
-workspace packages (`@socratic-council/{shared,sdk,core}`).
+workspace packages (`@socratic-council/{shared,sdk,core}`). A standalone Rust
+CLI/TUI lives at `cli/` (publishable crate `socratic-council`).
 
 See `plan.md` for the full product roadmap and the April 2026 upgrade
 proposal (security hardening, Wave 2–4 features, completed task list).
+See `docs/model-flexibility-design.md` and `docs/cli-design.md` for the
+June 2026 model-flexibility + CLI work.
+
+---
+
+## Model selection (June 2026 — no more hardcoded model bumps)
+
+The per-character `LOCKED_MODELS` lock was replaced by an Auto resolver + live
+scanning so model ids never need hand-editing on a new release.
+
+- **`packages/shared/src/models/resolver.ts`** — `resolveModel(provider, tier,
+  available, selection)`; version-dominant ranking adopts a newer scanned
+  flagship automatically. Never fabricates ids (see user memory).
+- **`apps/desktop/src/services/modelScan.ts`** — GET each provider's own
+  `/models` endpoint (Chinese endpoints included); graceful catalog fallback.
+- **`stores/config.ts`** — `modelSelection[provider][tier]` ("auto" default),
+  `agentTiers`, `councilTier`/`utilityTier`. `config.models[provider]` is now
+  DERIVED/live-resolved — keep it so the many read sites in `Chat.tsx` work.
+- **Reasoning tier → effort** threads via `CompletionOptions.reasoningTier`.
+  Anthropic uses a per-model thinking profile (`anthropic.ts`): 4.6 adaptive,
+  4.7 adaptive-only + prohibits sampling, **4.8 reverted to extended budgets**.
+- Settings → Models tab: per-provider Scan + per-tier dropdowns + per-agent
+  debate level.
+
+## CLI (`cli/`)
+
+Standalone Rust crate (`socratic-council`, `cargo install`), ratatui TUI.
+`cd cli && cargo test && cargo build --release`. Ports the resolver, the 8
+providers (4 client styles), and the reasoning-tier knobs from the TS SDK.
+Subcommands: `run`, `models [--scan]`, `providers`, `config`.
 
 ---
 

@@ -6,6 +6,8 @@ import {
   PROVIDER_INFO,
   ANTHROPIC_OPUS_FALLBACK_MODEL,
   TURNS_PER_ROUND,
+  resolveUtilityModel,
+  getAgentReasoningTier,
   type Provider,
 } from "../stores/config";
 import { callProvider, apiLogger, type ChatMessage as APIChatMessage } from "../services/api";
@@ -2887,11 +2889,12 @@ ${firstRoundObjections.length > 0 ? firstRoundObjections.join("\n") : "- None. E
     if (!config.preferences.moderatorEnabled) return null;
     const googleCredential = config.credentials.google;
     if (googleCredential?.apiKey) {
-      // Moderator runs on Gemini 3.1 Pro Preview by default (same model Grace uses).
+      // Moderator runs on the same model Grace uses (Google's resolved debate
+      // model — Auto-picked, no longer a hardcoded id).
       return {
         provider: "google" as const,
         credential: googleCredential,
-        model: "gemini-3.1-pro-preview" as const,
+        model: config.models.google ?? resolveUtilityModel("google"),
       };
     }
     // Fix 3.19: fall back to other providers when Google isn't configured
@@ -2923,7 +2926,8 @@ ${firstRoundObjections.length > 0 ? firstRoundObjections.join("\n") : "- None. E
     return {
       provider: "google" as const,
       credential,
-      model: "gemini-3-flash-preview" as const,
+      // Cheap/fast utility-tier model (Auto-picked, e.g. a Flash variant).
+      model: resolveUtilityModel("google"),
     };
   }, [config.credentials.google]);
   // Late-bind for the conflict useEffect (declared earlier in the component).
@@ -2938,7 +2942,7 @@ ${firstRoundObjections.length > 0 ? firstRoundObjections.join("\n") : "- None. E
       return {
         provider: "google" as const,
         credential: googleCredential,
-        model: "gemini-3.1-pro-preview" as const,
+        model: config.models.google ?? resolveUtilityModel("google"),
       };
     }
 
@@ -3972,6 +3976,7 @@ Write the official moderator wrap-up in 4 short sentences:
               requestTimeoutMs,
               signal: requestController.signal,
               disableThinking: requestOptions?.disableThinking,
+              reasoningTier: getAgentReasoningTier(agentConfig.provider),
             },
           );
 

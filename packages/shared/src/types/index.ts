@@ -239,7 +239,8 @@ export type DeepSeekConfig = z.infer<typeof DeepSeekConfigSchema>;
 
 // DeepSeek uses OpenAI-compatible API format
 export interface DeepSeekRequest {
-  model: DeepSeekModel;
+  // Accepts catalog or live-scanned ids (see AnyModelId).
+  model: string;
   messages: Array<{
     role: "user" | "assistant" | "system";
     content: string;
@@ -293,7 +294,8 @@ export type KimiConfig = z.infer<typeof KimiConfigSchema>;
 
 // Kimi uses OpenAI-compatible API format
 export interface KimiRequest {
-  model: KimiModel;
+  // Accepts catalog or live-scanned ids (see AnyModelId).
+  model: string;
   messages: Array<{
     role: "user" | "assistant" | "system";
     content:
@@ -345,7 +347,8 @@ export const QwenConfigSchema = z.object({
 export type QwenConfig = z.infer<typeof QwenConfigSchema>;
 
 export interface QwenRequest {
-  model: QwenModel;
+  // Accepts catalog or live-scanned ids (see AnyModelId).
+  model: string;
   messages: Array<{
     role: "user" | "assistant" | "system";
     content: string;
@@ -383,7 +386,8 @@ export const MiniMaxConfigSchema = z.object({
 export type MiniMaxConfig = z.infer<typeof MiniMaxConfigSchema>;
 
 export interface MiniMaxRequest {
-  model: MiniMaxModel;
+  // Accepts catalog or live-scanned ids (see AnyModelId).
+  model: string;
   messages: Array<{
     role: "user" | "assistant";
     content: string | Array<{ type: "text"; text: string }>;
@@ -422,7 +426,8 @@ export const ZhipuConfigSchema = z.object({
 export type ZhipuConfig = z.infer<typeof ZhipuConfigSchema>;
 
 export interface ZhipuRequest {
-  model: ZhipuModel;
+  // Accepts catalog or live-scanned ids (see AnyModelId).
+  model: string;
   messages: Array<{
     role: "user" | "assistant" | "system";
     content: string;
@@ -475,6 +480,54 @@ export interface ModelInfo {
   };
 }
 
+/**
+ * A model id chosen at runtime. It is usually one of the catalog `ModelId`s,
+ * but with live capability-scanning the user can also select an id the
+ * provider reports that we have never seen before — so the accepted type is
+ * widened to any string while keeping `ModelId` autocompletion for the
+ * known catalog. (The `& {}` keeps the literal union suggestions alive.)
+ */
+export type AnyModelId = ModelId | (string & {});
+
+/**
+ * Council-wide reasoning levels. Each level maps to (a) a chosen model per
+ * provider (see `modelSelection` in the desktop config) and (b) a
+ * provider-specific reasoning-effort knob (see the SDK `reasoningTier`
+ * option). `"high"` is the debate default; `"low"` drives fast background
+ * tasks (bidding, summaries, arg-map extraction, fact-checks).
+ */
+export type ReasoningTier = "low" | "medium" | "high";
+
+export const REASONING_TIERS: ReasoningTier[] = ["low", "medium", "high"];
+
+export const REASONING_TIER_LABELS: Record<ReasoningTier, string> = {
+  low: "Low",
+  medium: "Medium",
+  high: "High",
+};
+
+/** Sentinel meaning "let the resolver pick the best model for this tier". */
+export const AUTO_MODEL = "auto" as const;
+
+/**
+ * A model discovered by scanning a provider's list-models endpoint, or
+ * synthesized from the static catalog as a fallback. Enriched with catalog
+ * metadata when the id is recognized.
+ */
+export interface DiscoveredModel {
+  id: string;
+  provider: Provider;
+  displayName?: string;
+  /** Unix seconds, when the provider reports a creation time. */
+  created?: number;
+  source: "scanned" | "catalog";
+  contextWindow?: number;
+  maxOutputTokens?: number;
+  supportsThinking?: boolean;
+  supportsVision?: boolean;
+  pricing?: ModelInfo["pricing"];
+}
+
 // =============================================================================
 // AGENT TYPES
 // =============================================================================
@@ -487,11 +540,14 @@ export interface AgentConfig {
   id: AgentId;
   name: string;
   provider: Provider;
-  model: ModelId;
+  /** Catalog id or a live-scanned id (see {@link AnyModelId}). */
+  model: AnyModelId;
   systemPrompt: string;
   avatar?: string;
   temperature?: number;
   maxTokens?: number;
+  /** Reasoning level this agent debates at; defaults to `"high"`. */
+  reasoningTier?: ReasoningTier;
 }
 
 export const AgentConfigSchema = z.object({
@@ -507,11 +563,15 @@ export const AgentConfigSchema = z.object({
     "minimax",
     "zhipu",
   ]),
-  model: ModelIdSchema,
+  // Accept any non-empty string: live-scanned ids are not in the catalog
+  // enums. `ModelIdSchema` is retained above for places that still want to
+  // validate against the known catalog.
+  model: z.string().min(1),
   systemPrompt: z.string(),
   avatar: z.string().optional(),
   temperature: z.number().min(0).max(2).optional(),
   maxTokens: z.number().min(1).optional(),
+  reasoningTier: z.enum(["low", "medium", "high"]).optional(),
 });
 
 // =============================================================================
@@ -529,7 +589,7 @@ export interface Message {
     reasoning?: number;
   };
   metadata?: {
-    model: ModelId;
+    model: AnyModelId;
     latencyMs: number;
     bidScore?: number;
   };
@@ -669,7 +729,7 @@ export interface AgentResponse {
     reasoning?: number;
   };
   metadata?: {
-    model?: ModelId;
+    model?: AnyModelId;
     latencyMs?: number;
   };
 }

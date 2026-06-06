@@ -3,7 +3,7 @@
  * Uses OpenAI-compatible format via bigmodel.cn endpoint.
  */
 
-import type { AgentConfig, ZhipuModel, ZhipuRequest } from "@socratic-council/shared";
+import type { AgentConfig, ZhipuRequest } from "@socratic-council/shared";
 import { API_ENDPOINTS } from "@socratic-council/shared";
 import type {
   BaseProvider,
@@ -43,9 +43,10 @@ export class ZhipuProvider implements BaseProvider {
     this.transport = options?.transport ?? createFetchTransport();
   }
 
-  private normalizeModel(model: string): ZhipuModel {
-    if (model === "glm-5.1" || model === "glm-5" || model === "glm-4.7") return model;
-    return "glm-5.1";
+  private normalizeModel(model: string): string {
+    // Pass any non-empty id through (including live-scanned ids); only fall
+    // back to the flagship when nothing was supplied.
+    return model && model.trim() !== "" ? model : "glm-5.1";
   }
 
   private buildRequestBody(

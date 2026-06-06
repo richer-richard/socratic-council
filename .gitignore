@@ -55,3 +55,6 @@ docs/internal/
 
 # OS files
 Thumbs.db
+
+# Rust CLI build artifacts
+cli/target/
