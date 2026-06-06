@@ -106,19 +106,22 @@ pub struct Engine {
     topic: String,
     agents: Vec<Agent>,
     available: HashMap<Provider, Vec<DiscoveredModel>>,
+    keys: HashMap<Provider, String>,
     max_turns: u32,
 }
 
 impl Engine {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         http: reqwest::Client,
         config: Config,
         topic: String,
         agents: Vec<Agent>,
         available: HashMap<Provider, Vec<DiscoveredModel>>,
+        keys: HashMap<Provider, String>,
         max_turns: u32,
     ) -> Self {
-        Self { http, config, topic, agents, available, max_turns }
+        Self { http, config, topic, agents, available, keys, max_turns }
     }
 
     /// Resolve the model id for an agent's provider + tier.
@@ -159,8 +162,8 @@ impl Engine {
             last_spoke.insert(agent.id.clone(), turn);
 
             let provider = agent.provider;
-            let api_key = match self.config.api_key(provider) {
-                Some(k) => k.to_string(),
+            let api_key = match self.keys.get(&provider) {
+                Some(k) => k.clone(),
                 None => continue,
             };
             let base_url = self.config.base_url(provider);

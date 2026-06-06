@@ -4,10 +4,14 @@ A terminal multi-agent debate workstation. Eight AI agents — one each from
 OpenAI, Anthropic, Google, DeepSeek, Moonshot (Kimi), Qwen, MiniMax, and
 Z.AI (Zhipu) — debate any topic, live, in a [ratatui](https://ratatui.rs) TUI.
 
-It is the command-line sibling of the Socratic Council desktop app and shares
-its model philosophy: **you never hand-bump model ids.** Models are chosen by
-an *Auto* resolver and refreshed by scanning each provider's own `/models`
-endpoint, so a newer flagship (say `gpt-5.6`) is adopted the moment it ships.
+It is the command-line sibling of the Socratic Council desktop app — a faithful
+terminal port of the same workstation: a **Home** view with the animated council
+mark + a topic composer, a collapsible **history** sidebar of saved sessions, and
+the live **debate chamber**. It shares the app's model philosophy (**you never
+hand-bump model ids** — an *Auto* resolver picks the best model and refreshes by
+scanning each provider's own `/models` endpoint, so a newer flagship like
+`gpt-5.6` is adopted the moment it ships) **and its keys**: if you've already
+configured the desktop app, the CLI reads those keys directly — no re-entry.
 
 ## Install
 
@@ -39,6 +43,20 @@ council. Chinese providers use their own endpoints (DeepSeek, Moonshot,
 DashScope, Z.AI) — set a custom `base_url` per provider in the config file if
 you route through a gateway (`socratic-council config path`).
 
+### Share the desktop app's keys
+
+If you already use the **Socratic Council desktop app**, you don't need to set
+keys again. The CLI reads the app's stored keys, model selection, council tier,
+and saved sessions directly (shared core). On the file-vault build this is
+silent; on the older macOS keychain build the CLI reads the keys from the
+Keychain on demand — you'll see a one-time "Always Allow" prompt the first time a
+debate launches (and again when you first open the history sidebar, to unlock
+saved sessions). `socratic-council providers` shows what's shared without
+prompting. Precedence: a `<PROVIDER>_API_KEY` env var or a `config set-key`
+value always wins over the shared key. Build with
+`cargo install socratic-council --no-default-features` to opt out of the bridge
+entirely (lean build, env / key-file only).
+
 ## Use
 
 ```bash
@@ -54,15 +72,27 @@ socratic-council models --scan         # list live models per provider
 socratic-council models --provider openai
 ```
 
-### TUI keys
+### TUI
 
-| Key      | Action            |
-|----------|-------------------|
-| `q`/`Esc`| quit              |
-| `t`      | toggle thinking traces |
-| `↑`/`↓`  | scroll transcript |
-| `PgUp`/`PgDn` | scroll faster |
-| `g`      | follow the tail   |
+Three surfaces mirror the desktop app:
+
+- **Home** — the animated council mark, a topic composer, and the agent roster.
+  Type a topic and press `Enter` to convene.
+- **History sidebar** (`Tab`) — your saved sessions; `↑`/`↓` to select, `Enter`
+  on an empty composer to open one read-only.
+- **Debate chamber** — the live streaming transcript with a per-speaker roster.
+
+| Key            | Action                                   |
+|----------------|------------------------------------------|
+| `Enter`        | convene a debate (Home) / open a session |
+| `Tab`          | toggle the history sidebar               |
+| `^P`           | toggle the Settings / Models panel       |
+| `Esc`          | back to Home (Chat/Settings) / quit (Home) |
+| `q`            | stop the debate, back to Home (Chat)     |
+| `t`            | toggle thinking traces                   |
+| `↑`/`↓`, `PgUp`/`PgDn` | scroll the transcript            |
+| `g`            | follow the tail                          |
+| `^C`           | quit from anywhere                       |
 
 ## Reasoning tiers & Auto
 

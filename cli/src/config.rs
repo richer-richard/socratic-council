@@ -1,6 +1,7 @@
 //! Persistent CLI configuration: a TOML config file, a `0600` key file, and
 //! environment-variable fallback for API keys.
 
+use crate::bridge::DesktopBridge;
 use crate::error::{Error, Result};
 use crate::types::{Provider, ReasoningTier};
 use directories::ProjectDirs;
@@ -45,7 +46,7 @@ pub struct ProviderConfig {
     pub base_url: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct Config {
     #[serde(default = "default_council_tier")]
     pub council_tier: ReasoningTier,
@@ -70,6 +71,30 @@ pub struct Config {
     /// disk.
     #[serde(skip)]
     env_keys: BTreeSet<String>,
+
+    /// Keys + model config shared from the desktop app (read-only). Consulted as
+    /// the lowest-precedence source so the user never re-enters a key the app
+    /// already holds. Never serialized.
+    #[serde(skip)]
+    bridge: DesktopBridge,
+}
+
+// Manual Debug so a stray `{config:?}` / `dbg!` / anyhow context can never
+// dump the plaintext `keys` map or a credential-bearing proxy URL. Mirrors the
+// redaction the desktop bridge already does.
+impl std::fmt::Debug for Config {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Config")
+            .field("council_tier", &self.council_tier)
+            .field("utility_tier", &self.utility_tier)
+            .field("max_turns", &self.max_turns)
+            .field("has_proxy", &self.proxy.is_some())
+            .field("providers", &self.providers.len())
+            .field("model_selection", &self.model_selection.len())
+            .field("keys", &self.keys.len())
+            .field("bridge", &self.bridge)
+            .finish()
+    }
 }
 
 fn default_council_tier() -> ReasoningTier {
@@ -93,6 +118,7 @@ impl Default for Config {
             model_selection: BTreeMap::new(),
             keys: BTreeMap::new(),
             env_keys: BTreeSet::new(),
+            bridge: DesktopBridge::default(),
         }
     }
 }
@@ -142,6 +168,28 @@ impl Config {
                 }
             }
         }
+
+        // Desktop bridge: adopt the app's already-stored keys + model config so
+        // the user never re-enters a key. Lowest precedence (env + keys.toml
+        // win). Best-effort — a failure leaves the CLI on its own config.
+        let bridge = DesktopBridge::load();
+        for (slug, selection) in bridge.model_selection() {
+            config.model_selection.entry(slug.clone()).or_insert_with(|| selection.clone());
+        }
+        // With no CLI config file, inherit the app's council/utility tier + cap.
+        if !path.exists() {
+            if let Some(tier) = bridge.council_tier() {
+                config.council_tier = tier;
+            }
+            if let Some(tier) = bridge.utility_tier() {
+                config.utility_tier = tier;
+            }
+            if let Some(turns) = bridge.max_turns() {
+                config.max_turns = turns;
+            }
+        }
+        config.bridge = bridge;
+
         Ok(config)
     }
 
@@ -177,7 +225,33 @@ impl Config {
     }
 
     pub fn api_key(&self, provider: Provider) -> Option<&str> {
-        self.keys.get(provider.slug()).map(|s| s.as_str()).filter(|s| !s.trim().is_empty())
+        // env / keys.toml win; the desktop app's shared key is the fallback.
+        self.keys
+            .get(provider.slug())
+            .map(|s| s.as_str())
+            .filter(|s| !s.trim().is_empty())
+            .or_else(|| self.bridge.api_key(provider))
+    }
+
+    /// Read-only access to the desktop bridge (shared sessions, etc.).
+    pub fn bridge(&self) -> &DesktopBridge {
+        &self.bridge
+    }
+
+    /// Whether `provider` has a key available without prompting — a silent
+    /// source (env / keys.toml / file-vault) or a desktop `hasKey` marker whose
+    /// value sits in the keychain. Safe for listing / roster display.
+    pub fn is_configured(&self, provider: Provider) -> bool {
+        self.api_key(provider).is_some() || self.bridge.has_key(provider)
+    }
+
+    /// Resolve `provider`'s key for an actual request. **May prompt** for
+    /// keychain access when only a desktop marker is known — call once per run
+    /// and cache the result.
+    pub fn resolve_api_key(&self, provider: Provider) -> Option<String> {
+        self.api_key(provider)
+            .map(|s| s.to_string())
+            .or_else(|| self.bridge.resolve_key(provider))
     }
 
     pub fn set_key(&mut self, provider: Provider, key: String) {
@@ -188,7 +262,7 @@ impl Config {
     }
 
     pub fn configured_providers(&self) -> Vec<Provider> {
-        Provider::ALL.into_iter().filter(|p| self.api_key(*p).is_some()).collect()
+        Provider::ALL.into_iter().filter(|p| self.is_configured(*p)).collect()
     }
 
     pub fn base_url(&self, provider: Provider) -> String {
