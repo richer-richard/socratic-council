@@ -3,7 +3,7 @@
  * Uses OpenAI-compatible format via Alibaba Cloud DashScope compatible-mode endpoint.
  */
 
-import type { AgentConfig, QwenModel, QwenRequest } from "@socratic-council/shared";
+import type { AgentConfig, QwenRequest } from "@socratic-council/shared";
 import { API_ENDPOINTS } from "@socratic-council/shared";
 import type {
   BaseProvider,
@@ -57,12 +57,10 @@ export class QwenProvider implements BaseProvider {
     this.transport = options?.transport ?? createFetchTransport();
   }
 
-  private normalizeModel(model: string): QwenModel {
-    if (model === "qwen3.7-max") return "qwen3.7-max";
-    if (model === "qwen3.6-max-preview") return "qwen3.6-max-preview";
-    if (model === "qwen3.6-plus") return "qwen3.6-plus";
-    if (model === "qwen3.5-plus") return "qwen3.5-plus";
-    return "qwen3.7-max";
+  private normalizeModel(model: string): string {
+    // Pass any non-empty id through (including live-scanned ids); only fall
+    // back to the flagship when nothing was supplied.
+    return model && model.trim() !== "" ? model : "qwen3.7-max";
   }
 
   private buildRequestBody(
@@ -77,8 +75,9 @@ export class QwenProvider implements BaseProvider {
         role: msg.role,
         content: msg.content,
       })),
-      // Explicitly enable reasoning output for Qwen 3.5 Plus.
-      enable_thinking: true,
+      // Reasoning output: on for medium/high tiers (and by default), off for
+      // the fast "low" tier.
+      enable_thinking: options.reasoningTier ? options.reasoningTier !== "low" : true,
       stream,
     };
 

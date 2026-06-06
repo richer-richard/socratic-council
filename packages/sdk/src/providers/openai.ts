@@ -9,7 +9,7 @@
  * - Reasoning models (o1, o3, o4-mini) use 'reasoning.effort' parameter
  */
 
-import type { AgentConfig, OpenAIModel } from "@socratic-council/shared";
+import type { AgentConfig, OpenAIModel, ReasoningTier } from "@socratic-council/shared";
 import { API_ENDPOINTS } from "@socratic-council/shared";
 import {
   type BaseProvider,
@@ -221,6 +221,20 @@ function reasoningEffortForModel(model: OpenAIModel): "high" | "xhigh" {
     return "xhigh";
   }
   return "high";
+}
+
+/**
+ * Map the council reasoning tier to an OpenAI `reasoning.effort`. The "high"
+ * tier defers to the per-model default (xhigh for the gpt-5 flagships).
+ * Returns the model default when no tier is supplied (prior behavior).
+ */
+function reasoningEffortForTier(
+  model: OpenAIModel,
+  tier: ReasoningTier | undefined,
+): "low" | "medium" | "high" | "xhigh" {
+  if (!tier || tier === "high") return reasoningEffortForModel(model);
+  if (tier === "low") return "low";
+  return "medium";
 }
 
 function extractReasoningChunk(event: OpenAIStreamEvent): string {
@@ -561,7 +575,10 @@ export class OpenAIProvider implements BaseProvider {
 
     // Handle reasoning effort for reasoning models
     if (REASONING_MODELS.includes(model)) {
-      request.reasoning = { effort: reasoningEffortForModel(model), summary: "auto" };
+      request.reasoning = {
+        effort: reasoningEffortForTier(model, options?.reasoningTier),
+        summary: "auto",
+      };
     }
 
     const promptCacheKey = this.buildPromptCacheKey(messages);

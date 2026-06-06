@@ -9,7 +9,7 @@
  * - Requires 'anthropic-version' header
  */
 
-import type { AgentConfig, AnthropicModel } from "@socratic-council/shared";
+import type { AgentConfig, AnthropicModel, ReasoningTier } from "@socratic-council/shared";
 import { API_ENDPOINTS } from "@socratic-council/shared";
 import {
   type BaseProvider,
@@ -114,27 +114,51 @@ interface AnthropicStreamEvent {
   };
 }
 
-function supportsExtendedThinking(model: AnthropicModel): boolean {
-  return model.includes("opus-4") || model.includes("sonnet-4") || model.includes("haiku-4");
+type AnthropicThinkingMode = "adaptive" | "extended" | "none";
+
+interface AnthropicThinkingProfile {
+  mode: AnthropicThinkingMode;
+  /** Opus 4.7's adaptive mode rejects any non-default sampling param (400). */
+  prohibitsSampling: boolean;
 }
 
-function supportsAdaptiveThinking(model: AnthropicModel): boolean {
-  // Claude Opus 4.6 introduced adaptive thinking; Opus 4.7+ made it the ONLY
-  // thinking-on mode (extended thinking budgets removed → 400 error).
-  return (
-    model === "claude-opus-4-6" || model === "claude-opus-4-7" || model === "claude-opus-4-8"
-  );
+/**
+ * Per-model thinking capability. Adaptive thinking is NOT monotonic across
+ * the Claude line — wire each generation explicitly:
+ *  - Opus 4.6 INTRODUCED adaptive thinking (extended budgets still allowed).
+ *  - Opus 4.7 made adaptive the ONLY thinking-on mode (extended budget → 400)
+ *    and rejects non-default sampling params.
+ *  - Opus 4.8 REVERTED adaptive: back to extended thinking budgets, and
+ *    sampling params are allowed again.
+ *  - Other 4.x (Sonnet 4 / Haiku 4 / Opus 4.1 / 4.5): extended budgets.
+ *  - Claude 3.x and anything else: no thinking.
+ */
+function anthropicThinkingProfile(model: AnthropicModel): AnthropicThinkingProfile {
+  if (model.includes("opus-4-8")) return { mode: "extended", prohibitsSampling: false };
+  if (model.includes("opus-4-7")) return { mode: "adaptive", prohibitsSampling: true };
+  if (model.includes("opus-4-6")) return { mode: "adaptive", prohibitsSampling: false };
+  if (model.includes("opus-4") || model.includes("sonnet-4") || model.includes("haiku-4")) {
+    return { mode: "extended", prohibitsSampling: false };
+  }
+  return { mode: "none", prohibitsSampling: false };
 }
 
-function prohibitsSamplingParams(model: AnthropicModel): boolean {
-  // Starting with Opus 4.7, setting temperature/top_p/top_k to any non-default
-  // value returns a 400 error. Safest path is to omit them entirely.
-  return model === "claude-opus-4-7" || model === "claude-opus-4-8";
+/** Extended-thinking budget for the requested tier (undefined → omit thinking). */
+function extendedBudgetForTier(
+  tier: ReasoningTier | undefined,
+  maxTokens: number,
+): number | undefined {
+  if (tier === "low") return undefined; // fast tier: skip extended thinking
+  const cap = tier === "medium" ? 4096 : 8192; // high / unset → richer budget
+  // Anthropic requires max_tokens > thinking.budget_tokens.
+  const budget = Math.min(cap, maxTokens - 256);
+  return budget >= 1024 ? budget : undefined;
 }
 
 function buildThinkingConfig(
   model: AnthropicModel,
   maxTokens: number,
+  options?: CompletionOptions,
 ):
   | {
       type: "enabled";
@@ -144,22 +168,18 @@ function buildThinkingConfig(
       type: "adaptive";
     }
   | undefined {
-  if (!supportsExtendedThinking(model)) return undefined;
+  if (options?.disableThinking) return undefined;
 
-  if (supportsAdaptiveThinking(model)) {
-    return { type: "adaptive" };
+  const profile = anthropicThinkingProfile(model);
+  const tier = options?.reasoningTier;
+
+  if (profile.mode === "none") return undefined;
+  if (profile.mode === "adaptive") {
+    // Adaptive can't accept a budget; the fast tier just omits thinking.
+    return tier === "low" ? undefined : { type: "adaptive" };
   }
-
-  // Anthropic requires max_tokens > thinking.budget_tokens.
-  const budgetUpperBound = Math.min(8192, maxTokens - 256);
-  if (budgetUpperBound < 1024) {
-    return undefined;
-  }
-
-  return {
-    type: "enabled",
-    budget_tokens: budgetUpperBound,
-  };
+  const budget = extendedBudgetForTier(tier, maxTokens);
+  return budget ? { type: "enabled", budget_tokens: budget } : undefined;
 }
 
 function mapStopReason(reason?: string): "stop" | "length" | "error" {
@@ -407,12 +427,10 @@ export class AnthropicProvider implements BaseProvider {
       request.system = systemMessage.content;
     }
 
-    const thinking = options?.disableThinking
-      ? undefined
-      : buildThinkingConfig(model, request.max_tokens);
+    const thinking = buildThinkingConfig(model, request.max_tokens, options);
     if (thinking) {
       request.thinking = thinking;
-    } else if (!prohibitsSamplingParams(model)) {
+    } else if (!anthropicThinkingProfile(model).prohibitsSampling) {
       // Anthropic thinking mode is not compatible with temperature overrides.
       // Opus 4.7 rejects sampling params at any non-default value.
       const temp = options?.temperature ?? agent.temperature ?? 1;

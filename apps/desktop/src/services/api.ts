@@ -5,7 +5,13 @@
  */
 
 import { DEFAULT_AGENTS } from "@socratic-council/shared";
-import type { AgentConfig, AgentId, ModelId, ProviderCredentials } from "@socratic-council/shared";
+import type {
+  AgentConfig,
+  AgentId,
+  ModelId,
+  ProviderCredentials,
+  ReasoningTier,
+} from "@socratic-council/shared";
 import { ProviderManager, TransportFailure, replayBufferedStream } from "@socratic-council/sdk";
 import type { ChatAttachment, CompletionOptions } from "@socratic-council/sdk";
 
@@ -258,6 +264,8 @@ export async function callProvider(
     signal?: AbortSignal;
     disableThinking?: boolean;
     maxTokens?: number;
+    /** Council reasoning level → provider reasoning-effort knob. */
+    reasoningTier?: ReasoningTier;
   },
 ): Promise<CompletionResult> {
   const startTime = Date.now();
@@ -289,6 +297,7 @@ export async function callProvider(
     idleTimeoutMs: options?.idleTimeoutMs,
     signal: options?.signal,
     disableThinking: options?.disableThinking,
+    reasoningTier: options?.reasoningTier,
     ...(provider === "kimi" && { useSearch: true }),
   } as CompletionOptions;
 

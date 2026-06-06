@@ -3,7 +3,7 @@
  * Uses the Gemini API format with contents, systemInstruction, and generationConfig
  */
 
-import type { AgentConfig, GeminiModel, GeminiRequest } from "@socratic-council/shared";
+import type { AgentConfig, GeminiModel, GeminiRequest, ReasoningTier } from "@socratic-council/shared";
 import { API_ENDPOINTS, getModelInfo } from "@socratic-council/shared";
 import type {
   BaseProvider,
@@ -15,6 +15,13 @@ import type {
 import { createHeaders, resolveEndpoint } from "./base.js";
 import { createSseParser } from "./sse.js";
 import { type Transport, createFetchTransport } from "../transport.js";
+
+/** Gemini `thinkingBudget` for a reasoning tier (0 → omit thinking). */
+function thinkingBudgetForTier(tier: ReasoningTier | undefined): number {
+  if (tier === "low") return 0;
+  if (tier === "medium") return 8192;
+  return 24576; // high / unset → max budget supported by the schema
+}
 
 export class GoogleProvider implements BaseProvider {
   readonly provider = "google" as const;
@@ -119,12 +126,16 @@ export class GoogleProvider implements BaseProvider {
       generationConfig.maxOutputTokens = agent.maxTokens;
     }
 
-    // Thinking config for models that support it (gemini-2.5-pro, gemini-3-pro-preview)
+    // Thinking config for models that support it (gemini-2.5-pro, gemini-3-pro-preview).
+    // The reasoning tier scales the budget; the low tier omits thinking entirely.
     if (modelInfo?.supportsThinking && agent.model.includes("pro")) {
-      generationConfig.thinkingConfig = {
-        thinkingBudget: 24576, // Max thinking budget supported by current schema
-        includeThoughts: true,
-      };
+      const budget = thinkingBudgetForTier(options.reasoningTier);
+      if (budget > 0) {
+        generationConfig.thinkingConfig = {
+          thinkingBudget: budget,
+          includeThoughts: true,
+        };
+      }
     }
 
     if (Object.keys(generationConfig).length > 0) {
