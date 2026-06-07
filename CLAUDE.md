@@ -96,8 +96,12 @@ and rendered as a collapsible "Thought for Xs" panel (`t` toggles). **End-vote**
 (`vote.rs`, v0.6.0): an agent appends `@end()` → `strip_directives` flags it →
 `run_end_vote` polls every other agent (`Vote: YES/NO/ABSTAIN` + reason, parsed by
 `parse_vote`), majority `floor(n/2)+1` passes → closing round; rendered as a vote
-board (`push_vote_board`). Reflection / peer-eval / deep-research / canvas are the
-remaining port increments.
+board (`push_vote_board`). **Reflection** (`reflect.rs`, v0.7.0, `--reflect
+off|light|deep`): with it on, the streamed draft is suppressed (internal), revised
+per the light/deep rubric on the agent's own model, then the final text is
+revealed; the TUI also strips directives on commit so a trailing `@end()` never
+shows. **Peer-eval scorecard / deep-research report / canvas are the remaining
+port increments; live web/file search needs a search backend + attachments (deferred).**
 
 ### Desktop bridge (`cli/src/bridge.rs`, feature `desktop-bridge`, default on)
 

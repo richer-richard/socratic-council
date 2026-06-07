@@ -7,7 +7,7 @@ use socratic_council::engine::{default_agents, DebateEvent, Engine};
 use socratic_council::http_client;
 use socratic_council::providers::scan::scan_models;
 use socratic_council::tui::{self, AppContext};
-use socratic_council::types::{Agent, Provider, ReasoningTier};
+use socratic_council::types::{Agent, Provider, ReasoningTier, Reflection};
 use std::collections::HashMap;
 use std::io::Write;
 
@@ -37,6 +37,9 @@ enum Command {
         /// Turn cap (0 = until you quit).
         #[arg(long)]
         max_turns: Option<u32>,
+        /// Draft→revise reflection per turn: off | light | deep.
+        #[arg(long)]
+        reflect: Option<Reflection>,
         /// Plain streaming output instead of the TUI.
         #[arg(long)]
         no_tui: bool,
@@ -78,12 +81,13 @@ async fn main() {
     let cli = Cli::parse();
     let result = match cli.command {
         None => cmd_run(RunArgs::default()).await,
-        Some(Command::Run { topic, providers, tier, max_turns, no_tui, scan }) => {
+        Some(Command::Run { topic, providers, tier, max_turns, reflect, no_tui, scan }) => {
             cmd_run(RunArgs {
                 topic: topic.join(" "),
                 providers,
                 tier,
                 max_turns,
+                reflect,
                 no_tui,
                 scan,
             })
@@ -105,6 +109,7 @@ struct RunArgs {
     providers: Option<String>,
     tier: Option<ReasoningTier>,
     max_turns: Option<u32>,
+    reflect: Option<Reflection>,
     no_tui: bool,
     scan: bool,
 }
@@ -125,6 +130,9 @@ async fn cmd_run(args: RunArgs) -> anyhow::Result<()> {
     }
     if let Some(n) = args.max_turns {
         config.max_turns = n;
+    }
+    if let Some(r) = args.reflect {
+        config.reflection = r;
     }
 
     // The *allowed* set: the `--providers` filter, or all eight. We deliberately
