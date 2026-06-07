@@ -89,6 +89,9 @@ socratic-council run "Is P = NP?"      # start a debate
 socratic-council run "…" --tier high   # reasoning level: low | medium | high
 socratic-council run "…" --providers openai,anthropic,google
 socratic-council run "…" --max-turns 24
+socratic-council run "…" --reflect deep # draft→revise each turn: off | light | deep
+socratic-council run "…" --deep-research # synthesize a research report at the close
+socratic-council run "…" --no-peer-eval # skip the closing scorecard (saves a call/agent)
 socratic-council run "…" --no-tui      # plain streaming stdout (pipe-friendly)
 socratic-council run "…" --scan        # scan live models before starting
 
@@ -126,7 +129,23 @@ Three surfaces mirror the desktop app:
 
 In **Settings** (`^P`): `↑`/`↓` select a provider · `Enter` / `e` add or replace
 its key (paste it — masked) · `d` remove a local key · `Enter` save · `Esc`
-cancel / back. Keys you add here are stored locally at `keys.toml` (`0600`).
+cancel / back. Keys you add here are stored locally at `keys.enc` (`0600`).
+
+## The debate
+
+Faithful to the desktop app. Agents are told to be concise, challenge weak
+claims, address each other by name, and — critically — **not fabricate facts,
+sources, or quotes**. Each agent's reasoning is quarantined in a collapsible
+"Thought for Xs" panel (`t` toggles) and never leaks into its spoken message, and
+each keeps a private **canvas** (a `@canvas` scratchpad, collapsible, only it
+sees). A **Moderator** (its own model) frames the topic, synthesizes periodically,
+and nudges toward a close. Any agent can append `@end()` once the room converges,
+triggering a **vote** (majority `floor(n/2)+1`) rendered as a tally board. At the
+close the council produces a **peer-review scorecard** (every agent rates every
+other on rigor / evidence / novelty / civility / on-topic) and the Moderator
+publishes a **scored verdict** (`Consensus` / `Majority` / `Unresolved` +
+`Score X/10`). Add `--deep-research` for a synthesized report over the transcript,
+or `--reflect light|deep` to have each agent revise its draft before speaking.
 
 ## Reasoning tiers & Auto
 

@@ -43,6 +43,9 @@ enum Command {
         /// Synthesize a deep-research report at the close (one extra pass).
         #[arg(long)]
         deep_research: bool,
+        /// Skip the closing peer-evaluation scorecard (saves one call per agent).
+        #[arg(long)]
+        no_peer_eval: bool,
         /// Plain streaming output instead of the TUI.
         #[arg(long)]
         no_tui: bool,
@@ -91,6 +94,7 @@ async fn main() {
             max_turns,
             reflect,
             deep_research,
+            no_peer_eval,
             no_tui,
             scan,
         }) => {
@@ -101,6 +105,7 @@ async fn main() {
                 max_turns,
                 reflect,
                 deep_research,
+                no_peer_eval,
                 no_tui,
                 scan,
             })
@@ -124,6 +129,7 @@ struct RunArgs {
     max_turns: Option<u32>,
     reflect: Option<Reflection>,
     deep_research: bool,
+    no_peer_eval: bool,
     no_tui: bool,
     scan: bool,
 }
@@ -149,6 +155,7 @@ async fn cmd_run(args: RunArgs) -> anyhow::Result<()> {
         config.reflection = r;
     }
     config.deep_research = args.deep_research;
+    config.peer_eval = !args.no_peer_eval;
 
     // The *allowed* set: the `--providers` filter, or all eight. We deliberately
     // do NOT pre-filter by which keys are configured — a terminal-only/VPS user

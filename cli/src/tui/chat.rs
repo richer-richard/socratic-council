@@ -141,7 +141,14 @@ fn push_turn(lines: &mut Vec<Line<'static>>, t: &TurnView, show_thinking: bool, 
         }
     }
 
-    for line in t.content.lines() {
+    // Committed turns are already directive-stripped; scrub the *live* stream
+    // each frame so a half-typed @canvas/@end or a <think> span never flashes.
+    let body = if streaming {
+        crate::engine::strip_directives(&t.content).0
+    } else {
+        t.content.clone()
+    };
+    for line in body.lines() {
         lines.push(Line::from(Span::styled(
             format!("  {line}"),
             Style::default().fg(theme::TEXT),

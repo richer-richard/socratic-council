@@ -116,6 +116,16 @@ directive-stripped message per turn. **All named activities are ported; live
 web/file search needs a search backend + attachments, and observer-circle /
 fact-check / argument-map remain deferred.**
 
+**Hardening (v0.11.0, from a 4-agent adversarial review).** `strip_directives` is
+now a balanced-paren scanner that excises directives anywhere (not just line-start,
+so inline `@end()` triggers the vote and `@endorse` is left alone) and strips
+MiniMax `<think>…</think>` reasoning (was leaking into Mary's message + the
+transcript). The peer-eval/deep-research transcript truncation snaps to a char
+boundary (was a CJK byte-slice panic that hung the close). The TUI render scrubs
+the *live* stream each frame; `run_loop` marks the debate done on channel
+disconnect (no hang if the engine task dies); `http_client` has 30s connect / 300s
+request timeouts. Peer-eval is on by default but `--no-peer-eval` opts out (N calls).
+
 ### Desktop bridge (`cli/src/bridge.rs`, feature `desktop-bridge`, default on)
 
 Shares the **desktop app's keys + config + sessions** so the user never re-enters a

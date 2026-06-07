@@ -76,33 +76,86 @@ Respond with ONLY your spoken contribution (plus any @canvas/@end lines) — no 
     )
 }
 
-/// Strip any stray `@`-protocol directive lines (`@quote`, `@react`, `@tool`,
-/// `@canvas`, `@handoff`, `@vote`, `@done`, `@end`) from a model's visible text.
-/// Mirrors the app's `extractActions`: agents are trained on these directives, so
-/// even when the CLI doesn't use one it must never leak into the transcript.
-/// Returns `(clean_text, requested_end)` — `@end()` doubles as the close request.
+/// Scrub model output of anything that must never reach a visible message:
+/// (1) reasoning some models inline as `<think>…</think>` (MiniMax), and
+/// (2) `@`-protocol directives (`@end/@canvas/@tool/@quote/@react/@handoff/@vote/
+/// @done`) wherever they appear — not just at the start of a line — with balanced
+/// parens, mirroring the app's `extractActions`. Returns `(clean_text,
+/// requested_end)`; an `@end(...)` anywhere is the close request.
 pub fn strip_directives(text: &str) -> (String, bool) {
+    let text = strip_think_tags(text);
+
+    const DIRECTIVES: [&str; 8] =
+        ["@end", "@canvas", "@tool", "@quote", "@react", "@handoff", "@vote", "@done"];
+    let mut out = String::with_capacity(text.len());
     let mut requested_end = false;
-    let mut kept: Vec<&str> = Vec::new();
-    for line in text.lines() {
-        let t = line.trim_start();
-        if t.starts_with("@end") {
-            requested_end = true;
-            continue;
+    let mut rest: &str = &text;
+    'scan: while !rest.is_empty() {
+        if rest.starts_with('@') {
+            for d in DIRECTIVES {
+                if let Some(after) = rest.strip_prefix(d) {
+                    // Require a `(` (optionally after spaces) so `@endorse`/`@ending`
+                    // are left alone.
+                    if let Some(inner) = after.trim_start().strip_prefix('(') {
+                        if let Some(end) = balanced_paren_end(inner) {
+                            if d == "@end" {
+                                requested_end = true;
+                            }
+                            rest = &inner[end..];
+                            continue 'scan;
+                        }
+                    }
+                }
+            }
         }
-        if t.starts_with("@quote")
-            || t.starts_with("@react")
-            || t.starts_with("@tool")
-            || t.starts_with("@canvas")
-            || t.starts_with("@handoff")
-            || t.starts_with("@vote")
-            || t.starts_with("@done")
-        {
-            continue;
-        }
-        kept.push(line);
+        let ch = rest.chars().next().unwrap();
+        out.push(ch);
+        rest = &rest[ch.len_utf8()..];
     }
-    (kept.join("\n").trim().to_string(), requested_end)
+
+    // Collapse blank lines a removed directive line left behind, then trim.
+    while out.contains("\n\n\n") {
+        out = out.replace("\n\n\n", "\n\n");
+    }
+    let cleaned =
+        out.lines().map(|l| l.trim_end()).collect::<Vec<_>>().join("\n").trim().to_string();
+    (cleaned, requested_end)
+}
+
+/// Remove `<think>…</think>` reasoning spans. A dangling open tag (truncated
+/// reasoning stream) drops everything from the tag onward.
+fn strip_think_tags(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(open) = rest.find("<think>") {
+        out.push_str(&rest[..open]);
+        let after = &rest[open + "<think>".len()..];
+        match after.find("</think>") {
+            Some(close) => rest = &after[close + "</think>".len()..],
+            None => return out, // unterminated reasoning — drop the remainder
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
+/// Byte offset (into `s`, which begins just after an opening `(`) one past the
+/// `)` that balances it.
+fn balanced_paren_end(s: &str) -> Option<usize> {
+    let mut depth = 1i32;
+    for (i, ch) in s.char_indices() {
+        match ch {
+            '(' => depth += 1,
+            ')' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(i + 1);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
 }
 
 /// The eight default inner-circle agents (one per provider).
@@ -420,7 +473,7 @@ impl Engine {
         let _ = tx.send(DebateEvent::Phase("Resolution".into()));
 
         // Closing round — the peer-evaluation scorecard, then the moderator verdict.
-        if !transcript.is_empty() {
+        if self.config.peer_eval && !transcript.is_empty() {
             if let Some(round) = peereval::run(
                 &self.http,
                 &self.config,
@@ -585,6 +638,33 @@ mod tests {
         last.insert(agents[first].id.clone(), 0);
         let second = pick_next(&agents, &last);
         assert_ne!(first, second);
+    }
+
+    #[test]
+    fn strip_directives_handles_inline_think_and_endorse() {
+        // Inline @end() after prose is detected + removed.
+        let (clean, end) = strip_directives("I think we're done. @end()");
+        assert_eq!(clean, "I think we're done.");
+        assert!(end);
+
+        // @endorse must NOT be treated as @end.
+        let (clean, end) = strip_directives("I @endorse this fully.");
+        assert_eq!(clean, "I @endorse this fully.");
+        assert!(!end);
+
+        // <think> reasoning (MiniMax) is stripped from the visible text.
+        let (clean, _) = strip_directives("<think>secret reasoning</think>My actual point.");
+        assert_eq!(clean, "My actual point.");
+
+        // A @canvas directive with nested JSON parens is excised whole (a blank
+        // line where the directive sat is harmless).
+        let (clean, _) =
+            strip_directives("Point one.\n@canvas({\"op\":\"append\",\"text\":\"a(b)c\"})\nPoint two.");
+        assert_eq!(clean, "Point one.\n\nPoint two.");
+
+        // An unterminated <think> drops the remainder.
+        let (clean, _) = strip_directives("visible<think>dangling");
+        assert_eq!(clean, "visible");
     }
 
     #[test]

@@ -15,9 +15,14 @@ pub mod providers;
 pub mod tui;
 pub mod types;
 
-/// Build an HTTP client, optionally routed through a proxy URL.
+/// Build an HTTP client, optionally routed through a proxy URL. A connect +
+/// overall request timeout means a stalled provider eventually errors (the turn
+/// fails gracefully) instead of hanging the whole debate forever.
 pub fn http_client(proxy: Option<&str>) -> reqwest::Client {
-    let mut builder = reqwest::Client::builder().user_agent("socratic-council-cli");
+    let mut builder = reqwest::Client::builder()
+        .user_agent("socratic-council-cli")
+        .connect_timeout(std::time::Duration::from_secs(30))
+        .timeout(std::time::Duration::from_secs(300));
     if let Some(p) = proxy {
         if let Ok(px) = reqwest::Proxy::all(p) {
             builder = builder.proxy(px);
