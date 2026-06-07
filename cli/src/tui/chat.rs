@@ -147,6 +147,32 @@ fn push_turn(lines: &mut Vec<Line<'static>>, t: &TurnView, show_thinking: bool, 
             Style::default().fg(theme::TEXT),
         )));
     }
+
+    // Collapsible private canvas (the agent's own scratchpad), keyed by its color.
+    if !t.canvas.is_empty() {
+        let color = theme::speaker_color(&t.agent_id);
+        let caret = if show_thinking { "⌃" } else { "⌄" };
+        let n = t.canvas.len();
+        lines.push(Line::from(Span::styled(
+            format!("  {caret} ⌗ canvas · {n} section{}", if n == 1 { "" } else { "s" }),
+            Style::default().fg(color),
+        )));
+        if show_thinking {
+            for sec in &t.canvas {
+                lines.push(Line::from(Span::styled(
+                    format!("    {}", sec.label),
+                    Style::default().fg(color).add_modifier(Modifier::BOLD),
+                )));
+                for line in sec.text.lines() {
+                    lines.push(Line::from(Span::styled(
+                        format!("      {line}"),
+                        Style::default().fg(theme::DIM),
+                    )));
+                }
+            }
+        }
+    }
+
     lines.push(Line::from(""));
 }
 

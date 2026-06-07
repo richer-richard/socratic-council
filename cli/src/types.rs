@@ -117,6 +117,13 @@ impl std::str::FromStr for ReasoningTier {
     }
 }
 
+/// One labelled section of an agent's private canvas (scratchpad).
+#[derive(Debug, Clone)]
+pub struct CanvasSection {
+    pub label: String,
+    pub text: String,
+}
+
 /// Confidence band on a research finding (mirrors the app's high/medium/low).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Confidence {
