@@ -305,6 +305,18 @@ async fn run_plain(engine: Engine) {
                             if passed { "PASSED" } else { "FAILED" }
                         );
                     }
+                    DebateEvent::PeerEval(round) => {
+                        println!("\n── Peer Review Scorecard · {} critiques ──", round.critiques.len());
+                        println!("   #  Agent       rig evi nov civ top   avg");
+                        for s in &round.summaries {
+                            println!(
+                                "  #{} {:<10} {:>3} {:>3} {:>3} {:>3} {:>3}   {:>3}",
+                                s.rank, s.name, s.avg.rigor, s.avg.evidence, s.avg.novelty,
+                                s.avg.civility, s.avg.on_topic, s.overall
+                            );
+                        }
+                        println!();
+                    }
                     DebateEvent::Error(e) => eprintln!("\n[error] {e}"),
                     DebateEvent::Done => break,
                     _ => {}

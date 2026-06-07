@@ -6,8 +6,8 @@ use crate::catalog::{resolve_model, DiscoveredModel};
 use crate::config::Config;
 use crate::providers::stream_completion;
 use crate::types::{
-    Agent, ChatMessage, CompletionChunk, CompletionRequest, ModeratorConclusion, Provider,
-    ReasoningTier, Reflection, Usage, VoteChoice,
+    Agent, ChatMessage, CompletionChunk, CompletionRequest, ModeratorConclusion, PeerEvalRound,
+    Provider, ReasoningTier, Reflection, Usage, VoteChoice,
 };
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -16,6 +16,7 @@ use std::time::Instant;
 use tokio::sync::mpsc::UnboundedSender;
 
 mod moderator;
+mod peereval;
 mod reflect;
 mod vote;
 use moderator::ModeratorPick;
@@ -38,6 +39,8 @@ pub enum DebateEvent {
     Vote { agent_id: String, name: String, choice: VoteChoice, reason: String },
     /// The vote outcome.
     EndVoteResult { passed: bool, yes: u32, no: u32, abstain: u32 },
+    /// The closing peer-evaluation scorecard.
+    PeerEval(PeerEvalRound),
     Error(String),
     Done,
 }
@@ -380,6 +383,23 @@ impl Engine {
         }
 
         let _ = tx.send(DebateEvent::Phase("Resolution".into()));
+
+        // Closing round — the peer-evaluation scorecard, then the moderator verdict.
+        if !transcript.is_empty() {
+            if let Some(round) = peereval::run(
+                &self.http,
+                &self.config,
+                &self.available,
+                &self.keys,
+                &self.agents,
+                &self.topic,
+                &transcript,
+            )
+            .await
+            {
+                let _ = tx.send(DebateEvent::PeerEval(round));
+            }
+        }
 
         // Final scored verdict from the moderator.
         if let Some(m) = &moderator {

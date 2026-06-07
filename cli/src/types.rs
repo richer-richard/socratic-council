@@ -213,6 +213,72 @@ pub struct ModeratorConclusion {
     pub next: Option<String>,
 }
 
+/// Five 0-100 dimensions one agent scores a peer on.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct PeerEvalScores {
+    pub rigor: u8,
+    pub evidence: u8,
+    pub novelty: u8,
+    pub civility: u8,
+    pub on_topic: u8,
+}
+
+/// How an evaluator stands relative to the peer they reviewed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Stance {
+    Agree,
+    Disagree,
+    Mixed,
+}
+
+impl Stance {
+    pub fn label(self) -> &'static str {
+        match self {
+            Stance::Agree => "agree",
+            Stance::Disagree => "disagree",
+            Stance::Mixed => "mixed",
+        }
+    }
+    pub fn from_str_lenient(s: &str) -> Stance {
+        match s.to_ascii_lowercase().as_str() {
+            "agree" => Stance::Agree,
+            "disagree" => Stance::Disagree,
+            _ => Stance::Mixed,
+        }
+    }
+}
+
+/// One evaluator's review of one peer.
+#[derive(Debug, Clone)]
+pub struct PeerCritique {
+    pub evaluator_name: String,
+    pub target_id: String,
+    pub scores: PeerEvalScores,
+    pub overall: u8,
+    pub stance: Stance,
+    pub critique: String,
+}
+
+/// Aggregated standing for one reviewed agent.
+#[derive(Debug, Clone)]
+pub struct PeerEvalSummary {
+    pub agent_id: String,
+    pub name: String,
+    pub avg: PeerEvalScores,
+    pub overall: u8,
+    pub rank: u32,
+    pub reviews: u32,
+    /// The sharpest (lowest-overall) critique received — the standout.
+    pub standout: Option<String>,
+}
+
+/// A full peer-evaluation round, ready to render as a scorecard.
+#[derive(Debug, Clone)]
+pub struct PeerEvalRound {
+    pub critiques: Vec<PeerCritique>,
+    pub summaries: Vec<PeerEvalSummary>,
+}
+
 /// A council agent's ballot when someone moves to end the session.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VoteChoice {

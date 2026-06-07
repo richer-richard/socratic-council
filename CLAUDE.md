@@ -100,8 +100,11 @@ board (`push_vote_board`). **Reflection** (`reflect.rs`, v0.7.0, `--reflect
 off|light|deep`): with it on, the streamed draft is suppressed (internal), revised
 per the light/deep rubric on the agent's own model, then the final text is
 revealed; the TUI also strips directives on commit so a trailing `@end()` never
-shows. **Peer-eval scorecard / deep-research report / canvas are the remaining
-port increments; live web/file search needs a search backend + attachments (deferred).**
+shows. **Peer-eval** (`peereval.rs`, v0.8.0): at the close every agent reviews
+every other on a 5-dim rubric (rigor/evidence/novelty/civility/onTopic, lenient
+JSON), aggregated into a ranked heatmap scorecard (`push_scorecard`) with sharpest
+critiques. **Deep-research report / canvas are the remaining port increments; live
+web/file search needs a search backend + attachments (deferred).**
 
 ### Desktop bridge (`cli/src/bridge.rs`, feature `desktop-bridge`, default on)
 
