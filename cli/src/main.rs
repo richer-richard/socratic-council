@@ -149,7 +149,7 @@ async fn cmd_run(args: RunArgs) -> anyhow::Result<()> {
     // offline + free, so we can populate even unconfigured providers (their
     // roster row + resolved model render before any key exists). Only `--scan`
     // the providers that actually have a key, capturing each resolved key so
-    // launching a debate never re-prompts the keychain.
+    // launching a debate reuses it.
     let mut available: HashMap<Provider, Vec<DiscoveredModel>> = HashMap::new();
     let mut prefetched_keys: HashMap<Provider, String> = HashMap::new();
     for provider in &allowed {
@@ -216,8 +216,8 @@ async fn run_plain_debate(
         .collect();
     agents.sort_by(|a, b| a.name.cmp(&b.name));
 
-    // Resolve any key not already prefetched (reads the keychain at most once
-    // per provider), then drop agents whose key couldn't be resolved.
+    // Resolve any key not already prefetched (from env / the CLI's encrypted
+    // store / the app's vault), then drop agents whose key couldn't be resolved.
     for agent in &agents {
         if keys.contains_key(&agent.provider) {
             continue;
@@ -296,7 +296,6 @@ async fn cmd_models(provider: Option<String>, scan: bool) -> anyhow::Result<()> 
     for provider in providers {
         println!("\n{} ({})", provider.display_name(), provider.slug());
         let models = if scan {
-            // resolve_api_key may read the keychain — fine, the user asked to scan.
             match config.resolve_api_key(provider) {
                 Some(key) => match scan_models(&http, provider, &config.base_url(provider), &key).await
                 {

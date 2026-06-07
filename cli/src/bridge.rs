@@ -16,17 +16,12 @@
 //!
 //! Everything is behind the default-on `desktop-bridge` feature. With the
 //! feature off, `DesktopBridge::load()` returns an empty bridge and the CLI
-//! falls back to env vars + `keys.toml`.
+//! falls back to env vars + its own encrypted `keys.enc` store.
 
 use crate::config::TierSelection;
 use crate::types::{Provider, ReasoningTier};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::path::PathBuf;
-
-/// Keychain service the desktop app's older builds stored API keys under
-/// (service `socratic-council`, account `apiKey:<provider-slug>`).
-#[allow(dead_code)] // referenced only by the macOS keychain reader
-const KEYCHAIN_SERVICE: &str = "socratic-council";
 
 /// Tauri bundle identifier of the desktop app — the key to every on-disk path.
 #[allow(dead_code)] // used only by the `desktop-bridge` feature's path resolver
@@ -69,19 +64,18 @@ pub struct TranscriptMessage {
 /// CLI `Config`. Holds no `Debug` of secret values (see the manual impl).
 #[derive(Clone, Default)]
 pub struct DesktopBridge {
+    /// API keys decrypted from the desktop app's file vault at load time. The
+    /// only source of truth — no OS keychain, so `has_key` never lies about a
+    /// key it can't actually read.
     keys: BTreeMap<String, String>,
-    /// Provider slugs the app marked `hasKey: true` in its config but whose
-    /// value lives in the OS keychain (read lazily so listing never prompts).
-    key_markers: BTreeSet<String>,
     proxy_password: Option<String>,
     model_selection: BTreeMap<String, TierSelection>,
     council_tier: Option<ReasoningTier>,
     utility_tier: Option<ReasoningTier>,
     max_turns: Option<u32>,
     sessions: Vec<DesktopSession>,
-    /// Whether the session index exists but failed to decrypt with the silent
-    /// file DEK — i.e. there is genuinely locked history to offer a keychain
-    /// unlock for (distinct from a decrypted-but-empty `[]` index).
+    /// Whether the session index exists but failed to decrypt with the file DEK
+    /// (distinct from a decrypted-but-empty `[]` index).
     index_decrypt_failed: bool,
     /// Retained for on-demand transcript decryption. Never logged.
     #[allow(dead_code)]
@@ -106,30 +100,23 @@ impl std::fmt::Debug for DesktopBridge {
 }
 
 impl DesktopBridge {
-    /// The API key the desktop app stored for `provider` in a silent source
-    /// (file-vault localStorage / legacy inline). Does NOT touch the keychain.
+    /// The API key the desktop app stored for `provider`, decrypted from its
+    /// file vault. No keychain, no prompt — resolved once at load.
     pub fn api_key(&self, provider: Provider) -> Option<&str> {
         self.keys.get(provider.slug()).map(|s| s.as_str()).filter(|s| !s.trim().is_empty())
     }
 
-    /// Whether the app reports a key for `provider` — either readable silently
-    /// or marked `hasKey` (value in the keychain). Used for display so listing
-    /// providers never triggers a keychain prompt.
+    /// Whether the app has a usable key for `provider` — i.e. one the bridge
+    /// actually decrypted. Honest: never reports "configured" for a key it
+    /// can't read.
     pub fn has_key(&self, provider: Provider) -> bool {
-        self.api_key(provider).is_some() || self.key_markers.contains(provider.slug())
+        self.api_key(provider).is_some()
     }
 
-    /// Read `provider`'s key, consulting the OS keychain when only a marker is
-    /// known. **May prompt** for keychain access — call only when a key is
-    /// actually needed (e.g. starting a debate), and cache the result.
+    /// Read `provider`'s key. Identical to [`api_key`] now that keys are resolved
+    /// eagerly from the file vault — kept for call-site symmetry. Never prompts.
     pub fn resolve_key(&self, provider: Provider) -> Option<String> {
-        if let Some(k) = self.api_key(provider) {
-            return Some(k.to_string());
-        }
-        if self.key_markers.contains(provider.slug()) {
-            return keychain_get(&format!("apiKey:{}", provider.slug()));
-        }
-        None
+        self.api_key(provider).map(|s| s.to_string())
     }
 
     /// The desktop app's proxy password (unused until proxy wiring lands).
@@ -157,44 +144,17 @@ impl DesktopBridge {
         &self.sessions
     }
 
-    /// True when a session index exists but couldn't be decrypted silently —
-    /// the history sidebar can offer a keychain-DEK unlock (`read_sessions`).
-    /// A decrypted-but-empty index (`[]`) returns false, so deleting every
-    /// session never produces a bogus "access denied" prompt.
+    /// True when a session index exists but couldn't be decrypted with the file
+    /// DEK (e.g. a different DEK sealed it). A decrypted-but-empty index (`[]`)
+    /// returns false, so deleting every session never looks like a locked vault.
     pub fn has_sessions_to_unlock(&self) -> bool {
         self.sessions.is_empty() && self.index_decrypt_failed
     }
 
     /// Whether the bridge found any usable desktop state.
     pub fn is_available(&self) -> bool {
-        !self.keys.is_empty() || !self.key_markers.is_empty() || !self.sessions.is_empty()
+        !self.keys.is_empty() || !self.sessions.is_empty()
     }
-}
-
-/// Read a generic-password from the macOS keychain (service `socratic-council`).
-/// `-w` prints only the password to stdout; the first read may surface a
-/// keychain access prompt. macOS only — other platforms return `None`.
-#[cfg(target_os = "macos")]
-fn keychain_get(account: &str) -> Option<String> {
-    let output = std::process::Command::new("/usr/bin/security")
-        .args(["find-generic-password", "-s", KEYCHAIN_SERVICE, "-a", account, "-w"])
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    let value = String::from_utf8_lossy(&output.stdout);
-    let trimmed = value.trim();
-    if trimmed.is_empty() {
-        None
-    } else {
-        Some(trimmed.to_string())
-    }
-}
-
-#[cfg(not(target_os = "macos"))]
-fn keychain_get(_account: &str) -> Option<String> {
-    None
 }
 
 // ---------------------------------------------------------------------------
@@ -226,8 +186,7 @@ impl DesktopBridge {
 #[cfg(feature = "desktop-bridge")]
 mod imp {
     use super::*;
-    use base64::Engine as _;
-    use chacha20poly1305::{aead::Aead, KeyInit, XChaCha20Poly1305, XNonce};
+    use crate::crypto;
     use directories::BaseDirs;
     use rusqlite::{Connection, OpenFlags};
     use std::path::Path;
@@ -236,7 +195,7 @@ mod imp {
     impl DesktopBridge {
         /// Best-effort load of the desktop app's shared state. Never panics; any
         /// failure (missing app, locked db, bad key) yields an empty bridge so
-        /// the CLI keeps working from env vars / `keys.toml`.
+        /// the CLI keeps working from env vars / its own `keys.enc` store.
         pub fn load() -> Self {
             // Opt-in diagnostics — prints ONLY paths / presence booleans /
             // counts, never a secret value. `SC_BRIDGE_DEBUG=1`.
@@ -247,19 +206,25 @@ mod imp {
 
             let mut bridge = Self::default();
 
-            let app_data = match desktop_app_data_dir() {
-                Some(d) => d,
-                None => {
-                    dlog!("no data_dir");
-                    return bridge;
+            // Candidate app-data dirs, most-specific first. On macOS the app is
+            // sandboxed, so its real data lives in the App Sandbox *container*
+            // (`~/Library/Containers/<id>/Data/...`) — search that before the
+            // plain (unsandboxed/dev) data dir.
+            let app_data_dirs = desktop_app_data_dirs();
+            for dir in &app_data_dirs {
+                let dek_path = dir.join("vault.key");
+                if let Some(dek) = crypto::load_dek(&dek_path) {
+                    bridge.dek = Some(dek);
+                    dlog!("vault.key = {} dek_loaded=true", dek_path.display());
+                    break;
                 }
-            };
-            dlog!("app_data = {} (exists={})", app_data.display(), app_data.exists());
-            let dek_path = app_data.join("vault.key");
-            bridge.dek = read_dek(&dek_path);
-            dlog!("vault.key exists={} dek_loaded={}", dek_path.exists(), bridge.dek.is_some());
+                dlog!("vault.key absent at {}", dek_path.display());
+            }
+            if bridge.dek.is_none() {
+                dlog!("no readable vault.key in any candidate dir");
+            }
 
-            let ls_path = match find_localstorage(&app_data) {
+            let ls_path = match find_localstorage(&app_data_dirs) {
                 Some(p) => p,
                 None => {
                     dlog!("localstorage.sqlite3 NOT FOUND");
@@ -317,9 +282,8 @@ mod imp {
                 }
             }
 
-            // Session index (vault-encrypted or plaintext JSON summary array).
-            // Decrypt silently with the file DEK if present; otherwise leave it
-            // for a lazy keychain-DEK unlock from the history sidebar.
+            // Session index (vault-encrypted or plaintext JSON summary array),
+            // decrypted with the file DEK.
             if let Some(raw) = get_item(&conn, SESSION_INDEX_KEY) {
                 dlog!("session index present enc1={}", raw.starts_with(ENC_PREFIX));
                 match decrypt_value(dek.as_ref(), &raw) {
@@ -335,27 +299,14 @@ mod imp {
             bridge
         }
 
-        /// Decrypt a localStorage value, resolving a DEK only when actually
-        /// needed. Plaintext (non-`ENC1:`) values pass straight through with no
-        /// keychain access. `ENC1:` values try the silent file DEK first, then
-        /// fall back to the old keychain build's `vault:dek` (base64 of 32
-        /// bytes) — which **may prompt**. This covers a post-migration state
-        /// where `vault.key` exists but the blob was sealed with the old DEK.
+        /// Decrypt a localStorage value with the app's file DEK. Plaintext
+        /// (non-`ENC1:`) values pass straight through. No keychain, no prompt.
         fn decrypt_shared(&self, raw: &str) -> Option<String> {
-            if !raw.starts_with(ENC_PREFIX) {
-                return Some(raw.to_string()); // plaintext — no DEK, no prompt
-            }
-            if let Some(dek) = self.dek {
-                if let Some(plain) = decrypt_value(Some(&dek), raw) {
-                    return Some(plain);
-                }
-            }
-            let dek = keychain_dek()?;
-            decrypt_value(Some(&dek), raw)
+            decrypt_value(self.dek.as_ref(), raw)
         }
 
-        /// Re-read the session index, unlocking with the keychain DEK when the
-        /// file DEK can't. Used by the history sidebar; may prompt once.
+        /// Re-read the session index with the file DEK. Used by the history
+        /// sidebar; sessions are usually already loaded, so this is a fallback.
         pub fn read_sessions(&self) -> Vec<DesktopSession> {
             if !self.sessions.is_empty() {
                 return self.sessions.clone();
@@ -403,47 +354,51 @@ mod imp {
         }
     }
 
-    /// `<data_dir>/com.socratic-council.desktop` — matches Tauri's `app_data_dir`.
-    fn desktop_app_data_dir() -> Option<PathBuf> {
-        BaseDirs::new().map(|b| b.data_dir().join(APP_IDENTIFIER))
-    }
-
-    /// The old keychain build's data-encryption key (`vault:dek`, base64 of 32
-    /// bytes). Reading it **may prompt** for keychain access.
-    fn keychain_dek() -> Option<[u8; 32]> {
-        let b64 = keychain_get("vault:dek")?;
-        let bytes = base64::engine::general_purpose::STANDARD.decode(b64.trim()).ok()?;
-        if bytes.len() != 32 {
-            return None;
-        }
-        let mut dek = [0u8; 32];
-        dek.copy_from_slice(&bytes);
-        Some(dek)
-    }
-
-    fn read_dek(path: &Path) -> Option<[u8; 32]> {
-        let bytes = std::fs::read(path).ok()?;
-        if bytes.len() != 32 {
-            return None;
-        }
-        let mut dek = [0u8; 32];
-        dek.copy_from_slice(&bytes);
-        Some(dek)
-    }
-
-    /// Locate the WebView's `localstorage.sqlite3`. macOS (WKWebView) keeps it
-    /// under `~/Library/WebKit/<id>/…/LocalStorage/`; Linux (WebKitGTK) under
-    /// the app data dir. **Windows (WebView2) stores localStorage as a LevelDB
-    /// directory, not sqlite — unsupported here**, so the bridge yields nothing
-    /// and the CLI falls back to env / `keys.toml`. Picks the most-recently-
-    /// modified non-empty hit.
-    fn find_localstorage(app_data: &Path) -> Option<PathBuf> {
-        let mut roots: Vec<PathBuf> = Vec::new();
-        #[cfg(target_os = "macos")]
+    /// App-data dirs that may hold `vault.key`, most-specific first. On macOS a
+    /// sandboxed app redirects `~/Library/Application Support` into its
+    /// container (`~/Library/Containers/<id>/Data/...`); an unsandboxed/dev build
+    /// uses the plain data dir. Linux/Windows use the platform data dir.
+    fn desktop_app_data_dirs() -> Vec<PathBuf> {
+        let mut dirs = Vec::new();
         if let Some(base) = BaseDirs::new() {
-            roots.push(base.home_dir().join("Library/WebKit").join(APP_IDENTIFIER));
+            #[cfg(target_os = "macos")]
+            dirs.push(
+                base.home_dir()
+                    .join("Library/Containers")
+                    .join(APP_IDENTIFIER)
+                    .join("Data/Library/Application Support")
+                    .join(APP_IDENTIFIER),
+            );
+            dirs.push(base.data_dir().join(APP_IDENTIFIER));
         }
-        roots.push(app_data.to_path_buf());
+        dirs
+    }
+
+    /// Locate the WebView's `localstorage.sqlite3`, picking the most-recently-
+    /// modified non-empty hit across every candidate root. macOS (WKWebView)
+    /// keeps it under `~/Library/WebKit/<id>/…` — or, for a sandboxed app, inside
+    /// the container's `…/Data/Library/WebKit/…`; Linux (WebKitGTK) under the app
+    /// data dir. **Windows (WebView2) uses LevelDB, not sqlite — unsupported**,
+    /// so the bridge yields nothing and the CLI uses its own encrypted key store.
+    fn find_localstorage(app_data_dirs: &[PathBuf]) -> Option<PathBuf> {
+        let mut roots: Vec<PathBuf> = Vec::new();
+        if let Some(base) = BaseDirs::new() {
+            let home = base.home_dir();
+            #[cfg(target_os = "macos")]
+            {
+                // Sandboxed WKWebView storage (the active store for a sandboxed app).
+                roots.push(
+                    home.join("Library/Containers")
+                        .join(APP_IDENTIFIER)
+                        .join("Data/Library/WebKit"),
+                );
+                // Unsandboxed WKWebView storage.
+                roots.push(home.join("Library/WebKit").join(APP_IDENTIFIER));
+            }
+            let _ = home;
+        }
+        // Linux (WebKitGTK) keeps it under the app data dir.
+        roots.extend(app_data_dirs.iter().cloned());
 
         let mut best: Option<(PathBuf, SystemTime)> = None;
         for root in roots {
@@ -548,19 +503,12 @@ mod imp {
 
     /// Mirror of `vault.decryptString` + `secrets.secretsGet`: decrypt an
     /// `ENC1:` envelope with the DEK, or pass a legacy plaintext value through.
+    /// Delegates the AEAD to the shared [`crypto`] module.
     fn decrypt_value(dek: Option<&[u8; 32]>, raw: &str) -> Option<String> {
-        let Some(b64) = raw.strip_prefix(ENC_PREFIX) else {
+        if !crypto::is_enveloped(raw) {
             return Some(raw.to_string()); // legacy plaintext
-        };
-        let dek = dek?;
-        let payload = base64::engine::general_purpose::STANDARD.decode(b64.trim()).ok()?;
-        if payload.len() < 24 + 16 {
-            return None;
         }
-        let (nonce, body) = payload.split_at(24);
-        let cipher = XChaCha20Poly1305::new_from_slice(dek).ok()?;
-        let plaintext = cipher.decrypt(XNonce::from_slice(nonce), body).ok()?;
-        String::from_utf8(plaintext).ok()
+        crypto::decrypt_str(dek?, raw)
     }
 
     fn parse_tier(s: &str) -> Option<ReasoningTier> {
@@ -583,13 +531,11 @@ mod imp {
         if let Some(t) = value.get("utilityTier").and_then(|x| x.as_str()).and_then(parse_tier) {
             bridge.utility_tier = Some(t);
         }
-        // Credentials: record `hasKey` markers (value in the keychain) and pick
-        // up any legacy plaintext key stored inline in older config blobs.
+        // Credentials: pick up any legacy plaintext key stored inline in older
+        // config blobs. `hasKey` markers are intentionally ignored — a key is
+        // only "configured" if the bridge actually decrypted it from the vault.
         if let Some(creds) = value.get("credentials").and_then(|x| x.as_object()) {
             for (slug, cred) in creds {
-                if cred.get("hasKey").and_then(|x| x.as_bool()).unwrap_or(false) {
-                    bridge.key_markers.insert(slug.clone());
-                }
                 if let Some(inline) = cred.get("apiKey").and_then(|x| x.as_str()) {
                     let trimmed = inline.trim();
                     if !trimmed.is_empty() {
@@ -690,13 +636,7 @@ mod imp {
         use super::*;
 
         fn enc1(dek: &[u8; 32], plaintext: &str) -> String {
-            // Deterministic nonce — fine for a round-trip test.
-            let nonce = [7u8; 24];
-            let cipher = XChaCha20Poly1305::new_from_slice(dek).unwrap();
-            let ct = cipher.encrypt(XNonce::from_slice(&nonce), plaintext.as_bytes()).unwrap();
-            let mut payload = nonce.to_vec();
-            payload.extend_from_slice(&ct);
-            format!("{ENC_PREFIX}{}", base64::engine::general_purpose::STANDARD.encode(payload))
+            crypto::encrypt_str(dek, plaintext).unwrap()
         }
 
         #[test]

@@ -24,7 +24,15 @@ convenience, never a requirement.
 cargo install socratic-council
 ```
 
-This installs a single static binary named `socratic-council`.
+This installs a single binary named `socratic-council`. It builds on macOS,
+Linux, and Windows. The default build bundles a small SQLite (to read the desktop
+app's local store, if you have it), which needs a C compiler — already present
+wherever you can link a Rust binary. In a minimal environment without one, install
+the **pure-Rust** build (no C deps, no desktop-app bridge):
+
+```bash
+cargo install socratic-council --no-default-features
+```
 
 ## Configure keys
 
@@ -36,7 +44,7 @@ export DEEPSEEK_API_KEY=…    MOONSHOT_API_KEY=…    DASHSCOPE_API_KEY=…
 export MINIMAX_API_KEY=…     ZHIPU_API_KEY=…
 ```
 
-…or store them in a `0600` key file:
+…or store them locally:
 
 ```bash
 socratic-council config set-key openai
@@ -47,6 +55,13 @@ socratic-council providers          # see which keys are configured
 `Enter` to paste a key (masked), `Enter` to save. This needs nothing but the
 terminal — ideal on a VPS — and the key becomes usable for the very next debate.
 
+Keys you store locally are encrypted at rest with **XChaCha20-Poly1305** (an
+`ENC1:` envelope in `keys.enc`, sealed under a `0600` `vault.key` in the config
+dir). **No OS keychain** is ever used — so a plain `cargo install socratic-council`
+builds and runs identically on macOS, Linux, and Windows, and there are no
+password prompts. (A 256-bit AEAD key is already post-quantum-safe for data at
+rest; that's why this, not a PQ key-exchange scheme, is the right primitive.)
+
 You only need one provider to start a debate; configure more for a fuller
 council. Chinese providers use their own endpoints (DeepSeek, Moonshot,
 DashScope, Z.AI) — set a custom `base_url` per provider in the config file if
@@ -54,18 +69,17 @@ you route through a gateway (`socratic-council config path`).
 
 ### Optional: share the desktop app's keys
 
-If you *also* run the **Socratic Council desktop app**, the CLI will read its
-stored keys, model selection, council tier, and saved sessions directly (shared
-core) so you don't re-enter anything — but this is a convenience, not a
-requirement, and the CLI is fully usable without the app. On the file-vault build
-the sharing is silent; on the older macOS keychain build the CLI reads the keys
-from the Keychain on demand — a one-time "Always Allow" prompt the first time a
-debate launches (and again when you first open the history sidebar). Settings
-labels each provider's key source (`local` / `env` / `shared`). Precedence: a
-`<PROVIDER>_API_KEY` env var or a `config set-key` / Settings value always wins
-over a shared key. Build with
-`cargo install socratic-council --no-default-features` to opt out of the bridge
-entirely (lean build, env / key-file / TUI only).
+If you *also* run the **Socratic Council desktop app**, the CLI reads its stored
+keys, model selection, council tier, and saved sessions directly (shared core) so
+you don't re-enter anything — a convenience, not a requirement; the CLI is fully
+usable without the app. The app stores everything in the same file vault
+(XChaCha20-Poly1305 + `vault.key`), and the CLI reads it with **no keychain and no
+prompts** — including when the app is sandboxed (its data lives in the macOS App
+Sandbox container). Settings labels each provider's key source (`local` / `env` /
+`shared`). Precedence: a `<PROVIDER>_API_KEY` env var or a `config set-key` /
+Settings value always wins over a shared key. Build with
+`cargo install socratic-council --no-default-features` for a lean, **pure-Rust**
+CLI (no C deps) that skips the bridge entirely (env / key-file / TUI only).
 
 ## Use
 

@@ -60,19 +60,36 @@ plus an event-draining loop make pasting a key instant. `Config::key_source` →
 `{Env,Local,Shared,None}` drives accurate per-provider labels. Sharing the
 desktop app's keys is a convenience, **not** a requirement — no UI text forces it.
 
+### At-rest crypto (`cli/src/crypto.rs`, July 2026 — NO OS keychain)
+
+Shared, **always-compiled** (not feature-gated) XChaCha20-Poly1305 module: `ENC1:`
+envelope = `"ENC1:" + base64(nonce[24] || ct || tag[16])`, byte-compatible with the
+app's `vault.ts`. Portable file-DEK mgmt: `load_dek` (read-only, for the app's
+`vault.key`) and `load_or_create_dek` (0600, `create_new`, for the CLI's own DEK).
+Pure Rust (`chacha20poly1305` + `base64` + `getrandom`) → a plain
+`cargo install socratic-council` builds on macOS/Linux/Windows; `rusqlite` (the only
+C dep) stays gated behind `desktop-bridge`. **The CLI's own keys live in `keys.enc`**
+(ENC1, under a `0600` `vault.key` in the config dir) — `Config::save_keys`/
+`load_encrypted_keys`; legacy plaintext `keys.toml` is migrated on load then deleted.
+A 256-bit AEAD key is already post-quantum-safe at rest (Grover → ~128-bit), so this —
+not an ML-KEM-style PQ KEM (that solves key *exchange*, not local encryption) — is the
+right primitive. **No keychain anywhere in the CLI** (removed July 2026).
+
 ### Desktop bridge (`cli/src/bridge.rs`, feature `desktop-bridge`, default on)
 
-Shares the **desktop app's keys + config + sessions** so the user never
-re-enters a key. Reads `<app_data_dir>/vault.key` (file-vault build) and the
+Shares the **desktop app's keys + config + sessions** so the user never re-enters a
+key — read-only, **no keychain, no prompts**. Reads the app's `vault.key` + the
 WebView localStorage sqlite (`rusqlite`, read-only/immutable; WebKit BLOBs are
-UTF-16LE/UTF-8); opens `ENC1:` XChaCha20-Poly1305 envelopes
-(`chacha20poly1305`). **Older keychain build:** no `vault.key` — keys live in
-the macOS Keychain (service `socratic-council`, account `apiKey:<provider>`) and
-the session DEK at `vault:dek` (base64). Keychain reads are **lazy** (keys on
-debate launch, DEK on opening history) and cached; config `hasKey` markers drive
-listing so `providers`/roster never prompt. `Config::load()` merges the bridge
-at lowest precedence (env / `keys.toml` win). **Never logs secret values**
-(`SC_BRIDGE_DEBUG=1` prints only paths / presence / counts).
+UTF-16LE/UTF-8) and decrypts `ENC1:` secrets via `crypto`. Keys are resolved
+**eagerly** at `load()` (the file DEK never prompts), so `has_key` is honest — it
+reports "configured" only for a key actually decrypted (the old `hasKey`-marker path
+is gone). **The app is sandboxed**, so `desktop_app_data_dirs` + `find_localstorage`
+search the macOS **App Sandbox container** (`~/Library/Containers/<id>/Data/Library/
+{Application Support,WebKit}/…`) before the plain paths — this was the bug that broke
+CLI key reads. Linux = WebKitGTK sqlite; Windows = WebView2 LevelDB (unsupported → CLI
+uses its own `keys.enc`). `Config::load()` merges the bridge at lowest precedence (env
+/ `keys.enc` win). **Never logs secret values** (`SC_BRIDGE_DEBUG=1` prints only paths
+/ presence / counts).
 
 ---
 
