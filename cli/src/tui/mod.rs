@@ -15,7 +15,7 @@ mod theme;
 use crate::catalog::{resolve_model, DiscoveredModel};
 use crate::config::{Config, KeySource};
 use crate::engine::{default_agents, DebateEvent, Engine};
-use crate::types::{Agent, ModeratorConclusion, Provider, Usage, VoteChoice};
+use crate::types::{Agent, ModeratorConclusion, PeerEvalRound, Provider, Usage, VoteChoice};
 use crossterm::event::{
     self, DisableBracketedPaste, EnableBracketedPaste, Event, KeyCode, KeyEvent, KeyEventKind,
     KeyModifiers,
@@ -142,6 +142,8 @@ pub struct Debate {
     pub status: String,
     /// End-vote rounds, in the order they occurred.
     pub vote_boards: Vec<VoteBoard>,
+    /// The closing peer-evaluation scorecard, once produced.
+    pub peer_eval: Option<PeerEvalRound>,
     /// The moderator's final scored verdict, once published.
     pub conclusion: Option<ModeratorConclusion>,
     pub show_thinking: bool,
@@ -221,6 +223,7 @@ impl Debate {
                     b.result = Some(VoteResult { passed, yes, no, abstain });
                 }
             }
+            DebateEvent::PeerEval(round) => self.peer_eval = Some(round),
             DebateEvent::Error(e) => self.turns.push(TurnView::note("error", "⚠ Error", e)),
             DebateEvent::Done => {
                 self.done = true;
@@ -425,6 +428,7 @@ impl App {
             turn_count: 0,
             status: "Convening…".into(),
             vote_boards: Vec::new(),
+            peer_eval: None,
             conclusion: None,
             show_thinking: false,
             follow: true,
@@ -507,6 +511,7 @@ impl App {
             turn_count: row.turns,
             status: "Saved session · read-only".into(),
             vote_boards: Vec::new(),
+            peer_eval: None,
             conclusion: None,
             show_thinking: false,
             follow: false,
@@ -909,6 +914,7 @@ mod tests {
             turn_count: 2,
             status: "Discussion".into(),
             vote_boards: Vec::new(),
+            peer_eval: None,
             conclusion: Some(ModeratorConclusion {
                 status: crate::types::ConclusionStatus::Majority,
                 summary: "Leaning yes with reservations.".into(),

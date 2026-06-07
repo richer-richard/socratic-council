@@ -2,7 +2,7 @@
 //! a header with running usage, and a keybinding footer.
 
 use super::{theme, App, Debate, TurnView, VoteBoard};
-use crate::types::{ConclusionStatus, ModeratorConclusion, VoteChoice};
+use crate::types::{ConclusionStatus, ModeratorConclusion, PeerEvalRound, VoteChoice};
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
@@ -65,6 +65,9 @@ fn render_transcript(f: &mut Frame, area: Rect, d: &mut Debate) {
     }
     for board in &d.vote_boards {
         push_vote_board(&mut lines, board);
+    }
+    if let Some(round) = &d.peer_eval {
+        push_scorecard(&mut lines, round);
     }
     if let Some(c) = &d.conclusion {
         push_conclusion(&mut lines, c);
@@ -216,6 +219,60 @@ fn push_vote_board(lines: &mut Vec<Line<'static>>, b: &VoteBoard) {
         ]));
     }
     lines.push(Line::from(""));
+}
+
+/// The closing peer-evaluation scorecard: a ranked heatmap + sharpest critiques.
+fn push_scorecard(lines: &mut Vec<Line<'static>>, round: &PeerEvalRound) {
+    lines.push(Line::from(Span::styled(
+        format!("  ── Peer Review Scorecard · {} critiques ──", round.critiques.len()),
+        Style::default().fg(theme::GOLD).add_modifier(Modifier::BOLD),
+    )));
+    lines.push(Line::from(Span::styled(
+        "   #  Agent       rig  evi  nov  civ  top    avg",
+        Style::default().fg(theme::MUTED),
+    )));
+    for s in &round.summaries {
+        let mut spans = vec![
+            Span::styled(format!("  #{} ", s.rank), Style::default().fg(theme::GOLD)),
+            Span::styled(
+                format!("{:<9} ", s.name),
+                Style::default().fg(theme::speaker_color(&s.agent_id)).add_modifier(Modifier::BOLD),
+            ),
+        ];
+        for v in [s.avg.rigor, s.avg.evidence, s.avg.novelty, s.avg.civility, s.avg.on_topic] {
+            spans.push(Span::styled(format!("{v:>3}  "), Style::default().fg(score_color(v))));
+        }
+        spans.push(Span::styled(
+            format!("  {:>3}", s.overall),
+            Style::default().fg(score_color(s.overall)).add_modifier(Modifier::BOLD),
+        ));
+        lines.push(Line::from(spans));
+    }
+    if round.summaries.iter().any(|s| s.standout.is_some()) {
+        lines.push(Line::from(Span::styled(
+            "  Sharpest critiques:",
+            Style::default().fg(theme::MUTED),
+        )));
+        for s in &round.summaries {
+            if let Some(c) = &s.standout {
+                lines.push(Line::from(Span::styled(
+                    format!("   {} ← {}", s.name, truncate(c, 78)),
+                    Style::default().fg(theme::DIM),
+                )));
+            }
+        }
+    }
+    lines.push(Line::from(""));
+}
+
+fn score_color(v: u8) -> Color {
+    if v >= 75 {
+        Color::Rgb(0x34, 0xD3, 0x99) // emerald — gilds as scores climb
+    } else if v >= 45 {
+        theme::MUTED
+    } else {
+        Color::Rgb(0xFB, 0x71, 0x85) // terracotta — reddens as scores drop
+    }
 }
 
 fn vote_color(c: VoteChoice) -> Color {
