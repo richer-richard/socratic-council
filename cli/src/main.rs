@@ -127,33 +127,33 @@ async fn cmd_run(args: RunArgs) -> anyhow::Result<()> {
         config.max_turns = n;
     }
 
-    let configured = config.configured_providers();
-    if configured.is_empty() {
-        anyhow::bail!(
-            "no API keys configured. Set one with `socratic-council config set-key <provider>`, \
-             a <PROVIDER>_API_KEY env var, or open the desktop app once."
-        );
-    }
-
-    // Providers to prepare models for: configured ∩ --providers filter.
+    // The *allowed* set: the `--providers` filter, or all eight. We deliberately
+    // do NOT pre-filter by which keys are configured — a terminal-only/VPS user
+    // opens the TUI with zero keys and adds one in Settings, and it must become
+    // usable immediately. Actual key-gating happens at debate-launch time.
     let filter = parse_provider_filter(&args.providers);
-    let providers: Vec<Provider> = configured
+    let allowed: Vec<Provider> = Provider::ALL
         .into_iter()
         .filter(|p| filter.as_ref().map(|f| f.contains(p)).unwrap_or(true))
         .collect();
-    if providers.is_empty() {
-        anyhow::bail!("none of the requested providers have a key configured");
+    if allowed.is_empty() {
+        anyhow::bail!(
+            "no valid providers in --providers (known slugs: {})",
+            Provider::ALL.iter().map(|p| p.slug()).collect::<Vec<_>>().join(", ")
+        );
     }
 
     let http = http_client(config.proxy.as_deref());
 
-    // Build the available-models map (scan or catalog) for those providers.
-    // A `--scan` pass resolves each key anyway, so capture them to avoid
-    // re-prompting the keychain when the debate launches.
+    // Build the available-models map for every allowed provider. Catalog is
+    // offline + free, so we can populate even unconfigured providers (their
+    // roster row + resolved model render before any key exists). Only `--scan`
+    // the providers that actually have a key, capturing each resolved key so
+    // launching a debate never re-prompts the keychain.
     let mut available: HashMap<Provider, Vec<DiscoveredModel>> = HashMap::new();
     let mut prefetched_keys: HashMap<Provider, String> = HashMap::new();
-    for provider in &providers {
-        let models = if args.scan {
+    for provider in &allowed {
+        let models = if args.scan && config.is_configured(*provider) {
             let key = config.resolve_api_key(*provider).unwrap_or_default();
             if !key.is_empty() {
                 prefetched_keys.insert(*provider, key.clone());
@@ -169,12 +169,23 @@ async fn cmd_run(args: RunArgs) -> anyhow::Result<()> {
     }
 
     if args.no_tui {
-        return run_plain_debate(config, http, available, prefetched_keys, &args, &providers).await;
+        // Plain mode has no interactive way to add a key, so it still requires
+        // at least one configured provider up front.
+        let configured: Vec<Provider> =
+            allowed.iter().copied().filter(|p| config.is_configured(*p)).collect();
+        if configured.is_empty() {
+            anyhow::bail!(
+                "no API keys configured for the selected providers. Add one with \
+                 `socratic-council config set-key <provider>` or a <PROVIDER>_API_KEY env \
+                 var — or drop --no-tui and add a key in Settings (press ^P)."
+            );
+        }
+        return run_plain_debate(config, http, available, prefetched_keys, &args, &configured).await;
     }
 
     let initial_topic =
         if args.topic.trim().is_empty() { None } else { Some(args.topic.clone()) };
-    let ctx = AppContext { http, config, available, providers, prefetched_keys };
+    let ctx = AppContext { http, config, available, providers: allowed, prefetched_keys };
     tui::run(ctx, initial_topic).await
 }
 

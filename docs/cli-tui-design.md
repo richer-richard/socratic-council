@@ -96,15 +96,31 @@ enum View { Home, Chat, Settings }
 
 - **Home** — animated council-ring logo + "socratic council" wordmark + tagline,
   a bordered topic composer (Enter → launch debate), and an 8-agent roster strip
-  (colored dot + ✓ when a shared key is present). Left: the history sidebar.
+  (colored dot + ✓ when a key is present — local or shared). Left: the history
+  sidebar.
 - **Chat (debate chamber)** — header (topic · turn · tok in/out · phase) with a
   gold rule; 70/30 body = transcript (agent-colored turn headers, streaming
   caret `▌`, optional thinking pane) and the live roster (active speaker pulses
   `●`, shows resolved model + provider). Footer keybindings. Sidebar overlays
   on toggle.
-- **Settings/Models** — providers (✓ from shared keys), council & utility tier,
-  per-provider model selection (auto + resolved preview), live `/models` scan,
-  max-turns. Read-focused since keys come from the app.
+- **Settings/Models** — an **interactive key manager** plus council & utility
+  tier, per-provider model selection (auto + resolved preview), live `/models`
+  scan, max-turns. `↑/↓` select a provider; `Enter`/`e` add or replace its key
+  (paste it — rendered as masked bullets, never plaintext); `d` removes a local
+  key; `Enter` saves to `keys.toml` (`0600`) and primes the in-session key cache
+  so the next debate uses it with no keychain prompt. Each row is labelled by key
+  source (`local` / `env` / `shared` / `—`).
+
+### Terminal-only / VPS is first-class (v0.3.0)
+
+Sharing the desktop app's keys is a **convenience, not a requirement**. The TUI
+opens even with **zero keys** (`main.rs` passes the *allowed* provider set — the
+`--providers` filter or all eight — rather than configured-only; only `--no-tui`
+still needs a key up front). A first-run VPS user lands on Home, presses `^P`,
+adds a key in Settings, and convenes immediately — no desktop app, no shell
+round-trip. No UI string frames the app as the place to configure keys. Pasting is
+robust: bracketed paste (`Event::Paste`) plus an event-draining loop so a pasted
+key registers instantly even on terminals without bracketed-paste support.
 
 **History sidebar** (collapsible, the "history bar"): the decrypted desktop
 session index — same titles/status/turn-counts the app shows — grouped active +
