@@ -105,6 +105,10 @@ Three surfaces mirror the desktop app:
 - **History sidebar** (`Tab`) — your saved sessions; `↑`/`↓` to select, `Enter`
   on an empty composer to open one read-only.
 - **Debate chamber** — the live streaming transcript with a per-speaker roster.
+  A **Moderator** (its own model) frames the topic, synthesizes periodically, and
+  publishes a final scored verdict (`Consensus` / `Majority` / `Unresolved` +
+  `Score X/10`). Each agent's reasoning is quarantined in a collapsible
+  "Thought for Xs" panel (`t` toggles) — it never leaks into the spoken message.
 - **Settings / Models** (`^P`) — manage API keys (add / replace / remove, masked,
   stored `0600`), see each provider's key source + resolved model, and the tiers.
 

@@ -6,37 +6,84 @@ use crate::catalog::{resolve_model, DiscoveredModel};
 use crate::config::Config;
 use crate::providers::stream_completion;
 use crate::types::{
-    Agent, ChatMessage, CompletionChunk, CompletionRequest, Provider, ReasoningTier, Usage,
+    Agent, ChatMessage, CompletionChunk, CompletionRequest, ModeratorConclusion, Provider,
+    ReasoningTier, Usage,
 };
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::time::Instant;
 use tokio::sync::mpsc::UnboundedSender;
+
+mod moderator;
+use moderator::ModeratorPick;
 
 /// Events streamed from the orchestrator to whatever drives the UI.
 #[derive(Debug, Clone)]
 pub enum DebateEvent {
     Phase(String),
+    /// A moderator note (framing / synthesis / resolution nudge).
     Moderator(String),
+    /// The moderator's final scored verdict — rendered as a conclusion card.
+    Conclusion(ModeratorConclusion),
     TurnStarted { agent_id: String, name: String, provider: Provider, model: String },
     Token(String),
     Thinking(String),
-    TurnEnded { usage: Usage },
+    TurnEnded { usage: Usage, thinking_ms: u64 },
     Error(String),
     Done,
 }
 
-fn base_system_prompt(name: &str) -> String {
+/// The council's spoken-style system prompt — ported faithfully from the desktop
+/// app's `BASE_SYSTEM_PROMPT` + `GROUP_CHAT_GUIDELINES`. The anti-hallucination
+/// and "only your spoken contribution" lines are load-bearing: they keep agents
+/// from inventing facts/quotes and from spilling reasoning into the message.
+pub fn base_system_prompt(name: &str) -> String {
     format!(
-        "You are {name} in the Socratic Council, a panel of AI agents debating a topic.\n\n\
-CONVERSATION STYLE:\n\
-- Keep responses short and direct (2-5 sentences).\n\
-- Speak as yourself; do not adopt a character or impersonate others.\n\
-- Prefer concrete claims and clear reasoning.\n\
-- Surface the real disagreement early, then help the group reach a clear result.\n\
-- Address at least one other participant by name and push the conversation forward.\n\
-- Do not reopen settled points unless you have new evidence."
+        "You are {name} in a group chat with George, Cathy, Grace, Douglas, Kate, Quinn, Mary, and Zara.\n\n\
+Do NOT adopt a persona or specialty. Speak as yourself, and keep the tone natural.\n\
+Do NOT fabricate facts, invent sources, or hallucinate quotes. Only reference points actually made in the conversation above.\n\n\
+You are in a real-time group chat. Keep responses short, pointed, and decision-oriented.\n\
+- 1-2 short paragraphs (max ~140 words).\n\
+- Be assertive: challenge weak claims directly and name the specific assumption you reject.\n\
+- Avoid headings and long bullet lists — keep it chatty.\n\
+- Directly address a specific point from someone else by name.\n\
+- Push the discussion forward: add one new point or counterpoint, or help the group get concrete about what the decision hinges on.\n\
+- Do not reopen settled points unless you have new evidence or a better standard.\n\
+- If the discussion is mature, prefer synthesis and a clear choice over novelty.\n\
+- When you make a strong claim, name something specific that would change your mind, or a concrete case where it would fail.\n\
+- Surface the real disagreement early, then help the group reach a clear closing result. The goal is not endless debate.\n\n\
+Respond with ONLY your spoken contribution — no headings, no meta-commentary, no stage directions, and never narrate your reasoning."
     )
+}
+
+/// Strip any stray `@`-protocol directive lines (`@quote`, `@react`, `@tool`,
+/// `@canvas`, `@handoff`, `@vote`, `@done`, `@end`) from a model's visible text.
+/// Mirrors the app's `extractActions`: agents are trained on these directives, so
+/// even when the CLI doesn't use one it must never leak into the transcript.
+/// Returns `(clean_text, requested_end)` — `@end()` doubles as the close request.
+pub fn strip_directives(text: &str) -> (String, bool) {
+    let mut requested_end = false;
+    let mut kept: Vec<&str> = Vec::new();
+    for line in text.lines() {
+        let t = line.trim_start();
+        if t.starts_with("@end") {
+            requested_end = true;
+            continue;
+        }
+        if t.starts_with("@quote")
+            || t.starts_with("@react")
+            || t.starts_with("@tool")
+            || t.starts_with("@canvas")
+            || t.starts_with("@handoff")
+            || t.starts_with("@vote")
+            || t.starts_with("@done")
+        {
+            continue;
+        }
+        kept.push(line);
+    }
+    (kept.join("\n").trim().to_string(), requested_end)
 }
 
 /// The eight default inner-circle agents (one per provider).
@@ -137,10 +184,6 @@ impl Engine {
     /// Takes ownership so the future is `'static` and can be spawned.
     pub async fn run(self, tx: UnboundedSender<DebateEvent>, cancel: Arc<AtomicBool>) {
         let _ = tx.send(DebateEvent::Phase("Discussion".into()));
-        let _ = tx.send(DebateEvent::Moderator(format!(
-            "The council convenes on: {}",
-            self.topic
-        )));
 
         if self.agents.is_empty() {
             let _ = tx.send(DebateEvent::Error(
@@ -150,8 +193,24 @@ impl Engine {
             return;
         }
 
+        // The moderator speaks through a configured provider (prefer Google).
+        let moderator = ModeratorPick::choose(&self.config, &self.available, &self.keys);
+
+        // Opening: the moderator frames the topic (falls back to a plain line).
+        let opening = match &moderator {
+            Some(m) => {
+                moderator::generate(&self.http, m, &self.topic, &[], moderator::ModeratorKind::Opening)
+                    .await
+            }
+            None => None,
+        };
+        let _ = tx.send(DebateEvent::Moderator(
+            opening.unwrap_or_else(|| format!("The council convenes on: {}", self.topic)),
+        ));
+
         let mut transcript: Vec<Turn> = Vec::new();
         let mut last_spoke: HashMap<String, i64> = HashMap::new();
+        let mut resolution_nudged = false;
 
         for turn in 0..self.max_turns as i64 {
             if cancel.load(Ordering::Relaxed) {
@@ -180,12 +239,14 @@ impl Engine {
                 model,
                 system: Some(agent.system_prompt.clone()),
                 messages: build_messages(&agent, &self.topic, &transcript),
-                max_tokens: 1024,
+                max_tokens: 2048,
                 temperature: 1.0,
                 tier: agent.tier,
             };
 
+            let started = Instant::now();
             let mut full = String::new();
+            let mut had_thinking = false;
             let result = {
                 let mut on_chunk = |chunk: &CompletionChunk| {
                     if !chunk.content.is_empty() {
@@ -193,6 +254,7 @@ impl Engine {
                         let _ = tx.send(DebateEvent::Token(chunk.content.clone()));
                     }
                     if !chunk.thinking.is_empty() {
+                        had_thinking = true;
                         let _ = tx.send(DebateEvent::Thinking(chunk.thinking.clone()));
                     }
                 };
@@ -209,8 +271,15 @@ impl Engine {
 
             match result {
                 Ok(usage) => {
-                    let _ = tx.send(DebateEvent::TurnEnded { usage });
-                    let content = full.trim().to_string();
+                    let thinking_ms = if had_thinking {
+                        started.elapsed().as_millis() as u64
+                    } else {
+                        0
+                    };
+                    let _ = tx.send(DebateEvent::TurnEnded { usage, thinking_ms });
+                    // Strip any leaked @-protocol directives before the line lands
+                    // in the public transcript (the agents are trained on them).
+                    let (content, _requested_end) = strip_directives(&full);
                     if !content.is_empty() {
                         transcript.push(Turn {
                             agent_id: agent.id.clone(),
@@ -223,11 +292,97 @@ impl Engine {
                     let _ = tx.send(DebateEvent::Error(format!("{} failed: {e}", agent.name)));
                 }
             }
+
+            // Moderator cadence (only with a moderator runtime).
+            if let Some(m) = &moderator {
+                let spoken = (turn + 1) as u32;
+                let remaining = self.max_turns.saturating_sub(spoken);
+                // Periodic synthesis every 7 turns.
+                if spoken % 7 == 0 && !transcript.is_empty() {
+                    if let Some(note) = moderator::generate(
+                        &self.http,
+                        m,
+                        &self.topic,
+                        &recent_tail(&transcript, 12),
+                        moderator::ModeratorKind::Synthesis { turn: spoken },
+                    )
+                    .await
+                    {
+                        let _ = tx.send(DebateEvent::Moderator(note));
+                    }
+                }
+                // One resolution nudge as the cap approaches.
+                if !resolution_nudged && self.max_turns > 0 && remaining <= 3 && remaining > 0 {
+                    resolution_nudged = true;
+                    if let Some(note) = moderator::generate(
+                        &self.http,
+                        m,
+                        &self.topic,
+                        &recent_tail(&transcript, 12),
+                        moderator::ModeratorKind::Resolution { remaining },
+                    )
+                    .await
+                    {
+                        let _ = tx.send(DebateEvent::Moderator(note));
+                    }
+                }
+            }
         }
 
-        let _ = tx.send(DebateEvent::Moderator("The council rests.".into()));
+        let _ = tx.send(DebateEvent::Phase("Resolution".into()));
+
+        // Final scored verdict from the moderator.
+        if let Some(m) = &moderator {
+            if !transcript.is_empty() {
+                let conclusion = self.final_conclusion(m, &transcript).await;
+                match conclusion {
+                    Some(c) => {
+                        let _ = tx.send(DebateEvent::Conclusion(c));
+                    }
+                    None => {
+                        let _ = tx.send(DebateEvent::Moderator("The council rests.".into()));
+                    }
+                }
+            } else {
+                let _ = tx.send(DebateEvent::Moderator("The council rests.".into()));
+            }
+        } else {
+            let _ = tx.send(DebateEvent::Moderator("The council rests.".into()));
+        }
+
         let _ = tx.send(DebateEvent::Done);
     }
+
+    /// Ask the moderator for a final summary, parse it, retrying once if it
+    /// doesn't follow the labelled `Score: X/10` format.
+    async fn final_conclusion(
+        &self,
+        m: &ModeratorPick,
+        transcript: &[Turn],
+    ) -> Option<ModeratorConclusion> {
+        let turns = transcript.len() as u32;
+        let recent = recent_tail(transcript, 16);
+        for _ in 0..2 {
+            let text = moderator::generate(
+                &self.http,
+                m,
+                &self.topic,
+                &recent,
+                moderator::ModeratorKind::FinalSummary { turns },
+            )
+            .await?;
+            if let Some(c) = moderator::parse_conclusion(&text) {
+                return Some(c);
+            }
+        }
+        None
+    }
+}
+
+/// The last `n` transcript turns formatted as `"Name: content"` lines.
+fn recent_tail(transcript: &[Turn], n: usize) -> Vec<String> {
+    let start = transcript.len().saturating_sub(n);
+    transcript[start..].iter().map(|t| format!("{}: {}", t.name, t.content)).collect()
 }
 
 #[cfg(test)]

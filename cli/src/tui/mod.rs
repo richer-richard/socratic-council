@@ -15,7 +15,7 @@ mod theme;
 use crate::catalog::{resolve_model, DiscoveredModel};
 use crate::config::{Config, KeySource};
 use crate::engine::{default_agents, DebateEvent, Engine};
-use crate::types::{Agent, Provider, Usage};
+use crate::types::{Agent, ModeratorConclusion, Provider, Usage};
 use crossterm::event::{
     self, DisableBracketedPaste, EnableBracketedPaste, Event, KeyCode, KeyEvent, KeyEventKind,
     KeyModifiers,
@@ -65,12 +65,28 @@ pub struct RosterEntry {
     pub color: Color,
 }
 
-/// A rendered transcript turn (or a moderator/system note).
+/// A rendered transcript turn (or a moderator/system note). Carries its own
+/// reasoning trace so thinking can be shown collapsibly per message.
 pub struct TurnView {
     pub agent_id: String,
     pub name: String,
     pub model: String,
     pub content: String,
+    pub thinking: String,
+    pub thinking_ms: u64,
+}
+
+impl TurnView {
+    fn note(agent_id: &str, name: &str, content: String) -> Self {
+        Self {
+            agent_id: agent_id.to_string(),
+            name: name.to_string(),
+            model: String::new(),
+            content,
+            thinking: String::new(),
+            thinking_ms: 0,
+        }
+    }
 }
 
 /// One row in the history sidebar — a saved desktop session.
@@ -107,7 +123,8 @@ pub struct Debate {
     pub usage: Usage,
     pub turn_count: u32,
     pub status: String,
-    pub thinking: String,
+    /// The moderator's final scored verdict, once published.
+    pub conclusion: Option<ModeratorConclusion>,
     pub show_thinking: bool,
     pub follow: bool,
     pub scroll: u16,
@@ -120,41 +137,50 @@ impl Debate {
     fn apply(&mut self, ev: DebateEvent) {
         match ev {
             DebateEvent::Phase(p) => self.status = p,
-            DebateEvent::Moderator(text) => self.turns.push(TurnView {
-                agent_id: "system".into(),
-                name: "Moderator".into(),
-                model: String::new(),
-                content: text,
-            }),
+            DebateEvent::Moderator(text) => {
+                self.turns.push(TurnView::note("system", "Moderator", text))
+            }
+            DebateEvent::Conclusion(c) => {
+                self.conclusion = Some(c);
+                self.active = None;
+            }
             DebateEvent::TurnStarted { agent_id, name, model, .. } => {
                 self.turn_count += 1;
                 self.active = Some(name.clone());
-                self.thinking.clear();
-                self.streaming = Some(TurnView { agent_id, name, model, content: String::new() });
+                self.streaming = Some(TurnView {
+                    agent_id,
+                    name,
+                    model,
+                    content: String::new(),
+                    thinking: String::new(),
+                    thinking_ms: 0,
+                });
             }
             DebateEvent::Token(t) => {
                 if let Some(s) = self.streaming.as_mut() {
                     s.content.push_str(&t);
                 }
             }
-            DebateEvent::Thinking(t) => self.thinking.push_str(&t),
-            DebateEvent::TurnEnded { usage } => {
+            DebateEvent::Thinking(t) => {
+                if let Some(s) = self.streaming.as_mut() {
+                    s.thinking.push_str(&t);
+                }
+            }
+            DebateEvent::TurnEnded { usage, thinking_ms } => {
                 self.usage.input += usage.input;
                 self.usage.output += usage.output;
                 self.usage.reasoning += usage.reasoning;
-                if let Some(s) = self.streaming.take() {
-                    if !s.content.trim().is_empty() {
+                if let Some(mut s) = self.streaming.take() {
+                    s.thinking_ms = thinking_ms;
+                    // Keep a turn that produced reasoning even if its visible text
+                    // was all directives — but drop fully-empty turns.
+                    if !s.content.trim().is_empty() || !s.thinking.trim().is_empty() {
                         self.turns.push(s);
                     }
                 }
                 self.active = None;
             }
-            DebateEvent::Error(e) => self.turns.push(TurnView {
-                agent_id: "error".into(),
-                name: "⚠ Error".into(),
-                model: String::new(),
-                content: e,
-            }),
+            DebateEvent::Error(e) => self.turns.push(TurnView::note("error", "⚠ Error", e)),
             DebateEvent::Done => {
                 self.done = true;
                 self.status = "Adjourned".into();
@@ -357,7 +383,7 @@ impl App {
             usage: Usage::default(),
             turn_count: 0,
             status: "Convening…".into(),
-            thinking: String::new(),
+            conclusion: None,
             show_thinking: false,
             follow: true,
             scroll: 0,
@@ -426,12 +452,7 @@ impl App {
 
         let turns = messages
             .into_iter()
-            .map(|m| TurnView {
-                agent_id: m.agent_id,
-                name: m.name,
-                model: String::new(),
-                content: m.content,
-            })
+            .map(|m| TurnView::note(&m.agent_id, &m.name, m.content))
             .collect();
 
         self.debate = Some(Debate {
@@ -443,7 +464,7 @@ impl App {
             usage: Usage::default(),
             turn_count: row.turns,
             status: "Saved session · read-only".into(),
-            thinking: String::new(),
+            conclusion: None,
             show_thinking: false,
             follow: false,
             scroll: 0,
@@ -829,18 +850,28 @@ mod tests {
                 name: "George".into(),
                 model: "gpt-x".into(),
                 content: "First line.\nSecond line.".into(),
+                thinking: "weighing the trade-offs".into(),
+                thinking_ms: 1234,
             }],
             streaming: Some(TurnView {
                 agent_id: "cathy".into(),
                 name: "Cathy".into(),
                 model: "claude-x".into(),
                 content: "streaming…".into(),
+                thinking: String::new(),
+                thinking_ms: 0,
             }),
             active: Some("Cathy".into()),
             usage: Usage::default(),
             turn_count: 2,
             status: "Discussion".into(),
-            thinking: "pondering".into(),
+            conclusion: Some(ModeratorConclusion {
+                status: crate::types::ConclusionStatus::Majority,
+                summary: "Leaning yes with reservations.".into(),
+                score: 6,
+                reason: "Decent reasoning, thin evidence.".into(),
+                next: Some("Run a small test.".into()),
+            }),
             show_thinking: true,
             follow: true,
             scroll: 0,
