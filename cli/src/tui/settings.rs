@@ -2,7 +2,7 @@
 //! tiers and each provider's resolved model.
 //!
 //! Keys can be **added right here in the terminal** (stored locally at
-//! `keys.toml`, `0600`) — no desktop app required, so the council works the same
+//! `keys.enc`, `0600`) — no desktop app required, so the council works the same
 //! on a headless VPS as on a laptop. Keys the desktop app already holds are
 //! shared automatically and shown as `shared`. The key buffer is always rendered
 //! masked; the plaintext never reaches the screen or a log.

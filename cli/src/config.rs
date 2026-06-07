@@ -2,12 +2,13 @@
 //! environment-variable fallback for API keys.
 
 use crate::bridge::DesktopBridge;
+use crate::crypto;
 use crate::error::{Error, Result};
 use crate::types::{Provider, ReasoningTier};
 use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// Per-provider, per-tier model id (or `"auto"`).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -48,9 +49,9 @@ impl TierSelection {
 pub enum KeySource {
     /// A `<PROVIDER>_API_KEY` environment variable (this process only).
     Env,
-    /// Stored locally in `keys.toml` (set in-terminal via Settings or `set-key`).
+    /// Stored locally in `keys.enc` (set in-terminal via Settings or `set-key`).
     Local,
-    /// Inherited from the desktop app (bridge: file-vault or keychain).
+    /// Inherited from the desktop app's file vault (bridge).
     Shared,
     /// No key available for this provider.
     None,
@@ -167,8 +168,20 @@ impl Config {
         Ok(Self::dirs()?.config_dir().join("config.toml"))
     }
 
+    /// Legacy plaintext key file — read once for migration, then deleted.
     fn key_path() -> Result<PathBuf> {
         Ok(Self::dirs()?.config_dir().join("keys.toml"))
+    }
+
+    /// The XChaCha20-Poly1305-encrypted key store (`ENC1:` envelope).
+    fn enc_path() -> Result<PathBuf> {
+        Ok(Self::dirs()?.config_dir().join("keys.enc"))
+    }
+
+    /// The CLI's own 32-byte data-encryption key (0600). Distinct from — and in
+    /// a different directory than — the desktop app's `vault.key`.
+    fn dek_path() -> Result<PathBuf> {
+        Ok(Self::dirs()?.config_dir().join("vault.key"))
     }
 
     /// Load config + keys from disk, applying environment-variable overrides.
@@ -181,12 +194,23 @@ impl Config {
             Config::default()
         };
 
-        // Keys: file first, then env overrides.
-        let key_path = Self::key_path()?;
-        if key_path.exists() {
-            let text = std::fs::read_to_string(&key_path)?;
-            let kf: KeyFile = toml::from_str(&text).map_err(|e| Error::Config(e.to_string()))?;
-            config.keys = kf.keys;
+        // Keys: encrypted store first; else migrate a legacy plaintext file;
+        // then env overrides.
+        let enc_path = Self::enc_path()?;
+        let legacy_path = Self::key_path()?;
+        if enc_path.exists() {
+            config.load_encrypted_keys(&enc_path);
+        } else if legacy_path.exists() {
+            // Legacy plaintext `keys.toml` from an earlier CLI — read it, then
+            // re-write it encrypted and delete the plaintext (one-time migration).
+            if let Ok(text) = std::fs::read_to_string(&legacy_path) {
+                if let Ok(kf) = toml::from_str::<KeyFile>(&text) {
+                    config.keys = kf.keys;
+                }
+            }
+            if !config.keys.is_empty() && config.save_keys().is_ok() {
+                let _ = std::fs::remove_file(&legacy_path);
+            }
         }
         for provider in Provider::ALL {
             if let Ok(value) = std::env::var(provider.env_var()) {
@@ -198,7 +222,7 @@ impl Config {
         }
 
         // Desktop bridge: adopt the app's already-stored keys + model config so
-        // the user never re-enters a key. Lowest precedence (env + keys.toml
+        // the user never re-enters a key. Lowest precedence (env + keys.enc
         // win). Best-effort — a failure leaves the CLI on its own config.
         let bridge = DesktopBridge::load();
         for (slug, selection) in bridge.model_selection() {
@@ -221,24 +245,43 @@ impl Config {
         Ok(config)
     }
 
-    /// Persist non-secret config to `config.toml`.
+    /// Persist non-secret config to `config.toml`. Written `0600` — a `proxy`
+    /// URL may carry inline credentials, so it shouldn't be world-readable.
     pub fn save(&self) -> Result<()> {
         let path = Self::config_path()?;
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
+            set_dir_owner_only(parent)?;
         }
         let text = toml::to_string_pretty(self).map_err(|e| Error::Config(e.to_string()))?;
-        std::fs::write(&path, text)?;
+        write_secret_file(&path, &text)?;
+        set_owner_only(&path)?;
         Ok(())
     }
 
-    /// Persist API keys to `keys.toml` with `0600` permissions.
+    /// Load + decrypt the encrypted key store. Best-effort: a missing/corrupt
+    /// DEK or a failed decrypt leaves `keys` empty (the user can re-add a key)
+    /// rather than failing the whole `Config::load`.
+    fn load_encrypted_keys(&mut self, enc_path: &Path) {
+        let Ok(dek_path) = Self::dek_path() else { return };
+        let Some(dek) = crypto::load_dek(&dek_path) else { return };
+        let Ok(envelope) = std::fs::read_to_string(enc_path) else { return };
+        let Some(plain) = crypto::decrypt_str(&dek, envelope.trim()) else { return };
+        if let Ok(kf) = toml::from_str::<KeyFile>(&plain) {
+            self.keys = kf.keys;
+        }
+    }
+
+    /// Persist API keys to `keys.enc`, encrypted with XChaCha20-Poly1305 under a
+    /// `0600` file DEK (`vault.key`) — no OS keychain, portable to every OS.
     pub fn save_keys(&self) -> Result<()> {
-        let path = Self::key_path()?;
-        if let Some(parent) = path.parent() {
+        let dek_path = Self::dek_path()?;
+        if let Some(parent) = dek_path.parent() {
             std::fs::create_dir_all(parent)?;
             set_dir_owner_only(parent)?;
         }
+        let dek = crypto::load_or_create_dek(&dek_path).map_err(Error::Config)?;
+
         // Exclude env-sourced keys so a transient env secret never lands on disk.
         let keys: BTreeMap<String, String> = self
             .keys
@@ -247,16 +290,21 @@ impl Config {
             .map(|(k, v)| (k.clone(), v.clone()))
             .collect();
         let kf = KeyFile { keys };
-        let text = toml::to_string_pretty(&kf).map_err(|e| Error::Config(e.to_string()))?;
-        // Create the file 0600 from the start (no world-readable window on a
-        // shared VPS), then chmod as a safety net in case it pre-existed 0644.
-        write_secret_file(&path, &text)?;
-        set_owner_only(&path)?;
+        let toml_text = toml::to_string_pretty(&kf).map_err(|e| Error::Config(e.to_string()))?;
+        let envelope = crypto::encrypt_str(&dek, &toml_text).map_err(Error::Config)?;
+
+        let enc_path = Self::enc_path()?;
+        // Create the file 0600 from the start (no world-readable window), then
+        // chmod as a belt-and-suspenders safety net.
+        write_secret_file(&enc_path, &envelope)?;
+        set_owner_only(&enc_path)?;
+        // Drop any legacy plaintext key file now that the encrypted store exists.
+        let _ = std::fs::remove_file(Self::key_path()?);
         Ok(())
     }
 
     pub fn api_key(&self, provider: Provider) -> Option<&str> {
-        // env / keys.toml win; the desktop app's shared key is the fallback.
+        // env / keys.enc win; the desktop app's shared key is the fallback.
         self.keys
             .get(provider.slug())
             .map(|s| s.as_str())
@@ -269,16 +317,15 @@ impl Config {
         &self.bridge
     }
 
-    /// Whether `provider` has a key available without prompting — a silent
-    /// source (env / keys.toml / file-vault) or a desktop `hasKey` marker whose
-    /// value sits in the keychain. Safe for listing / roster display.
+    /// Whether `provider` has a usable key — from env, the CLI's own encrypted
+    /// store, or the desktop app's file vault. No prompts, no keychain. Safe for
+    /// listing / roster display.
     pub fn is_configured(&self, provider: Provider) -> bool {
         self.api_key(provider).is_some() || self.bridge.has_key(provider)
     }
 
-    /// Resolve `provider`'s key for an actual request. **May prompt** for
-    /// keychain access when only a desktop marker is known — call once per run
-    /// and cache the result.
+    /// Resolve `provider`'s key for an actual request. Never prompts — keys are
+    /// resolved from files (env / `keys.enc` / the app's vault). Cache the result.
     pub fn resolve_api_key(&self, provider: Provider) -> Option<String> {
         self.api_key(provider)
             .map(|s| s.to_string())
@@ -286,7 +333,7 @@ impl Config {
     }
 
     /// Classify where `provider`'s key comes from — without prompting. Mirrors
-    /// `api_key`'s precedence (env / `keys.toml` over the shared desktop key).
+    /// `api_key`'s precedence (env / `keys.enc` over the shared desktop key).
     pub fn key_source(&self, provider: Provider) -> KeySource {
         let slug = provider.slug();
         let has_local = self.keys.get(slug).map(|s| !s.trim().is_empty()).unwrap_or(false);

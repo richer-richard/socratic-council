@@ -38,39 +38,38 @@ localStorage is a WebKit/WebView store:
 `nonce(24) || ciphertext || tag(16)`, XChaCha20‑Poly1305 decrypt with the DEK.
 Non-enveloped values are returned as legacy plaintext (same as `secretsGet`).
 
-### Two storage generations (what the bridge actually finds)
+### One at-rest scheme, no keychain (July 2026)
 
-The app shipped two at-rest schemes; the bridge handles both:
+The app uses a single **file vault** — a 32-byte DEK at `vault.key` (0600) +
+secrets/sessions as `ENC1:` XChaCha20-Poly1305 envelopes in localStorage. There is
+**no OS keychain** anywhere (the app migrated off it long ago; the CLI's keychain
+fallback was removed in this pass). The bridge reads the DEK + decrypts every
+secret **eagerly at load** — the file DEK never prompts — so `has_key` is honest:
+it reports "configured" only for a key actually decrypted.
 
-1. **File-vault build** — `vault.key` on disk + secrets/sessions `ENC1:` in
-   localStorage. The bridge reads everything silently.
-2. **Keychain build (older)** — there is **no `vault.key`**; the config blob
-   marks each provider `hasKey: true` and the real values live in the macOS
-   **Keychain** (service `socratic-council`): the API keys at account
-   `apiKey:<provider>`, and the session DEK (base64 of 32 bytes) at account
-   `vault:dek`. Sessions/secrets in localStorage are `ENC1:` under that DEK.
+**Sandboxing is the catch.** The app is sandboxed, so its data is redirected into
+the macOS **App Sandbox container**:
+`~/Library/Containers/com.socratic-council.desktop/Data/Library/{Application
+Support,WebKit}/…`. `desktop_app_data_dirs` + `find_localstorage` search the
+container **before** the plain `~/Library/{Application Support,WebKit}` paths (and
+pick the most-recently-modified `localstorage.sqlite3`). Missing this was the bug
+that made the CLI report "could not read key." Linux = WebKitGTK sqlite under the
+data dir; Windows = WebView2 LevelDB (unsupported → the CLI uses its own store).
 
-For the keychain build the bridge:
-- uses the config's `hasKey` markers for **display** (`providers`, the roster) so
-  listing never prompts;
-- reads `apiKey:<provider>` **lazily**, only when a debate is launched (cached,
-  so at most one prompt per provider per run);
-- reads `vault:dek` **lazily**, only when the history sidebar is opened, to
-  unlock saved sessions.
+**Read-only & safe.** The bridge opens the sqlite read-only (WAL-aware, retry with
+`immutable=1`), never writes to the app's store, and **never logs secret values**.
+Behind a default-on `desktop-bridge` cargo feature whose only extra dependency is a
+bundled `rusqlite`; the XChaCha20 crypto (`crypto.rs`) is always compiled, so
+`--no-default-features` is a lean **pure-Rust** build.
 
-Keychain reads may surface a one-time macOS access prompt per item (click
-**Always Allow**); this is inherent to reading keychain-stored secrets and is the
-same friction that pushed the app toward the file vault.
+**The CLI's own keys** live in `keys.enc` (ENC1, under a `0600` `vault.key` in the
+CLI config dir) — same primitive as the app, no keychain. A plaintext `keys.toml`
+from an older CLI is migrated on first load, then deleted.
 
-**Read-only & safe.** The bridge opens the sqlite read-only (WAL-aware, retry
-with `immutable=1`), never writes to the app's store, and **never logs secret
-values**. Behind a default-on `desktop-bridge` cargo feature (so
-`--no-default-features` skips the bundled sqlite + crypto for a lean build).
-
-**Merge precedence** (highest wins): `<PROVIDER>_API_KEY` env → CLI `keys.toml`
-(set via `config set-key`) → **desktop bridge**. Model selection / council tier /
-proxy fall back to the bridge when the CLI config hasn't customized them. A
-bridge failure is swallowed — the CLI still works from env/keys.toml.
+**Merge precedence** (highest wins): `<PROVIDER>_API_KEY` env → CLI `keys.enc`
+(set via `config set-key` / Settings `^P`) → **desktop bridge**. Model selection /
+council tier / proxy fall back to the bridge when the CLI hasn't customized them.
+A bridge failure is swallowed — the CLI still works from env / its own store.
 
 ---
 

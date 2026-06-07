@@ -45,7 +45,7 @@ pub struct AppContext {
     /// Home view's roster and any spawned debate are restricted to this set.
     pub providers: Vec<Provider>,
     /// Keys already resolved during a `--scan` pre-pass, so launching a debate
-    /// in the same run never re-prompts the keychain for them.
+    /// in the same run reuses them.
     pub prefetched_keys: HashMap<Provider, String>,
 }
 
@@ -229,10 +229,10 @@ impl App {
         self.ctx.config.configured_providers().len()
     }
 
-    /// Lazily unlock the desktop app's saved sessions the first time the
-    /// history sidebar opens. On the old keychain build this resolves the DEK
-    /// from the keychain (one prompt); on the file-vault build sessions are
-    /// already loaded and this is a no-op.
+    /// Lazily load the desktop app's saved sessions the first time the history
+    /// sidebar opens. Sessions are decrypted from the app's file vault at bridge
+    /// load, so this is usually already populated — the re-read just covers an
+    /// index that wasn't decrypted on the first pass.
     fn ensure_sessions(&mut self) {
         if self.sessions_loaded {
             return;
@@ -243,7 +243,7 @@ impl App {
         }
         let loaded = self.ctx.config.bridge().read_sessions();
         if loaded.is_empty() {
-            self.toast("No readable history (keychain access denied?).");
+            self.toast("No readable history (the app's vault couldn't be opened).");
             return;
         }
         self.sessions = loaded
@@ -266,8 +266,8 @@ impl App {
         }
     }
 
-    /// Resolve keys (caching to avoid repeat keychain prompts) and spawn the
-    /// debate engine on a background task.
+    /// Resolve keys (caching them for the session) and spawn the debate engine
+    /// on a background task.
     fn start_debate(&mut self, topic: String) {
         let topic = topic.trim().to_string();
         if topic.is_empty() {
@@ -299,8 +299,7 @@ impl App {
             return;
         }
 
-        // Resolve each provider's key once (reads the keychain at most once per
-        // provider, then caches so a second debate never re-prompts).
+        // Resolve each provider's key once, then cache it for the session.
         let mut keys = HashMap::new();
         for agent in &agents {
             if let Some(k) = self.key_cache.get(&agent.provider) {
@@ -312,7 +311,7 @@ impl App {
         }
         agents.retain(|a| keys.contains_key(&a.provider));
         if agents.is_empty() {
-            self.toast("Could not read any API key (keychain access denied?).");
+            self.toast("Couldn't read a stored key — add one here with ^P.");
             return;
         }
 
@@ -599,12 +598,12 @@ impl App {
         false
     }
 
-    /// Persist a key typed in Settings to the `0600` key file, then prime the
-    /// cache so the next debate uses it without a keychain prompt. The plaintext
-    /// is moved into the config/cache and never logged.
+    /// Persist a key typed in Settings to the encrypted `keys.enc` store, then
+    /// prime the cache so the next debate uses it immediately. The plaintext is
+    /// moved into the config/cache and never logged.
     fn save_key(&mut self, provider: Provider, key: String) {
         self.ctx.config.set_key(provider, key.clone());
-        // Only keys.toml changes — keys never live in config.toml, so there's no
+        // Only keys.enc changes — keys never live in config.toml, so there's no
         // need to write (and thereby create) config.toml here.
         if let Err(e) = self.ctx.config.save_keys() {
             self.toast(format!("Couldn't save key: {e}"));

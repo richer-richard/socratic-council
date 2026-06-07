@@ -1,6 +1,6 @@
 [package]
 name = "socratic-council"
-version = "0.3.0"
+version = "0.4.0"
 edition = "2021"
 rust-version = "1.82"
 description = "A terminal multi-agent debate workstation — eight AI agents from eight providers argue any topic in a ratatui TUI."
@@ -24,11 +24,12 @@ path = "src/lib.rs"
 [features]
 default = ["desktop-bridge"]
 # Reads the desktop app's already-stored keys + config + sessions so the user
-# never re-enters an API key. Pulls a bundled sqlite (to read the WebView
-# localStorage) plus XChaCha20-Poly1305 (to open the app's `ENC1:` envelopes).
-# Build with `--no-default-features` for a lean CLI that uses only env vars +
-# `config set-key`.
-desktop-bridge = ["dep:rusqlite", "dep:chacha20poly1305", "dep:base64"]
+# never re-enters an API key. Pulls only a bundled sqlite (to read the WebView
+# localStorage); the XChaCha20-Poly1305 crypto is always compiled (the CLI
+# encrypts its OWN key store with it too). Build with `--no-default-features`
+# for a lean, pure-Rust CLI (no C deps) that uses env vars + `config set-key` +
+# the in-TUI key manager.
+desktop-bridge = ["dep:rusqlite"]
 
 [dependencies]
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "io-std", "io-util", "signal"] }
@@ -47,11 +48,16 @@ directories = "5"
 unicode-width = "0.2"
 textwrap = "0.16"
 
-# Desktop bridge (feature-gated): read the app's WebView localStorage + open
-# its XChaCha20-Poly1305 `ENC1:` envelopes with the shared DEK.
+# At-rest secret encryption (always compiled, pure Rust): the CLI encrypts its
+# own key store with XChaCha20-Poly1305 and reads the desktop app's `ENC1:`
+# envelopes with the same primitive. No OS keychain, builds on every platform.
+chacha20poly1305 = "0.10"
+base64 = "0.22"
+getrandom = "0.2"
+
+# Desktop bridge (feature-gated): a bundled sqlite to read the app's WebView
+# localStorage. The only C dependency, and only when the bridge is enabled.
 rusqlite = { version = "0.32", features = ["bundled"], optional = true }
-chacha20poly1305 = { version = "0.10", optional = true }
-base64 = { version = "0.22", optional = true }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["rt", "macros"] }
