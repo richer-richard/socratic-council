@@ -139,13 +139,22 @@ fn render_roster(f: &mut Frame, area: Rect, app: &App) {
             Style::default().fg(theme::MUTED),
         ));
     }
-    let title = format!(" Council · {configured}/8 keys shared ");
+    let mut body: Vec<Line> = vec![Line::from(spans)];
+    // Zero-keys first run (typically a terminal-only / VPS machine): make it
+    // obvious you can add a key right here, no desktop app required.
+    if configured == 0 {
+        body.push(Line::from(Span::styled(
+            "No keys yet — press ^P to add one in the terminal (no desktop app needed).",
+            Style::default().fg(theme::GOLD),
+        )));
+    }
+    let title = format!(" Council · {configured}/8 ready ");
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(Style::default().fg(theme::DIM))
         .title(Span::styled(title, Style::default().fg(theme::MUTED)));
     f.render_widget(
-        Paragraph::new(Line::from(spans)).block(block).wrap(Wrap { trim: true }),
+        Paragraph::new(body).block(block).wrap(Wrap { trim: true }),
         area,
     );
 }

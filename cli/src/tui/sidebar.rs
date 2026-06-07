@@ -22,7 +22,7 @@ fn render_brand(f: &mut Frame, area: Rect) {
         ),
     ]);
     let sub = Line::from(Span::styled(
-        "shared workstation",
+        "council workstation",
         Style::default().fg(theme::DIM),
     ));
     f.render_widget(Paragraph::new(vec![line, sub]), area);
@@ -46,10 +46,13 @@ fn render_list(f: &mut Frame, area: Rect, app: &App) {
                 Style::default().fg(theme::DIM),
             )),
             Line::from(Span::styled(
-                "  Run the desktop app to",
+                "  Desktop-app history, if",
                 Style::default().fg(theme::DIM),
             )),
-            Line::from(Span::styled("  populate history.", Style::default().fg(theme::DIM))),
+            Line::from(Span::styled(
+                "  any, is listed here.",
+                Style::default().fg(theme::DIM),
+            )),
         ])
         .block(block);
         f.render_widget(para, area);

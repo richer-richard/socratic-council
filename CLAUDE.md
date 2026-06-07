@@ -48,6 +48,18 @@ chamber (`chat.rs`), and a **Settings/Models** panel (`settings.rs`).
 a tokio task. `theme.rs` holds the palette (gold `#F5C542`) + the 8 agents'
 provider colors. Render paths are smoke-tested with `TestBackend` down to 1×1.
 
+**Terminal-only / VPS is first-class (v0.3.0).** The TUI opens even with zero
+keys — `main.rs` passes the *allowed* provider set (`--providers` filter, else
+all 8), not configured-only, and only `--no-tui` still requires a key up front.
+**Settings is an interactive key manager** (`settings.rs` + `handle_settings_key`):
+`↑/↓` select, `Enter`/`e` edit (masked paste → `KeyDraft.buffer`, bullets only,
+never plaintext), `d` clear a local key, `Enter` save (`Config::set_key` +
+`save_keys` → `keys.toml` 0600, primes `App.key_cache` so the next debate skips
+the keychain). Bracketed paste (`Enable/DisableBracketedPaste` + `Event::Paste`)
+plus an event-draining loop make pasting a key instant. `Config::key_source` →
+`{Env,Local,Shared,None}` drives accurate per-provider labels. Sharing the
+desktop app's keys is a convenience, **not** a requirement — no UI text forces it.
+
 ### Desktop bridge (`cli/src/bridge.rs`, feature `desktop-bridge`, default on)
 
 Shares the **desktop app's keys + config + sessions** so the user never

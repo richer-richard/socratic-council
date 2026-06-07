@@ -40,6 +40,34 @@ impl TierSelection {
     }
 }
 
+/// Where a provider's API key comes from. Drives accurate, context-aware UI:
+/// a key the user typed in the terminal is `Local`, a key inherited from the
+/// desktop app is `Shared` (read-only here), and a terminal-only/VPS machine
+/// with nothing set yet is `None`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KeySource {
+    /// A `<PROVIDER>_API_KEY` environment variable (this process only).
+    Env,
+    /// Stored locally in `keys.toml` (set in-terminal via Settings or `set-key`).
+    Local,
+    /// Inherited from the desktop app (bridge: file-vault or keychain).
+    Shared,
+    /// No key available for this provider.
+    None,
+}
+
+impl KeySource {
+    /// A short label for the Settings panel / `providers` listing.
+    pub fn label(self) -> &'static str {
+        match self {
+            KeySource::Env => "env",
+            KeySource::Local => "local",
+            KeySource::Shared => "shared",
+            KeySource::None => "—",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ProviderConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -209,6 +237,7 @@ impl Config {
         let path = Self::key_path()?;
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
+            set_dir_owner_only(parent)?;
         }
         // Exclude env-sourced keys so a transient env secret never lands on disk.
         let keys: BTreeMap<String, String> = self
@@ -219,7 +248,9 @@ impl Config {
             .collect();
         let kf = KeyFile { keys };
         let text = toml::to_string_pretty(&kf).map_err(|e| Error::Config(e.to_string()))?;
-        std::fs::write(&path, text)?;
+        // Create the file 0600 from the start (no world-readable window on a
+        // shared VPS), then chmod as a safety net in case it pre-existed 0644.
+        write_secret_file(&path, &text)?;
         set_owner_only(&path)?;
         Ok(())
     }
@@ -254,11 +285,37 @@ impl Config {
             .or_else(|| self.bridge.resolve_key(provider))
     }
 
+    /// Classify where `provider`'s key comes from — without prompting. Mirrors
+    /// `api_key`'s precedence (env / `keys.toml` over the shared desktop key).
+    pub fn key_source(&self, provider: Provider) -> KeySource {
+        let slug = provider.slug();
+        let has_local = self.keys.get(slug).map(|s| !s.trim().is_empty()).unwrap_or(false);
+        if has_local {
+            if self.env_keys.contains(slug) {
+                KeySource::Env
+            } else {
+                KeySource::Local
+            }
+        } else if self.bridge.api_key(provider).is_some() || self.bridge.has_key(provider) {
+            KeySource::Shared
+        } else {
+            KeySource::None
+        }
+    }
+
     pub fn set_key(&mut self, provider: Provider, key: String) {
         // An explicitly-set key is file-origin from now on, so it persists even
         // if the same provider also has an env var.
         self.env_keys.remove(provider.slug());
         self.keys.insert(provider.slug().to_string(), key);
+    }
+
+    /// Remove a locally-stored key for `provider`. A key shared from the desktop
+    /// app is unaffected (it lives outside this CLI) — after clearing the local
+    /// key the provider may simply fall back to that shared key.
+    pub fn clear_key(&mut self, provider: Provider) {
+        self.keys.remove(provider.slug());
+        self.env_keys.remove(provider.slug());
     }
 
     pub fn configured_providers(&self) -> Vec<Provider> {
@@ -306,5 +363,45 @@ fn set_owner_only(path: &std::path::Path) -> Result<()> {
 
 #[cfg(not(unix))]
 fn set_owner_only(_path: &std::path::Path) -> Result<()> {
+    Ok(())
+}
+
+/// Restrict the (app-specific) config directory to the owner so a secret written
+/// inside it isn't exposed via a world-traversable parent.
+#[cfg(unix)]
+fn set_dir_owner_only(path: &std::path::Path) -> Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    let mut perms = std::fs::metadata(path)?.permissions();
+    perms.set_mode(0o700);
+    std::fs::set_permissions(path, perms)?;
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn set_dir_owner_only(_path: &std::path::Path) -> Result<()> {
+    Ok(())
+}
+
+/// Write a secret file, creating it owner-only (`0600`) at creation time so the
+/// plaintext never exists in a world-readable state — closing the write-then-chmod
+/// race on a shared host. On a pre-existing file, `O_TRUNC` keeps the old mode, so
+/// `save_keys` follows this with `set_owner_only` to repair any legacy `0644`.
+#[cfg(unix)]
+fn write_secret_file(path: &std::path::Path, contents: &str) -> Result<()> {
+    use std::io::Write;
+    use std::os::unix::fs::OpenOptionsExt;
+    let mut f = std::fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .mode(0o600)
+        .open(path)?;
+    f.write_all(contents.as_bytes())?;
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn write_secret_file(path: &std::path::Path, contents: &str) -> Result<()> {
+    std::fs::write(path, contents)?;
     Ok(())
 }

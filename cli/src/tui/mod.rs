@@ -13,10 +13,13 @@ mod sidebar;
 mod theme;
 
 use crate::catalog::{resolve_model, DiscoveredModel};
-use crate::config::Config;
+use crate::config::{Config, KeySource};
 use crate::engine::{default_agents, DebateEvent, Engine};
 use crate::types::{Agent, Provider, Usage};
-use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
+use crossterm::event::{
+    self, DisableBracketedPaste, EnableBracketedPaste, Event, KeyCode, KeyEvent, KeyEventKind,
+    KeyModifiers,
+};
 use crossterm::execute;
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen};
 use ratatui::backend::CrosstermBackend;
@@ -84,6 +87,14 @@ struct EngineHandle {
     rx: UnboundedReceiver<DebateEvent>,
     cancel: Arc<AtomicBool>,
     handle: JoinHandle<()>,
+}
+
+/// In-progress API-key entry in the Settings panel. The buffer holds the secret
+/// while it's typed/pasted; it is rendered masked and dropped once saved or
+/// cancelled (never logged, never shown in plaintext).
+pub struct KeyDraft {
+    pub provider: Provider,
+    pub buffer: String,
 }
 
 /// A live or historical debate being viewed in the Chat chamber.
@@ -170,6 +181,10 @@ pub struct App {
     toast: Option<String>,
     toast_expire: u64,
     key_cache: HashMap<Provider, String>,
+    /// Cursor over the eight providers in the Settings panel.
+    settings_sel: usize,
+    /// Active API-key entry, if the user is editing a key in Settings.
+    key_draft: Option<KeyDraft>,
 }
 
 impl App {
@@ -199,6 +214,8 @@ impl App {
             toast: None,
             toast_expire: 0,
             key_cache: ctx.prefetched_keys.clone(),
+            settings_sel: 0,
+            key_draft: None,
             ctx,
         }
     }
@@ -267,7 +284,18 @@ impl App {
             .collect();
         agents.sort_by(|a, b| a.name.cmp(&b.name));
         if agents.is_empty() {
-            self.toast("No API keys found — open the desktop app or run `config set-key`.");
+            // Keep the topic (e.g. `run "topic"` on a keyless first run) so the
+            // user can add a key and convene without retyping it.
+            self.composer = topic;
+            // Distinguish "no keys at all" from "keys exist but --providers
+            // excludes them" so the hint is actionable.
+            let keyed_but_filtered =
+                Provider::ALL.into_iter().any(|p| config.is_configured(p) && !allowed.contains(&p));
+            if keyed_but_filtered {
+                self.toast("Your keyed providers are excluded by --providers this run.");
+            } else {
+                self.toast("No API keys yet — press ^P to add one in Settings.");
+            }
             return;
         }
 
@@ -515,10 +543,132 @@ impl App {
     }
 
     fn handle_settings_key(&mut self, key: KeyEvent) -> bool {
-        if key.code == KeyCode::Esc {
-            self.view = View::Home;
+        // Editing a provider's key: capture printable input (masked on screen),
+        // Enter saves, Esc cancels, ^U clears the buffer. Each arm scopes its own
+        // borrow of `key_draft` so save/toast can re-borrow `self`.
+        if self.key_draft.is_some() {
+            match key.code {
+                KeyCode::Esc => self.key_draft = None,
+                KeyCode::Enter => {
+                    if let Some(draft) = self.key_draft.take() {
+                        let value = draft.buffer.trim().to_string();
+                        if value.is_empty() {
+                            self.toast("No key entered — paste a key or press Esc.");
+                        } else {
+                            self.save_key(draft.provider, value);
+                        }
+                    }
+                }
+                KeyCode::Backspace => {
+                    if let Some(d) = self.key_draft.as_mut() {
+                        d.buffer.pop();
+                    }
+                }
+                KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    if let Some(d) = self.key_draft.as_mut() {
+                        d.buffer.clear();
+                    }
+                }
+                KeyCode::Char(c) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    if let Some(d) = self.key_draft.as_mut() {
+                        d.buffer.push(c);
+                    }
+                }
+                _ => {}
+            }
+            return false;
+        }
+
+        // Normal Settings navigation.
+        match key.code {
+            KeyCode::Esc => self.view = View::Home,
+            KeyCode::Up => self.settings_sel = self.settings_sel.saturating_sub(1),
+            KeyCode::Down => {
+                self.settings_sel = (self.settings_sel + 1).min(theme::AGENTS.len() - 1);
+            }
+            KeyCode::Enter | KeyCode::Char('e') => {
+                let provider = theme::AGENTS[self.settings_sel].provider;
+                self.key_draft = Some(KeyDraft { provider, buffer: String::new() });
+            }
+            KeyCode::Char('d') => {
+                let provider = theme::AGENTS[self.settings_sel].provider;
+                self.clear_key(provider);
+            }
+            _ => {}
         }
         false
+    }
+
+    /// Persist a key typed in Settings to the `0600` key file, then prime the
+    /// cache so the next debate uses it without a keychain prompt. The plaintext
+    /// is moved into the config/cache and never logged.
+    fn save_key(&mut self, provider: Provider, key: String) {
+        self.ctx.config.set_key(provider, key.clone());
+        // Only keys.toml changes — keys never live in config.toml, so there's no
+        // need to write (and thereby create) config.toml here.
+        if let Err(e) = self.ctx.config.save_keys() {
+            self.toast(format!("Couldn't save key: {e}"));
+            return;
+        }
+        self.key_cache.insert(provider, key);
+        self.toast(format!("Saved {} key.", provider.display_name()));
+    }
+
+    /// Remove a locally-stored key. A key shared from the desktop app or sourced
+    /// from an env var isn't this CLI's to delete — say so instead.
+    fn clear_key(&mut self, provider: Provider) {
+        match self.ctx.config.key_source(provider) {
+            KeySource::Local => {
+                self.ctx.config.clear_key(provider);
+                let _ = self.ctx.config.save_keys();
+                self.key_cache.remove(&provider);
+                self.toast(format!("Removed {} key.", provider.display_name()));
+            }
+            KeySource::Env => {
+                self.toast("That key comes from an env var — unset it in your shell.")
+            }
+            KeySource::Shared => {
+                self.toast("That key is shared from the desktop app — managed there.")
+            }
+            KeySource::None => self.toast("No key to remove."),
+        }
+    }
+
+    /// Route pasted text to whatever input is focused. Control chars (incl. the
+    /// trailing newline a bracketed paste carries) are stripped so a pasted key
+    /// or topic stays a single clean line.
+    fn handle_paste(&mut self, text: String) {
+        let clean: String = text.chars().filter(|c| !c.is_control()).collect();
+        if clean.is_empty() {
+            return;
+        }
+        match self.view {
+            View::Settings => {
+                if let Some(d) = self.key_draft.as_mut() {
+                    d.buffer.push_str(&clean);
+                }
+            }
+            View::Home => self.composer.push_str(&clean),
+            View::Chat => {}
+        }
+    }
+}
+
+/// Restores the terminal (raw mode, bracketed paste, alternate screen, cursor)
+/// on `Drop` — so it runs on a normal exit *and* if `run_loop` panics and
+/// unwinds. Without this, a panic would leave the shell unusable (no echo,
+/// bracketed-paste markers around pasted text) until `reset`.
+struct TerminalGuard;
+
+impl Drop for TerminalGuard {
+    fn drop(&mut self) {
+        let _ = disable_raw_mode();
+        let _ = execute!(
+            io::stdout(),
+            DisableBracketedPaste,
+            LeaveAlternateScreen,
+            crossterm::cursor::Show
+        );
     }
 }
 
@@ -526,8 +676,12 @@ impl App {
 /// (from `run <topic>`) jumps straight into a debate.
 pub async fn run(ctx: AppContext, initial_topic: Option<String>) -> anyhow::Result<()> {
     enable_raw_mode()?;
+    // From here on, any early return *or panic* restores the terminal via Drop.
+    let _guard = TerminalGuard;
     let mut stdout = io::stdout();
-    execute!(stdout, EnterAlternateScreen)?;
+    // Bracketed paste lets a pasted API key arrive as one `Event::Paste` instead
+    // of a burst of key events (and keeps a trailing newline from auto-submitting).
+    execute!(stdout, EnterAlternateScreen, EnableBracketedPaste)?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
@@ -540,16 +694,14 @@ pub async fn run(ctx: AppContext, initial_topic: Option<String>) -> anyhow::Resu
 
     let result = run_loop(&mut terminal, &mut app).await;
 
-    // Tear the engine down before leaving raw mode so quitting never blocks.
+    // Tear the engine down before the guard leaves raw mode so quitting never blocks.
     if let Some(d) = &app.debate {
         if let Some(e) = &d.engine {
             e.cancel.store(true, Ordering::Relaxed);
             e.handle.abort();
         }
     }
-    disable_raw_mode()?;
-    execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
-    terminal.show_cursor()?;
+    // Terminal teardown (incl. on panic) is handled by `_guard`'s Drop.
     result
 }
 
@@ -579,16 +731,29 @@ async fn run_loop(
 
         terminal.draw(|f| render(f, app))?;
 
+        // Block up to one frame for animation cadence, then drain everything
+        // queued this tick — so a char-by-char paste (terminals without
+        // bracketed-paste support) still registers instantly.
         if event::poll(Duration::from_millis(70))? {
-            if let Event::Key(key) = event::read()? {
-                if key.kind == KeyEventKind::Press && app.handle_key(key) {
+            loop {
+                let mut quit = false;
+                match event::read()? {
+                    Event::Key(key) if key.kind == KeyEventKind::Press => {
+                        quit = app.handle_key(key);
+                    }
+                    Event::Paste(text) => app.handle_paste(text),
+                    _ => {}
+                }
+                if quit {
+                    return Ok(());
+                }
+                if !event::poll(Duration::from_secs(0))? {
                     break;
                 }
             }
         }
         app.frame = app.frame.wrapping_add(1);
     }
-    Ok(())
 }
 
 fn render(f: &mut Frame, app: &mut App) {
@@ -720,11 +885,48 @@ mod tests {
         let mut app = test_app();
         app.sidebar_open = true;
         app.debate = Some(sample_debate());
+        // Also exercise the Settings key-editor overlay at every size.
+        app.key_draft =
+            Some(KeyDraft { provider: theme::AGENTS[0].provider, buffer: "sk-xxxxxxxx".into() });
         for view in [View::Home, View::Chat, View::Settings] {
             app.view = view;
             for (w, h) in [(1, 1), (4, 3), (10, 6), (20, 8)] {
                 render_at(&mut app, w, h);
             }
         }
+    }
+
+    #[test]
+    fn settings_edit_mode_masks_the_key() {
+        let mut app = test_app();
+        app.view = View::Settings;
+        app.settings_sel = 0;
+        let provider = theme::AGENTS[0].provider;
+        app.key_draft = Some(KeyDraft { provider, buffer: "sk-secret-value-123".into() });
+
+        let mut terminal = Terminal::new(TestBackend::new(120, 40)).unwrap();
+        terminal.draw(|f| render(f, &mut app)).unwrap();
+        let rendered: String =
+            terminal.backend().buffer().content().iter().map(|c| c.symbol()).collect();
+
+        assert!(!rendered.contains("sk-secret-value-123"), "plaintext key must never render");
+        assert!(rendered.contains('•'), "the key buffer should render as masked bullets");
+    }
+
+    #[test]
+    fn paste_routes_to_the_focused_input_and_strips_control_chars() {
+        // Into a Settings key draft.
+        let mut app = test_app();
+        app.view = View::Settings;
+        app.key_draft =
+            Some(KeyDraft { provider: theme::AGENTS[0].provider, buffer: String::new() });
+        app.handle_paste("sk-abc\n".into());
+        assert_eq!(app.key_draft.as_ref().unwrap().buffer, "sk-abc");
+
+        // Into the Home composer.
+        let mut app = test_app();
+        app.view = View::Home;
+        app.handle_paste("hello\nworld".into());
+        assert_eq!(app.composer, "helloworld");
     }
 }

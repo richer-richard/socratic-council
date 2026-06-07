@@ -10,8 +10,13 @@ mark + a topic composer, a collapsible **history** sidebar of saved sessions, an
 the live **debate chamber**. It shares the app's model philosophy (**you never
 hand-bump model ids** — an *Auto* resolver picks the best model and refreshes by
 scanning each provider's own `/models` endpoint, so a newer flagship like
-`gpt-5.6` is adopted the moment it ships) **and its keys**: if you've already
-configured the desktop app, the CLI reads those keys directly — no re-entry.
+`gpt-5.6` is adopted the moment it ships).
+
+**It is fully self-contained.** You configure keys right in the terminal — env
+vars, `config set-key`, or directly in the TUI's Settings panel — so it works the
+same on a headless VPS as on a laptop. *If* you also run the desktop app, the CLI
+will additionally read those keys so you don't re-enter them; that sharing is a
+convenience, never a requirement.
 
 ## Install
 
@@ -38,24 +43,29 @@ socratic-council config set-key openai
 socratic-council providers          # see which keys are configured
 ```
 
+…or add them **inside the TUI**: press `^P` for Settings, `↑`/`↓` to a provider,
+`Enter` to paste a key (masked), `Enter` to save. This needs nothing but the
+terminal — ideal on a VPS — and the key becomes usable for the very next debate.
+
 You only need one provider to start a debate; configure more for a fuller
 council. Chinese providers use their own endpoints (DeepSeek, Moonshot,
 DashScope, Z.AI) — set a custom `base_url` per provider in the config file if
 you route through a gateway (`socratic-council config path`).
 
-### Share the desktop app's keys
+### Optional: share the desktop app's keys
 
-If you already use the **Socratic Council desktop app**, you don't need to set
-keys again. The CLI reads the app's stored keys, model selection, council tier,
-and saved sessions directly (shared core). On the file-vault build this is
-silent; on the older macOS keychain build the CLI reads the keys from the
-Keychain on demand — you'll see a one-time "Always Allow" prompt the first time a
-debate launches (and again when you first open the history sidebar, to unlock
-saved sessions). `socratic-council providers` shows what's shared without
-prompting. Precedence: a `<PROVIDER>_API_KEY` env var or a `config set-key`
-value always wins over the shared key. Build with
+If you *also* run the **Socratic Council desktop app**, the CLI will read its
+stored keys, model selection, council tier, and saved sessions directly (shared
+core) so you don't re-enter anything — but this is a convenience, not a
+requirement, and the CLI is fully usable without the app. On the file-vault build
+the sharing is silent; on the older macOS keychain build the CLI reads the keys
+from the Keychain on demand — a one-time "Always Allow" prompt the first time a
+debate launches (and again when you first open the history sidebar). Settings
+labels each provider's key source (`local` / `env` / `shared`). Precedence: a
+`<PROVIDER>_API_KEY` env var or a `config set-key` / Settings value always wins
+over a shared key. Build with
 `cargo install socratic-council --no-default-features` to opt out of the bridge
-entirely (lean build, env / key-file only).
+entirely (lean build, env / key-file / TUI only).
 
 ## Use
 
@@ -81,6 +91,8 @@ Three surfaces mirror the desktop app:
 - **History sidebar** (`Tab`) — your saved sessions; `↑`/`↓` to select, `Enter`
   on an empty composer to open one read-only.
 - **Debate chamber** — the live streaming transcript with a per-speaker roster.
+- **Settings / Models** (`^P`) — manage API keys (add / replace / remove, masked,
+  stored `0600`), see each provider's key source + resolved model, and the tiers.
 
 | Key            | Action                                   |
 |----------------|------------------------------------------|
@@ -93,6 +105,10 @@ Three surfaces mirror the desktop app:
 | `↑`/`↓`, `PgUp`/`PgDn` | scroll the transcript            |
 | `g`            | follow the tail                          |
 | `^C`           | quit from anywhere                       |
+
+In **Settings** (`^P`): `↑`/`↓` select a provider · `Enter` / `e` add or replace
+its key (paste it — masked) · `d` remove a local key · `Enter` save · `Esc`
+cancel / back. Keys you add here are stored locally at `keys.toml` (`0600`).
 
 ## Reasoning tiers & Auto
 
