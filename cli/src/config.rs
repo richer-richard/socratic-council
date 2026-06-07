@@ -111,6 +111,10 @@ pub struct Config {
     /// persisted.
     #[serde(skip)]
     pub reflection: Reflection,
+
+    /// Whether to synthesize a deep-research report at the close (`--deep-research`).
+    #[serde(skip)]
+    pub deep_research: bool,
 }
 
 // Manual Debug so a stray `{config:?}` / `dbg!` / anyhow context can never
@@ -154,6 +158,7 @@ impl Default for Config {
             env_keys: BTreeSet::new(),
             bridge: DesktopBridge::default(),
             reflection: Reflection::Off,
+            deep_research: false,
         }
     }
 }

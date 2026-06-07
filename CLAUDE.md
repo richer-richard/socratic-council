@@ -103,8 +103,12 @@ revealed; the TUI also strips directives on commit so a trailing `@end()` never
 shows. **Peer-eval** (`peereval.rs`, v0.8.0): at the close every agent reviews
 every other on a 5-dim rubric (rigor/evidence/novelty/civility/onTopic, lenient
 JSON), aggregated into a ranked heatmap scorecard (`push_scorecard`) with sharpest
-critiques. **Deep-research report / canvas are the remaining port increments; live
-web/file search needs a search backend + attachments (deferred).**
+critiques. **Deep-research** (`deepresearch.rs`, v0.9.0, opt-in `--deep-research`):
+a streamlined single-pass synthesis over the transcript (vs the app's 4-phase
+planner→researcher→synthesizer→formatter) → a report card (title + confidence,
+abstract, 3-6 confidence-tagged sections) via `push_research`. **Canvas is the
+last remaining port increment; live web/file search needs a search backend +
+attachments, and observer-circle / fact-check / argument-map are deferred.**
 
 ### Desktop bridge (`cli/src/bridge.rs`, feature `desktop-bridge`, default on)
 

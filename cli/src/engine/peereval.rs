@@ -53,7 +53,7 @@ Now produce your strict JSON evaluation. One entry per peer above. JSON only."
 }
 
 /// Pull the first balanced JSON object out of a (possibly fenced) model reply.
-fn extract_json(raw: &str) -> Option<&str> {
+pub(super) fn extract_json(raw: &str) -> Option<&str> {
     let s = raw.trim().trim_start_matches("```json").trim_start_matches("```").trim_end_matches("```");
     let start = s.find('{')?;
     let mut depth = 0i32;

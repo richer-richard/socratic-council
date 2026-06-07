@@ -2,7 +2,9 @@
 //! a header with running usage, and a keybinding footer.
 
 use super::{theme, App, Debate, TurnView, VoteBoard};
-use crate::types::{ConclusionStatus, ModeratorConclusion, PeerEvalRound, VoteChoice};
+use crate::types::{
+    ConclusionStatus, Confidence, DeepResearchReport, ModeratorConclusion, PeerEvalRound, VoteChoice,
+};
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
@@ -71,6 +73,9 @@ fn render_transcript(f: &mut Frame, area: Rect, d: &mut Debate) {
     }
     if let Some(c) = &d.conclusion {
         push_conclusion(&mut lines, c);
+    }
+    if let Some(r) = &d.deep_research {
+        push_research(&mut lines, r);
     }
     if lines.is_empty() {
         lines.push(Line::from(Span::styled(
@@ -263,6 +268,59 @@ fn push_scorecard(lines: &mut Vec<Line<'static>>, round: &PeerEvalRound) {
         }
     }
     lines.push(Line::from(""));
+}
+
+/// The deep-research report — title, abstract, and confidence-tagged sections.
+fn push_research(lines: &mut Vec<Line<'static>>, r: &DeepResearchReport) {
+    lines.push(Line::from(Span::styled(
+        "  ══ Deep Research Report ══",
+        Style::default().fg(theme::GOLD).add_modifier(Modifier::BOLD),
+    )));
+    if !r.title.is_empty() {
+        lines.push(Line::from(vec![
+            Span::styled(
+                format!("  {}", r.title),
+                Style::default().fg(theme::TEXT).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                format!("   [{}]", r.confidence.label()),
+                Style::default().fg(conf_color(r.confidence)),
+            ),
+        ]));
+    }
+    for line in r.abstract_text.lines() {
+        lines.push(Line::from(Span::styled(
+            format!("  {line}"),
+            Style::default().fg(theme::MUTED),
+        )));
+    }
+    for sec in &r.sections {
+        lines.push(Line::from(vec![
+            Span::styled(
+                format!("  ▸ {}", sec.heading),
+                Style::default().fg(theme::GOLD).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                format!("  [{}]", sec.confidence.label()),
+                Style::default().fg(conf_color(sec.confidence)),
+            ),
+        ]));
+        for line in sec.body.lines() {
+            lines.push(Line::from(Span::styled(
+                format!("    {line}"),
+                Style::default().fg(theme::TEXT),
+            )));
+        }
+    }
+    lines.push(Line::from(""));
+}
+
+fn conf_color(c: Confidence) -> Color {
+    match c {
+        Confidence::High => Color::Rgb(0x34, 0xD3, 0x99),
+        Confidence::Medium => theme::GOLD,
+        Confidence::Low => Color::Rgb(0xFB, 0x71, 0x85),
+    }
 }
 
 fn score_color(v: u8) -> Color {

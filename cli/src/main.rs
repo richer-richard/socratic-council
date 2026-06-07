@@ -40,6 +40,9 @@ enum Command {
         /// Draft→revise reflection per turn: off | light | deep.
         #[arg(long)]
         reflect: Option<Reflection>,
+        /// Synthesize a deep-research report at the close (one extra pass).
+        #[arg(long)]
+        deep_research: bool,
         /// Plain streaming output instead of the TUI.
         #[arg(long)]
         no_tui: bool,
@@ -81,13 +84,23 @@ async fn main() {
     let cli = Cli::parse();
     let result = match cli.command {
         None => cmd_run(RunArgs::default()).await,
-        Some(Command::Run { topic, providers, tier, max_turns, reflect, no_tui, scan }) => {
+        Some(Command::Run {
+            topic,
+            providers,
+            tier,
+            max_turns,
+            reflect,
+            deep_research,
+            no_tui,
+            scan,
+        }) => {
             cmd_run(RunArgs {
                 topic: topic.join(" "),
                 providers,
                 tier,
                 max_turns,
                 reflect,
+                deep_research,
                 no_tui,
                 scan,
             })
@@ -110,6 +123,7 @@ struct RunArgs {
     tier: Option<ReasoningTier>,
     max_turns: Option<u32>,
     reflect: Option<Reflection>,
+    deep_research: bool,
     no_tui: bool,
     scan: bool,
 }
@@ -134,6 +148,7 @@ async fn cmd_run(args: RunArgs) -> anyhow::Result<()> {
     if let Some(r) = args.reflect {
         config.reflection = r;
     }
+    config.deep_research = args.deep_research;
 
     // The *allowed* set: the `--providers` filter, or all eight. We deliberately
     // do NOT pre-filter by which keys are configured — a terminal-only/VPS user
@@ -316,6 +331,14 @@ async fn run_plain(engine: Engine) {
                             );
                         }
                         println!();
+                    }
+                    DebateEvent::DeepResearch(r) => {
+                        println!("\n══ Deep Research Report — {} ({}) ══", r.title, r.confidence.label());
+                        println!("{}\n", r.abstract_text);
+                        for sec in &r.sections {
+                            println!("• {} [{}]", sec.heading, sec.confidence.label());
+                            println!("  {}\n", sec.body);
+                        }
                     }
                     DebateEvent::Error(e) => eprintln!("\n[error] {e}"),
                     DebateEvent::Done => break,
