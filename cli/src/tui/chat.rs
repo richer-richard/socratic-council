@@ -1,9 +1,10 @@
 //! Chat view — the debate chamber: a streaming transcript, the live roster,
 //! a header with running usage, and a keybinding footer.
 
-use super::{theme, App, Debate};
+use super::{theme, App, Debate, TurnView};
+use crate::types::{ConclusionStatus, ModeratorConclusion};
 use ratatui::layout::{Constraint, Layout, Rect};
-use ratatui::style::{Modifier, Style};
+use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, List, ListItem, Paragraph, Wrap};
 use ratatui::Frame;
@@ -57,17 +58,13 @@ fn render_header(f: &mut Frame, area: Rect, d: &Debate) {
 fn render_transcript(f: &mut Frame, area: Rect, d: &mut Debate) {
     let mut lines: Vec<Line> = Vec::new();
     for turn in &d.turns {
-        push_turn(&mut lines, &turn.agent_id, &turn.name, &turn.model, &turn.content);
-    }
-    if d.show_thinking && !d.thinking.is_empty() {
-        lines.push(Line::from(Span::styled(
-            format!("  ⋯ {}", truncate(&d.thinking, 400)),
-            Style::default().fg(theme::DIM).add_modifier(Modifier::ITALIC),
-        )));
-        lines.push(Line::from(""));
+        push_turn(&mut lines, turn, d.show_thinking, false);
     }
     if let Some(s) = &d.streaming {
-        push_turn(&mut lines, &s.agent_id, &format!("{} ▌", s.name), &s.model, &s.content);
+        push_turn(&mut lines, s, d.show_thinking, true);
+    }
+    if let Some(c) = &d.conclusion {
+        push_conclusion(&mut lines, c);
     }
     if lines.is_empty() {
         lines.push(Line::from(Span::styled(
@@ -101,21 +98,88 @@ fn render_transcript(f: &mut Frame, area: Rect, d: &mut Debate) {
     f.render_widget(para, area);
 }
 
-fn push_turn(lines: &mut Vec<Line>, agent_id: &str, name: &str, model: &str, content: &str) {
-    let color = theme::speaker_color(agent_id);
+fn push_turn(lines: &mut Vec<Line<'static>>, t: &TurnView, show_thinking: bool, streaming: bool) {
+    let color = theme::speaker_color(&t.agent_id);
+    let name = if streaming { format!("{} ▌", t.name) } else { t.name.clone() };
     let mut header =
-        vec![Span::styled(name.to_string(), Style::default().fg(color).add_modifier(Modifier::BOLD))];
-    if !model.is_empty() {
-        header.push(Span::styled(format!("  {model}"), Style::default().fg(theme::DIM)));
+        vec![Span::styled(name, Style::default().fg(color).add_modifier(Modifier::BOLD))];
+    if !t.model.is_empty() {
+        header.push(Span::styled(format!("  {}", t.model), Style::default().fg(theme::DIM)));
     }
     lines.push(Line::from(header));
-    for line in content.lines() {
+
+    // Collapsible reasoning panel — quarantined above the spoken text, like the
+    // app. A dim one-line summary is always visible; the body shows when `t` is on.
+    if !t.thinking.trim().is_empty() {
+        let caret = if show_thinking { "⌃" } else { "⌄" };
+        let summary = if streaming && t.content.trim().is_empty() {
+            "  ⌄ thinking…".to_string()
+        } else if t.thinking_ms > 0 {
+            format!("  {caret} Thought for {:.1}s", t.thinking_ms as f64 / 1000.0)
+        } else {
+            format!("  {caret} reasoning")
+        };
+        lines.push(Line::from(Span::styled(summary, Style::default().fg(theme::MUTED))));
+        if show_thinking {
+            for line in t.thinking.lines() {
+                lines.push(Line::from(Span::styled(
+                    format!("    {line}"),
+                    Style::default().fg(theme::DIM).add_modifier(Modifier::ITALIC),
+                )));
+            }
+        }
+    }
+
+    for line in t.content.lines() {
         lines.push(Line::from(Span::styled(
             format!("  {line}"),
             Style::default().fg(theme::TEXT),
         )));
     }
     lines.push(Line::from(""));
+}
+
+/// The moderator's final scored verdict, rendered as a gold-accented card.
+fn push_conclusion(lines: &mut Vec<Line<'static>>, c: &ModeratorConclusion) {
+    let status_color = match c.status {
+        ConclusionStatus::Consensus => Color::Rgb(0x34, 0xD3, 0x99),
+        ConclusionStatus::Majority => theme::GOLD,
+        ConclusionStatus::Unresolved => Color::Rgb(0xFB, 0x71, 0x85),
+    };
+    lines.push(Line::from(Span::styled(
+        "  ── Council Verdict ──────────────────────────────",
+        Style::default().fg(theme::GOLD).add_modifier(Modifier::BOLD),
+    )));
+    lines.push(Line::from(vec![
+        Span::styled(
+            format!("  {} {}", c.status.glyph(), c.status.label()),
+            Style::default().fg(status_color).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(
+            format!("    Score {}/10", c.score),
+            Style::default().fg(theme::GOLD).add_modifier(Modifier::BOLD),
+        ),
+    ]));
+    for line in c.summary.lines() {
+        lines.push(Line::from(Span::styled(
+            format!("  {line}"),
+            Style::default().fg(theme::TEXT).add_modifier(Modifier::BOLD),
+        )));
+    }
+    if !c.reason.trim().is_empty() {
+        lines.push(labelled("  Reason  ", &c.reason));
+    }
+    if let Some(next) = c.next.as_deref().filter(|n| !n.trim().is_empty()) {
+        lines.push(labelled("  Next    ", next));
+    }
+    lines.push(Line::from(""));
+}
+
+fn labelled(label: &str, value: &str) -> Line<'static> {
+    Line::from(vec![
+        Span::styled(label.to_string(), Style::default().fg(theme::MUTED).add_modifier(Modifier::BOLD)),
+        Span::styled(value.to_string(), Style::default().fg(theme::MUTED)),
+    ])
 }
 
 fn render_roster(f: &mut Frame, area: Rect, d: &Debate, frame: u64) {

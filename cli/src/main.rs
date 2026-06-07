@@ -262,6 +262,18 @@ async fn run_plain(engine: Engine) {
                 let Some(ev) = maybe else { break };
                 match ev {
                     DebateEvent::Moderator(text) => println!("\n— {text}\n"),
+                    DebateEvent::Conclusion(c) => {
+                        println!("\n── Council Verdict ──");
+                        println!("{} {}    Score {}/10", c.status.glyph(), c.status.label(), c.score);
+                        println!("{}", c.summary);
+                        if !c.reason.trim().is_empty() {
+                            println!("Reason: {}", c.reason);
+                        }
+                        if let Some(next) = &c.next {
+                            println!("Next:   {next}");
+                        }
+                        println!();
+                    }
                     DebateEvent::TurnStarted { name, model, .. } => {
                         print!("\n{name} ({model}):\n  ");
                         let _ = std::io::stdout().flush();

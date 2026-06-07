@@ -75,6 +75,26 @@ A 256-bit AEAD key is already post-quantum-safe at rest (Grover → ~128-bit), s
 not an ML-KEM-style PQ KEM (that solves key *exchange*, not local encryption) — is the
 right primitive. **No keychain anywhere in the CLI** (removed July 2026).
 
+### Debate engine (`cli/src/engine/`, July 2026 — app-faithful orchestration)
+
+`mod.rs` drives the council; `moderator.rs` is the meta-agent. Prompts ported
+from the app (`Chat.tsx`): `base_system_prompt` is the rich group-chat prompt
+(anti-hallucination "do NOT fabricate facts/invent quotes" + concise 140-word +
+proactive rules + "only your spoken contribution"). **Two real bugs fixed here:**
+(1) the OpenAI-compatible providers (DeepSeek/Kimi/Qwen/Zhipu) never received the
+system prompt → Douglas rambled/invented; now prepended as a `system` message.
+(2) `ant_profile` mapped `claude-opus-4-8` to extended thinking, which the LIVE
+API rejects (`thinking.type.enabled` 400) → **Cathy failed every turn**; 4.8 is
+now adaptive-only (see [[anthropic-thinking-profile]]). `strip_directives` scrubs
+any leaked `@quote/@react/@tool/@canvas/@handoff/@vote/@end/@done` lines.
+**Moderator** (`ModeratorPick` prefers Google/utility tier) runs opening framing,
+synthesis every 7 turns, a resolution nudge near the cap, and a final **scored
+verdict** (`Consensus/Majority/Unresolved` + `Score X/10` + reason + next) parsed
+by `parse_conclusion` → `DebateEvent::Conclusion` → a gold verdict card in
+`chat.rs`. Per-message reasoning is carried on `TurnView.thinking`/`thinking_ms`
+and rendered as a collapsible "Thought for Xs" panel (`t` toggles). Reflection /
+end-vote / peer-eval / deep-research / canvas are the next port increments.
+
 ### Desktop bridge (`cli/src/bridge.rs`, feature `desktop-bridge`, default on)
 
 Shares the **desktop app's keys + config + sessions** so the user never re-enters a

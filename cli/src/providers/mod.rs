@@ -64,9 +64,10 @@ enum AntMode {
 }
 
 fn ant_profile(model: &str) -> (AntMode, bool) {
-    if model.contains("opus-4-8") {
-        (AntMode::Extended, false)
-    } else if model.contains("opus-4-7") {
+    // (mode, prohibits_sampling). The live API is authoritative and non-monotonic:
+    // claude-opus-4-8 rejects `thinking.type.enabled` ("Use thinking.type.adaptive")
+    // and rejects an explicit temperature — so 4.8, like 4.7, is adaptive-only.
+    if model.contains("opus-4-8") || model.contains("opus-4-7") {
         (AntMode::Adaptive, true)
     } else if model.contains("opus-4-6") {
         (AntMode::Adaptive, false)
@@ -215,11 +216,21 @@ fn prepare(provider: Provider, base_url: &str, api_key: &str, req: &CompletionRe
         }
         // OpenAI-compatible chat-completions providers.
         Provider::DeepSeek | Provider::Kimi | Provider::Qwen | Provider::Zhipu => {
-            let messages: Vec<Value> = req
-                .messages
-                .iter()
-                .map(|m| json!({ "role": role_str(m.role), "content": m.content }))
-                .collect();
+            // Carry the system prompt as the leading `system` message — these
+            // providers have no separate field for it. Without this the agent
+            // never learns its role/constraints and rambles or invents.
+            let mut messages: Vec<Value> = Vec::new();
+            if let Some(system) = &req.system {
+                if !system.trim().is_empty() {
+                    messages.push(json!({ "role": "system", "content": system }));
+                }
+            }
+            messages.extend(
+                req.messages
+                    .iter()
+                    .filter(|m| m.role != Role::System)
+                    .map(|m| json!({ "role": role_str(m.role), "content": m.content })),
+            );
             let mut body = json!({
                 "model": req.model,
                 "messages": messages,
@@ -387,4 +398,47 @@ pub async fn stream_completion(
     }
 
     Ok(usage)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::types::CompletionRequest;
+
+    fn req(model: &str) -> CompletionRequest {
+        CompletionRequest {
+            model: model.to_string(),
+            system: Some("You are Douglas in the Socratic Council.".into()),
+            messages: vec![ChatMessage::user("debate this")],
+            max_tokens: 256,
+            temperature: 1.0,
+            tier: ReasoningTier::High,
+        }
+    }
+
+    /// Regression: every provider must actually transmit the system prompt.
+    /// The OpenAI-compatible providers previously dropped it entirely.
+    #[test]
+    fn system_prompt_is_sent_to_every_provider() {
+        let needle = "Douglas in the Socratic Council";
+        for provider in Provider::ALL {
+            let p = prepare(provider, "https://example.com", "k", &req("some-model"));
+            let body = serde_json::to_string(&p.body).unwrap();
+            assert!(
+                body.contains(needle),
+                "{provider:?} request is missing the system prompt: {body}"
+            );
+        }
+    }
+
+    /// The OpenAI-compatible providers must carry it as a leading system message.
+    #[test]
+    fn openai_compatible_prepends_system_message() {
+        for provider in [Provider::DeepSeek, Provider::Kimi, Provider::Qwen, Provider::Zhipu] {
+            let p = prepare(provider, "https://example.com", "k", &req("chat"));
+            let msgs = p.body["messages"].as_array().expect("messages array");
+            assert_eq!(msgs[0]["role"], "system", "{provider:?} should lead with system");
+            assert!(msgs[0]["content"].as_str().unwrap().contains("Douglas"));
+        }
+    }
 }

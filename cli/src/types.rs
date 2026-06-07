@@ -180,3 +180,40 @@ pub struct CompletionChunk {
     pub content: String,
     pub thinking: String,
 }
+
+/// The Moderator's official closing verdict — mirrors the app's
+/// `ModeratorConclusionSnapshot`. Parsed from the moderator's final-summary text.
+#[derive(Debug, Clone)]
+pub struct ModeratorConclusion {
+    pub status: ConclusionStatus,
+    pub summary: String,
+    pub score: u8, // 0..=10
+    pub reason: String,
+    pub next: Option<String>,
+}
+
+/// Outcome label the moderator leads its verdict with.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConclusionStatus {
+    Consensus,
+    Majority,
+    Unresolved,
+}
+
+impl ConclusionStatus {
+    pub fn label(self) -> &'static str {
+        match self {
+            ConclusionStatus::Consensus => "Consensus",
+            ConclusionStatus::Majority => "Majority with dissent",
+            ConclusionStatus::Unresolved => "Unresolved",
+        }
+    }
+    /// The disclosure glyph shown in the conclusion card.
+    pub fn glyph(self) -> &'static str {
+        match self {
+            ConclusionStatus::Consensus => "✓",
+            ConclusionStatus::Majority => "≈",
+            ConclusionStatus::Unresolved => "✕",
+        }
+    }
+}
