@@ -16,7 +16,8 @@ use crate::catalog::{resolve_model, DiscoveredModel};
 use crate::config::{Config, KeySource};
 use crate::engine::{default_agents, DebateEvent, Engine};
 use crate::types::{
-    Agent, DeepResearchReport, ModeratorConclusion, PeerEvalRound, Provider, Usage, VoteChoice,
+    Agent, CanvasSection, DeepResearchReport, ModeratorConclusion, PeerEvalRound, Provider, Usage,
+    VoteChoice,
 };
 use crossterm::event::{
     self, DisableBracketedPaste, EnableBracketedPaste, Event, KeyCode, KeyEvent, KeyEventKind,
@@ -76,6 +77,8 @@ pub struct TurnView {
     pub content: String,
     pub thinking: String,
     pub thinking_ms: u64,
+    /// Snapshot of this agent's private canvas as of this turn (if updated).
+    pub canvas: Vec<CanvasSection>,
 }
 
 impl TurnView {
@@ -87,6 +90,7 @@ impl TurnView {
             content,
             thinking: String::new(),
             thinking_ms: 0,
+            canvas: Vec::new(),
         }
     }
 }
@@ -179,6 +183,7 @@ impl Debate {
                     content: String::new(),
                     thinking: String::new(),
                     thinking_ms: 0,
+                    canvas: Vec::new(),
                 });
             }
             DebateEvent::Token(t) => {
@@ -225,6 +230,15 @@ impl Debate {
             DebateEvent::EndVoteResult { passed, yes, no, abstain } => {
                 if let Some(b) = self.vote_boards.last_mut() {
                     b.result = Some(VoteResult { passed, yes, no, abstain });
+                }
+            }
+            DebateEvent::Canvas { agent_id, sections, .. } => {
+                // Attach to this agent's live or most-recent turn.
+                if let Some(s) = self.streaming.as_mut().filter(|s| s.agent_id == agent_id) {
+                    s.canvas = sections;
+                } else if let Some(t) = self.turns.iter_mut().rev().find(|t| t.agent_id == agent_id)
+                {
+                    t.canvas = sections;
                 }
             }
             DebateEvent::PeerEval(round) => self.peer_eval = Some(round),
@@ -907,6 +921,10 @@ mod tests {
                 content: "First line.\nSecond line.".into(),
                 thinking: "weighing the trade-offs".into(),
                 thinking_ms: 1234,
+                canvas: vec![CanvasSection {
+                    label: "Key Points".into(),
+                    text: "- cost vs benefit\n- who decides".into(),
+                }],
             }],
             streaming: Some(TurnView {
                 agent_id: "cathy".into(),
@@ -915,6 +933,7 @@ mod tests {
                 content: "streaming…".into(),
                 thinking: String::new(),
                 thinking_ms: 0,
+                canvas: Vec::new(),
             }),
             active: Some("Cathy".into()),
             usage: Usage::default(),

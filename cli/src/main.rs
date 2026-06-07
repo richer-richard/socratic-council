@@ -298,16 +298,20 @@ async fn run_plain(engine: Engine) {
                         println!();
                     }
                     DebateEvent::TurnStarted { name, model, .. } => {
-                        print!("\n{name} ({model}):\n  ");
+                        print!("\n{name} ({model}):\n");
                         let _ = std::io::stdout().flush();
                         current.clear();
                     }
-                    DebateEvent::Token(t) => {
-                        current.push_str(&t);
-                        print!("{t}");
-                        let _ = std::io::stdout().flush();
+                    // Accumulate the turn; print the directive-stripped message at
+                    // the end so piped output stays clean (no @canvas/@end lines).
+                    DebateEvent::Token(t) => current.push_str(&t),
+                    DebateEvent::TurnEnded { .. } => {
+                        let (clean, _) = socratic_council::engine::strip_directives(&current);
+                        for line in clean.lines() {
+                            println!("  {line}");
+                        }
+                        println!();
                     }
-                    DebateEvent::TurnEnded { .. } => println!(),
                     DebateEvent::EndVoteStarted { proposer, threshold, total } => {
                         println!("\n── End Vote · moved by {proposer} (needs {threshold}/{total} YES) ──");
                     }

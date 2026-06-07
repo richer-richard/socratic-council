@@ -6,8 +6,8 @@ use crate::catalog::{resolve_model, DiscoveredModel};
 use crate::config::Config;
 use crate::providers::stream_completion;
 use crate::types::{
-    Agent, ChatMessage, CompletionChunk, CompletionRequest, DeepResearchReport, ModeratorConclusion,
-    PeerEvalRound, Provider, ReasoningTier, Reflection, Usage, VoteChoice,
+    Agent, CanvasSection, ChatMessage, CompletionChunk, CompletionRequest, DeepResearchReport,
+    ModeratorConclusion, PeerEvalRound, Provider, ReasoningTier, Reflection, Usage, VoteChoice,
 };
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -15,6 +15,7 @@ use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::mpsc::UnboundedSender;
 
+mod canvas;
 mod deepresearch;
 mod moderator;
 mod peereval;
@@ -34,6 +35,8 @@ pub enum DebateEvent {
     Token(String),
     Thinking(String),
     TurnEnded { usage: Usage, thinking_ms: u64 },
+    /// An agent's private canvas was updated this turn.
+    Canvas { agent_id: String, name: String, sections: Vec<CanvasSection> },
     /// An agent moved to end the session — the council now votes.
     EndVoteStarted { proposer: String, threshold: u32, total: u32 },
     /// One agent's cast ballot.
@@ -67,8 +70,9 @@ You are in a real-time group chat. Keep responses short, pointed, and decision-o
 - If the discussion is mature, prefer synthesis and a clear choice over novelty.\n\
 - When you make a strong claim, name something specific that would change your mind, or a concrete case where it would fail.\n\
 - Surface the real disagreement early, then help the group reach a clear closing result. The goal is not endless debate.\n\
-- If the room has clearly converged and more debate would be repetitive, append @end() on its own line after your closing message to request the closing round.\n\n\
-Respond with ONLY your spoken contribution — no headings, no meta-commentary, no stage directions, and never narrate your reasoning."
+- If the room has clearly converged and more debate would be repetitive, append @end() on its own line after your closing message to request the closing round.\n\
+- You have a private canvas — a scratchpad only you see. On its own line you may jot or refine your key points with @canvas({{\"op\":\"append\",\"section\":\"TITLE\",\"text\":\"...\"}}); it persists across your turns and is never shown to the others.\n\n\
+Respond with ONLY your spoken contribution (plus any @canvas/@end lines) — no headings, no meta-commentary, no stage directions, and never narrate your reasoning."
     )
 }
 
@@ -133,7 +137,14 @@ pub struct Turn {
 }
 
 /// Build the per-agent message list (system handled separately by providers).
-fn build_messages(agent: &Agent, topic: &str, transcript: &[Turn]) -> Vec<ChatMessage> {
+/// `canvas_summary` is the agent's own persistent scratchpad, re-injected so it
+/// can build on it — visible only to this agent.
+fn build_messages(
+    agent: &Agent,
+    topic: &str,
+    transcript: &[Turn],
+    canvas_summary: &str,
+) -> Vec<ChatMessage> {
     let mut messages = Vec::new();
     messages.push(ChatMessage::user(format!(
         "The council is debating: \"{topic}\".\nEngage with the others' points and move toward a conclusion."
@@ -145,6 +156,15 @@ fn build_messages(agent: &Agent, topic: &str, transcript: &[Turn]) -> Vec<ChatMe
             messages.push(ChatMessage::user(format!("[{}]: {}", turn.name, turn.content)));
         }
     }
+    if !canvas_summary.trim().is_empty() {
+        messages.push(ChatMessage::user(format!(
+            "[Your persistent canvas — your own notes from earlier turns, not visible to the others]\n{canvas_summary}"
+        )));
+    }
+    // Final per-turn instruction (mirrors the app): jot the canvas first, then speak.
+    messages.push(ChatMessage::user(
+        "Your turn. First, on its own line, capture or refine your key points on your private canvas with an @canvas({\"op\":\"append\",\"section\":\"Key Points\",\"text\":\"...\"}) line (build on it if it already exists). Then respond directly to one specific point above and push the group toward a decision.",
+    ));
     messages
 }
 
@@ -225,6 +245,7 @@ impl Engine {
 
         let mut transcript: Vec<Turn> = Vec::new();
         let mut last_spoke: HashMap<String, i64> = HashMap::new();
+        let mut canvases: HashMap<String, Vec<CanvasSection>> = HashMap::new();
         let mut resolution_nudged = false;
 
         for turn in 0..self.max_turns as i64 {
@@ -250,10 +271,12 @@ impl Engine {
                 model: model.clone(),
             });
 
+            let canvas_summary =
+                canvases.get(&agent.id).map(|c| canvas::summary(c)).unwrap_or_default();
             let req = CompletionRequest {
                 model: model.clone(),
                 system: Some(agent.system_prompt.clone()),
-                messages: build_messages(&agent, &self.topic, &transcript),
+                messages: build_messages(&agent, &self.topic, &transcript, &canvas_summary),
                 max_tokens: 2048,
                 temperature: 1.0,
                 tier: agent.tier,
@@ -325,6 +348,15 @@ impl Engine {
                         }
                     }
                     let _ = tx.send(DebateEvent::TurnEnded { usage, thinking_ms });
+                    // Update this agent's private canvas from its @canvas directives.
+                    let agent_canvas = canvases.entry(agent.id.clone()).or_default();
+                    if canvas::apply_directives(agent_canvas, &full) {
+                        let _ = tx.send(DebateEvent::Canvas {
+                            agent_id: agent.id.clone(),
+                            name: agent.name.clone(),
+                            sections: agent_canvas.clone(),
+                        });
+                    }
                     if !content.is_empty() {
                         transcript.push(Turn {
                             agent_id: agent.id.clone(),
@@ -563,7 +595,7 @@ mod tests {
             Turn { agent_id: george.id.clone(), name: "George".into(), content: "hi".into() },
             Turn { agent_id: "cathy".into(), name: "Cathy".into(), content: "hello".into() },
         ];
-        let msgs = build_messages(george, "topic", &transcript);
+        let msgs = build_messages(george, "topic", &transcript, "");
         // user framing + own(assistant) + other(user)
         assert!(matches!(msgs[1].role, crate::types::Role::Assistant));
         assert!(msgs[2].content.starts_with("[Cathy]"));

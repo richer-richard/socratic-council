@@ -106,9 +106,15 @@ JSON), aggregated into a ranked heatmap scorecard (`push_scorecard`) with sharpe
 critiques. **Deep-research** (`deepresearch.rs`, v0.9.0, opt-in `--deep-research`):
 a streamlined single-pass synthesis over the transcript (vs the app's 4-phase
 planner→researcher→synthesizer→formatter) → a report card (title + confidence,
-abstract, 3-6 confidence-tagged sections) via `push_research`. **Canvas is the
-last remaining port increment; live web/file search needs a search backend +
-attachments, and observer-circle / fact-check / argument-map are deferred.**
+abstract, 3-6 confidence-tagged sections) via `push_research`. **Canvas**
+(`canvas.rs`, v0.10.0): the per-turn instruction tells each agent to jot key
+points with `@canvas({op,section,text})`; `apply_directives` updates a per-agent
+scratchpad (max 5 sections), `summary` re-injects it into ONLY that agent's next
+prompt, and a `DebateEvent::Canvas` attaches a snapshot to the turn → a
+collapsible canvas block keyed by the agent color. Plain `--no-tui` prints the
+directive-stripped message per turn. **All named activities are ported; live
+web/file search needs a search backend + attachments, and observer-circle /
+fact-check / argument-map remain deferred.**
 
 ### Desktop bridge (`cli/src/bridge.rs`, feature `desktop-bridge`, default on)
 
