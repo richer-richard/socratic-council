@@ -4,7 +4,7 @@
 use crate::bridge::DesktopBridge;
 use crate::crypto;
 use crate::error::{Error, Result};
-use crate::types::{Provider, ReasoningTier};
+use crate::types::{Provider, ReasoningTier, Reflection};
 use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
@@ -106,6 +106,11 @@ pub struct Config {
     /// already holds. Never serialized.
     #[serde(skip)]
     bridge: DesktopBridge,
+
+    /// Draft→revise reflection mode — a runtime CLI option (`--reflect`), not
+    /// persisted.
+    #[serde(skip)]
+    pub reflection: Reflection,
 }
 
 // Manual Debug so a stray `{config:?}` / `dbg!` / anyhow context can never
@@ -148,6 +153,7 @@ impl Default for Config {
             keys: BTreeMap::new(),
             env_keys: BTreeSet::new(),
             bridge: DesktopBridge::default(),
+            reflection: Reflection::Off,
         }
     }
 }

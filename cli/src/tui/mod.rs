@@ -191,6 +191,9 @@ impl Debate {
                 self.usage.reasoning += usage.reasoning;
                 if let Some(mut s) = self.streaming.take() {
                     s.thinking_ms = thinking_ms;
+                    // The live stream showed raw tokens; scrub any @-directives
+                    // (e.g. a trailing @end()) before the turn lands in the chamber.
+                    s.content = crate::engine::strip_directives(&s.content).0;
                     // Keep a turn that produced reasoning even if its visible text
                     // was all directives — but drop fully-empty turns.
                     if !s.content.trim().is_empty() || !s.thinking.trim().is_empty() {

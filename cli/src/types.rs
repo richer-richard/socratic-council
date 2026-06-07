@@ -117,6 +117,27 @@ impl std::str::FromStr for ReasoningTier {
     }
 }
 
+/// Optional draft → critique → revise pass after each council turn (off default).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Reflection {
+    #[default]
+    Off,
+    Light,
+    Deep,
+}
+
+impl std::str::FromStr for Reflection {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_ascii_lowercase().as_str() {
+            "off" | "none" => Ok(Reflection::Off),
+            "light" => Ok(Reflection::Light),
+            "deep" => Ok(Reflection::Deep),
+            other => Err(format!("unknown reflection mode: {other} (use off|light|deep)")),
+        }
+    }
+}
+
 /// A message role in the conversation transcript.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]

@@ -7,7 +7,7 @@ use crate::config::Config;
 use crate::providers::stream_completion;
 use crate::types::{
     Agent, ChatMessage, CompletionChunk, CompletionRequest, ModeratorConclusion, Provider,
-    ReasoningTier, Usage, VoteChoice,
+    ReasoningTier, Reflection, Usage, VoteChoice,
 };
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -16,6 +16,7 @@ use std::time::Instant;
 use tokio::sync::mpsc::UnboundedSender;
 
 mod moderator;
+mod reflect;
 mod vote;
 use moderator::ModeratorPick;
 
@@ -244,13 +245,18 @@ impl Engine {
             });
 
             let req = CompletionRequest {
-                model,
+                model: model.clone(),
                 system: Some(agent.system_prompt.clone()),
                 messages: build_messages(&agent, &self.topic, &transcript),
                 max_tokens: 2048,
                 temperature: 1.0,
                 tier: agent.tier,
             };
+
+            // With reflection on, the streamed draft is internal: suppress live
+            // tokens, revise, then reveal the final text at once.
+            let reflect_mode = self.config.reflection;
+            let reflecting = reflect_mode != Reflection::Off;
 
             let started = Instant::now();
             let mut full = String::new();
@@ -259,7 +265,9 @@ impl Engine {
                 let mut on_chunk = |chunk: &CompletionChunk| {
                     if !chunk.content.is_empty() {
                         full.push_str(&chunk.content);
-                        let _ = tx.send(DebateEvent::Token(chunk.content.clone()));
+                        if !reflecting {
+                            let _ = tx.send(DebateEvent::Token(chunk.content.clone()));
+                        }
                     }
                     if !chunk.thinking.is_empty() {
                         had_thinking = true;
@@ -285,10 +293,32 @@ impl Engine {
                     } else {
                         0
                     };
-                    let _ = tx.send(DebateEvent::TurnEnded { usage, thinking_ms });
                     // Strip any leaked @-protocol directives before the line lands
                     // in the public transcript (the agents are trained on them).
-                    let (content, requested_end) = strip_directives(&full);
+                    let (mut content, requested_end) = strip_directives(&full);
+                    // Reflection pass: revise the hidden draft, then reveal it.
+                    if reflecting && !content.is_empty() {
+                        if let Some(revised) = reflect::revise(
+                            &self.http,
+                            provider,
+                            &base_url,
+                            &api_key,
+                            &model,
+                            &agent.system_prompt,
+                            &recent_tail(&transcript, 6),
+                            &content,
+                            &agent.name,
+                            reflect_mode,
+                        )
+                        .await
+                        {
+                            content = strip_directives(&revised).0;
+                        }
+                        if !content.is_empty() {
+                            let _ = tx.send(DebateEvent::Token(content.clone()));
+                        }
+                    }
+                    let _ = tx.send(DebateEvent::TurnEnded { usage, thinking_ms });
                     if !content.is_empty() {
                         transcript.push(Turn {
                             agent_id: agent.id.clone(),
