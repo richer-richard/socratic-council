@@ -192,6 +192,24 @@ pub struct ModeratorConclusion {
     pub next: Option<String>,
 }
 
+/// A council agent's ballot when someone moves to end the session.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VoteChoice {
+    Yes,
+    No,
+    Abstain,
+}
+
+impl VoteChoice {
+    pub fn label(self) -> &'static str {
+        match self {
+            VoteChoice::Yes => "YES",
+            VoteChoice::No => "NO",
+            VoteChoice::Abstain => "ABSTAIN",
+        }
+    }
+}
+
 /// Outcome label the moderator leads its verdict with.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ConclusionStatus {

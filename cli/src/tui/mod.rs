@@ -15,7 +15,7 @@ mod theme;
 use crate::catalog::{resolve_model, DiscoveredModel};
 use crate::config::{Config, KeySource};
 use crate::engine::{default_agents, DebateEvent, Engine};
-use crate::types::{Agent, ModeratorConclusion, Provider, Usage};
+use crate::types::{Agent, ModeratorConclusion, Provider, Usage, VoteChoice};
 use crossterm::event::{
     self, DisableBracketedPaste, EnableBracketedPaste, Event, KeyCode, KeyEvent, KeyEventKind,
     KeyModifiers,
@@ -89,6 +89,23 @@ impl TurnView {
     }
 }
 
+/// A single end-vote round, accumulated from the vote events.
+pub struct VoteBoard {
+    pub proposer: String,
+    pub threshold: u32,
+    pub total: u32,
+    pub votes: Vec<(String, VoteChoice, String)>,
+    pub result: Option<VoteResult>,
+}
+
+/// The tally of a finished end-vote.
+pub struct VoteResult {
+    pub passed: bool,
+    pub yes: u32,
+    pub no: u32,
+    pub abstain: u32,
+}
+
 /// One row in the history sidebar — a saved desktop session.
 #[derive(Clone)]
 pub struct SessionRow {
@@ -123,6 +140,8 @@ pub struct Debate {
     pub usage: Usage,
     pub turn_count: u32,
     pub status: String,
+    /// End-vote rounds, in the order they occurred.
+    pub vote_boards: Vec<VoteBoard>,
     /// The moderator's final scored verdict, once published.
     pub conclusion: Option<ModeratorConclusion>,
     pub show_thinking: bool,
@@ -179,6 +198,25 @@ impl Debate {
                     }
                 }
                 self.active = None;
+            }
+            DebateEvent::EndVoteStarted { proposer, threshold, total } => {
+                self.vote_boards.push(VoteBoard {
+                    proposer,
+                    threshold,
+                    total,
+                    votes: Vec::new(),
+                    result: None,
+                });
+            }
+            DebateEvent::Vote { name, choice, reason, .. } => {
+                if let Some(b) = self.vote_boards.last_mut() {
+                    b.votes.push((name, choice, reason));
+                }
+            }
+            DebateEvent::EndVoteResult { passed, yes, no, abstain } => {
+                if let Some(b) = self.vote_boards.last_mut() {
+                    b.result = Some(VoteResult { passed, yes, no, abstain });
+                }
             }
             DebateEvent::Error(e) => self.turns.push(TurnView::note("error", "⚠ Error", e)),
             DebateEvent::Done => {
@@ -383,6 +421,7 @@ impl App {
             usage: Usage::default(),
             turn_count: 0,
             status: "Convening…".into(),
+            vote_boards: Vec::new(),
             conclusion: None,
             show_thinking: false,
             follow: true,
@@ -464,6 +503,7 @@ impl App {
             usage: Usage::default(),
             turn_count: row.turns,
             status: "Saved session · read-only".into(),
+            vote_boards: Vec::new(),
             conclusion: None,
             show_thinking: false,
             follow: false,
@@ -865,6 +905,7 @@ mod tests {
             usage: Usage::default(),
             turn_count: 2,
             status: "Discussion".into(),
+            vote_boards: Vec::new(),
             conclusion: Some(ModeratorConclusion {
                 status: crate::types::ConclusionStatus::Majority,
                 summary: "Leaning yes with reservations.".into(),
