@@ -1,8 +1,8 @@
 //! Chat view — the debate chamber: a streaming transcript, the live roster,
 //! a header with running usage, and a keybinding footer.
 
-use super::{theme, App, Debate, TurnView};
-use crate::types::{ConclusionStatus, ModeratorConclusion};
+use super::{theme, App, Debate, TurnView, VoteBoard};
+use crate::types::{ConclusionStatus, ModeratorConclusion, VoteChoice};
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
@@ -62,6 +62,9 @@ fn render_transcript(f: &mut Frame, area: Rect, d: &mut Debate) {
     }
     if let Some(s) = &d.streaming {
         push_turn(&mut lines, s, d.show_thinking, true);
+    }
+    for board in &d.vote_boards {
+        push_vote_board(&mut lines, board);
     }
     if let Some(c) = &d.conclusion {
         push_conclusion(&mut lines, c);
@@ -173,6 +176,54 @@ fn push_conclusion(lines: &mut Vec<Line<'static>>, c: &ModeratorConclusion) {
         lines.push(labelled("  Next    ", next));
     }
     lines.push(Line::from(""));
+}
+
+/// An end-vote round, rendered as a tally card.
+fn push_vote_board(lines: &mut Vec<Line<'static>>, b: &VoteBoard) {
+    lines.push(Line::from(Span::styled(
+        format!(
+            "  ── End Vote · moved by {} ──  (needs {}/{} YES)",
+            b.proposer, b.threshold, b.total
+        ),
+        Style::default().fg(theme::GOLD).add_modifier(Modifier::BOLD),
+    )));
+    for (name, choice, reason) in &b.votes {
+        let mut spans = vec![
+            Span::styled(format!("  {:<9}", name), Style::default().fg(theme::TEXT)),
+            Span::styled(
+                format!("{:<8}", choice.label()),
+                Style::default().fg(vote_color(*choice)).add_modifier(Modifier::BOLD),
+            ),
+        ];
+        if !reason.trim().is_empty() {
+            spans.push(Span::styled(truncate(reason, 56), Style::default().fg(theme::DIM)));
+        }
+        lines.push(Line::from(spans));
+    }
+    if let Some(r) = &b.result {
+        let (label, color) = if r.passed {
+            ("PASSED", Color::Rgb(0x34, 0xD3, 0x99))
+        } else {
+            ("FAILED", Color::Rgb(0xFB, 0x71, 0x85))
+        };
+        lines.push(Line::from(vec![
+            Span::styled("  Result: ", Style::default().fg(theme::MUTED)),
+            Span::styled(label, Style::default().fg(color).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                format!("  — YES {} · NO {} · ABSTAIN {}", r.yes, r.no, r.abstain),
+                Style::default().fg(theme::MUTED),
+            ),
+        ]));
+    }
+    lines.push(Line::from(""));
+}
+
+fn vote_color(c: VoteChoice) -> Color {
+    match c {
+        VoteChoice::Yes => Color::Rgb(0x34, 0xD3, 0x99),
+        VoteChoice::No => Color::Rgb(0xFB, 0x71, 0x85),
+        VoteChoice::Abstain => theme::MUTED,
+    }
 }
 
 fn labelled(label: &str, value: &str) -> Line<'static> {

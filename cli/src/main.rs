@@ -285,6 +285,18 @@ async fn run_plain(engine: Engine) {
                         let _ = std::io::stdout().flush();
                     }
                     DebateEvent::TurnEnded { .. } => println!(),
+                    DebateEvent::EndVoteStarted { proposer, threshold, total } => {
+                        println!("\n── End Vote · moved by {proposer} (needs {threshold}/{total} YES) ──");
+                    }
+                    DebateEvent::Vote { name, choice, reason, .. } => {
+                        println!("  {name}: {} — {reason}", choice.label());
+                    }
+                    DebateEvent::EndVoteResult { passed, yes, no, abstain } => {
+                        println!(
+                            "  Result: {} — YES {yes} · NO {no} · ABSTAIN {abstain}\n",
+                            if passed { "PASSED" } else { "FAILED" }
+                        );
+                    }
                     DebateEvent::Error(e) => eprintln!("\n[error] {e}"),
                     DebateEvent::Done => break,
                     _ => {}

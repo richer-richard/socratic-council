@@ -92,8 +92,12 @@ synthesis every 7 turns, a resolution nudge near the cap, and a final **scored
 verdict** (`Consensus/Majority/Unresolved` + `Score X/10` + reason + next) parsed
 by `parse_conclusion` → `DebateEvent::Conclusion` → a gold verdict card in
 `chat.rs`. Per-message reasoning is carried on `TurnView.thinking`/`thinking_ms`
-and rendered as a collapsible "Thought for Xs" panel (`t` toggles). Reflection /
-end-vote / peer-eval / deep-research / canvas are the next port increments.
+and rendered as a collapsible "Thought for Xs" panel (`t` toggles). **End-vote**
+(`vote.rs`, v0.6.0): an agent appends `@end()` → `strip_directives` flags it →
+`run_end_vote` polls every other agent (`Vote: YES/NO/ABSTAIN` + reason, parsed by
+`parse_vote`), majority `floor(n/2)+1` passes → closing round; rendered as a vote
+board (`push_vote_board`). Reflection / peer-eval / deep-research / canvas are the
+remaining port increments.
 
 ### Desktop bridge (`cli/src/bridge.rs`, feature `desktop-bridge`, default on)
 

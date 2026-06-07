@@ -7,7 +7,7 @@ use crate::config::Config;
 use crate::providers::stream_completion;
 use crate::types::{
     Agent, ChatMessage, CompletionChunk, CompletionRequest, ModeratorConclusion, Provider,
-    ReasoningTier, Usage,
+    ReasoningTier, Usage, VoteChoice,
 };
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -16,6 +16,7 @@ use std::time::Instant;
 use tokio::sync::mpsc::UnboundedSender;
 
 mod moderator;
+mod vote;
 use moderator::ModeratorPick;
 
 /// Events streamed from the orchestrator to whatever drives the UI.
@@ -30,6 +31,12 @@ pub enum DebateEvent {
     Token(String),
     Thinking(String),
     TurnEnded { usage: Usage, thinking_ms: u64 },
+    /// An agent moved to end the session — the council now votes.
+    EndVoteStarted { proposer: String, threshold: u32, total: u32 },
+    /// One agent's cast ballot.
+    Vote { agent_id: String, name: String, choice: VoteChoice, reason: String },
+    /// The vote outcome.
+    EndVoteResult { passed: bool, yes: u32, no: u32, abstain: u32 },
     Error(String),
     Done,
 }
@@ -52,7 +59,8 @@ You are in a real-time group chat. Keep responses short, pointed, and decision-o
 - Do not reopen settled points unless you have new evidence or a better standard.\n\
 - If the discussion is mature, prefer synthesis and a clear choice over novelty.\n\
 - When you make a strong claim, name something specific that would change your mind, or a concrete case where it would fail.\n\
-- Surface the real disagreement early, then help the group reach a clear closing result. The goal is not endless debate.\n\n\
+- Surface the real disagreement early, then help the group reach a clear closing result. The goal is not endless debate.\n\
+- If the room has clearly converged and more debate would be repetitive, append @end() on its own line after your closing message to request the closing round.\n\n\
 Respond with ONLY your spoken contribution — no headings, no meta-commentary, no stage directions, and never narrate your reasoning."
     )
 }
@@ -269,6 +277,7 @@ impl Engine {
                 .await
             };
 
+            let mut proposed_end = false;
             match result {
                 Ok(usage) => {
                     let thinking_ms = if had_thinking {
@@ -279,7 +288,7 @@ impl Engine {
                     let _ = tx.send(DebateEvent::TurnEnded { usage, thinking_ms });
                     // Strip any leaked @-protocol directives before the line lands
                     // in the public transcript (the agents are trained on them).
-                    let (content, _requested_end) = strip_directives(&full);
+                    let (content, requested_end) = strip_directives(&full);
                     if !content.is_empty() {
                         transcript.push(Turn {
                             agent_id: agent.id.clone(),
@@ -287,10 +296,21 @@ impl Engine {
                             content,
                         });
                     }
+                    proposed_end = requested_end;
                 }
                 Err(e) => {
                     let _ = tx.send(DebateEvent::Error(format!("{} failed: {e}", agent.name)));
                 }
+            }
+
+            // An agent moved to end → the council votes. A passing motion goes
+            // straight to the closing round.
+            if proposed_end
+                && self.agents.len() > 1
+                && !transcript.is_empty()
+                && self.run_end_vote(&agent, &transcript, &tx).await
+            {
+                break;
             }
 
             // Moderator cadence (only with a moderator runtime).
@@ -376,6 +396,72 @@ impl Engine {
             }
         }
         None
+    }
+
+    /// Run a single end-vote round. The proposer is a YES; every other keyed
+    /// agent casts a ballot in turn. Returns whether the motion passed.
+    async fn run_end_vote(
+        &self,
+        proposer: &Agent,
+        transcript: &[Turn],
+        tx: &UnboundedSender<DebateEvent>,
+    ) -> bool {
+        let total = self.agents.len();
+        let threshold = vote::threshold(total);
+        let _ = tx.send(DebateEvent::EndVoteStarted {
+            proposer: proposer.name.clone(),
+            threshold,
+            total: total as u32,
+        });
+        let recent = recent_tail(transcript, 12);
+
+        // The proposer's move counts as a YES.
+        let (mut yes, mut no, mut abstain) = (1u32, 0u32, 0u32);
+        let _ = tx.send(DebateEvent::Vote {
+            agent_id: proposer.id.clone(),
+            name: proposer.name.clone(),
+            choice: VoteChoice::Yes,
+            reason: "moved to end the session".into(),
+        });
+
+        for agent in &self.agents {
+            if agent.id == proposer.id {
+                continue;
+            }
+            let Some(key) = self.keys.get(&agent.provider) else {
+                continue;
+            };
+            let model = self.model_for(agent);
+            let (choice, reason) = vote::cast(
+                &self.http,
+                agent.provider,
+                &self.config.base_url(agent.provider),
+                key,
+                &model,
+                &agent.system_prompt,
+                &self.topic,
+                &recent,
+                &proposer.name,
+                total,
+                agent.tier,
+            )
+            .await;
+            match choice {
+                VoteChoice::Yes => yes += 1,
+                VoteChoice::No => no += 1,
+                VoteChoice::Abstain => abstain += 1,
+            }
+            let _ = tx.send(DebateEvent::Vote {
+                agent_id: agent.id.clone(),
+                name: agent.name.clone(),
+                choice,
+                reason,
+            });
+        }
+
+        let passed = yes >= threshold;
+        let _ = tx.send(DebateEvent::EndVoteResult { passed, yes, no, abstain });
+        passed
     }
 }
 
