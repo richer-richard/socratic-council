@@ -117,6 +117,48 @@ impl std::str::FromStr for ReasoningTier {
     }
 }
 
+/// Confidence band on a research finding (mirrors the app's high/medium/low).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Confidence {
+    High,
+    Medium,
+    Low,
+}
+
+impl Confidence {
+    pub fn label(self) -> &'static str {
+        match self {
+            Confidence::High => "high",
+            Confidence::Medium => "medium",
+            Confidence::Low => "low",
+        }
+    }
+    pub fn from_str_lenient(s: &str) -> Confidence {
+        match s.to_ascii_lowercase().as_str() {
+            "high" => Confidence::High,
+            "low" => Confidence::Low,
+            _ => Confidence::Medium,
+        }
+    }
+}
+
+/// One section of the deep-research report.
+#[derive(Debug, Clone)]
+pub struct ResearchSection {
+    pub heading: String,
+    pub body: String,
+    pub confidence: Confidence,
+}
+
+/// A structured analytical report synthesized from the debate transcript.
+#[derive(Debug, Clone)]
+pub struct DeepResearchReport {
+    pub title: String,
+    pub abstract_text: String,
+    pub confidence: Confidence,
+    pub sections: Vec<ResearchSection>,
+}
+
 /// Optional draft → critique → revise pass after each council turn (off default).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Reflection {

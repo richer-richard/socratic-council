@@ -15,7 +15,9 @@ mod theme;
 use crate::catalog::{resolve_model, DiscoveredModel};
 use crate::config::{Config, KeySource};
 use crate::engine::{default_agents, DebateEvent, Engine};
-use crate::types::{Agent, ModeratorConclusion, PeerEvalRound, Provider, Usage, VoteChoice};
+use crate::types::{
+    Agent, DeepResearchReport, ModeratorConclusion, PeerEvalRound, Provider, Usage, VoteChoice,
+};
 use crossterm::event::{
     self, DisableBracketedPaste, EnableBracketedPaste, Event, KeyCode, KeyEvent, KeyEventKind,
     KeyModifiers,
@@ -146,6 +148,8 @@ pub struct Debate {
     pub peer_eval: Option<PeerEvalRound>,
     /// The moderator's final scored verdict, once published.
     pub conclusion: Option<ModeratorConclusion>,
+    /// The deep-research report, if one was requested + produced.
+    pub deep_research: Option<DeepResearchReport>,
     pub show_thinking: bool,
     pub follow: bool,
     pub scroll: u16,
@@ -224,6 +228,7 @@ impl Debate {
                 }
             }
             DebateEvent::PeerEval(round) => self.peer_eval = Some(round),
+            DebateEvent::DeepResearch(r) => self.deep_research = Some(r),
             DebateEvent::Error(e) => self.turns.push(TurnView::note("error", "⚠ Error", e)),
             DebateEvent::Done => {
                 self.done = true;
@@ -430,6 +435,7 @@ impl App {
             vote_boards: Vec::new(),
             peer_eval: None,
             conclusion: None,
+            deep_research: None,
             show_thinking: false,
             follow: true,
             scroll: 0,
@@ -513,6 +519,7 @@ impl App {
             vote_boards: Vec::new(),
             peer_eval: None,
             conclusion: None,
+            deep_research: None,
             show_thinking: false,
             follow: false,
             scroll: 0,
@@ -922,6 +929,7 @@ mod tests {
                 reason: "Decent reasoning, thin evidence.".into(),
                 next: Some("Run a small test.".into()),
             }),
+            deep_research: None,
             show_thinking: true,
             follow: true,
             scroll: 0,

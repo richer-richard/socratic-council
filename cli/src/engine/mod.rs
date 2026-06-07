@@ -6,8 +6,8 @@ use crate::catalog::{resolve_model, DiscoveredModel};
 use crate::config::Config;
 use crate::providers::stream_completion;
 use crate::types::{
-    Agent, ChatMessage, CompletionChunk, CompletionRequest, ModeratorConclusion, PeerEvalRound,
-    Provider, ReasoningTier, Reflection, Usage, VoteChoice,
+    Agent, ChatMessage, CompletionChunk, CompletionRequest, DeepResearchReport, ModeratorConclusion,
+    PeerEvalRound, Provider, ReasoningTier, Reflection, Usage, VoteChoice,
 };
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -15,6 +15,7 @@ use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::mpsc::UnboundedSender;
 
+mod deepresearch;
 mod moderator;
 mod peereval;
 mod reflect;
@@ -41,6 +42,8 @@ pub enum DebateEvent {
     EndVoteResult { passed: bool, yes: u32, no: u32, abstain: u32 },
     /// The closing peer-evaluation scorecard.
     PeerEval(PeerEvalRound),
+    /// The deep-research report (opt-in).
+    DeepResearch(DeepResearchReport),
     Error(String),
     Done,
 }
@@ -418,6 +421,22 @@ impl Engine {
             }
         } else {
             let _ = tx.send(DebateEvent::Moderator("The council rests.".into()));
+        }
+
+        // Deep-research report (opt-in; one extra synthesis pass over the transcript).
+        if self.config.deep_research && !transcript.is_empty() {
+            if let Some(report) = deepresearch::run(
+                &self.http,
+                &self.config,
+                &self.available,
+                &self.keys,
+                &self.topic,
+                &transcript,
+            )
+            .await
+            {
+                let _ = tx.send(DebateEvent::DeepResearch(report));
+            }
         }
 
         let _ = tx.send(DebateEvent::Done);
