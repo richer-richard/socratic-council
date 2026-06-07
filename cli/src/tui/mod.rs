@@ -799,18 +799,34 @@ async fn run_loop(
     app: &mut App,
 ) -> anyhow::Result<()> {
     loop {
-        // Drain any pending debate events.
+        // Drain any pending debate events. If the channel disconnects (the engine
+        // task ended — including an unexpected panic), mark the debate done so the
+        // UI never hangs waiting for a `Done` that won't come.
         let mut pending = Vec::new();
+        let mut disconnected = false;
         if let Some(d) = app.debate.as_mut() {
             if let Some(e) = d.engine.as_mut() {
-                while let Ok(ev) = e.rx.try_recv() {
-                    pending.push(ev);
+                use tokio::sync::mpsc::error::TryRecvError;
+                loop {
+                    match e.rx.try_recv() {
+                        Ok(ev) => pending.push(ev),
+                        Err(TryRecvError::Empty) => break,
+                        Err(TryRecvError::Disconnected) => {
+                            disconnected = true;
+                            break;
+                        }
+                    }
                 }
             }
         }
         if let Some(d) = app.debate.as_mut() {
             for ev in pending {
                 d.apply(ev);
+            }
+            if disconnected && !d.done {
+                d.done = true;
+                d.active = None;
+                d.status = "Adjourned".into();
             }
         }
 

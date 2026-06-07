@@ -44,7 +44,11 @@ pub async fn run(
         block.push_str(&format!("[{}] {}\n", t.name, t.content));
     }
     if block.len() > MAX_TRANSCRIPT_CHARS {
-        let start = block.len() - MAX_TRANSCRIPT_CHARS;
+        // Snap to a char boundary so a multibyte (CJK) cut never panics.
+        let mut start = block.len() - MAX_TRANSCRIPT_CHARS;
+        while start < block.len() && !block.is_char_boundary(start) {
+            start += 1;
+        }
         block = format!("…\n{}", &block[start..]);
     }
 

@@ -115,6 +115,11 @@ pub struct Config {
     /// Whether to synthesize a deep-research report at the close (`--deep-research`).
     #[serde(skip)]
     pub deep_research: bool,
+
+    /// Whether the closing peer-evaluation scorecard runs (on by default; one
+    /// completion per agent — `--no-peer-eval` opts out to save cost).
+    #[serde(skip)]
+    pub peer_eval: bool,
 }
 
 // Manual Debug so a stray `{config:?}` / `dbg!` / anyhow context can never
@@ -159,6 +164,7 @@ impl Default for Config {
             bridge: DesktopBridge::default(),
             reflection: Reflection::Off,
             deep_research: false,
+            peer_eval: true,
         }
     }
 }
