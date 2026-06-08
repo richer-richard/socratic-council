@@ -7,7 +7,7 @@ use crate::error::{Error, Result};
 use crate::types::{Provider, ReasoningTier, Reflection};
 use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 /// Per-provider, per-tier model id (or `"auto"`).
@@ -95,11 +95,12 @@ pub struct Config {
     #[serde(skip)]
     keys: BTreeMap<String, String>,
 
-    /// Slugs whose key came from the environment (not the key file). These are
-    /// excluded from `save_keys` so a transient env secret is never written to
-    /// disk.
+    /// API keys sourced from the environment (slug → value), kept SEPARATE from
+    /// `keys` so a `<PROVIDER>_API_KEY` env var never overwrites — and
+    /// `save_keys` never drops — a locally-stored key that shares the slug. Env
+    /// keys win at resolution time but are never written to disk.
     #[serde(skip)]
-    env_keys: BTreeSet<String>,
+    env_keys: BTreeMap<String, String>,
 
     /// Keys + model config shared from the desktop app (read-only). Consulted as
     /// the lowest-precedence source so the user never re-enters a key the app
@@ -160,7 +161,7 @@ impl Default for Config {
             providers: BTreeMap::new(),
             model_selection: BTreeMap::new(),
             keys: BTreeMap::new(),
-            env_keys: BTreeSet::new(),
+            env_keys: BTreeMap::new(),
             bridge: DesktopBridge::default(),
             reflection: Reflection::Off,
             deep_research: false,
@@ -232,8 +233,12 @@ impl Config {
         for provider in Provider::ALL {
             if let Ok(value) = std::env::var(provider.env_var()) {
                 if !value.trim().is_empty() {
-                    config.keys.insert(provider.slug().to_string(), value);
-                    config.env_keys.insert(provider.slug().to_string());
+                    // Keep env secrets OUT of `config.keys`. If the env value
+                    // overwrote a local key here, `save_keys` (which persists
+                    // only `keys`) would then drop that local key from disk —
+                    // silent, permanent data loss. Env keys live apart and win
+                    // at lookup time without ever touching the on-disk store.
+                    config.env_keys.insert(provider.slug().to_string(), value);
                 }
             }
         }
@@ -299,33 +304,32 @@ impl Config {
         }
         let dek = crypto::load_or_create_dek(&dek_path).map_err(Error::Config)?;
 
-        // Exclude env-sourced keys so a transient env secret never lands on disk.
-        let keys: BTreeMap<String, String> = self
-            .keys
-            .iter()
-            .filter(|(slug, _)| !self.env_keys.contains(*slug))
-            .map(|(k, v)| (k.clone(), v.clone()))
-            .collect();
-        let kf = KeyFile { keys };
+        // `self.keys` never holds env-sourced secrets (those live apart in
+        // `env_keys`), so the whole map is safe to persist — and a local key is
+        // never dropped just because a `<PROVIDER>_API_KEY` env var shares its
+        // slug.
+        let kf = KeyFile { keys: self.keys.clone() };
         let toml_text = toml::to_string_pretty(&kf).map_err(|e| Error::Config(e.to_string()))?;
         let envelope = crypto::encrypt_str(&dek, &toml_text).map_err(Error::Config)?;
 
-        let enc_path = Self::enc_path()?;
-        // Create the file 0600 from the start (no world-readable window), then
-        // chmod as a belt-and-suspenders safety net.
-        write_secret_file(&enc_path, &envelope)?;
-        set_owner_only(&enc_path)?;
+        // Atomic: write a fresh `0600` temp file then rename over `keys.enc`, so
+        // a crash mid-write can't leave a truncated/empty store that later fails
+        // to decrypt and looks like "no keys".
+        write_secret_file_atomic(&Self::enc_path()?, &envelope)?;
         // Drop any legacy plaintext key file now that the encrypted store exists.
         let _ = std::fs::remove_file(Self::key_path()?);
         Ok(())
     }
 
     pub fn api_key(&self, provider: Provider) -> Option<&str> {
-        // env / keys.enc win; the desktop app's shared key is the fallback.
-        self.keys
+        // Precedence: env var, then the local `keys.enc` value, then the desktop
+        // app's shared key.
+        let nonempty = |s: &&str| !s.trim().is_empty();
+        self.env_keys
             .get(provider.slug())
             .map(|s| s.as_str())
-            .filter(|s| !s.trim().is_empty())
+            .filter(nonempty)
+            .or_else(|| self.keys.get(provider.slug()).map(|s| s.as_str()).filter(nonempty))
             .or_else(|| self.bridge.api_key(provider))
     }
 
@@ -353,13 +357,13 @@ impl Config {
     /// `api_key`'s precedence (env / `keys.enc` over the shared desktop key).
     pub fn key_source(&self, provider: Provider) -> KeySource {
         let slug = provider.slug();
-        let has_local = self.keys.get(slug).map(|s| !s.trim().is_empty()).unwrap_or(false);
-        if has_local {
-            if self.env_keys.contains(slug) {
-                KeySource::Env
-            } else {
-                KeySource::Local
-            }
+        let nonempty = |m: &BTreeMap<String, String>| {
+            m.get(slug).map(|s| !s.trim().is_empty()).unwrap_or(false)
+        };
+        if nonempty(&self.env_keys) {
+            KeySource::Env
+        } else if nonempty(&self.keys) {
+            KeySource::Local
         } else if self.bridge.api_key(provider).is_some() || self.bridge.has_key(provider) {
             KeySource::Shared
         } else {
@@ -468,4 +472,61 @@ fn write_secret_file(path: &std::path::Path, contents: &str) -> Result<()> {
 fn write_secret_file(path: &std::path::Path, contents: &str) -> Result<()> {
     std::fs::write(path, contents)?;
     Ok(())
+}
+
+/// Write a secret file atomically: a fresh owner-only (`0600`) temp file, then
+/// rename over `path`. Unlike a plain truncate-then-write, a crash or short
+/// write can never leave the target empty/partial — the rename either fully
+/// succeeds or leaves the previous file untouched.
+fn write_secret_file_atomic(path: &std::path::Path, contents: &str) -> Result<()> {
+    let tmp = path.with_extension("enc.tmp");
+    let _ = std::fs::remove_file(&tmp);
+    write_secret_file(&tmp, contents)?;
+    set_owner_only(&tmp)?;
+    std::fs::rename(&tmp, path).map_err(|e| {
+        let _ = std::fs::remove_file(&tmp);
+        Error::Io(e)
+    })?;
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn env_var_never_clobbers_a_local_key() {
+        // A local key AND an env var for the same slug coexist: the env var wins
+        // at resolution, but the persistable `keys` map still holds the local
+        // secret — so `save_keys` (which writes `keys`) can never drop it.
+        let mut config = Config::default();
+        config.keys.insert("openai".into(), "sk-local".into());
+        config.env_keys.insert("openai".into(), "sk-env".into());
+
+        assert_eq!(config.api_key(Provider::OpenAI), Some("sk-env"));
+        assert_eq!(config.key_source(Provider::OpenAI), KeySource::Env);
+        assert_eq!(config.keys.get("openai").map(String::as_str), Some("sk-local"));
+    }
+
+    #[test]
+    fn local_key_resolves_and_is_labelled_local() {
+        let mut config = Config::default();
+        config.keys.insert("anthropic".into(), "sk-local".into());
+        assert_eq!(config.api_key(Provider::Anthropic), Some("sk-local"));
+        assert_eq!(config.key_source(Provider::Anthropic), KeySource::Local);
+    }
+
+    #[test]
+    fn set_key_overrides_env_in_session_then_clear_removes_it() {
+        let mut config = Config::default();
+        config.env_keys.insert("google".into(), "sk-env".into());
+        // An explicitly-typed key is used immediately this session, even over env.
+        config.set_key(Provider::Google, "sk-typed".into());
+        assert_eq!(config.api_key(Provider::Google), Some("sk-typed"));
+        assert_eq!(config.key_source(Provider::Google), KeySource::Local);
+        // Clearing the local key leaves nothing (the bridge is empty here).
+        config.clear_key(Provider::Google);
+        assert_eq!(config.api_key(Provider::Google), None);
+        assert_eq!(config.key_source(Provider::Google), KeySource::None);
+    }
 }

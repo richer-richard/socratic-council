@@ -243,11 +243,19 @@ impl Debate {
             }
             DebateEvent::PeerEval(round) => self.peer_eval = Some(round),
             DebateEvent::DeepResearch(r) => self.deep_research = Some(r),
-            DebateEvent::Error(e) => self.turns.push(TurnView::note("error", "⚠ Error", e)),
+            DebateEvent::Error(e) => {
+                // The failed turn never sends TurnEnded; drop its in-progress
+                // bubble (the partial stream is incomplete) so it can't linger
+                // as a stuck "streaming…" line.
+                self.streaming = None;
+                self.active = None;
+                self.turns.push(TurnView::note("error", "⚠ Error", e));
+            }
             DebateEvent::Done => {
                 self.done = true;
                 self.status = "Adjourned".into();
                 self.active = None;
+                self.streaming = None;
             }
         }
     }
@@ -260,6 +268,9 @@ impl Debate {
 pub struct App {
     ctx: AppContext,
     view: View,
+    /// The view to return to when Settings closes (so `^P`/`Esc` out of Settings
+    /// never strands a live debate by hard-jumping to Home).
+    prev_view: View,
     frame: u64,
     sidebar_open: bool,
     composer: String,
@@ -293,6 +304,7 @@ impl App {
             .collect::<Vec<_>>();
         Self {
             view: View::Home,
+            prev_view: View::Home,
             frame: 0,
             sidebar_open: false,
             composer: String::new(),
@@ -550,9 +562,15 @@ impl App {
         if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
             return true;
         }
-        // Ctrl-P toggles Settings from anywhere.
+        // Ctrl-P toggles Settings from anywhere — and returns to wherever you
+        // were (e.g. a live Chat), not unconditionally Home.
         if key.code == KeyCode::Char('p') && key.modifiers.contains(KeyModifiers::CONTROL) {
-            self.view = if self.view == View::Settings { View::Home } else { View::Settings };
+            if self.view == View::Settings {
+                self.view = self.prev_view;
+            } else {
+                self.prev_view = self.view;
+                self.view = View::Settings;
+            }
             return false;
         }
         match self.view {
@@ -586,7 +604,10 @@ impl App {
             KeyCode::Backspace => {
                 self.composer.pop();
             }
-            KeyCode::Char(c) => {
+            // Only insert real printable input — a Ctrl+<letter> chord (anything
+            // not caught by the global ^C/^P handlers) must not land its bare
+            // letter in the composer.
+            KeyCode::Char(c) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
                 self.composer.push(c);
             }
             _ => {}
@@ -613,8 +634,9 @@ impl App {
             self.view = View::Home;
             return false;
         };
+        let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
         match key.code {
-            KeyCode::Char('t') => d.show_thinking = !d.show_thinking,
+            KeyCode::Char('t') if !ctrl => d.show_thinking = !d.show_thinking,
             KeyCode::Up => {
                 d.follow = false;
                 d.scroll = d.scroll.saturating_sub(1);
@@ -625,7 +647,7 @@ impl App {
                 d.scroll = d.scroll.saturating_sub(10);
             }
             KeyCode::PageDown => d.scroll = d.scroll.saturating_add(10),
-            KeyCode::Char('g') => d.follow = true,
+            KeyCode::Char('g') if !ctrl => d.follow = true,
             _ => {}
         }
         false
@@ -670,7 +692,7 @@ impl App {
 
         // Normal Settings navigation.
         match key.code {
-            KeyCode::Esc => self.view = View::Home,
+            KeyCode::Esc => self.view = self.prev_view,
             KeyCode::Up => self.settings_sel = self.settings_sel.saturating_sub(1),
             KeyCode::Down => {
                 self.settings_sel = (self.settings_sel + 1).min(theme::AGENTS.len() - 1);
@@ -826,6 +848,7 @@ async fn run_loop(
             if disconnected && !d.done {
                 d.done = true;
                 d.active = None;
+                d.streaming = None;
                 d.status = "Adjourned".into();
             }
         }

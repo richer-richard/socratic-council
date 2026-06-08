@@ -126,6 +126,29 @@ the *live* stream each frame; `run_loop` marks the debate done on channel
 disconnect (no hang if the engine task dies); `http_client` has 30s connect / 300s
 request timeouts. Peer-eval is on by default but `--no-peer-eval` opts out (N calls).
 
+**Hardening (v0.12.0, from a repo-wide 11-agent adversarial bug scan).** The three
+balanced-delimiter scanners — `balanced_paren_end` (strip_directives),
+`balanced_object` (canvas), `extract_json` (peer-eval + deep-research) — are now
+**string-literal aware** (track `in_string`/`escaped`), so a `(`/`)`/`{`/`}` inside
+a directive's JSON string no longer (a) leaks the directive's tail — incl. an
+agent's *private* canvas notes — into the shared transcript, (b) drops a canvas
+update, or (c) truncates the eval/report JSON so a whole scorecard row / the report
+silently vanishes. **MiniMax reasoning tier was silently dropped** (`ant_profile`
+only matched Claude ids → no thinking knob ever sent for Mary); MiniMax now routes
+to extended thinking with `budget_tokens`, faithful to the app's `minimax.ts`.
+OpenAI reasoning is captured **only on `.delta` events** (the aggregate `.done`
+re-emitted the full trace 2-3×). `peereval::score` coerces float/quoted scores (was
+`as_i64`-zeroing `80.0`/`"80"`). **`config` no longer destroys a local `keys.enc`
+key when a `<PROVIDER>_API_KEY` env var shares its slug** — env keys live in their
+own map and win at lookup but never touch the on-disk store; `keys.enc` is written
+atomically (temp+rename). TUI: `prev_view` so `^P`/`Esc` out of Settings returns to
+a live Chat (no longer strands it); composer/chat shortcuts ignore Ctrl-chords; the
+in-progress `streaming` bubble is cleared on Error/Done/disconnect; transcript
+scroll clamps to **post-wrap** row count (`textwrap`) so the newest content is
+reachable. App-side (**v2.2.1**): the desktop DEK temp file is created `0600` (was a
+brief world-readable window before `chmod`). 59 CLI tests (+10 regressions), clippy
+clean on both feature sets.
+
 ### Desktop bridge (`cli/src/bridge.rs`, feature `desktop-bridge`, default on)
 
 Shares the **desktop app's keys + config + sessions** so the user never re-enters a

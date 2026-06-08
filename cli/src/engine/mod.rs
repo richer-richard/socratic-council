@@ -140,11 +140,29 @@ fn strip_think_tags(text: &str) -> String {
 }
 
 /// Byte offset (into `s`, which begins just after an opening `(`) one past the
-/// `)` that balances it.
+/// `)` that balances it. **String-literal aware**: a `(` or `)` inside a JSON
+/// string value (e.g. an emoticon `":)"` or an enumeration `"see 3)"` in a
+/// `@canvas` directive's text) is NOT counted, so an unbalanced bracket inside
+/// the argument can't end the scan early — which would otherwise leak the
+/// directive's tail (and the agent's *private* canvas notes) into the public
+/// transcript.
 fn balanced_paren_end(s: &str) -> Option<usize> {
     let mut depth = 1i32;
+    let mut in_string = false;
+    let mut escaped = false;
     for (i, ch) in s.char_indices() {
+        if in_string {
+            if escaped {
+                escaped = false;
+            } else if ch == '\\' {
+                escaped = true;
+            } else if ch == '"' {
+                in_string = false;
+            }
+            continue;
+        }
         match ch {
+            '"' => in_string = true,
             '(' => depth += 1,
             ')' => {
                 depth -= 1;
@@ -665,6 +683,25 @@ mod tests {
         // An unterminated <think> drops the remainder.
         let (clean, _) = strip_directives("visible<think>dangling");
         assert_eq!(clean, "visible");
+
+        // A `)` inside the directive's JSON string must NOT end the scan early
+        // (it would otherwise leak the `"})` tail into the visible message).
+        let (clean, _) = strip_directives(
+            "Real point.\n@canvas({\"op\":\"append\",\"text\":\"see item 3) here\"})\nNext.",
+        );
+        assert_eq!(clean, "Real point.\n\nNext.");
+
+        // A lone `(` inside the directive's JSON string likewise stays contained
+        // — the whole directive (and the private notes) is stripped, not leaked.
+        let (clean, _) = strip_directives(
+            "Open.\n@canvas({\"op\":\"append\",\"text\":\"post-quantum (Grover\"})\nClose.",
+        );
+        assert_eq!(clean, "Open.\n\nClose.");
+
+        // Inline @end() with a parenthetical still triggers the close request.
+        let (clean, end) = strip_directives("We are done. @end(\"ship it :)\")");
+        assert_eq!(clean, "We are done.");
+        assert!(end);
     }
 
     #[test]

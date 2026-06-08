@@ -57,12 +57,30 @@ Now produce your strict JSON evaluation. One entry per peer above. JSON only."
 }
 
 /// Pull the first balanced JSON object out of a (possibly fenced) model reply.
+/// **String-literal aware**: a `{` or `}` inside a quoted value (the `critique`
+/// and report `body`/`abstract` fields are free text and may contain braces or
+/// set/code notation) is not counted, so it can't truncate the object early and
+/// make `serde_json` reject — which would silently drop a whole evaluator's
+/// ratings or the entire research report.
 pub(super) fn extract_json(raw: &str) -> Option<&str> {
     let s = raw.trim().trim_start_matches("```json").trim_start_matches("```").trim_end_matches("```");
     let start = s.find('{')?;
     let mut depth = 0i32;
+    let mut in_string = false;
+    let mut escaped = false;
     for (i, ch) in s[start..].char_indices() {
+        if in_string {
+            if escaped {
+                escaped = false;
+            } else if ch == '\\' {
+                escaped = true;
+            } else if ch == '"' {
+                in_string = false;
+            }
+            continue;
+        }
         match ch {
+            '"' => in_string = true,
             '{' => depth += 1,
             '}' => {
                 depth -= 1;
@@ -77,7 +95,13 @@ pub(super) fn extract_json(raw: &str) -> Option<&str> {
 }
 
 fn score(v: &serde_json::Value, key: &str) -> u8 {
-    v.get(key).and_then(|x| x.as_i64()).unwrap_or(0).clamp(0, 100) as u8
+    // Lenient: models emit scores as ints (80), floats (80.0), or quoted
+    // numbers ("80") despite the integer-N instruction. `as_i64` returns None
+    // for the latter two and would silently record 0; coerce all three.
+    v.get(key)
+        .and_then(|x| x.as_f64().or_else(|| x.as_str().and_then(|s| s.trim().parse::<f64>().ok())))
+        .map(|n| n.round().clamp(0.0, 100.0) as u8)
+        .unwrap_or(0)
 }
 
 /// Parse one evaluator's JSON into `(target_id, scores, overall, stance, critique)`.
@@ -261,5 +285,25 @@ mod tests {
         assert_eq!(parsed[0].1.rigor, 100);
         assert_eq!(parsed[0].2, 0);
         assert_eq!(parsed[0].3, Stance::Mixed);
+    }
+
+    #[test]
+    fn coerces_float_and_string_scores() {
+        // Float (80.4 → 80), quoted ("70" → 70), and quoted float ("60.6" → 61).
+        let raw = "{\"ratings\":[{\"targetId\":\"x\",\"scores\":{\"rigor\":80.4,\"evidence\":\"70\",\"novelty\":\"60.6\"},\"overall\":\"76\"}]}";
+        let parsed = parse_eval(raw);
+        assert_eq!(parsed[0].1.rigor, 80);
+        assert_eq!(parsed[0].1.evidence, 70);
+        assert_eq!(parsed[0].1.novelty, 61);
+        assert_eq!(parsed[0].2, 76);
+    }
+
+    #[test]
+    fn extract_json_tolerates_braces_in_strings() {
+        // A `}` inside the critique string must not truncate the object.
+        let raw = "{\"ratings\":[{\"targetId\":\"cathy\",\"scores\":{\"rigor\":50,\"evidence\":50,\"novelty\":50,\"civility\":50,\"onTopic\":50},\"overall\":50,\"stance\":\"mixed\",\"critique\":\"Claimed the set {x} is closed }.\"}]}";
+        let parsed = parse_eval(raw);
+        assert_eq!(parsed.len(), 1);
+        assert!(parsed[0].4.contains("closed"));
     }
 }
