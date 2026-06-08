@@ -119,6 +119,22 @@ fn restrict_permissions(_path: &Path) -> Result<(), String> {
     Ok(())
 }
 
+/// Create a brand-new file (`create_new`) **owner-only at creation** so the DEK
+/// never lands on disk group/world-readable, even for the brief window before
+/// `restrict_permissions` runs. On unix `create_new` without an explicit mode
+/// yields `0644 & ~umask`; setting `0o600` up front closes that window.
+#[cfg(unix)]
+fn create_new_owner_only(path: &Path) -> std::io::Result<fs::File> {
+    use std::os::unix::fs::OpenOptionsExt;
+    fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(path)
+}
+
+#[cfg(not(unix))]
+fn create_new_owner_only(path: &Path) -> std::io::Result<fs::File> {
+    // On Windows the file inherits the user-only AppData ACL.
+    fs::OpenOptions::new().write(true).create_new(true).open(path)
+}
+
 /// Atomic write: write to a sibling tempfile, fsync (best-effort), then
 /// rename over the target. Avoids the "half-written 16-byte DEK" failure
 /// mode if the process is killed mid-write or the disk loses power.
@@ -186,20 +202,15 @@ fn quarantine_corrupt_dek(path: &Path, reason: &str) -> Result<PathBuf, String> 
 /// Returns the bytes that ended up on disk — either the ones we wrote, or
 /// the ones the racing caller already wrote.
 fn create_new_dek(path: &Path) -> Result<Vec<u8>, String> {
-    use std::fs::OpenOptions;
-
     let fresh = generate_dek()?;
 
     let tmp_path = path.with_extension("key.tmp");
     let _ = fs::remove_file(&tmp_path);
 
-    // Try to claim the temp file atomically. If another process is creating
-    // the DEK at the same instant, fall through to the read path.
-    match OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(&tmp_path)
-    {
+    // Try to claim the temp file atomically (owner-only at creation). If another
+    // process is creating the DEK at the same instant, fall through to the read
+    // path.
+    match create_new_owner_only(&tmp_path) {
         Ok(mut file) => {
             file.write_all(&fresh)
                 .map_err(|e| format!("Failed to write fresh DEK: {}", e))?;
@@ -209,10 +220,7 @@ fn create_new_dek(path: &Path) -> Result<Vec<u8>, String> {
         Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
             // Stale temp from a crashed run — remove and retry once.
             let _ = fs::remove_file(&tmp_path);
-            let mut file = OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .open(&tmp_path)
+            let mut file = create_new_owner_only(&tmp_path)
                 .map_err(|e| format!("Failed to reopen DEK temp file: {}", e))?;
             file.write_all(&fresh)
                 .map_err(|e| format!("Failed to write fresh DEK: {}", e))?;
