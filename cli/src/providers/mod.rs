@@ -67,11 +67,19 @@ fn ant_profile(model: &str) -> (AntMode, bool) {
     // (mode, prohibits_sampling). The live API is authoritative and non-monotonic:
     // claude-opus-4-8 rejects `thinking.type.enabled` ("Use thinking.type.adaptive")
     // and rejects an explicit temperature — so 4.8, like 4.7, is adaptive-only.
-    if model.contains("opus-4-8") || model.contains("opus-4-7") {
+    let m = model.to_ascii_lowercase();
+    if m.contains("opus-4-8") || m.contains("opus-4-7") {
         (AntMode::Adaptive, true)
-    } else if model.contains("opus-4-6") {
+    } else if m.contains("opus-4-6") {
         (AntMode::Adaptive, false)
-    } else if model.contains("opus-4") || model.contains("sonnet-4") || model.contains("haiku-4") {
+    } else if m.contains("minimax") {
+        // MiniMax routes through this Anthropic-shaped branch and takes extended
+        // thinking with an explicit `budget_tokens` (faithful to the app's
+        // `minimax.ts`), NOT Claude's adaptive mode. Without this the reasoning
+        // tier was silently dropped for Mary (every MiniMax id fell through to
+        // `None`, so no thinking knob was ever sent).
+        (AntMode::Extended, false)
+    } else if m.contains("opus-4") || m.contains("sonnet-4") || m.contains("haiku-4") {
         (AntMode::Extended, false)
     } else {
         (AntMode::None, false)
@@ -268,14 +276,12 @@ fn parse_event(provider: Provider, value: &Value, usage: &mut Usage) -> Completi
             let t = value["type"].as_str().unwrap_or("");
             if t == "response.output_text.delta" {
                 chunk.content = value["delta"].as_str().unwrap_or("").to_string();
-            } else if t.contains("reasoning") || t.contains("summary") {
-                chunk.thinking = value["delta"]
-                    .as_str()
-                    .or_else(|| value["text"].as_str())
-                    .or_else(|| value["part"]["text"].as_str())
-                    .or_else(|| value["summary"]["text"].as_str())
-                    .unwrap_or("")
-                    .to_string();
+            } else if t.ends_with(".delta") && (t.contains("reasoning") || t.contains("summary")) {
+                // Capture ONLY the incremental reasoning deltas. The Responses
+                // API also emits aggregate `.done`/`.added` events carrying the
+                // FULL summary text; matching those re-emitted the whole trace
+                // 2-3× into the thinking panel.
+                chunk.thinking = value["delta"].as_str().unwrap_or("").to_string();
             } else if t == "response.completed" {
                 let u = &value["response"]["usage"];
                 usage.input = num(&u["input_tokens"]);
@@ -440,5 +446,42 @@ mod tests {
             assert_eq!(msgs[0]["role"], "system", "{provider:?} should lead with system");
             assert!(msgs[0]["content"].as_str().unwrap().contains("Douglas"));
         }
+    }
+
+    /// Regression: MiniMax must receive an extended-thinking budget at the high
+    /// tier (its reasoning knob was previously dropped — `ant_profile` only knew
+    /// Claude ids), and no temperature alongside the thinking block.
+    #[test]
+    fn minimax_high_tier_gets_extended_thinking_budget() {
+        let mut r = req("MiniMax-M2.7-highspeed");
+        r.max_tokens = 2048;
+        r.tier = ReasoningTier::High;
+        let p = prepare(Provider::MiniMax, "https://api.minimaxi.com/anthropic", "k", &r);
+        assert_eq!(p.body["thinking"]["type"], "enabled");
+        assert!(p.body["thinking"]["budget_tokens"].as_i64().unwrap() >= 1024);
+        assert!(p.body.get("temperature").is_none());
+    }
+
+    /// At the low tier MiniMax skips extended thinking and keeps a temperature.
+    #[test]
+    fn minimax_low_tier_skips_thinking_keeps_temperature() {
+        let mut r = req("MiniMax-M2.7-highspeed");
+        r.tier = ReasoningTier::Low;
+        let p = prepare(Provider::MiniMax, "https://api.minimaxi.com/anthropic", "k", &r);
+        assert!(p.body.get("thinking").is_none());
+        assert!(p.body.get("temperature").is_some());
+    }
+
+    /// OpenAI reasoning capture is restricted to incremental `.delta` events so
+    /// the aggregate `.done` event can't re-emit the full summary text.
+    #[test]
+    fn openai_reasoning_only_captured_on_delta_events() {
+        let mut usage = Usage::default();
+        let delta = json!({ "type": "response.reasoning_summary_text.delta", "delta": "step " });
+        let done = json!({ "type": "response.reasoning_summary_text.done", "text": "step step step" });
+        let d = parse_event(Provider::OpenAI, &delta, &mut usage);
+        let f = parse_event(Provider::OpenAI, &done, &mut usage);
+        assert_eq!(d.thinking, "step ");
+        assert!(f.thinking.is_empty(), "the aggregate .done event must not re-emit reasoning");
     }
 }

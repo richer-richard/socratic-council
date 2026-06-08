@@ -85,7 +85,11 @@ fn render_transcript(f: &mut Frame, area: Rect, d: &mut Debate) {
     }
 
     let inner_h = area.height.saturating_sub(2);
-    let total = u16::try_from(lines.len()).unwrap_or(u16::MAX);
+    let inner_w = area.width.saturating_sub(2);
+    // Count POST-wrap rows, not logical Lines: ratatui applies `scroll.y` to
+    // wrapped rows, so a max offset based on pre-wrap line count left the newest
+    // (and any wrap-overflowed) content unreachable on a narrow pane.
+    let total = u16::try_from(wrapped_row_count(&lines, inner_w)).unwrap_or(u16::MAX);
     let max_off = total.saturating_sub(inner_h);
     // While following, pin to the bottom so a first scroll-up starts from there.
     let scroll = if d.follow {
@@ -107,6 +111,23 @@ fn render_transcript(f: &mut Frame, area: Rect, d: &mut Debate) {
                 .title(Span::styled(title, Style::default().fg(theme::MUTED))),
         );
     f.render_widget(para, area);
+}
+
+/// Total POST-wrap rows `lines` occupy at `width` (matching ratatui's `Wrap`),
+/// so the scroll clamp lets every row — including the newest — be reached.
+fn wrapped_row_count(lines: &[Line<'_>], width: u16) -> usize {
+    let w = width.max(1) as usize;
+    lines
+        .iter()
+        .map(|line| {
+            let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
+            if text.trim().is_empty() {
+                1
+            } else {
+                textwrap::wrap(&text, w).len().max(1)
+            }
+        })
+        .sum()
 }
 
 fn push_turn(lines: &mut Vec<Line<'static>>, t: &TurnView, show_thinking: bool, streaming: bool) {
