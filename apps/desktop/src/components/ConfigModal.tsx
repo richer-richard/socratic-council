@@ -422,6 +422,16 @@ export function ConfigModal({
   });
   const [testError, setTestError] = useState<string | null>(null);
 
+  // Available models per provider (live scan ∪ catalog), recomputed after a scan.
+  // Must sit above the early return: hooks can never be conditional.
+  const availableByProvider = useMemo(() => {
+    const map = {} as Record<Provider, DiscoveredModel[]>;
+    for (const provider of PROVIDERS) map[provider] = availableModelsForProvider(provider);
+    return map;
+    // modelsVersion/isOpen are the recompute triggers; the body reads only stable module refs.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [modelsVersion, isOpen]);
+
   if (!isOpen) return null;
 
   const configuredCount = PROVIDERS.filter((p) => config.credentials[p]?.apiKey).length;
@@ -501,15 +511,6 @@ export function ConfigModal({
     const configured = PROVIDERS.filter((p) => config.credentials[p]?.apiKey);
     await Promise.all(configured.map((p) => handleScan(p)));
   };
-
-  // Available models per provider (live scan ∪ catalog), recomputed after a scan.
-  const availableByProvider = useMemo(() => {
-    const map = {} as Record<Provider, DiscoveredModel[]>;
-    for (const provider of PROVIDERS) map[provider] = availableModelsForProvider(provider);
-    return map;
-    // modelsVersion/isOpen are the recompute triggers; the body reads only stable module refs.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [modelsVersion, isOpen]);
 
   return (
     <div className="modal-overlay" onClick={(e) => e.target === e.currentTarget && onClose()}>

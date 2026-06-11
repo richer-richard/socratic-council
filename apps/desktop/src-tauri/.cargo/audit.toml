@@ -1,0 +1,42 @@
+# cargo-audit policy for the desktop backend.
+#
+# The nightly Security audit runs `cargo audit --deny warnings`, so every
+# ignored advisory below needs a documented reason and a revisit plan.
+# Actual *vulnerabilities* are never ignored here — they get lockfile updates
+# (last sweep: 2026-06-11, clearing bytes/quinn-proto/rustls-webpki/time).
+#
+# Revisit when Tauri v2 moves its Linux backend off GTK3 (upstream:
+# https://github.com/tauri-apps/tauri/issues/8595) — that removes the whole
+# gtk-rs 0.18 block below in one go.
+
+[advisories]
+ignore = [
+  # ── Tauri's Linux windowing stack: gtk-rs 0.18 bindings are archived
+  #    ("unmaintained") but are the only GTK3 bindings Tauri v2/wry support.
+  #    Linux-only code paths; no fix exists downstream of Tauri.
+  "RUSTSEC-2024-0411", # gdkwayland-sys
+  "RUSTSEC-2024-0412", # gdk
+  "RUSTSEC-2024-0413", # atk
+  "RUSTSEC-2024-0414", # gdkx11-sys
+  "RUSTSEC-2024-0415", # gtk
+  "RUSTSEC-2024-0416", # atk-sys
+  "RUSTSEC-2024-0417", # gdkx11
+  "RUSTSEC-2024-0418", # gdk-sys
+  "RUSTSEC-2024-0419", # gtk3-macros
+  "RUSTSEC-2024-0420", # gtk-sys
+  "RUSTSEC-2024-0429", # glib: unsound VariantStrIter (GTK3-era glib 0.18; fixed in 0.20 which Tauri can't take yet)
+
+  # ── Unmaintained transitive deps pulled in by the Tauri/wry tree. No
+  #    maintained alternative reachable without upstream bumps; all are
+  #    build-time or hashing helpers, not network-facing.
+  "RUSTSEC-2024-0370", # proc-macro-error (via gtk3-macros / glib-macros)
+  "RUSTSEC-2025-0057", # fxhash (via selectors/servo css parsing in wry)
+  "RUSTSEC-2025-0075", # unic-char-range   (unic-* block via tauri codegen/i18n)
+  "RUSTSEC-2025-0080", # unic-common
+  "RUSTSEC-2025-0081", # unic-char-property
+  "RUSTSEC-2025-0098", # unic-ucd-version
+  "RUSTSEC-2025-0100", # unic-ucd-ident
+
+  # ── Unsound-but-unreachable
+  "RUSTSEC-2026-0097", # rand: unsound SmallRng seeding on some platforms; rand here is transitive and not used with SmallRng
+]

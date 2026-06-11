@@ -1,0 +1,16 @@
+# cargo-audit policy for the CLI crate. Vulnerabilities are never ignored —
+# only advisories with no fix reachable from our dependency tree, each with a
+# reason and a revisit condition.
+
+[advisories]
+ignore = [
+  # paste is unmaintained (archived); pulled in by ratatui's macro layer.
+  # Build-time proc-macro only — no runtime or network surface. Revisit when
+  # ratatui drops it (tracked upstream in ratatui#1517).
+  "RUSTSEC-2024-0436",
+
+  # lru < 0.16.1 has an unsound iterator (RUSTSEC-2026-0002). ratatui 0.29
+  # pins lru 0.12; the unsound API (mutable iteration) is not exercised by
+  # ratatui's cell cache. Revisit on the next ratatui major bump.
+  "RUSTSEC-2026-0002",
+]
