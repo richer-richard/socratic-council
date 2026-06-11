@@ -119,14 +119,58 @@ jobs:
         with:
           workspaces: apps/desktop/src-tauri -> target
       - run: pnpm install --frozen-lockfile
+      - name: Rust backend unit tests
+        working-directory: apps/desktop/src-tauri
+        run: cargo test --lib
       - name: Build Tauri app
         working-directory: apps/desktop
         run: pnpm tauri build --bundles app
 
+  cli-test:
+    name: CLI Test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-14, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: cli -> target
+      - name: Test (default features — desktop bridge)
+        working-directory: cli
+        run: cargo test --locked
+      - name: Test (pure Rust — no default features)
+        working-directory: cli
+        run: cargo test --locked --no-default-features
+      - name: Build release binary
+        working-directory: cli
+        run: cargo build --release --locked
+
+  cli-lint:
+    name: CLI Clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: cli -> target
+      - name: Clippy (default features)
+        working-directory: cli
+        run: cargo clippy --all-targets --locked -- -D warnings
+      - name: Clippy (no default features)
+        working-directory: cli
+        run: cargo clippy --all-targets --locked --no-default-features -- -D warnings
+
   ci-pass:
     name: CI Pass
     if: always()
-    needs: [check-format, lint, typecheck, build, test, audit, build-desktop]
+    needs: [check-format, lint, typecheck, build, test, audit, build-desktop, cli-test, cli-lint]
     runs-on: ubuntu-latest
     env:
       FORMAT_RESULT: ${{ needs.check-format.result }}
@@ -135,11 +179,13 @@ jobs:
       BUILD_RESULT: ${{ needs.build.result }}
       TEST_RESULT: ${{ needs.test.result }}
       DESKTOP_RESULT: ${{ needs.build-desktop.result }}
+      CLI_TEST_RESULT: ${{ needs.cli-test.result }}
+      CLI_LINT_RESULT: ${{ needs.cli-lint.result }}
     steps:
       - name: Check all jobs
         run: |
           failed=false
-          for result in "$FORMAT_RESULT" "$LINT_RESULT" "$TYPECHECK_RESULT" "$BUILD_RESULT" "$TEST_RESULT" "$DESKTOP_RESULT"; do
+          for result in "$FORMAT_RESULT" "$LINT_RESULT" "$TYPECHECK_RESULT" "$BUILD_RESULT" "$TEST_RESULT" "$DESKTOP_RESULT" "$CLI_TEST_RESULT" "$CLI_LINT_RESULT"; do
             if [ "$result" = "failure" ]; then
               failed=true
             fi
