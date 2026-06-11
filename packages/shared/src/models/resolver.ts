@@ -59,7 +59,7 @@ export function versionScore(id: string): number {
   // so an open-weight id like "qwen2.5-72b-instruct" scores 2.5, not 72.
   s = s.replace(/(\d+(?:\.\d+)?)[kmb]\b/gi, "");
 
-  const matches = s.match(/\d+(?:[.\-]\d+)?/g);
+  const matches = s.match(/\d+(?:[.-]\d+)?/g);
   if (!matches) return 0;
   let best = 0;
   for (const raw of matches) {

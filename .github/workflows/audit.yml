@@ -46,9 +46,9 @@ jobs:
         run: cargo install cargo-audit --locked
       - name: Run cargo audit
         working-directory: apps/desktop/src-tauri
-        # Fail on any security advisory. Ignored advisories can be added to
-        # `audit.toml` in the src-tauri directory when justified (with a
-        # documented reason and follow-up plan).
+        # Fail on any security advisory. Ignored advisories live in
+        # `.cargo/audit.toml` (cargo-audit's config path) next to the crate,
+        # each with a documented reason and follow-up plan.
         run: cargo audit --deny warnings
 
   cargo-audit-cli:
