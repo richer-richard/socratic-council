@@ -17,32 +17,34 @@ regressions — see `git log`).
 ## Goals
 
 1. **Auto model choice** — by default each provider/tier resolves to the
-   best *currently available* model, so a new flagship is used the moment
+   best _currently available_ model, so a new flagship is used the moment
    it is discovered, without code edits.
-2. **Capability scanning** — call each provider's *own* list-models
+2. **Capability scanning** — call each provider's _own_ list-models
    endpoint (Chinese endpoints for Chinese providers) with the user's key,
    so the picker shows what the key can actually use.
 3. **Reasoning tiers** — in Settings, assign a model to each reasoning
    level (Low / Medium / High) per provider, and have the level also drive
    the provider's reasoning-effort knob.
 
-Non-negotiable (per user memory *No fabricated model IDs*): never invent a
+Non-negotiable (per user memory _No fabricated model IDs_): never invent a
 model id. Auto picks only from **scanned** ids or the **existing** catalog.
 
 ## Concepts
 
 ```ts
-type ReasoningTier = "low" | "medium" | "high";            // council-wide levels
-type ModelSelection = string;                              // a model id, or "auto"
+type ReasoningTier = "low" | "medium" | "high"; // council-wide levels
+type ModelSelection = string; // a model id, or "auto"
 
-interface ProviderModelConfig { tiers: Record<ReasoningTier, ModelSelection>; }
+interface ProviderModelConfig {
+  tiers: Record<ReasoningTier, ModelSelection>;
+}
 
 interface AppConfig {
   // …existing…
   modelSelection: Partial<Record<Provider, ProviderModelConfig>>; // NEW
-  agentTiers:     Partial<Record<AgentId, ReasoningTier>>;        // NEW, default "high"
-  councilTier:    ReasoningTier;          // default "high" — debate turns
-  utilityTier:    ReasoningTier;          // default "low"  — bidding/argmap/etc.
+  agentTiers: Partial<Record<AgentId, ReasoningTier>>; // NEW, default "high"
+  councilTier: ReasoningTier; // default "high" — debate turns
+  utilityTier: ReasoningTier; // default "low"  — bidding/argmap/etc.
 }
 ```
 
@@ -69,16 +71,16 @@ listAvailableModels(provider): DiscoveredModel[]  // cached scan ∪ catalog, de
 Scan endpoints (GET, through the existing Tauri transport so proxy +
 allowlist apply — all hosts already allowlisted in `allowlist.rs:29`):
 
-| Provider  | Method | URL (base = credential.baseUrl ?? default)             | Parse |
-|-----------|--------|--------------------------------------------------------|-------|
-| openai    | GET    | `<base>/v1/models`                                     | `data[].id` |
-| anthropic | GET    | `<base>/v1/models` (x-api-key + anthropic-version)     | `data[].id`,`display_name` |
-| google    | GET    | `<base>/v1beta/models` (x-goog-api-key)                | `models[].name` → strip `models/` |
-| deepseek  | GET    | `<base>/v1/models`                                     | `data[].id` |
-| kimi      | GET    | `<base>/v1/models`                                     | `data[].id` |
-| qwen      | GET    | `<base>/models` (base already `…/compatible-mode/v1`)  | `data[].id` |
-| zhipu     | GET    | `<base>/models` (base already `…/api/paas/v4`)         | `data[].id` |
-| minimax   | —      | Anthropic-style endpoint, no list API                  | catalog only |
+| Provider  | Method | URL (base = credential.baseUrl ?? default)            | Parse                             |
+| --------- | ------ | ----------------------------------------------------- | --------------------------------- |
+| openai    | GET    | `<base>/v1/models`                                    | `data[].id`                       |
+| anthropic | GET    | `<base>/v1/models` (x-api-key + anthropic-version)    | `data[].id`,`display_name`        |
+| google    | GET    | `<base>/v1beta/models` (x-goog-api-key)               | `models[].name` → strip `models/` |
+| deepseek  | GET    | `<base>/v1/models`                                    | `data[].id`                       |
+| kimi      | GET    | `<base>/v1/models`                                    | `data[].id`                       |
+| qwen      | GET    | `<base>/models` (base already `…/compatible-mode/v1`) | `data[].id`                       |
+| zhipu     | GET    | `<base>/models` (base already `…/api/paas/v4`)        | `data[].id`                       |
+| minimax   | —      | Anthropic-style endpoint, no list API                 | catalog only                      |
 
 Every scan **degrades gracefully**: non-2xx / parse failure / empty →
 return catalog for that provider and surface a soft warning. minimax always
@@ -93,6 +95,7 @@ resolveModel(provider, tier, available, selection?): string
 ```
 
 `resolveModel`:
+
 1. If `selection` is a concrete id present in `available` → use it.
 2. Else (Auto, or a stale id) rank `available`:
    - **high** → max capability (prefer `supportsThinking`, newest version,
@@ -112,14 +115,14 @@ unit-tested, no fabricated ids.
 Thread `reasoningTier?: ReasoningTier` through `CompletionOptions` →
 `callProvider` → each provider's `buildRequestBody`. Mapping:
 
-| Provider  | low | medium | high |
-|-----------|-----|--------|------|
-| openai    | effort `low` | `medium` | `xhigh` (gpt-5.x) / `high` |
-| anthropic | per-model profile (see below) | | |
-| google    | thinkingBudget 0 (omit) | 8192 | 24576 |
-| qwen      | enable_thinking=false | true | true |
-| minimax   | omit | budget≈8k | budget≈32k |
-| deepseek/kimi/zhipu | model-driven (Auto picks reasoner vs chat) | | |
+| Provider            | low                                        | medium    | high                       |
+| ------------------- | ------------------------------------------ | --------- | -------------------------- |
+| openai              | effort `low`                               | `medium`  | `xhigh` (gpt-5.x) / `high` |
+| anthropic           | per-model profile (see below)              |           |                            |
+| google              | thinkingBudget 0 (omit)                    | 8192      | 24576                      |
+| qwen                | enable_thinking=false                      | true      | true                       |
+| minimax             | omit                                       | budget≈8k | budget≈32k                 |
+| deepseek/kimi/zhipu | model-driven (Auto picks reasoner vs chat) |           |                            |
 
 Additive: when no tier is passed, current hardcoded behavior is unchanged,
 so existing tests stay green.
@@ -129,20 +132,24 @@ so existing tests stay green.
 Thinking config differs **per Claude model generation** and is NOT
 monotonic — adaptive was added then removed:
 
-| Model match            | mode       | prohibitsSampling | notes |
-|------------------------|------------|-------------------|-------|
-| `opus-4-8`             | `extended` | false             | **4.8 reverted adaptive** → extended `budget_tokens` again; sampling params allowed |
-| `opus-4-7`             | `adaptive` | true              | adaptive is the ONLY thinking-on mode; temp/top_p/top_k → 400 |
-| `opus-4-6`             | `adaptive` | false             | adaptive introduced here |
-| `opus-4`/`sonnet-4`/`haiku-4` (4.5, 4.1, 4) | `extended` | false | `{type:"enabled", budget_tokens}` |
-| `claude-3*` / other    | `none`     | false             | no thinking field ever |
+| Model match                                 | mode       | prohibitsSampling | notes                                                                               |
+| ------------------------------------------- | ---------- | ----------------- | ----------------------------------------------------------------------------------- |
+| `opus-4-8`                                  | `extended` | false             | **4.8 reverted adaptive** → extended `budget_tokens` again; sampling params allowed |
+| `opus-4-7`                                  | `adaptive` | true              | adaptive is the ONLY thinking-on mode; temp/top_p/top_k → 400                       |
+| `opus-4-6`                                  | `adaptive` | false             | adaptive introduced here                                                            |
+| `opus-4`/`sonnet-4`/`haiku-4` (4.5, 4.1, 4) | `extended` | false             | `{type:"enabled", budget_tokens}`                                                   |
+| `claude-3*` / other                         | `none`     | false             | no thinking field ever                                                              |
 
 ```ts
-interface AnthropicThinkingProfile { mode: "adaptive"|"extended"|"none"; prohibitsSampling: boolean; }
-function anthropicThinkingProfile(model: string): AnthropicThinkingProfile
+interface AnthropicThinkingProfile {
+  mode: "adaptive" | "extended" | "none";
+  prohibitsSampling: boolean;
+}
+function anthropicThinkingProfile(model: string): AnthropicThinkingProfile;
 ```
 
 Tier → request:
+
 - **adaptive**: `low` → omit thinking; `medium`/`high` → `{type:"adaptive"}`.
 - **extended**: `low` → omit; `medium` → `{type:"enabled", budget_tokens: min(4096, maxTokens-256)}`;
   `high` → `{type:"enabled", budget_tokens: min(8192, maxTokens-256)}`. Skip if budget < 1024.

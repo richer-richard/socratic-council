@@ -1,122 +1,129 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 720" role="img" aria-labelledby="title desc" preserveAspectRatio="xMidYMid meet">
-  <title id="title">Manual install: chapter index</title>
-  <desc id="desc">A typeset chapter index of the seven manual install steps. Each chapter has a Roman numeral, an editorial title, a one-sentence purpose, and a representative shell command set in monospace.</desc>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 640" role="img" aria-labelledby="title desc" preserveAspectRatio="xMidYMid meet">
+  <title id="title">Manual install flow</title>
+  <desc id="desc">Seven step cards in reading order — system prerequisites, Node, Rust, pnpm, clone and install, dev mode, production build — ending at a gold verification card with the eight-point checklist.</desc>
   <defs>
-    <radialGradient id="page" cx="50%" cy="48%" r="78%">
-      <stop offset="0%" stop-color="#0d1117"/>
-      <stop offset="60%" stop-color="#080a10"/>
-      <stop offset="100%" stop-color="#04050a"/>
-    </radialGradient>
-    <pattern id="dotgrid" width="22" height="22" patternUnits="userSpaceOnUse">
-      <circle cx="1" cy="1" r="0.7" fill="#1c2434" fill-opacity="0.55"/>
-    </pattern>
     <style>
-      .display { font-family: 'Cormorant Garamond', 'Hoefler Text', Garamond, 'Times New Roman', serif; }
-      .body    { font-family: 'Manrope', -apple-system, BlinkMacSystemFont, 'Helvetica Neue', sans-serif; }
-      .mono    { font-family: 'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace; }
-      .ink     { fill: #ecf0f6; }
-      .body-c  { fill: #b9c2d6; }
-      .muted   { fill: #5d667a; }
-      .gold    { fill: #f5c542; }
-      .stroke-hair { stroke: #20283c; stroke-width: 1; fill: none; }
-      .stroke-hair-strong { stroke: #344166; stroke-width: 1.2; fill: none; }
-      .stroke-rule { stroke: #1a2233; stroke-width: 1; fill: none; }
-      .leader { stroke: #2a3550; stroke-width: 1; stroke-dasharray: 1 4; fill: none; }
+      .sans { font-family: -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; }
+      .mono { font-family: 'SF Mono', 'Cascadia Code', 'JetBrains Mono', Menlo, Consolas, monospace; }
+      .h1   { fill: #F2F5FA; font-size: 27px; font-weight: 700; letter-spacing: -0.3px; }
+      .sub  { fill: #97A2B8; font-size: 14px; }
+      .tag  { fill: #F5C542; font-size: 11px; font-weight: 600; letter-spacing: 2.6px; }
+      .meta { fill: #6B7690; font-size: 11px; letter-spacing: 2px; }
+      .num   { fill: #F5C542; font-size: 12px; font-weight: 700; letter-spacing: 1.5px; }
+      .title2{ fill: #ECF0F6; font-size: 15.5px; font-weight: 650; }
+      .body2 { fill: #A6B0C5; font-size: 12px; }
+      .cmd2  { fill: #8B96AD; font-size: 11.5px; }
+      .footer{ fill: #6B7690; font-size: 11px; letter-spacing: 1.8px; }
+      .edge  { stroke: #516080; stroke-width: 1.5; fill: none; }
+      .edgegold { stroke: #F5C542; stroke-width: 1.8; fill: none; }
     </style>
+    <radialGradient id="bgGlow6" cx="50%" cy="28%" r="80%">
+      <stop offset="0%" stop-color="#11182A"/>
+      <stop offset="100%" stop-color="#0A0E16"/>
+    </radialGradient>
+    <marker id="arr6" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#516080"/>
+    </marker>
+    <marker id="arrGold6" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#F5C542"/>
+    </marker>
   </defs>
 
-  <rect width="1280" height="720" fill="url(#page)"/>
-  <rect width="1280" height="720" fill="url(#dotgrid)"/>
+  <rect width="1200" height="640" rx="18" fill="url(#bgGlow6)"/>
+  <rect x="0.5" y="0.5" width="1199" height="639" rx="18" fill="none" stroke="#222B3F"/>
 
   <!-- masthead -->
-  <line x1="64" y1="60" x2="1216" y2="60" class="stroke-hair"/>
-  <text x="64" y="48" class="mono ink" font-size="10" font-weight="600" letter-spacing="2">FIG. 07 / MANUAL</text>
-  <text x="1216" y="48" class="mono muted" font-size="10" letter-spacing="2" text-anchor="end">build from source · all platforms</text>
+  <text x="64" y="58" class="mono tag">SOCRATIC COUNCIL</text>
+  <text x="1136" y="58" class="mono meta" text-anchor="end">FIG. 06 — MANUAL INSTALL</text>
+  <text x="64" y="98" class="sans h1">Seven steps, any platform</text>
+  <text x="64" y="126" class="sans sub">Each step has full per-OS instructions and verification commands in the guide below.</text>
 
-  <!-- title -->
-  <text x="64" y="118" class="display ink" font-style="italic" font-size="48">A Reader's Guide</text>
-  <text x="64" y="148" class="body body-c" font-size="13">Seven chapters, in order. Read each one through, run its commands, then turn the page. Anything you skip will turn up later, asking for attention.</text>
-
-  <!-- contents header -->
-  <line x1="64" y1="198" x2="1216" y2="198" class="stroke-hair-strong"/>
-  <text x="64" y="220" class="mono muted" font-size="10" letter-spacing="2">CONTENTS</text>
-  <text x="1216" y="220" class="mono muted" font-size="10" letter-spacing="2" text-anchor="end">SHELL · POSIX</text>
-  <line x1="64" y1="232" x2="1216" y2="232" class="stroke-rule"/>
-
-  <!-- ============ CHAPTERS ============ -->
-  <!-- Each row: Roman numeral (left), title + caption (mid), command (right mono) -->
-
-  <!-- I -->
-  <g transform="translate(0,272)">
-    <text x="80"  y="0" class="display ink" font-style="italic" font-size="34" text-anchor="middle">I</text>
-    <text x="160" y="-6" class="display ink" font-style="italic" font-size="22">System prerequisites</text>
-    <text x="160" y="16" class="body body-c" font-size="11.5">OS-level packages that Tauri needs to compile and embed a WebView.</text>
-    <line x1="552" y1="-2" x2="800" y2="-2" class="leader"/>
-    <text x="1216" y="-6" class="mono ink" font-size="11" letter-spacing="0.5" text-anchor="end">xcode-select --install</text>
-    <text x="1216" y="14" class="mono muted" font-size="10" text-anchor="end">apt · dnf · pacman alternatives</text>
+  <!-- ============ ROW 1 ============ -->
+  <g transform="translate(64,176)">
+    <rect width="250" height="128" rx="12" fill="#121826" stroke="#283349"/>
+    <text x="18" y="30" class="mono num">STEP 1</text>
+    <text x="18" y="54" class="sans title2">System prereqs</text>
+    <text x="18" y="78" class="sans body2">Xcode CLT · MSVC + WebView2 ·</text>
+    <text x="18" y="94" class="sans body2">webkit2gtk (per distro)</text>
+    <text x="18" y="116" class="mono cmd2">xcode-select --install</text>
   </g>
-  <line x1="64" y1="306" x2="1216" y2="306" class="stroke-rule"/>
+  <line x1="314" y1="240" x2="334" y2="240" class="edge" marker-end="url(#arr6)"/>
 
-  <!-- II -->
-  <g transform="translate(0,346)">
-    <text x="80"  y="0" class="display ink" font-style="italic" font-size="34" text-anchor="middle">II</text>
-    <text x="160" y="-6" class="display ink" font-style="italic" font-size="22">Node.js, version 22 or later</text>
-    <text x="160" y="16" class="body body-c" font-size="11.5">Frontend toolchain runtime, and the host of corepack.</text>
-    <line x1="552" y1="-2" x2="800" y2="-2" class="leader"/>
-    <text x="1216" y="-6" class="mono ink" font-size="11" letter-spacing="0.5" text-anchor="end">nvm install 22</text>
-    <text x="1216" y="14" class="mono muted" font-size="10" text-anchor="end">or fnm install 22</text>
+  <g transform="translate(338,176)">
+    <rect width="250" height="128" rx="12" fill="#121826" stroke="#283349"/>
+    <text x="18" y="30" class="mono num">STEP 2</text>
+    <text x="18" y="54" class="sans title2">Node.js ≥ 22</text>
+    <text x="18" y="78" class="sans body2">Runs the frontend toolchain;</text>
+    <text x="18" y="94" class="sans body2">ships corepack for step 4.</text>
+    <text x="18" y="116" class="mono cmd2">nvm install 22</text>
   </g>
-  <line x1="64" y1="380" x2="1216" y2="380" class="stroke-rule"/>
+  <line x1="588" y1="240" x2="608" y2="240" class="edge" marker-end="url(#arr6)"/>
 
-  <!-- III -->
-  <g transform="translate(0,420)">
-    <text x="80"  y="0" class="display ink" font-style="italic" font-size="34" text-anchor="middle">III</text>
-    <text x="160" y="-6" class="display ink" font-style="italic" font-size="22">Rust, stable channel</text>
-    <text x="160" y="16" class="body body-c" font-size="11.5">Compiler and cargo for the Tauri backend. Version 1.77.2 or newer.</text>
-    <line x1="552" y1="-2" x2="800" y2="-2" class="leader"/>
-    <text x="1216" y="-6" class="mono ink" font-size="11" letter-spacing="0.5" text-anchor="end">curl ... | sh</text>
-    <text x="1216" y="14" class="mono muted" font-size="10" text-anchor="end">rustup default stable</text>
+  <g transform="translate(612,176)">
+    <rect width="250" height="128" rx="12" fill="#121826" stroke="#283349"/>
+    <text x="18" y="30" class="mono num">STEP 3</text>
+    <text x="18" y="54" class="sans title2">Rust ≥ 1.77.2</text>
+    <text x="18" y="78" class="sans body2">Compiles the Tauri v2 native</text>
+    <text x="18" y="94" class="sans body2">backend (stable toolchain).</text>
+    <text x="18" y="116" class="mono cmd2">curl https://sh.rustup.rs | sh</text>
   </g>
-  <line x1="64" y1="454" x2="1216" y2="454" class="stroke-rule"/>
+  <line x1="862" y1="240" x2="882" y2="240" class="edge" marker-end="url(#arr6)"/>
 
-  <!-- IV (gold accent) -->
-  <g transform="translate(0,494)">
-    <text x="80"  y="0" class="display gold" font-style="italic" font-size="34" text-anchor="middle">IV</text>
-    <text x="160" y="-6" class="display ink" font-style="italic" font-size="22">Pin pnpm via corepack</text>
-    <text x="160" y="16" class="body body-c" font-size="11.5">The repo pins pnpm 9.15.0 in <tspan class="mono" fill="#9ba6bf">package.json</tspan>; corepack obeys.</text>
-    <line x1="552" y1="-2" x2="800" y2="-2" class="leader"/>
-    <text x="1216" y="-6" class="mono gold" font-size="11" letter-spacing="0.5" text-anchor="end">corepack enable</text>
-    <text x="1216" y="14" class="mono muted" font-size="10" text-anchor="end">pnpm -v   # 9.15.0</text>
+  <g transform="translate(886,176)">
+    <rect width="250" height="128" rx="12" fill="#121826" stroke="#283349"/>
+    <text x="18" y="30" class="mono num">STEP 4</text>
+    <text x="18" y="54" class="sans title2">pnpm 9.15.0</text>
+    <text x="18" y="78" class="sans body2">Exact version pinned by the</text>
+    <text x="18" y="94" class="sans body2">repo's packageManager field.</text>
+    <text x="18" y="116" class="mono cmd2">corepack enable</text>
   </g>
-  <line x1="64" y1="528" x2="1216" y2="528" class="stroke-rule"/>
 
-  <!-- V -->
-  <g transform="translate(0,568)">
-    <text x="80"  y="0" class="display ink" font-style="italic" font-size="34" text-anchor="middle">V</text>
-    <text x="160" y="-6" class="display ink" font-style="italic" font-size="22">Clone and install</text>
-    <text x="160" y="16" class="body body-c" font-size="11.5">Resolve the workspace and download every JavaScript dependency.</text>
-    <line x1="552" y1="-2" x2="800" y2="-2" class="leader"/>
-    <text x="1216" y="-6" class="mono ink" font-size="11" letter-spacing="0.5" text-anchor="end">git clone &amp; cd</text>
-    <text x="1216" y="14" class="mono muted" font-size="10" text-anchor="end">pnpm install</text>
-  </g>
-  <line x1="64" y1="602" x2="1216" y2="602" class="stroke-rule"/>
+  <!-- snake to row 2 -->
+  <path d="M 1011 304 L 1011 322 L 189 322 L 189 340" class="edge" marker-end="url(#arr6)"/>
 
-  <!-- VI -->
-  <g transform="translate(0,642)">
-    <text x="80"  y="0" class="display ink" font-style="italic" font-size="34" text-anchor="middle">VI</text>
-    <text x="160" y="-6" class="display ink" font-style="italic" font-size="22">Run, hot-reload</text>
-    <text x="160" y="16" class="body body-c" font-size="11.5">Launches Vite, compiles Rust, opens the desktop window.</text>
-    <line x1="552" y1="-2" x2="800" y2="-2" class="leader"/>
-    <text x="1216" y="-6" class="mono ink" font-size="11" letter-spacing="0.5" text-anchor="end">pnpm tauri:dev</text>
-    <text x="1216" y="14" class="mono muted" font-size="10" text-anchor="end">first run: 5–15 min</text>
+  <!-- ============ ROW 2 ============ -->
+  <g transform="translate(64,344)">
+    <rect width="250" height="128" rx="12" fill="#121826" stroke="#283349"/>
+    <text x="18" y="30" class="mono num">STEP 5</text>
+    <text x="18" y="54" class="sans title2">Clone + install</text>
+    <text x="18" y="78" class="sans body2">Resolves all four workspace</text>
+    <text x="18" y="94" class="sans body2">packages in one shot.</text>
+    <text x="18" y="116" class="mono cmd2">git clone … &amp;&amp; pnpm install</text>
   </g>
-  <line x1="64" y1="676" x2="1216" y2="676" class="stroke-rule"/>
+  <line x1="314" y1="408" x2="334" y2="408" class="edge" marker-end="url(#arr6)"/>
 
-  <!-- VII -->
-  <g transform="translate(0,710)">
-    <text x="80"  y="0" class="display ink" font-style="italic" font-size="34" text-anchor="middle">VII</text>
-    <text x="160" y="-6" class="display ink" font-style="italic" font-size="20">Bundle for distribution</text>
-    <line x1="552" y1="-2" x2="800" y2="-2" class="leader"/>
-    <text x="1216" y="-6" class="mono ink" font-size="11" letter-spacing="0.5" text-anchor="end">pnpm tauri:build</text>
+  <g transform="translate(338,344)">
+    <rect width="250" height="128" rx="12" fill="#121826" stroke="#283349"/>
+    <text x="18" y="30" class="mono num">STEP 6</text>
+    <text x="18" y="54" class="sans title2">Run dev mode</text>
+    <text x="18" y="78" class="sans body2">Vite HMR + cargo build; first</text>
+    <text x="18" y="94" class="sans body2">run compiles ~300 crates.</text>
+    <text x="18" y="116" class="mono cmd2">pnpm … tauri:dev</text>
   </g>
+  <line x1="588" y1="408" x2="608" y2="408" class="edge" marker-end="url(#arr6)"/>
+
+  <g transform="translate(612,344)">
+    <rect width="250" height="128" rx="12" fill="#121826" stroke="#283349"/>
+    <text x="18" y="30" class="mono num">STEP 7</text>
+    <text x="18" y="54" class="sans title2">Production build</text>
+    <text x="18" y="78" class="sans body2">LTO release binary, bundled</text>
+    <text x="18" y="94" class="sans body2">per platform (.app/.msi/.deb).</text>
+    <text x="18" y="116" class="mono cmd2">pnpm … tauri:build</text>
+  </g>
+  <line x1="862" y1="408" x2="882" y2="408" class="edgegold" marker-end="url(#arrGold6)"/>
+
+  <g transform="translate(886,344)">
+    <rect width="250" height="128" rx="12" fill="#161408" stroke="#F5C542" stroke-width="1.2"/>
+    <text x="18" y="30" class="mono num">VERIFY</text>
+    <text x="18" y="54" class="sans title2">8-point checklist</text>
+    <text x="18" y="78" class="sans body2">git · node · pnpm · rustc ·</text>
+    <text x="18" y="94" class="sans body2">cargo · tauri · workspace · OS libs</text>
+    <text x="18" y="116" class="mono cmd2">README → verification</text>
+  </g>
+
+  <!-- footer -->
+  <line x1="64" y1="540" x2="1136" y2="540" stroke="#222B3F"/>
+  <text x="64" y="566" class="mono footer">FIRST CARGO BUILD: 5–15 MIN (COLD CACHE) · AFTER THAT: INCREMENTAL</text>
+  <text x="1136" y="566" class="mono footer" text-anchor="end">WINDOWS NEEDS stable-msvc</text>
+  <text x="64" y="592" class="sans body2">If a step fails, jump to the matching entry in Troubleshooting — every common error has a documented fix.</text>
 </svg>

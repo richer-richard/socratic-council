@@ -188,7 +188,8 @@ const SCAN_CACHE_PREFIX = "socratic-council-models:";
 
 function readScannedModels(provider: Provider): DiscoveredModel[] {
   try {
-    const raw = typeof localStorage !== "undefined" && localStorage.getItem(SCAN_CACHE_PREFIX + provider);
+    const raw =
+      typeof localStorage !== "undefined" && localStorage.getItem(SCAN_CACHE_PREFIX + provider);
     if (!raw) return [];
     const parsed = JSON.parse(raw) as { models?: DiscoveredModel[] };
     return Array.isArray(parsed?.models) ? parsed.models : [];

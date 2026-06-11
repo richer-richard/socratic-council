@@ -48,6 +48,9 @@ plan.md
 *.save
 docs/internal/
 
+# Claude Code local (per-machine) instructions — never committed
+CLAUDE.local.md
+
 # Temporary files
 *.tmp
 *.temp

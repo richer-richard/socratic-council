@@ -1,162 +1,161 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 580" role="img" aria-labelledby="title desc" preserveAspectRatio="xMidYMid meet">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 780" role="img" aria-labelledby="title desc" preserveAspectRatio="xMidYMid meet">
   <title id="title">Architecture: Socratic Council monorepo</title>
-  <desc id="desc">A stratified cross-section of the codebase. Five horizontal layers from top to bottom: the desktop Surface, the orchestration Core, the Wire of provider adapters, the Schema of shared types, and the World of provider APIs. A side column lists the Rust IPC surface that gates all outbound traffic.</desc>
+  <desc id="desc">Three columns: the Tauri desktop app whose outbound traffic passes through a Rust IPC gate, the three shared TypeScript packages, and the standalone Rust CLI with its read-only bridge into the desktop vault. All paths end at the eight provider APIs along the bottom.</desc>
   <defs>
-    <radialGradient id="page" cx="40%" cy="50%" r="80%">
-      <stop offset="0%" stop-color="#0d1117"/>
-      <stop offset="60%" stop-color="#080a10"/>
-      <stop offset="100%" stop-color="#04050a"/>
-    </radialGradient>
-    <pattern id="dotgrid" width="22" height="22" patternUnits="userSpaceOnUse">
-      <circle cx="1" cy="1" r="0.7" fill="#1c2434" fill-opacity="0.55"/>
-    </pattern>
     <style>
-      .display { font-family: 'Cormorant Garamond', 'Hoefler Text', Garamond, 'Times New Roman', serif; }
-      .body    { font-family: 'Manrope', -apple-system, BlinkMacSystemFont, 'Helvetica Neue', sans-serif; }
-      .mono    { font-family: 'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace; }
-      .ink     { fill: #ecf0f6; }
-      .body-c  { fill: #b9c2d6; }
-      .muted   { fill: #5d667a; }
-      .gold    { fill: #f5c542; }
-      .stroke-hair { stroke: #20283c; stroke-width: 1; fill: none; }
-      .stroke-hair-strong { stroke: #344166; stroke-width: 1.2; fill: none; }
-      .stroke-gold { stroke: #f5c542; stroke-width: 1; fill: none; }
-      .stroke-rule { stroke: #1a2233; stroke-width: 1; fill: none; }
-      .tick { stroke: #4a5878; stroke-width: 1.4; fill: none; }
+      .sans { font-family: -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; }
+      .mono { font-family: 'SF Mono', 'Cascadia Code', 'JetBrains Mono', Menlo, Consolas, monospace; }
+      .h1   { fill: #F2F5FA; font-size: 27px; font-weight: 700; letter-spacing: -0.3px; }
+      .sub  { fill: #97A2B8; font-size: 14px; }
+      .tag  { fill: #F5C542; font-size: 11px; font-weight: 600; letter-spacing: 2.6px; }
+      .meta { fill: #6B7690; font-size: 11px; letter-spacing: 2px; }
+      .colhead   { fill: #6B7690; font-size: 11px; letter-spacing: 2.2px; }
+      .boxtitle  { fill: #ECF0F6; font-size: 15.5px; font-weight: 650; }
+      .boxbody   { fill: #A6B0C5; font-size: 12.5px; }
+      .boxmono   { fill: #8B96AD; font-size: 11px; }
+      .gold      { fill: #F5C542; }
+      .provname  { fill: #C7D0E0; font-size: 12px; font-weight: 600; }
+      .footer    { fill: #6B7690; font-size: 11px; letter-spacing: 1.8px; }
+      .edge      { stroke: #516080; stroke-width: 1.6; fill: none; }
+      .edgegold  { stroke: #F5C542; stroke-width: 1.8; fill: none; }
+      .edgedash  { stroke: #516080; stroke-width: 1.4; fill: none; stroke-dasharray: 5 5; }
     </style>
+    <radialGradient id="bgGlow2" cx="50%" cy="30%" r="75%">
+      <stop offset="0%" stop-color="#11182A"/>
+      <stop offset="100%" stop-color="#0A0E16"/>
+    </radialGradient>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#516080"/>
+    </marker>
+    <marker id="arrGold" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#F5C542"/>
+    </marker>
   </defs>
 
-  <rect width="1280" height="580" fill="url(#page)"/>
-  <rect width="1280" height="580" fill="url(#dotgrid)"/>
+  <rect width="1200" height="780" rx="18" fill="url(#bgGlow2)"/>
+  <rect x="0.5" y="0.5" width="1199" height="779" rx="18" fill="none" stroke="#222B3F"/>
 
   <!-- masthead -->
-  <line x1="64" y1="60" x2="1216" y2="60" class="stroke-hair"/>
-  <text x="64" y="48" class="mono ink" font-size="10" font-weight="600" letter-spacing="2">FIG. 02 / ARCHITECTURE</text>
-  <text x="1216" y="48" class="mono muted" font-size="10" letter-spacing="2" text-anchor="end">stratigraphy of a monorepo</text>
+  <text x="64" y="58" class="mono tag">SOCRATIC COUNCIL</text>
+  <text x="1136" y="58" class="mono meta" text-anchor="end">FIG. 02 — ARCHITECTURE</text>
+  <text x="64" y="98" class="sans h1">One monorepo, two front ends, one gate</text>
+  <text x="64" y="126" class="sans sub">The desktop app and the terminal CLI share the same vault, model resolver, and provider contracts. Nothing leaves except provider calls.</text>
 
-  <!-- title block -->
-  <text x="64" y="120" class="display ink" font-style="italic" font-size="46">A Cross-Section</text>
-  <text x="64" y="148" class="body body-c" font-size="13">Five layers from user-facing chrome down to the eight provider endpoints. The Rust backend is a thin gate at the seam between the desktop and the wire.</text>
+  <!-- column heads -->
+  <text x="64"  y="172" class="mono colhead">DESKTOP APP · apps/desktop</text>
+  <text x="478" y="172" class="mono colhead">SHARED PACKAGES · packages/*</text>
+  <text x="852" y="172" class="mono colhead">TERMINAL CLI · cli/ (crates.io)</text>
 
-  <!-- ============ STRATA ============ -->
+  <!-- ============== COLUMN A: DESKTOP ============== -->
+  <!-- UI box -->
+  <g transform="translate(64,188)">
+    <rect width="372" height="104" rx="12" fill="#121826" stroke="#283349"/>
+    <text x="20" y="32" class="sans boxtitle">React + TypeScript UI</text>
+    <text x="20" y="56" class="sans boxbody">Debate chamber, argument map, conflict graph,</text>
+    <text x="20" y="74" class="sans boxbody">scorecards, exports, command palette.</text>
+    <text x="20" y="94" class="mono boxmono">Chat.tsx · Home · Settings · components/*</text>
+  </g>
+  <line x1="250" y1="292" x2="250" y2="318" class="edge" marker-end="url(#arr)"/>
 
-  <!-- left guideline / spine -->
-  <line x1="120" y1="200" x2="120" y2="500" class="stroke-rule"/>
+  <!-- services box -->
+  <g transform="translate(64,322)">
+    <rect width="372" height="96" rx="12" fill="#121826" stroke="#283349"/>
+    <text x="20" y="30" class="sans boxtitle">Services &amp; stores</text>
+    <text x="20" y="54" class="sans boxbody">Vault-encrypted secrets, sessions, attachments,</text>
+    <text x="20" y="72" class="sans boxbody">bundles, model scan, oracle tools, config store.</text>
+    <text x="20" y="88" class="mono boxmono">vault · secrets · sessions · attachments · tools</text>
+  </g>
+  <line x1="250" y1="418" x2="250" y2="444" class="edgegold" marker-end="url(#arrGold)"/>
 
-  <!-- right guideline -->
-  <line x1="900" y1="200" x2="900" y2="500" class="stroke-rule"/>
-
-  <!-- helper: each stratum is one g translated to its baseline -->
-
-  <!-- 01 SURFACE -->
-  <g transform="translate(0,210)">
-    <line x1="64" y1="0" x2="900" y2="0" class="stroke-hair-strong"/>
-    <text x="64"  y="-12" class="mono muted" font-size="10" letter-spacing="2">01</text>
-    <text x="100" y="-12" class="mono muted" font-size="10" letter-spacing="2">SURFACE · apps/desktop</text>
-    <text x="138" y="22"  class="display ink" font-style="italic" font-size="22">React + Tauri v2</text>
-    <text x="138" y="44"  class="body body-c" font-size="11.5">Pages, council circle, message bubbles, encrypted local storage, streaming UI.</text>
-    <g class="mono" font-size="9.5" fill="#9ba6bf" letter-spacing="1.4">
-      <text x="900" y="14"  text-anchor="end">Chat.tsx · Home.tsx · ProjectDetail.tsx</text>
-      <text x="900" y="30"  text-anchor="end">services/{vault,sessions,attachments,bundle}</text>
-      <text x="900" y="46"  text-anchor="end">stores/config · utils/{redact,messageVisibility}</text>
-    </g>
+  <!-- Rust gate (gold) -->
+  <g transform="translate(64,448)">
+    <rect width="372" height="148" rx="12" fill="#161408" stroke="#F5C542" stroke-width="1.3"/>
+    <text x="20" y="32" class="sans boxtitle"><tspan class="gold">Rust IPC gate</tspan> — src-tauri</text>
+    <text x="20" y="58" class="sans boxbody">Every outbound byte passes one door:</text>
+    <text x="20" y="82" class="mono boxmono">allowlist.rs   https-only · host allowlist · 4 MB cap · 600 req/min</text>
+    <text x="20" y="102" class="mono boxmono">http.rs        SSE streaming · proxy · cancel by request-id</text>
+    <text x="20" y="122" class="mono boxmono">vault_file.rs  32-byte DEK · 0600 · no OS keychain</text>
+    <text x="20" y="142" class="mono boxmono">redact.rs      keys + URL userinfo scrubbed from errors</text>
   </g>
 
-  <!-- 02 CORE (gold-accented) -->
-  <g transform="translate(0,300)">
-    <line x1="64" y1="0" x2="900" y2="0" class="stroke-gold"/>
-    <text x="64"  y="-12" class="mono gold" font-size="10" letter-spacing="2">02</text>
-    <text x="100" y="-12" class="mono gold" font-size="10" letter-spacing="2">CORE · packages/core</text>
-    <text x="138" y="22"  class="display ink" font-style="italic" font-size="22">The Orchestration Brain</text>
-    <text x="138" y="44"  class="body body-c" font-size="11.5">Provider-agnostic. Bidding, fairness, conflict, fact-check, argument map, reflection, summarize.</text>
-    <g class="mono" font-size="9.5" fill="#9ba6bf" letter-spacing="1.4">
-      <text x="900" y="14"  text-anchor="end">semanticBidding · reflection · factcheck</text>
-      <text x="900" y="30"  text-anchor="end">argmap · semanticConflict · summarize</text>
-      <text x="900" y="46"  text-anchor="end">fairness · cost · memory · oracle</text>
-    </g>
+  <!-- ============== COLUMN B: PACKAGES ============== -->
+  <g transform="translate(478,188)">
+    <rect width="300" height="120" rx="12" fill="#121826" stroke="#283349"/>
+    <text x="20" y="30" class="sans boxtitle">core</text>
+    <text x="20" y="54" class="sans boxbody">Orchestration brain — provider-free.</text>
+    <text x="20" y="76" class="mono boxmono">bidding · fairness · conflict · factcheck</text>
+    <text x="20" y="94" class="mono boxmono">argmap · reflection · summarize · cost</text>
+    <text x="20" y="112" class="mono boxmono">memory · oracle · peerEvaluation</text>
+  </g>
+  <g transform="translate(478,324)">
+    <rect width="300" height="94" rx="12" fill="#121826" stroke="#283349"/>
+    <text x="20" y="30" class="sans boxtitle">sdk</text>
+    <text x="20" y="54" class="sans boxbody">Eight provider clients, four wire styles,</text>
+    <text x="20" y="72" class="sans boxbody">SSE transport, retries, proxy.</text>
+    <text x="20" y="88" class="mono boxmono">openai · anthropic · google · 5 more</text>
+  </g>
+  <g transform="translate(478,434)">
+    <rect width="300" height="94" rx="12" fill="#121826" stroke="#283349"/>
+    <text x="20" y="30" class="sans boxtitle">shared</text>
+    <text x="20" y="54" class="sans boxbody">16-agent roster, model registry + pricing,</text>
+    <text x="20" y="72" class="sans boxbody">Auto model resolver, prompts, types.</text>
+    <text x="20" y="88" class="mono boxmono">DEFAULT_AGENTS · MODEL_REGISTRY · resolver</text>
   </g>
 
-  <!-- 03 WIRE -->
-  <g transform="translate(0,390)">
-    <line x1="64" y1="0" x2="900" y2="0" class="stroke-hair-strong"/>
-    <text x="64"  y="-12" class="mono muted" font-size="10" letter-spacing="2">03</text>
-    <text x="100" y="-12" class="mono muted" font-size="10" letter-spacing="2">WIRE · packages/sdk</text>
-    <text x="138" y="22"  class="display ink" font-style="italic" font-size="22">Provider Adapters</text>
-    <text x="138" y="44"  class="body body-c" font-size="11.5">SSE streaming, prompt caching, thinking modes, retries, replay buffer, abort.</text>
-    <g class="mono" font-size="9.5" fill="#9ba6bf" letter-spacing="1.4">
-      <text x="900" y="14"  text-anchor="end">openai · anthropic · google · deepseek</text>
-      <text x="900" y="30"  text-anchor="end">kimi · qwen · minimax · zhipu</text>
-      <text x="900" y="46"  text-anchor="end">transport · sse · base</text>
-    </g>
+  <!-- edges: app consumes packages -->
+  <line x1="478" y1="248" x2="436" y2="248" class="edge" marker-end="url(#arr)"/>
+  <line x1="478" y1="370" x2="436" y2="370" class="edge" marker-end="url(#arr)"/>
+  <!-- CLI ports core logic -->
+  <line x1="778" y1="248" x2="848" y2="248" class="edgedash" marker-end="url(#arr)"/>
+  <text x="813" y="236" class="mono boxmono" text-anchor="middle">ported</text>
+
+  <!-- ============== COLUMN C: CLI ============== -->
+  <g transform="translate(852,188)">
+    <rect width="284" height="240" rx="12" fill="#121826" stroke="#283349"/>
+    <text x="20" y="32" class="sans boxtitle">socratic-council (Rust)</text>
+    <text x="20" y="56" class="sans boxbody">The same workstation in a ratatui TUI —</text>
+    <text x="20" y="74" class="sans boxbody">first-class on a headless VPS.</text>
+    <text x="20" y="100" class="mono boxmono">tui/      Home · Chat · Settings · sidebar</text>
+    <text x="20" y="120" class="mono boxmono">engine/   moderator · votes · advisors</text>
+    <text x="20" y="140" class="mono boxmono">          conflict · peer eval · research</text>
+    <text x="20" y="160" class="mono boxmono">providers/ 8 endpoints · 4 client styles</text>
+    <text x="20" y="180" class="mono boxmono">crypto.rs  XChaCha20 keys.enc · 0600</text>
+    <text x="20" y="200" class="mono boxmono">catalog.rs Auto resolver · live /models</text>
+    <text x="20" y="226" class="sans boxbody">cargo install socratic-council</text>
   </g>
 
-  <!-- 04 SCHEMA -->
-  <g transform="translate(0,480)">
-    <line x1="64" y1="0" x2="900" y2="0" class="stroke-hair-strong"/>
-    <text x="64"  y="-12" class="mono muted" font-size="10" letter-spacing="2">04</text>
-    <text x="100" y="-12" class="mono muted" font-size="10" letter-spacing="2">SCHEMA · packages/shared</text>
-    <text x="138" y="22"  class="display ink" font-style="italic" font-size="22">Types &amp; Roster</text>
-    <text x="138" y="44"  class="body body-c" font-size="11.5">Agent and observer rosters, model registry, default prompts, zod schemas.</text>
-    <g class="mono" font-size="9.5" fill="#9ba6bf" letter-spacing="1.4">
-      <text x="900" y="14"  text-anchor="end">DEFAULT_AGENTS · OBSERVER_CONFIG</text>
-      <text x="900" y="30"  text-anchor="end">MODEL_REGISTRY (~50 models)</text>
-      <text x="900" y="46"  text-anchor="end">PARTNER_TO_OBSERVER · prompts</text>
-    </g>
+  <!-- bridge box -->
+  <g transform="translate(852,448)">
+    <rect width="284" height="80" rx="12" fill="#121826" stroke="#283349" stroke-dasharray="6 4"/>
+    <text x="20" y="30" class="sans boxtitle">Desktop bridge</text>
+    <text x="20" y="52" class="sans boxbody">Reads the app's keys + sessions,</text>
+    <text x="20" y="70" class="sans boxbody">read-only, optional, no prompts.</text>
   </g>
+  <!-- bridge edge to vault -->
+  <path d="M 852 488 C 700 488, 560 560, 440 560" class="edgedash" marker-end="url(#arr)"/>
+  <text x="640" y="540" class="mono boxmono" text-anchor="middle">decrypts the same ENC1 vault</text>
 
-  <!-- 05 WORLD -->
-  <g transform="translate(0,548)">
-    <line x1="64" y1="-8" x2="900" y2="-8" class="stroke-hair"/>
-    <text x="64"  y="6" class="mono muted" font-size="10" letter-spacing="2">05 · WORLD · provider APIs · loopback for ollama</text>
-  </g>
+  <!-- ============== BOTTOM: PROVIDERS ============== -->
+  <line x1="250" y1="596" x2="250" y2="652" class="edgegold" marker-end="url(#arrGold)"/>
+  <line x1="994" y1="528" x2="994" y2="652" class="edge" marker-end="url(#arr)"/>
+  <text x="268" y="630" class="mono boxmono">https only</text>
 
-  <!-- ============ RIGHT SIDEBAR: Rust IPC ============ -->
-  <g transform="translate(940,180)">
-    <line x1="0" y1="0" x2="220" y2="0" class="stroke-hair-strong"/>
-    <text x="0" y="-10" class="mono muted" font-size="10" letter-spacing="2">RUST IPC GATE</text>
-    <text x="0" y="22" class="display ink" font-style="italic" font-size="20">src-tauri/</text>
-    <text x="0" y="44" class="body body-c" font-size="11.5" >Every outbound call passes through</text>
-    <text x="0" y="60" class="body body-c" font-size="11.5">a host allowlist, body cap, and rate</text>
-    <text x="0" y="76" class="body body-c" font-size="11.5">limiter. Vault key never crosses IPC</text>
-    <text x="0" y="92" class="body body-c" font-size="11.5">after first launch.</text>
-
-    <!-- bracketed list -->
-    <g transform="translate(0,118)">
-      <line x1="0" y1="0" x2="0" y2="200" class="stroke-rule"/>
-      <line x1="0" y1="0" x2="6" y2="0" class="stroke-rule"/>
-      <line x1="0" y1="200" x2="6" y2="200" class="stroke-rule"/>
-
-      <text x="14" y="6" class="mono muted" font-size="9.5" letter-spacing="1.4">FILE</text>
-      <text x="80" y="6" class="mono muted" font-size="9.5" letter-spacing="1.4">PURPOSE</text>
-
-      <text x="14" y="32" class="mono ink" font-size="11">http.rs</text>
-      <text x="14" y="46" class="body muted" font-size="10">streaming, proxy, cancel</text>
-
-      <text x="14" y="74" class="mono ink" font-size="11">allowlist.rs</text>
-      <text x="14" y="88" class="body muted" font-size="10">12 hosts · 4 MB · 600 / min</text>
-
-      <text x="14" y="116" class="mono ink" font-size="11">vault_file.rs</text>
-      <text x="14" y="130" class="body muted" font-size="10">DEK · 0600 · quarantine</text>
-
-      <text x="14" y="158" class="mono ink" font-size="11">redact.rs</text>
-      <text x="14" y="172" class="body muted" font-size="10">scrub urls · api keys</text>
-
-      <text x="14" y="198" class="mono gold" font-size="9.5" letter-spacing="1.4">5 IPC COMMANDS</text>
+  <g transform="translate(64,656)">
+    <rect width="1072" height="64" rx="12" fill="#0E1422" stroke="#283349"/>
+    <g class="sans provname">
+      <circle cx="36"  cy="32" r="5.5" fill="#60A5FA"/><text x="50"  y="37">OpenAI</text>
+      <circle cx="166" cy="32" r="5.5" fill="#FBBF24"/><text x="180" y="37">Anthropic</text>
+      <circle cx="316" cy="32" r="5.5" fill="#34D399"/><text x="330" y="37">Google</text>
+      <circle cx="446" cy="32" r="5.5" fill="#F87171"/><text x="460" y="37">DeepSeek</text>
+      <circle cx="592" cy="32" r="5.5" fill="#2DD4BF"/><text x="606" y="37">Kimi</text>
+      <circle cx="694" cy="32" r="5.5" fill="#22D3EE"/><text x="708" y="37">Qwen</text>
+      <circle cx="800" cy="32" r="5.5" fill="#F472B6"/><text x="814" y="37">MiniMax</text>
+      <circle cx="938" cy="32" r="5.5" fill="#A78BFA"/><text x="952" y="37">Z.AI</text>
     </g>
-  </g>
-
-  <!-- left index column: depth ticks like a ruler -->
-  <g transform="translate(72,210)">
-    <g class="tick">
-      <line x1="0" y1="0"   x2="6" y2="0"/>
-      <line x1="0" y1="90"  x2="6" y2="90"/>
-      <line x1="0" y1="180" x2="6" y2="180"/>
-      <line x1="0" y1="270" x2="6" y2="270"/>
-      <line x1="0" y1="338" x2="6" y2="338"/>
-    </g>
-    <line x1="0" y1="0" x2="0" y2="338" class="stroke-rule"/>
   </g>
 
   <!-- footer -->
-  <line x1="64" y1="552" x2="1216" y2="552" class="stroke-hair"/>
+  <line x1="64" y1="744" x2="1136" y2="744" stroke="#222B3F"/>
+  <text x="64" y="764" class="mono footer">LOCAL-FIRST · BYO API KEYS · APACHE-2.0</text>
+  <text x="1136" y="764" class="mono footer" text-anchor="end">pnpm WORKSPACE + STANDALONE CARGO CRATE</text>
 </svg>

@@ -301,8 +301,7 @@ export function parsePeerEvalResponse(
     };
     const overall = clampScore(item.overall);
     const stance = normalizeStance(item.stance);
-    const critique =
-      typeof item.critique === "string" ? item.critique.trim().slice(0, 1500) : "";
+    const critique = typeof item.critique === "string" ? item.critique.trim().slice(0, 1500) : "";
     if (!critique) continue;
 
     out.push({
@@ -320,7 +319,7 @@ export function parsePeerEvalResponse(
 // --- Per-evaluator runner ----------------------------------------------------
 
 const RETRY_NUDGE =
-  '\n\n(Your previous response was not valid JSON. Respond now with ONLY the JSON object. No preamble, no fences.)';
+  "\n\n(Your previous response was not valid JSON. Respond now with ONLY the JSON object. No preamble, no fences.)";
 
 async function runOneEvaluator(
   evaluator: PeerEvalAgent,

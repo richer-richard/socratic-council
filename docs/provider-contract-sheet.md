@@ -1,6 +1,6 @@
 # Provider Contract Sheet (Socratic Council)
 
-Updated: 2026-03-05
+Updated: 2026-06-11
 
 This sheet records the API contracts used for provider request builders and stream parsers.
 When docs and existing behavior conflict, docs win.
@@ -49,6 +49,11 @@ Sources:
   - Must satisfy `max_tokens > thinking.budget_tokens`
   - Thinking mode is not compatible with `temperature` / `top_k` overrides
   - Adaptive thinking is supported for newer models (used for Opus 4.6 path)
+  - **Per-model and non-monotonic:** the live API rejects
+    `thinking: { type: "enabled" }` (extended budgets) for `claude-opus-4-7`
+    and `claude-opus-4-8` with a 400 — those two are **adaptive-only**.
+    Verified against the live API during CLI hardening (July-tagged work);
+    sending extended budgets to 4.8 fails every request.
 - Prompt caching:
   - Stable prompt prefixes can be marked with `cache_control: { type: "ephemeral" }` on cacheable content blocks
 
@@ -116,7 +121,8 @@ Sources:
 - Base URL: `https://api.minimaxi.com/anthropic`
 - Endpoint: `POST /v1/messages`
 - Canonical model ID:
-  - `MiniMax-M2.5` (lowercase alias `minimax-m2.5` normalized internally)
+  - `MiniMax-M2.5` at the time of the original sheet; the council default is
+    now `minimax-m2.7-highspeed` (lowercase aliases normalized internally)
 - Compatibility:
   - Anthropic-compatible request/stream shapes are supported
   - Keep thinking budget below `max_tokens` for safety

@@ -18,7 +18,11 @@ describe("parseModelsResponse", () => {
   it("parses Anthropic display_name + created_at", () => {
     const body = JSON.stringify({
       data: [
-        { id: "claude-opus-4-8", display_name: "Claude Opus 4.8", created_at: "2026-01-15T00:00:00Z" },
+        {
+          id: "claude-opus-4-8",
+          display_name: "Claude Opus 4.8",
+          created_at: "2026-01-15T00:00:00Z",
+        },
       ],
     });
     const [m] = parseModelsResponse("anthropic", body);
