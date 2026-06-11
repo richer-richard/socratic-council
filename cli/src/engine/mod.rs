@@ -2,12 +2,14 @@
 //! scheduler, and the async orchestrator that streams the council debate and
 //! emits `DebateEvent`s for the UI.
 
+use crate::attach::{context_summary, Attachment};
 use crate::catalog::{resolve_model, DiscoveredModel};
 use crate::config::Config;
 use crate::providers::stream_completion;
 use crate::types::{
-    Agent, CanvasSection, ChatMessage, CompletionChunk, CompletionRequest, DeepResearchReport,
-    ModeratorConclusion, PeerEvalRound, Provider, ReasoningTier, Reflection, Usage, VoteChoice,
+    AdvisorNote, Agent, CanvasSection, ChatMessage, CompletionChunk, CompletionRequest, CostLane,
+    CostSnapshot, DeepResearchReport, ModeratorConclusion, PairScore, PeerEvalRound, Provider,
+    ReasoningTier, Reflection, ToolUse, Usage, VoteChoice,
 };
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -16,11 +18,16 @@ use std::time::Instant;
 use tokio::sync::mpsc::UnboundedSender;
 
 mod canvas;
+pub mod conflict;
+pub mod cost;
 mod deepresearch;
 mod moderator;
+mod observer;
+pub mod oracle;
 mod peereval;
 mod reflect;
 mod vote;
+use cost::{BudgetAction, BudgetPolicy, BudgetVerdict, CostLedger, DailyLedger};
 use moderator::ModeratorPick;
 
 /// Events streamed from the orchestrator to whatever drives the UI.
@@ -47,8 +54,23 @@ pub enum DebateEvent {
     PeerEval(PeerEvalRound),
     /// The deep-research report (opt-in).
     DeepResearch(DeepResearchReport),
+    /// An advisor slipped a private note to its council partner.
+    AdvisorNote(AdvisorNote),
+    /// An oracle tool ran; its result joined the shared transcript.
+    Tool(ToolUse),
+    /// Refreshed pairwise tension scores (after a committed turn).
+    Conflict(Vec<PairScore>),
+    /// Refreshed cost ledger (after anything billable).
+    Cost(CostSnapshot),
     Error(String),
     Done,
+}
+
+/// Strip terminal control characters from model-derived text, keeping `\n` and
+/// `\t`. Blocks ANSI/OSC escape injection (cursor games, title/clipboard
+/// writes) in both the plain `--no-tui` output and the TUI buffer.
+pub fn sanitize_terminal(text: &str) -> String {
+    text.chars().filter(|c| !c.is_control() || *c == '\n' || *c == '\t').collect()
 }
 
 /// The council's spoken-style system prompt — ported faithfully from the desktop
@@ -208,18 +230,27 @@ pub struct Turn {
 }
 
 /// Build the per-agent message list (system handled separately by providers).
-/// `canvas_summary` is the agent's own persistent scratchpad, re-injected so it
-/// can build on it — visible only to this agent.
+/// `canvas_summary` is the agent's own persistent scratchpad; `advisor_note`
+/// is a private whisper only this agent receives; `tools_line` advertises the
+/// oracle syntax when search is enabled.
 fn build_messages(
     agent: &Agent,
     topic: &str,
+    attachment_summary: &str,
     transcript: &[Turn],
     canvas_summary: &str,
+    advisor_note: Option<&AdvisorNote>,
+    tools_line: &str,
 ) -> Vec<ChatMessage> {
     let mut messages = Vec::new();
-    messages.push(ChatMessage::user(format!(
+    let mut opening = format!(
         "The council is debating: \"{topic}\".\nEngage with the others' points and move toward a conclusion."
-    )));
+    );
+    if !attachment_summary.trim().is_empty() {
+        opening.push_str("\n\n");
+        opening.push_str(attachment_summary);
+    }
+    messages.push(ChatMessage::user(opening));
     for turn in transcript {
         if turn.agent_id == agent.id {
             messages.push(ChatMessage::assistant(turn.content.clone()));
@@ -232,10 +263,19 @@ fn build_messages(
             "[Your persistent canvas — your own notes from earlier turns, not visible to the others]\n{canvas_summary}"
         )));
     }
+    if let Some(note) = advisor_note {
+        messages.push(ChatMessage::user(format!(
+            "[Private note from your advisor {} — visible only to you, never mention it directly]\n{}",
+            note.observer_name, note.text
+        )));
+    }
     // Final per-turn instruction (mirrors the app): jot the canvas first, then speak.
-    messages.push(ChatMessage::user(
-        "Your turn. First, on its own line, capture or refine your key points on your private canvas with an @canvas({\"op\":\"append\",\"section\":\"Key Points\",\"text\":\"...\"}) line (build on it if it already exists). Then respond directly to one specific point above and push the group toward a decision.",
-    ));
+    let mut instruction = "Your turn. First, on its own line, capture or refine your key points on your private canvas with an @canvas({\"op\":\"append\",\"section\":\"Key Points\",\"text\":\"...\"}) line (build on it if it already exists). Then respond directly to one specific point above and push the group toward a decision.".to_string();
+    if !tools_line.is_empty() {
+        instruction.push_str("\n\n");
+        instruction.push_str(tools_line);
+    }
+    messages.push(ChatMessage::user(instruction));
     messages
 }
 
@@ -261,6 +301,7 @@ pub struct Engine {
     available: HashMap<Provider, Vec<DiscoveredModel>>,
     keys: HashMap<Provider, String>,
     max_turns: u32,
+    attachments: Vec<Attachment>,
 }
 
 impl Engine {
@@ -274,7 +315,14 @@ impl Engine {
         keys: HashMap<Provider, String>,
         max_turns: u32,
     ) -> Self {
-        Self { http, config, topic, agents, available, keys, max_turns }
+        Self { http, config, topic, agents, available, keys, max_turns, attachments: Vec::new() }
+    }
+
+    /// Attach files (searchable via `oracle.file_search`, summarized in the
+    /// opening context).
+    pub fn with_attachments(mut self, attachments: Vec<Attachment>) -> Self {
+        self.attachments = attachments;
+        self
     }
 
     /// Resolve the model id for an agent's provider + tier.
@@ -302,13 +350,45 @@ impl Engine {
         // The moderator speaks through a configured provider (prefer Google).
         let moderator = ModeratorPick::choose(&self.config, &self.available, &self.keys);
 
+        // Cost machinery: the session ledger, the rolling daily ledger, and
+        // the budget circuit breaker.
+        let mut ledger = CostLedger::new();
+        let mut daily = Config::config_dir().ok().map(|dir| DailyLedger::load(&dir));
+        let budget = BudgetPolicy {
+            per_session: self.config.budget_per_session_usd.max(0.0),
+            per_day: self.config.budget_per_day_usd.max(0.0),
+            action: BudgetAction::parse(&self.config.budget_action),
+        };
+        let mut last_session_usd = 0.0f64;
+        let mut budget_warned = false;
+        let mut budget_stopped = false;
+
+        // Attachments + tool syntax offered to the agents.
+        let attachment_summary = context_summary(&self.attachments);
+        let tools_line = if self.config.search_enabled {
+            oracle::tool_instruction(!self.attachments.is_empty())
+        } else {
+            String::new()
+        };
+
+        // Conflict machinery.
+        let detector = conflict::ConflictDetector::default();
+        let agent_pairs: Vec<(String, String)> =
+            self.agents.iter().map(|a| (a.id.clone(), a.name.clone())).collect();
+
         // Opening: the moderator frames the topic (falls back to a plain line).
-        let opening = match &moderator {
-            Some(m) => {
-                moderator::generate(&self.http, m, &self.topic, &[], moderator::ModeratorKind::Opening)
-                    .await
+        let opening = if let Some(m) = &moderator {
+            match moderator::generate(&self.http, m, &self.topic, &[], moderator::ModeratorKind::Opening)
+                .await
+            {
+                Some((text, usage)) => {
+                    ledger.record("moderator", "Moderator", CostLane::Moderator, &m.model, usage);
+                    Some(text)
+                }
+                None => None,
             }
-            None => None,
+        } else {
+            None
         };
         let _ = tx.send(DebateEvent::Moderator(
             opening.unwrap_or_else(|| format!("The council convenes on: {}", self.topic)),
@@ -317,9 +397,10 @@ impl Engine {
         let mut transcript: Vec<Turn> = Vec::new();
         let mut last_spoke: HashMap<String, i64> = HashMap::new();
         let mut canvases: HashMap<String, Vec<CanvasSection>> = HashMap::new();
+        let mut pending_notes: HashMap<String, AdvisorNote> = HashMap::new();
         let mut resolution_nudged = false;
 
-        for turn in 0..self.max_turns as i64 {
+        'turns: for turn in 0..self.max_turns as i64 {
             if cancel.load(Ordering::Relaxed) {
                 break;
             }
@@ -344,10 +425,20 @@ impl Engine {
 
             let canvas_summary =
                 canvases.get(&agent.id).map(|c| canvas::summary(c)).unwrap_or_default();
+            // Consume this agent's pending advisor whisper (latest note only).
+            let advisor_note = pending_notes.remove(&agent.id);
             let req = CompletionRequest {
                 model: model.clone(),
                 system: Some(agent.system_prompt.clone()),
-                messages: build_messages(&agent, &self.topic, &transcript, &canvas_summary),
+                messages: build_messages(
+                    &agent,
+                    &self.topic,
+                    &attachment_summary,
+                    &transcript,
+                    &canvas_summary,
+                    advisor_note.as_ref(),
+                    &tools_line,
+                ),
                 max_tokens: 2048,
                 temperature: 1.0,
                 tier: agent.tier,
@@ -393,12 +484,13 @@ impl Engine {
                     } else {
                         0
                     };
+                    ledger.record(&agent.id, &agent.name, CostLane::Council, &model, usage);
                     // Strip any leaked @-protocol directives before the line lands
                     // in the public transcript (the agents are trained on them).
                     let (mut content, requested_end) = strip_directives(&full);
                     // Reflection pass: revise the hidden draft, then reveal it.
                     if reflecting && !content.is_empty() {
-                        if let Some(revised) = reflect::revise(
+                        if let Some((revised, revise_usage)) = reflect::revise(
                             &self.http,
                             provider,
                             &base_url,
@@ -412,6 +504,13 @@ impl Engine {
                         )
                         .await
                         {
+                            ledger.record(
+                                &agent.id,
+                                &agent.name,
+                                CostLane::Council,
+                                &model,
+                                revise_usage,
+                            );
                             content = strip_directives(&revised).0;
                         }
                         if !content.is_empty() {
@@ -436,10 +535,96 @@ impl Engine {
                         });
                     }
                     proposed_end = requested_end;
+
+                    // Oracle tools: execute this turn's requests (≤2) and post
+                    // each result into the shared transcript.
+                    if self.config.search_enabled {
+                        for call in oracle::extract_tool_calls(&full) {
+                            if cancel.load(Ordering::Relaxed) {
+                                break;
+                            }
+                            let output = oracle::run_tool(&self.http, &call, &self.attachments).await;
+                            transcript.push(Turn {
+                                agent_id: "tool".into(),
+                                name: "Tool".into(),
+                                content: format!("Tool result ({}): {}", call.name, output),
+                            });
+                            let _ = tx.send(DebateEvent::Tool(ToolUse {
+                                name: call.name.clone(),
+                                query: call.query.clone(),
+                                output,
+                                agent_name: agent.name.clone(),
+                            }));
+                        }
+                    }
                 }
                 Err(e) => {
                     let _ = tx.send(DebateEvent::Error(format!("{} failed: {e}", agent.name)));
                 }
+            }
+
+            // Conflict pass: re-score every pair over the updated transcript;
+            // when the strongest pair crosses the floor, refine it with one
+            // NLI call on the utility model (the app's semantic check).
+            if !transcript.is_empty() {
+                let (mut pairs, strongest) = detector.evaluate_all(&transcript, &agent_pairs);
+                if strongest >= conflict::SEMANTIC_CHECK_REGEX_FLOOR && !pairs.is_empty() {
+                    if let Some(m) = &moderator {
+                        let mut idx_max = 0;
+                        for (i, p) in pairs.iter().enumerate() {
+                            if p.score > pairs[idx_max].score {
+                                idx_max = i;
+                            }
+                        }
+                        let (a_id, b_id) = (pairs[idx_max].a_id.clone(), pairs[idx_max].b_id.clone());
+                        let pos_a = transcript.iter().rposition(|t| t.agent_id == a_id);
+                        let pos_b = transcript.iter().rposition(|t| t.agent_id == b_id);
+                        if let (Some(pos_a), Some(pos_b)) = (pos_a, pos_b) {
+                            let (first, second) = if pos_a <= pos_b {
+                                (&transcript[pos_a], &transcript[pos_b])
+                            } else {
+                                (&transcript[pos_b], &transcript[pos_a])
+                            };
+                            let req = CompletionRequest {
+                                model: m.model.clone(),
+                                system: Some(conflict::NLI_SYSTEM_PROMPT.to_string()),
+                                messages: vec![ChatMessage::user(conflict::nli_user_prompt(
+                                    &self.topic,
+                                    &first.name,
+                                    &first.content,
+                                    &second.name,
+                                    &second.content,
+                                ))],
+                                max_tokens: 256,
+                                temperature: 0.7,
+                                tier: ReasoningTier::Low,
+                            };
+                            let mut out = String::new();
+                            let nli = {
+                                let mut on_chunk =
+                                    |c: &CompletionChunk| out.push_str(&c.content);
+                                stream_completion(
+                                    &self.http,
+                                    m.provider,
+                                    &m.base_url,
+                                    &m.key,
+                                    &req,
+                                    &mut on_chunk,
+                                )
+                                .await
+                            };
+                            if let Ok(usage) = nli {
+                                ledger.record("utility", "Utility", CostLane::Utility, &m.model, usage);
+                                let adj = conflict::nli_adjustment(&out);
+                                if adj != 0.0 {
+                                    let raw = (pairs[idx_max].score * 100.0 + adj).clamp(0.0, 100.0);
+                                    pairs[idx_max].score = raw / 100.0;
+                                }
+                            }
+                        }
+                    }
+                }
+                let _ = tx.send(DebateEvent::Conflict(pairs));
             }
 
             // An agent moved to end → the council votes. A passing motion goes
@@ -447,7 +632,7 @@ impl Engine {
             if proposed_end
                 && self.agents.len() > 1
                 && !transcript.is_empty()
-                && self.run_end_vote(&agent, &transcript, &tx).await
+                && self.run_end_vote(&agent, &transcript, &tx, &mut ledger).await
             {
                 break;
             }
@@ -458,7 +643,7 @@ impl Engine {
                 let remaining = self.max_turns.saturating_sub(spoken);
                 // Periodic synthesis every 7 turns.
                 if spoken % 7 == 0 && !transcript.is_empty() {
-                    if let Some(note) = moderator::generate(
+                    if let Some((note, usage)) = moderator::generate(
                         &self.http,
                         m,
                         &self.topic,
@@ -467,13 +652,14 @@ impl Engine {
                     )
                     .await
                     {
+                        ledger.record("moderator", "Moderator", CostLane::Moderator, &m.model, usage);
                         let _ = tx.send(DebateEvent::Moderator(note));
                     }
                 }
                 // One resolution nudge as the cap approaches.
                 if !resolution_nudged && self.max_turns > 0 && remaining <= 3 && remaining > 0 {
                     resolution_nudged = true;
-                    if let Some(note) = moderator::generate(
+                    if let Some((note, usage)) = moderator::generate(
                         &self.http,
                         m,
                         &self.topic,
@@ -482,17 +668,85 @@ impl Engine {
                     )
                     .await
                     {
+                        ledger.record("moderator", "Moderator", CostLane::Moderator, &m.model, usage);
                         let _ = tx.send(DebateEvent::Moderator(note));
                     }
+                }
+            }
+
+            // Advisor pass: every `observer_interval` turns, the outer circle
+            // reads the room and may whisper to its partners.
+            if self.config.observers_enabled
+                && self.config.observer_interval > 0
+                && (turn as u32 + 1) % self.config.observer_interval == 0
+                && !transcript.is_empty()
+                && !cancel.load(Ordering::Relaxed)
+            {
+                let partner_ids: Vec<String> =
+                    self.agents.iter().map(|a| a.id.clone()).collect();
+                let outcomes = observer::run_pass(
+                    &self.http,
+                    &self.config,
+                    &self.available,
+                    &self.keys,
+                    &partner_ids,
+                    &self.topic,
+                    &attachment_summary,
+                    &transcript,
+                )
+                .await;
+                for outcome in outcomes {
+                    ledger.record(
+                        &outcome.note.observer_id,
+                        &outcome.note.observer_name,
+                        CostLane::Advisors,
+                        &outcome.model,
+                        outcome.usage,
+                    );
+                    let _ = tx.send(DebateEvent::AdvisorNote(outcome.note.clone()));
+                    pending_notes.insert(outcome.note.partner_id.clone(), outcome.note);
+                }
+            }
+
+            // Cost snapshot + the budget circuit breaker, once per iteration.
+            let session_usd = ledger.total_usd();
+            if let Some(d) = daily.as_mut() {
+                d.add(session_usd - last_session_usd);
+            }
+            last_session_usd = session_usd;
+            let daily_usd = daily.as_ref().map(|d| d.total_usd).unwrap_or(0.0);
+            let mut snap = ledger.snapshot();
+            snap.daily_usd = daily_usd;
+            snap.session_cap = budget.per_session;
+            snap.daily_cap = budget.per_day;
+            match cost::evaluate_budget(session_usd, daily_usd, budget) {
+                BudgetVerdict::Stop(msg) => {
+                    snap.note = Some(msg.clone());
+                    let _ = tx.send(DebateEvent::Cost(snap));
+                    let _ = tx.send(DebateEvent::Moderator(format!("⚠ {msg}")));
+                    budget_stopped = true;
+                    break 'turns;
+                }
+                BudgetVerdict::Warn(msg) => {
+                    if !budget_warned {
+                        budget_warned = true;
+                        let _ = tx.send(DebateEvent::Moderator(format!("⚠ {msg}")));
+                    }
+                    snap.note = Some(msg);
+                    let _ = tx.send(DebateEvent::Cost(snap));
+                }
+                BudgetVerdict::Ok => {
+                    let _ = tx.send(DebateEvent::Cost(snap));
                 }
             }
         }
 
         let _ = tx.send(DebateEvent::Phase("Resolution".into()));
 
-        // Closing round — the peer-evaluation scorecard, then the moderator verdict.
-        if self.config.peer_eval && !transcript.is_empty() {
-            if let Some(round) = peereval::run(
+        // Closing round — the peer-evaluation scorecard, then the moderator
+        // verdict. A hard budget stop skips every further billable call.
+        if self.config.peer_eval && !transcript.is_empty() && !budget_stopped {
+            let (round, usages) = peereval::run(
                 &self.http,
                 &self.config,
                 &self.available,
@@ -501,16 +755,29 @@ impl Engine {
                 &self.topic,
                 &transcript,
             )
-            .await
-            {
+            .await;
+            for (agent_id, model, usage) in usages {
+                let name = self
+                    .agents
+                    .iter()
+                    .find(|a| a.id == agent_id)
+                    .map(|a| a.name.clone())
+                    .unwrap_or_else(|| agent_id.clone());
+                ledger.record(&agent_id, &name, CostLane::Council, &model, usage);
+            }
+            if let Some(round) = round {
                 let _ = tx.send(DebateEvent::PeerEval(round));
             }
         }
 
         // Final scored verdict from the moderator.
-        if let Some(m) = &moderator {
+        if budget_stopped {
+            let _ = tx.send(DebateEvent::Moderator(
+                "The session stopped at its budget cap; closing without a verdict.".into(),
+            ));
+        } else if let Some(m) = &moderator {
             if !transcript.is_empty() {
-                let conclusion = self.final_conclusion(m, &transcript).await;
+                let conclusion = self.final_conclusion(m, &transcript, &mut ledger).await;
                 match conclusion {
                     Some(c) => {
                         let _ = tx.send(DebateEvent::Conclusion(c));
@@ -527,8 +794,8 @@ impl Engine {
         }
 
         // Deep-research report (opt-in; one extra synthesis pass over the transcript).
-        if self.config.deep_research && !transcript.is_empty() {
-            if let Some(report) = deepresearch::run(
+        if self.config.deep_research && !transcript.is_empty() && !budget_stopped {
+            if let Some((report, model, usage)) = deepresearch::run(
                 &self.http,
                 &self.config,
                 &self.available,
@@ -538,9 +805,21 @@ impl Engine {
             )
             .await
             {
+                ledger.record("research", "Research", CostLane::Utility, &model, usage);
                 let _ = tx.send(DebateEvent::DeepResearch(report));
             }
         }
+
+        // Final ledger snapshot (closing-round costs included).
+        let session_usd = ledger.total_usd();
+        if let Some(d) = daily.as_mut() {
+            d.add(session_usd - last_session_usd);
+        }
+        let mut snap = ledger.snapshot();
+        snap.daily_usd = daily.as_ref().map(|d| d.total_usd).unwrap_or(0.0);
+        snap.session_cap = budget.per_session;
+        snap.daily_cap = budget.per_day;
+        let _ = tx.send(DebateEvent::Cost(snap));
 
         let _ = tx.send(DebateEvent::Done);
     }
@@ -551,11 +830,12 @@ impl Engine {
         &self,
         m: &ModeratorPick,
         transcript: &[Turn],
+        ledger: &mut CostLedger,
     ) -> Option<ModeratorConclusion> {
         let turns = transcript.len() as u32;
         let recent = recent_tail(transcript, 16);
         for _ in 0..2 {
-            let text = moderator::generate(
+            let (text, usage) = moderator::generate(
                 &self.http,
                 m,
                 &self.topic,
@@ -563,6 +843,7 @@ impl Engine {
                 moderator::ModeratorKind::FinalSummary { turns },
             )
             .await?;
+            ledger.record("moderator", "Moderator", CostLane::Moderator, &m.model, usage);
             if let Some(c) = moderator::parse_conclusion(&text) {
                 return Some(c);
             }
@@ -577,6 +858,7 @@ impl Engine {
         proposer: &Agent,
         transcript: &[Turn],
         tx: &UnboundedSender<DebateEvent>,
+        ledger: &mut CostLedger,
     ) -> bool {
         let total = self.agents.len();
         let threshold = vote::threshold(total);
@@ -604,7 +886,7 @@ impl Engine {
                 continue;
             };
             let model = self.model_for(agent);
-            let (choice, reason) = vote::cast(
+            let (choice, reason, usage) = vote::cast(
                 &self.http,
                 agent.provider,
                 &self.config.base_url(agent.provider),
@@ -618,6 +900,7 @@ impl Engine {
                 agent.tier,
             )
             .await;
+            ledger.record(&agent.id, &agent.name, CostLane::Council, &model, usage);
             match choice {
                 VoteChoice::Yes => yes += 1,
                 VoteChoice::No => no += 1,
@@ -712,9 +995,56 @@ mod tests {
             Turn { agent_id: george.id.clone(), name: "George".into(), content: "hi".into() },
             Turn { agent_id: "cathy".into(), name: "Cathy".into(), content: "hello".into() },
         ];
-        let msgs = build_messages(george, "topic", &transcript, "");
+        let msgs = build_messages(george, "topic", "", &transcript, "", None, "");
         // user framing + own(assistant) + other(user)
         assert!(matches!(msgs[1].role, crate::types::Role::Assistant));
         assert!(msgs[2].content.starts_with("[Cathy]"));
+    }
+
+    #[test]
+    fn build_messages_injects_whisper_attachments_and_tools() {
+        let agents = default_agents(ReasoningTier::High);
+        let george = &agents[0];
+        let note = AdvisorNote {
+            observer_id: "greta".into(),
+            observer_name: "Greta".into(),
+            partner_id: "george".into(),
+            partner_name: "George".into(),
+            text: "Press Cathy on her cost estimate.".into(),
+        };
+        let transcript = vec![
+            Turn { agent_id: "tool".into(), name: "Tool".into(), content: "Tool result (oracle.web_search): 1. X - https://x".into() },
+        ];
+        let msgs = build_messages(
+            george,
+            "topic",
+            "Attached files: notes.txt",
+            &transcript,
+            "",
+            Some(&note),
+            "Tools: @tool(oracle.web_search, {\"query\":\"...\"})",
+        );
+        // Opening carries the attachment summary.
+        assert!(msgs[0].content.contains("Attached files: notes.txt"));
+        // The tool result reads as a shared message from [Tool].
+        assert!(msgs[1].content.starts_with("[Tool]"));
+        // The whisper sits before the final instruction, marked private.
+        let whisper = &msgs[msgs.len() - 2];
+        assert!(whisper.content.contains("Private note from your advisor Greta"));
+        assert!(whisper.content.contains("Press Cathy"));
+        // The final instruction advertises the tool syntax.
+        assert!(msgs.last().unwrap().content.contains("@tool(oracle.web_search"));
+    }
+
+    #[test]
+    fn sanitize_terminal_strips_escapes_keeps_structure() {
+        // OSC 52 clipboard write, CSI cursor games, and a BEL all drop;
+        // newlines and tabs survive.
+        let evil = "safe\n\x1b]52;c;SGVsbG8=\x07line\ttab\x1b[2Jend\r";
+        let clean = sanitize_terminal(evil);
+        assert_eq!(clean, "safe\n]52;c;SGVsbG8=line\ttab[2Jend");
+        assert!(!clean.contains('\x1b'));
+        assert!(!clean.contains('\x07'));
+        assert!(!clean.contains('\r'));
     }
 }

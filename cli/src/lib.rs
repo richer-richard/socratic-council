@@ -5,6 +5,7 @@
 //! Models are chosen by the same Auto resolver + live `/models` scanning as the
 //! desktop app — no hardcoded ids to hand-bump.
 
+pub mod attach;
 pub mod bridge;
 pub mod catalog;
 pub mod config;
@@ -12,6 +13,7 @@ pub mod crypto;
 pub mod engine;
 pub mod error;
 pub mod providers;
+pub mod search;
 pub mod tui;
 pub mod types;
 

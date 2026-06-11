@@ -3,18 +3,22 @@
 A terminal multi-agent debate workstation. Eight AI agents — one each from
 OpenAI, Anthropic, Google, DeepSeek, Moonshot (Kimi), Qwen, MiniMax, and
 Z.AI (Zhipu) — debate any topic, live, in a [ratatui](https://ratatui.rs) TUI.
+Each debater is shadowed by a **silent advisor** on the same provider that
+slips it private tactical notes; the room is scored by a live **conflict
+graph**, billed to a per-agent **cost ledger** with budget caps, and armed
+with **oracle web search + file search** over your attached files.
 
 It is the command-line sibling of the Socratic Council desktop app — a faithful
 terminal port of the same workstation: a **Home** view with the animated council
 mark + a topic composer, a collapsible **history** sidebar of saved sessions, and
 the live **debate chamber**. It shares the app's model philosophy (**you never
-hand-bump model ids** — an *Auto* resolver picks the best model and refreshes by
+hand-bump model ids** — an _Auto_ resolver picks the best model and refreshes by
 scanning each provider's own `/models` endpoint, so a newer flagship like
 `gpt-5.6` is adopted the moment it ships).
 
 **It is fully self-contained.** You configure keys right in the terminal — env
 vars, `config set-key`, or directly in the TUI's Settings panel — so it works the
-same on a headless VPS as on a laptop. *If* you also run the desktop app, the CLI
+same on a headless VPS as on a laptop. _If_ you also run the desktop app, the CLI
 will additionally read those keys so you don't re-enter them; that sharing is a
 convenience, never a requirement.
 
@@ -69,7 +73,7 @@ you route through a gateway (`socratic-council config path`).
 
 ### Optional: share the desktop app's keys
 
-If you *also* run the **Socratic Council desktop app**, the CLI reads its stored
+If you _also_ run the **Socratic Council desktop app**, the CLI reads its stored
 keys, model selection, council tier, and saved sessions directly (shared core) so
 you don't re-enter anything — a convenience, not a requirement; the CLI is fully
 usable without the app. The app stores everything in the same file vault
@@ -89,9 +93,15 @@ socratic-council run "Is P = NP?"      # start a debate
 socratic-council run "…" --tier high   # reasoning level: low | medium | high
 socratic-council run "…" --providers openai,anthropic,google
 socratic-council run "…" --max-turns 24
+socratic-council run "…" --file notes.md --file data.csv  # attach searchable files
 socratic-council run "…" --reflect deep # draft→revise each turn: off | light | deep
 socratic-council run "…" --deep-research # synthesize a research report at the close
 socratic-council run "…" --no-peer-eval # skip the closing scorecard (saves a call/agent)
+socratic-council run "…" --no-observers # silence the advisor circle
+socratic-council run "…" --observer-interval 4  # advisors whisper every 4 turns
+socratic-council run "…" --budget 2.50 --budget-action stop  # USD cap per session
+socratic-council run "…" --no-search   # disable the oracle tools
+socratic-council run "…" --proxy socks5://127.0.0.1:1080
 socratic-council run "…" --no-tui      # plain streaming stdout (pipe-friendly)
 socratic-council run "…" --scan        # scan live models before starting
 
@@ -107,29 +117,41 @@ Three surfaces mirror the desktop app:
   Type a topic and press `Enter` to convene.
 - **History sidebar** (`Tab`) — your saved sessions; `↑`/`↓` to select, `Enter`
   on an empty composer to open one read-only.
-- **Debate chamber** — the live streaming transcript with a per-speaker roster.
-  A **Moderator** (its own model) frames the topic, synthesizes periodically, and
-  publishes a final scored verdict (`Consensus` / `Majority` / `Unresolved` +
-  `Score X/10`). Each agent's reasoning is quarantined in a collapsible
-  "Thought for Xs" panel (`t` toggles) — it never leaks into the spoken message.
+- **Debate chamber** — the live streaming transcript with a per-speaker roster,
+  a header **progress gauge** (`turn 12/40 ▰▰▰▱▱▱▱▱ · round 2/5 · $0.0123`),
+  advisor whispers (🔒, rendered in the partner's color), and `[Tool]` result
+  blocks. A **Moderator** (its own model) frames the topic, synthesizes
+  periodically, and publishes a final scored verdict (`Consensus` / `Majority`
+  / `Unresolved` + `Score X/10`). Each agent's reasoning is quarantined in a
+  collapsible "Thought for Xs" panel (`t` toggles) — it never leaks into the
+  spoken message. The right pane cycles between the **roster**, the
+  **Tensions** conflict graph (`c` — pairwise scores 0–1, hot pairs ≥ 0.75),
+  and the **Costs** ledger (`$` — per-agent USD, council/advisors/moderator/
+  utility lanes, budget state).
 - **Settings / Models** (`^P`) — manage API keys (add / replace / remove, masked,
-  stored `0600`), see each provider's key source + resolved model, and the tiers.
+  stored `0600`), see each provider's key source + resolved model — plus the
+  editable **Options** rows: discussion cap, advisor interval, session budget,
+  budget action (warn/stop), and the proxy URL (rendered with credentials
+  redacted).
 
-| Key            | Action                                   |
-|----------------|------------------------------------------|
-| `Enter`        | convene a debate (Home) / open a session |
-| `Tab`          | toggle the history sidebar               |
-| `^P`           | toggle the Settings / Models panel       |
-| `Esc`          | back to Home (Chat/Settings) / quit (Home) |
-| `q`            | stop the debate, back to Home (Chat)     |
-| `t`            | toggle thinking traces                   |
-| `↑`/`↓`, `PgUp`/`PgDn` | scroll the transcript            |
-| `g`            | follow the tail                          |
-| `^C`           | quit from anywhere                       |
+| Key                    | Action                                     |
+| ---------------------- | ------------------------------------------ |
+| `Enter`                | convene a debate (Home) / open a session   |
+| `Tab`                  | toggle the history sidebar                 |
+| `^P`                   | toggle the Settings / Models panel         |
+| `Esc`                  | back to Home (Chat/Settings) / quit (Home) |
+| `q`                    | stop the debate, back to Home (Chat)       |
+| `t`                    | toggle thinking traces                     |
+| `c`                    | toggle the Tensions (conflict) pane        |
+| `$`                    | toggle the Costs (ledger) pane             |
+| `↑`/`↓`, `PgUp`/`PgDn` | scroll the transcript                      |
+| `g`                    | follow the tail                            |
+| `^C`                   | quit from anywhere                         |
 
-In **Settings** (`^P`): `↑`/`↓` select a provider · `Enter` / `e` add or replace
-its key (paste it — masked) · `d` remove a local key · `Enter` save · `Esc`
-cancel / back. Keys you add here are stored locally at `keys.enc` (`0600`).
+In **Settings** (`^P`): `↑`/`↓` select a provider or option row · `Enter` / `e`
+edit (keys and the proxy are masked) · `d` remove a key / reset an option ·
+`Enter` save · `Esc` cancel / back. Keys you add here are stored locally at
+`keys.enc` (`0600`); options persist to `config.toml`.
 
 ## The debate
 
@@ -146,6 +168,38 @@ other on rigor / evidence / novelty / civility / on-topic) and the Moderator
 publishes a **scored verdict** (`Consensus` / `Majority` / `Unresolved` +
 `Score X/10`). Add `--deep-research` for a synthesized report over the transcript,
 or `--reflect light|deep` to have each agent revise its draft before speaking.
+
+**The advisor circle.** Every debater has a paired silent advisor on the same
+provider (Greta→George, Clara→Cathy, Gaia→Grace, Dara→Douglas, Kira→Kate,
+Quincy→Quinn, Mila→Mary, Zoe→Zara). Every `--observer-interval` turns
+(default 2) each advisor reads the public record and may slip its partner a
+private <80-word note — injected only into that partner's next context, shown
+to you as a 🔒 whisper. `--no-observers` silences the circle.
+
+**Conflict tracking.** After every committed turn the engine re-scores all
+agent pairs with the app's heuristic detector (directed pushback, negated
+back-and-forth on overlapping terms, recency-weighted with a cooldown), and
+when a pair crosses the semantic floor it is confirmed or damped by one NLI
+call on the utility model. Press `c` for the live tension board.
+
+**Cost ledger + budgets.** Every completion — turns, reflections, ballots,
+advisor notes, moderator calls, peer reviews, NLI checks — is metered with
+real per-1M pricing (unknown models count tokens and show a `≥` lower bound;
+prices are never guessed). `--budget 2.50 --budget-action stop` halts the
+session at the cap (warning at 80%); a rolling per-UTC-day total persists in
+`daily-spend.json`. Press `$` for the ledger; a final table prints in
+`--no-tui` mode.
+
+**Oracle tools.** Agents may call, on their own line, at most twice per turn:
+
+```text
+@tool(oracle.web_search, {"query":"..."})   # keyless web search (DuckDuckGo → Bing fallback)
+@tool(oracle.file_search, {"query":"..."})  # search the files attached with --file
+@tool(oracle.verify, {"claim":"..."})       # grade one factual claim against the web
+```
+
+Results land in the shared transcript as a `Tool result (…)` message every
+agent sees next turn. `--no-search` disables the tools entirely.
 
 ## Reasoning tiers & Auto
 

@@ -85,6 +85,21 @@ pub struct Config {
     pub max_turns: u32,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub proxy: Option<String>,
+    /// The outer advisor circle: paired silent agents that pass private notes.
+    #[serde(default = "default_true")]
+    pub observers_enabled: bool,
+    /// Advisors run every N turns (0 disables; the app's default is 2).
+    #[serde(default = "default_observer_interval")]
+    pub observer_interval: u32,
+    /// USD cap per session (0 = unlimited).
+    #[serde(default)]
+    pub budget_per_session_usd: f64,
+    /// USD cap per UTC day across sessions (0 = unlimited).
+    #[serde(default)]
+    pub budget_per_day_usd: f64,
+    /// What happens at a cap: "warn" (default) or "stop".
+    #[serde(default = "default_budget_action")]
+    pub budget_action: String,
     #[serde(default)]
     pub providers: BTreeMap<String, ProviderConfig>,
     #[serde(default)]
@@ -121,6 +136,11 @@ pub struct Config {
     /// completion per agent — `--no-peer-eval` opts out to save cost).
     #[serde(skip)]
     pub peer_eval: bool,
+
+    /// Whether the oracle tools (web/file search, verify) are offered to the
+    /// agents — a runtime option (`--no-search` opts out), set by `main`.
+    #[serde(skip)]
+    pub search_enabled: bool,
 }
 
 // Manual Debug so a stray `{config:?}` / `dbg!` / anyhow context can never
@@ -150,6 +170,15 @@ fn default_utility_tier() -> ReasoningTier {
 fn default_max_turns() -> u32 {
     40
 }
+fn default_true() -> bool {
+    true
+}
+fn default_observer_interval() -> u32 {
+    2
+}
+fn default_budget_action() -> String {
+    "warn".to_string()
+}
 
 impl Default for Config {
     fn default() -> Self {
@@ -158,6 +187,11 @@ impl Default for Config {
             utility_tier: ReasoningTier::Low,
             max_turns: 40,
             proxy: None,
+            observers_enabled: true,
+            observer_interval: 2,
+            budget_per_session_usd: 0.0,
+            budget_per_day_usd: 0.0,
+            budget_action: "warn".to_string(),
             providers: BTreeMap::new(),
             model_selection: BTreeMap::new(),
             keys: BTreeMap::new(),
@@ -166,6 +200,7 @@ impl Default for Config {
             reflection: Reflection::Off,
             deep_research: false,
             peer_eval: true,
+            search_enabled: true,
         }
     }
 }
@@ -184,6 +219,12 @@ impl Config {
 
     pub fn config_path() -> Result<PathBuf> {
         Ok(Self::dirs()?.config_dir().join("config.toml"))
+    }
+
+    /// The CLI's config directory (for sibling state files like the daily
+    /// cost ledger).
+    pub fn config_dir() -> Result<PathBuf> {
+        Ok(Self::dirs()?.config_dir().to_path_buf())
     }
 
     /// Legacy plaintext key file — read once for migration, then deleted.
@@ -493,6 +534,34 @@ fn write_secret_file_atomic(path: &std::path::Path, contents: &str) -> Result<()
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn new_option_fields_round_trip_and_default() {
+        // Old config files (no new fields) deserialize with the defaults.
+        let old: Config = toml::from_str("max_turns = 24").unwrap();
+        assert_eq!(old.max_turns, 24);
+        assert!(old.observers_enabled);
+        assert_eq!(old.observer_interval, 2);
+        assert_eq!(old.budget_per_session_usd, 0.0);
+        assert_eq!(old.budget_action, "warn");
+
+        // New fields persist through a serialize/deserialize round trip.
+        let config = Config {
+            observer_interval: 4,
+            observers_enabled: false,
+            budget_per_session_usd: 2.5,
+            budget_action: "stop".into(),
+            proxy: Some("socks5://127.0.0.1:1080".into()),
+            ..Default::default()
+        };
+        let text = toml::to_string_pretty(&config).unwrap();
+        let back: Config = toml::from_str(&text).unwrap();
+        assert!(!back.observers_enabled);
+        assert_eq!(back.observer_interval, 4);
+        assert_eq!(back.budget_per_session_usd, 2.5);
+        assert_eq!(back.budget_action, "stop");
+        assert_eq!(back.proxy.as_deref(), Some("socks5://127.0.0.1:1080"));
+    }
 
     #[test]
     fn env_var_never_clobbers_a_local_key() {

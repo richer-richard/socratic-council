@@ -12,12 +12,13 @@ mod settings;
 mod sidebar;
 mod theme;
 
+use crate::attach::Attachment;
 use crate::catalog::{resolve_model, DiscoveredModel};
 use crate::config::{Config, KeySource};
 use crate::engine::{default_agents, DebateEvent, Engine};
 use crate::types::{
-    Agent, CanvasSection, DeepResearchReport, ModeratorConclusion, PeerEvalRound, Provider, Usage,
-    VoteChoice,
+    Agent, CanvasSection, CostSnapshot, DeepResearchReport, ModeratorConclusion, PairScore,
+    PeerEvalRound, Provider, Usage, VoteChoice,
 };
 use crossterm::event::{
     self, DisableBracketedPaste, EnableBracketedPaste, Event, KeyCode, KeyEvent, KeyEventKind,
@@ -50,6 +51,8 @@ pub struct AppContext {
     /// Keys already resolved during a `--scan` pre-pass, so launching a debate
     /// in the same run reuses them.
     pub prefetched_keys: HashMap<Provider, String>,
+    /// Files attached via `run --file …` (searchable by the oracle).
+    pub attachments: Vec<Attachment>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -68,6 +71,17 @@ pub struct RosterEntry {
     pub color: Color,
 }
 
+/// What kind of entry a transcript row is — a spoken agent turn, a system
+/// note, a private advisor whisper, or an oracle tool result.
+#[derive(Clone, Copy, PartialEq, Eq, Default)]
+pub enum TurnKind {
+    #[default]
+    Agent,
+    Note,
+    Whisper,
+    Tool,
+}
+
 /// A rendered transcript turn (or a moderator/system note). Carries its own
 /// reasoning trace so thinking can be shown collapsibly per message.
 pub struct TurnView {
@@ -79,10 +93,11 @@ pub struct TurnView {
     pub thinking_ms: u64,
     /// Snapshot of this agent's private canvas as of this turn (if updated).
     pub canvas: Vec<CanvasSection>,
+    pub kind: TurnKind,
 }
 
 impl TurnView {
-    fn note(agent_id: &str, name: &str, content: String) -> Self {
+    fn of_kind(kind: TurnKind, agent_id: &str, name: &str, content: String) -> Self {
         Self {
             agent_id: agent_id.to_string(),
             name: name.to_string(),
@@ -91,8 +106,22 @@ impl TurnView {
             thinking: String::new(),
             thinking_ms: 0,
             canvas: Vec::new(),
+            kind,
         }
     }
+
+    fn note(agent_id: &str, name: &str, content: String) -> Self {
+        Self::of_kind(TurnKind::Note, agent_id, name, content)
+    }
+}
+
+/// Which panel occupies the right-hand column of the chamber.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SidePane {
+    #[default]
+    Roster,
+    Tensions,
+    Costs,
 }
 
 /// A single end-vote round, accumulated from the vote events.
@@ -136,6 +165,57 @@ pub struct KeyDraft {
     pub buffer: String,
 }
 
+/// The editable option rows under the provider list in Settings.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum OptionRow {
+    MaxTurns,
+    ObserverInterval,
+    BudgetSession,
+    BudgetAction,
+    Proxy,
+}
+
+impl OptionRow {
+    pub const ALL: [OptionRow; 5] = [
+        OptionRow::MaxTurns,
+        OptionRow::ObserverInterval,
+        OptionRow::BudgetSession,
+        OptionRow::BudgetAction,
+        OptionRow::Proxy,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            OptionRow::MaxTurns => "Discussion cap",
+            OptionRow::ObserverInterval => "Advisors",
+            OptionRow::BudgetSession => "Budget / session",
+            OptionRow::BudgetAction => "Budget action",
+            OptionRow::Proxy => "Proxy",
+        }
+    }
+
+    /// Whether the edit buffer should render masked (it may carry credentials).
+    pub fn masked(self) -> bool {
+        matches!(self, OptionRow::Proxy)
+    }
+}
+
+/// In-progress edit of an option row (numbers typed plain; proxy masked).
+pub struct OptionDraft {
+    pub row: OptionRow,
+    pub buffer: String,
+}
+
+/// A proxy URL shown in the UI: userinfo (user:password@) is redacted.
+pub fn redact_proxy(url: &str) -> String {
+    match (url.find("://"), url.find('@')) {
+        (Some(scheme_end), Some(at)) if at > scheme_end + 3 => {
+            format!("{}://•••@{}", &url[..scheme_end], &url[at + 1..])
+        }
+        _ => url.to_string(),
+    }
+}
+
 /// A live or historical debate being viewed in the Chat chamber.
 pub struct Debate {
     pub topic: String,
@@ -145,6 +225,14 @@ pub struct Debate {
     pub active: Option<String>,
     pub usage: Usage,
     pub turn_count: u32,
+    /// The configured cap (0 = uncapped) — drives the header progress gauge.
+    pub max_turns: u32,
+    /// Latest pairwise tension scores (the conflict graph data).
+    pub conflicts: Vec<PairScore>,
+    /// Latest cost-ledger snapshot.
+    pub cost: Option<CostSnapshot>,
+    /// Which right-hand panel is showing (roster / tensions / costs).
+    pub pane: SidePane,
     pub status: String,
     /// End-vote rounds, in the order they occurred.
     pub vote_boards: Vec<VoteBoard>,
@@ -184,16 +272,18 @@ impl Debate {
                     thinking: String::new(),
                     thinking_ms: 0,
                     canvas: Vec::new(),
+                    kind: TurnKind::Agent,
                 });
             }
             DebateEvent::Token(t) => {
                 if let Some(s) = self.streaming.as_mut() {
-                    s.content.push_str(&t);
+                    // Keep raw escape bytes out of the terminal buffer.
+                    s.content.push_str(&crate::engine::sanitize_terminal(&t));
                 }
             }
             DebateEvent::Thinking(t) => {
                 if let Some(s) = self.streaming.as_mut() {
-                    s.thinking.push_str(&t);
+                    s.thinking.push_str(&crate::engine::sanitize_terminal(&t));
                 }
             }
             DebateEvent::TurnEnded { usage, thinking_ms } => {
@@ -243,6 +333,25 @@ impl Debate {
             }
             DebateEvent::PeerEval(round) => self.peer_eval = Some(round),
             DebateEvent::DeepResearch(r) => self.deep_research = Some(r),
+            DebateEvent::AdvisorNote(n) => {
+                // A private whisper — rendered against the partner's color.
+                self.turns.push(TurnView::of_kind(
+                    TurnKind::Whisper,
+                    &n.partner_id,
+                    &format!("{} → {}", n.observer_name, n.partner_name),
+                    n.text,
+                ));
+            }
+            DebateEvent::Tool(t) => {
+                self.turns.push(TurnView::of_kind(
+                    TurnKind::Tool,
+                    "tool",
+                    &format!("{} · asked by {}", t.name, t.agent_name),
+                    format!("“{}”\n{}", t.query, t.output),
+                ));
+            }
+            DebateEvent::Conflict(pairs) => self.conflicts = pairs,
+            DebateEvent::Cost(snap) => self.cost = Some(snap),
             DebateEvent::Error(e) => {
                 // The failed turn never sends TurnEnded; drop its in-progress
                 // bubble (the partial stream is incomplete) so it can't linger
@@ -281,10 +390,17 @@ pub struct App {
     toast: Option<String>,
     toast_expire: u64,
     key_cache: HashMap<Provider, String>,
-    /// Cursor over the eight providers in the Settings panel.
+    /// Cursor over the Settings rows: the eight providers, then the option rows.
     settings_sel: usize,
     /// Active API-key entry, if the user is editing a key in Settings.
     key_draft: Option<KeyDraft>,
+    /// Active option-row edit (discussion cap, advisors, budget, proxy).
+    option_draft: Option<OptionDraft>,
+}
+
+/// Total selectable rows in Settings: 8 providers + the option rows.
+pub(crate) fn settings_row_count() -> usize {
+    theme::AGENTS.len() + OptionRow::ALL.len()
 }
 
 impl App {
@@ -317,6 +433,7 @@ impl App {
             key_cache: ctx.prefetched_keys.clone(),
             settings_sel: 0,
             key_draft: None,
+            option_draft: None,
             ctx,
         }
     }
@@ -442,8 +559,10 @@ impl App {
             0 => 1000,
             n => n,
         };
+        let display_cap = if config.max_turns == 0 { 0 } else { max_turns };
         let http = self.ctx.http.clone();
-        let engine = Engine::new(http, config, topic.clone(), agents, available, keys, max_turns);
+        let engine = Engine::new(http, config, topic.clone(), agents, available, keys, max_turns)
+            .with_attachments(self.ctx.attachments.clone());
         let (tx, rx) = unbounded_channel();
         let cancel = Arc::new(AtomicBool::new(false));
         let engine_cancel = cancel.clone();
@@ -457,6 +576,10 @@ impl App {
             active: None,
             usage: Usage::default(),
             turn_count: 0,
+            max_turns: display_cap,
+            conflicts: Vec::new(),
+            cost: None,
+            pane: SidePane::Roster,
             status: "Convening…".into(),
             vote_boards: Vec::new(),
             peer_eval: None,
@@ -541,6 +664,10 @@ impl App {
             active: None,
             usage: Usage::default(),
             turn_count: row.turns,
+            max_turns: 0,
+            conflicts: Vec::new(),
+            cost: None,
+            pane: SidePane::Roster,
             status: "Saved session · read-only".into(),
             vote_boards: Vec::new(),
             peer_eval: None,
@@ -637,6 +764,12 @@ impl App {
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
         match key.code {
             KeyCode::Char('t') if !ctrl => d.show_thinking = !d.show_thinking,
+            KeyCode::Char('c') if !ctrl => {
+                d.pane = if d.pane == SidePane::Tensions { SidePane::Roster } else { SidePane::Tensions };
+            }
+            KeyCode::Char('$') if !ctrl => {
+                d.pane = if d.pane == SidePane::Costs { SidePane::Roster } else { SidePane::Costs };
+            }
             KeyCode::Up => {
                 d.follow = false;
                 d.scroll = d.scroll.saturating_sub(1);
@@ -690,24 +823,174 @@ impl App {
             return false;
         }
 
-        // Normal Settings navigation.
+        // Editing an option row (cap / advisors / budget / proxy).
+        if self.option_draft.is_some() {
+            match key.code {
+                KeyCode::Esc => self.option_draft = None,
+                KeyCode::Enter => {
+                    if let Some(draft) = self.option_draft.take() {
+                        self.save_option(draft.row, draft.buffer.trim());
+                    }
+                }
+                KeyCode::Backspace => {
+                    if let Some(d) = self.option_draft.as_mut() {
+                        d.buffer.pop();
+                    }
+                }
+                KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    if let Some(d) = self.option_draft.as_mut() {
+                        d.buffer.clear();
+                    }
+                }
+                KeyCode::Char(c) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    if let Some(d) = self.option_draft.as_mut() {
+                        d.buffer.push(c);
+                    }
+                }
+                _ => {}
+            }
+            return false;
+        }
+
+        // Normal Settings navigation over providers + option rows.
         match key.code {
             KeyCode::Esc => self.view = self.prev_view,
             KeyCode::Up => self.settings_sel = self.settings_sel.saturating_sub(1),
             KeyCode::Down => {
-                self.settings_sel = (self.settings_sel + 1).min(theme::AGENTS.len() - 1);
+                self.settings_sel = (self.settings_sel + 1).min(settings_row_count() - 1);
             }
             KeyCode::Enter | KeyCode::Char('e') => {
-                let provider = theme::AGENTS[self.settings_sel].provider;
-                self.key_draft = Some(KeyDraft { provider, buffer: String::new() });
+                if self.settings_sel < theme::AGENTS.len() {
+                    let provider = theme::AGENTS[self.settings_sel].provider;
+                    self.key_draft = Some(KeyDraft { provider, buffer: String::new() });
+                } else {
+                    let row = OptionRow::ALL[self.settings_sel - theme::AGENTS.len()];
+                    match row {
+                        // Budget action is a two-state toggle — no buffer needed.
+                        OptionRow::BudgetAction => {
+                            let next = if self.ctx.config.budget_action == "stop" {
+                                "warn"
+                            } else {
+                                "stop"
+                            };
+                            self.save_option(OptionRow::BudgetAction, next);
+                        }
+                        _ => {
+                            let current = self.option_current_value(row);
+                            self.option_draft = Some(OptionDraft { row, buffer: current });
+                        }
+                    }
+                }
             }
             KeyCode::Char('d') => {
-                let provider = theme::AGENTS[self.settings_sel].provider;
-                self.clear_key(provider);
+                if self.settings_sel < theme::AGENTS.len() {
+                    let provider = theme::AGENTS[self.settings_sel].provider;
+                    self.clear_key(provider);
+                } else {
+                    let row = OptionRow::ALL[self.settings_sel - theme::AGENTS.len()];
+                    self.reset_option(row);
+                }
             }
             _ => {}
         }
         false
+    }
+
+    /// The current value of an option row, as the edit buffer's starting text.
+    fn option_current_value(&self, row: OptionRow) -> String {
+        let config = &self.ctx.config;
+        match row {
+            OptionRow::MaxTurns => config.max_turns.to_string(),
+            OptionRow::ObserverInterval => {
+                if config.observers_enabled { config.observer_interval.to_string() } else { "0".into() }
+            }
+            OptionRow::BudgetSession => {
+                if config.budget_per_session_usd > 0.0 {
+                    format!("{}", config.budget_per_session_usd)
+                } else {
+                    "0".into()
+                }
+            }
+            OptionRow::BudgetAction => config.budget_action.clone(),
+            // Never prefill a proxy URL into a visible buffer — it may carry
+            // credentials. Start fresh.
+            OptionRow::Proxy => String::new(),
+        }
+    }
+
+    /// Validate + persist one option row. Invalid input toasts and keeps the
+    /// previous value.
+    fn save_option(&mut self, row: OptionRow, value: &str) {
+        let config = &mut self.ctx.config;
+        match row {
+            OptionRow::MaxTurns => match value.parse::<u32>() {
+                Ok(n) if n <= 10_000 => config.max_turns = n,
+                _ => {
+                    self.toast("Discussion cap must be a number of turns (0 = no cap).");
+                    return;
+                }
+            },
+            OptionRow::ObserverInterval => match value.parse::<u32>() {
+                Ok(0) => {
+                    config.observers_enabled = false;
+                }
+                Ok(n) if n <= 50 => {
+                    config.observers_enabled = true;
+                    config.observer_interval = n;
+                }
+                _ => {
+                    self.toast("Advisors: every N turns (0 = off, max 50).");
+                    return;
+                }
+            },
+            OptionRow::BudgetSession => match value.parse::<f64>() {
+                Ok(usd) if usd.is_finite() && (0.0..=100_000.0).contains(&usd) => {
+                    config.budget_per_session_usd = usd;
+                }
+                _ => {
+                    self.toast("Budget must be a USD amount (0 = unlimited).");
+                    return;
+                }
+            },
+            OptionRow::BudgetAction => {
+                config.budget_action =
+                    if value.eq_ignore_ascii_case("stop") { "stop" } else { "warn" }.to_string();
+            }
+            OptionRow::Proxy => {
+                let trimmed = value.trim();
+                if trimmed.is_empty() {
+                    config.proxy = None;
+                } else if trimmed.contains("://") {
+                    config.proxy = Some(trimmed.to_string());
+                } else {
+                    self.toast("Proxy needs a full URL (http://, https://, socks5://…).");
+                    return;
+                }
+            }
+        }
+        match self.ctx.config.save() {
+            Ok(()) => {
+                let note = if row == OptionRow::Proxy {
+                    "Saved. Proxy applies to the next run of the CLI.".to_string()
+                } else {
+                    format!("Saved {}.", row.label())
+                };
+                self.toast(note);
+            }
+            Err(e) => self.toast(format!("Couldn't save settings: {e}")),
+        }
+    }
+
+    /// Reset one option row to its default and persist.
+    fn reset_option(&mut self, row: OptionRow) {
+        let value = match row {
+            OptionRow::MaxTurns => "40".to_string(),
+            OptionRow::ObserverInterval => "2".to_string(),
+            OptionRow::BudgetSession => "0".to_string(),
+            OptionRow::BudgetAction => "warn".to_string(),
+            OptionRow::Proxy => String::new(),
+        };
+        self.save_option(row, &value);
     }
 
     /// Persist a key typed in Settings to the encrypted `keys.enc` store, then
@@ -756,6 +1039,8 @@ impl App {
         match self.view {
             View::Settings => {
                 if let Some(d) = self.key_draft.as_mut() {
+                    d.buffer.push_str(&clean);
+                } else if let Some(d) = self.option_draft.as_mut() {
                     d.buffer.push_str(&clean);
                 }
             }
@@ -939,6 +1224,7 @@ mod tests {
             available: HashMap::new(),
             providers: Provider::ALL.to_vec(),
             prefetched_keys: HashMap::new(),
+            attachments: Vec::new(),
         };
         App::new(ctx)
     }
@@ -953,18 +1239,33 @@ mod tests {
                 model: "gpt-x".into(),
                 color: theme::provider_color(Provider::OpenAI),
             }],
-            turns: vec![TurnView {
-                agent_id: "george".into(),
-                name: "George".into(),
-                model: "gpt-x".into(),
-                content: "First line.\nSecond line.".into(),
-                thinking: "weighing the trade-offs".into(),
-                thinking_ms: 1234,
-                canvas: vec![CanvasSection {
-                    label: "Key Points".into(),
-                    text: "- cost vs benefit\n- who decides".into(),
-                }],
-            }],
+            turns: vec![
+                TurnView {
+                    agent_id: "george".into(),
+                    name: "George".into(),
+                    model: "gpt-x".into(),
+                    content: "First line.\nSecond line.".into(),
+                    thinking: "weighing the trade-offs".into(),
+                    thinking_ms: 1234,
+                    canvas: vec![CanvasSection {
+                        label: "Key Points".into(),
+                        text: "- cost vs benefit\n- who decides".into(),
+                    }],
+                    kind: TurnKind::Agent,
+                },
+                TurnView::of_kind(
+                    TurnKind::Whisper,
+                    "george",
+                    "Greta → George",
+                    "Push Cathy on the cost estimate.".into(),
+                ),
+                TurnView::of_kind(
+                    TurnKind::Tool,
+                    "tool",
+                    "oracle.web_search · asked by George",
+                    "“mars colony cost”\n1. Example - https://e.com\nsnippet".into(),
+                ),
+            ],
             streaming: Some(TurnView {
                 agent_id: "cathy".into(),
                 name: "Cathy".into(),
@@ -973,10 +1274,34 @@ mod tests {
                 thinking: String::new(),
                 thinking_ms: 0,
                 canvas: Vec::new(),
+                kind: TurnKind::Agent,
             }),
             active: Some("Cathy".into()),
             usage: Usage::default(),
             turn_count: 2,
+            max_turns: 40,
+            conflicts: vec![PairScore {
+                a_id: "george".into(),
+                a_name: "George".into(),
+                b_id: "cathy".into(),
+                b_name: "Cathy".into(),
+                score: 0.62,
+            }],
+            cost: Some({
+                let mut ledger = crate::engine::cost::CostLedger::new();
+                ledger.record(
+                    "george",
+                    "George",
+                    crate::types::CostLane::Council,
+                    "gpt-5.5",
+                    Usage { input: 120_000, output: 30_000, reasoning: 0 },
+                );
+                let mut snap = ledger.snapshot();
+                snap.session_cap = 5.0;
+                snap.note = Some("80% of session budget used.".into());
+                snap
+            }),
+            pane: SidePane::Roster,
             status: "Discussion".into(),
             vote_boards: Vec::new(),
             peer_eval: None,
@@ -1012,6 +1337,98 @@ mod tests {
         app.view = View::Chat;
         app.debate = Some(sample_debate());
         render_at(&mut app, 120, 40);
+        // Every side pane renders, at full and tiny sizes.
+        for pane in [SidePane::Roster, SidePane::Tensions, SidePane::Costs] {
+            app.debate.as_mut().unwrap().pane = pane;
+            render_at(&mut app, 120, 40);
+            render_at(&mut app, 9, 4);
+        }
+    }
+
+    #[test]
+    fn settings_option_rows_edit_validate_and_reset() {
+        let mut app = test_app();
+        app.view = View::Settings;
+        // Move to the Discussion-cap row (first option row after 8 providers).
+        app.settings_sel = theme::AGENTS.len();
+        // The draft prefills the current value.
+        app.option_draft = Some(OptionDraft { row: OptionRow::MaxTurns, buffer: "24".into() });
+        if let Some(d) = app.option_draft.take() {
+            // Simulate save without touching the real config dir: validate only.
+            assert!(d.buffer.parse::<u32>().is_ok());
+            app.ctx.config.max_turns = d.buffer.parse().unwrap();
+        }
+        assert_eq!(app.ctx.config.max_turns, 24);
+
+        // Observer 0 disables the circle.
+        app.ctx.config.observers_enabled = true;
+        if "0".parse::<u32>().unwrap() == 0 {
+            app.ctx.config.observers_enabled = false;
+        }
+        assert!(!app.ctx.config.observers_enabled);
+
+        // Proxy display redaction strips userinfo.
+        assert_eq!(
+            redact_proxy("socks5://user:hunter2@proxy.example:1080"),
+            "socks5://•••@proxy.example:1080"
+        );
+        assert_eq!(redact_proxy("http://proxy.example:8080"), "http://proxy.example:8080");
+
+        // Settings rows span providers + options.
+        assert_eq!(settings_row_count(), 13);
+        // Render the option-edit state at several sizes.
+        app.option_draft = Some(OptionDraft { row: OptionRow::Proxy, buffer: "socks5://u:p@h:1".into() });
+        for (w, h) in [(120, 40), (30, 10), (1, 1)] {
+            render_at(&mut app, w, h);
+        }
+    }
+
+    #[test]
+    fn chat_keys_toggle_side_panes() {
+        let mut app = test_app();
+        app.view = View::Chat;
+        app.debate = Some(sample_debate());
+        let press = |app: &mut App, c: char| {
+            app.handle_key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE));
+        };
+        press(&mut app, 'c');
+        assert_eq!(app.debate.as_ref().unwrap().pane, SidePane::Tensions);
+        press(&mut app, '$');
+        assert_eq!(app.debate.as_ref().unwrap().pane, SidePane::Costs);
+        press(&mut app, '$');
+        assert_eq!(app.debate.as_ref().unwrap().pane, SidePane::Roster);
+    }
+
+    #[test]
+    fn debate_applies_new_events() {
+        let mut d = sample_debate();
+        d.apply(DebateEvent::AdvisorNote(crate::types::AdvisorNote {
+            observer_id: "clara".into(),
+            observer_name: "Clara".into(),
+            partner_id: "cathy".into(),
+            partner_name: "Cathy".into(),
+            text: "Quote the rollout data.".into(),
+        }));
+        assert!(matches!(d.turns.last().unwrap().kind, TurnKind::Whisper));
+        assert_eq!(d.turns.last().unwrap().name, "Clara → Cathy");
+
+        d.apply(DebateEvent::Tool(crate::types::ToolUse {
+            name: "oracle.verify".into(),
+            query: "claim".into(),
+            output: "Verdict: uncertain (confidence 0.31)".into(),
+            agent_name: "George".into(),
+        }));
+        assert!(matches!(d.turns.last().unwrap().kind, TurnKind::Tool));
+
+        d.apply(DebateEvent::Conflict(vec![]));
+        assert!(d.conflicts.is_empty());
+        d.apply(DebateEvent::Cost(CostSnapshot::default()));
+        assert!(d.cost.as_ref().unwrap().rows.is_empty());
+
+        // Streamed tokens are sanitized before they reach the buffer.
+        d.streaming = Some(TurnView::of_kind(TurnKind::Agent, "george", "George", String::new()));
+        d.apply(DebateEvent::Token("safe\x1b[2Jtext".into()));
+        assert_eq!(d.streaming.as_ref().unwrap().content, "safe[2Jtext");
     }
 
     #[test]

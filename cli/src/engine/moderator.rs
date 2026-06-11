@@ -8,7 +8,7 @@ use crate::config::Config;
 use crate::providers::stream_completion;
 use crate::types::{
     ChatMessage, CompletionChunk, CompletionRequest, ConclusionStatus, ModeratorConclusion,
-    Provider, ReasoningTier,
+    Provider, ReasoningTier, Usage,
 };
 use regex::Regex;
 use std::collections::HashMap;
@@ -105,14 +105,15 @@ Write the official moderator wrap-up in 4 short sentences:\n\
 }
 
 /// Run one moderator completion (collected, non-streaming). `recent` is the tail
-/// of the transcript as `"Name: content"` lines.
+/// of the transcript as `"Name: content"` lines. Returns the text plus the
+/// usage it cost (for the ledger).
 pub async fn generate(
     http: &reqwest::Client,
     pick: &ModeratorPick,
     topic: &str,
     recent: &[String],
     kind: ModeratorKind,
-) -> Option<String> {
+) -> Option<(String, Usage)> {
     let mut messages = vec![ChatMessage::user(format!("Discussion topic: \"{topic}\""))];
     if !recent.is_empty() {
         messages.push(ChatMessage::user(format!("Recent discussion:\n{}", recent.join("\n"))));
@@ -129,14 +130,14 @@ pub async fn generate(
     };
 
     let mut out = String::new();
-    {
+    let usage = {
         let mut on_chunk = |c: &CompletionChunk| out.push_str(&c.content);
         stream_completion(http, pick.provider, &pick.base_url, &pick.key, &req, &mut on_chunk)
             .await
-            .ok()?;
-    }
+            .ok()?
+    };
     let out = out.trim().to_string();
-    (!out.is_empty()).then_some(out)
+    (!out.is_empty()).then_some((out, usage))
 }
 
 /// Parse the moderator's final-summary text into a structured conclusion.

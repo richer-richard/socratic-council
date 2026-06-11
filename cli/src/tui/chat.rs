@@ -1,9 +1,10 @@
 //! Chat view — the debate chamber: a streaming transcript, the live roster,
 //! a header with running usage, and a keybinding footer.
 
-use super::{theme, App, Debate, TurnView, VoteBoard};
+use super::{theme, App, Debate, SidePane, TurnKind, TurnView, VoteBoard};
 use crate::types::{
-    ConclusionStatus, Confidence, DeepResearchReport, ModeratorConclusion, PeerEvalRound, VoteChoice,
+    ConclusionStatus, Confidence, DeepResearchReport, ModeratorConclusion, PairScore,
+    PeerEvalRound, VoteChoice,
 };
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
@@ -29,8 +30,34 @@ pub fn render(f: &mut Frame, area: Rect, app: &mut App) {
     let body = Layout::horizontal([Constraint::Percentage(72), Constraint::Percentage(28)])
         .split(rows[1]);
     render_transcript(f, body[0], debate);
-    render_roster(f, body[1], debate, frame);
+    match debate.pane {
+        SidePane::Roster => render_roster(f, body[1], debate, frame),
+        SidePane::Tensions => render_tensions(f, body[1], debate),
+        SidePane::Costs => render_costs(f, body[1], debate),
+    }
     render_footer(f, rows[2], debate);
+}
+
+/// `turn 12/40 ▰▰▰▱▱▱▱▱` — the per-turn progress gauge (omitted when uncapped).
+pub(super) fn progress_gauge(turn: u32, max_turns: u32) -> String {
+    if max_turns == 0 {
+        return format!("turn {turn}");
+    }
+    const CELLS: u32 = 8;
+    let filled =
+        ((turn.min(max_turns) as u64 * CELLS as u64) / max_turns.max(1) as u64) as u32;
+    let bar: String = (0..CELLS).map(|i| if i < filled { '▰' } else { '▱' }).collect();
+    format!("turn {turn}/{max_turns} {bar}")
+}
+
+fn round_label(turn: u32, max_turns: u32) -> String {
+    const TURNS_PER_ROUND: u32 = 8;
+    let round = turn.saturating_sub(1) / TURNS_PER_ROUND + 1;
+    if max_turns == 0 {
+        format!("round {round}")
+    } else {
+        format!("round {round}/{}", max_turns.div_ceil(TURNS_PER_ROUND))
+    }
 }
 
 fn render_header(f: &mut Frame, area: Rect, d: &Debate) {
@@ -42,14 +69,24 @@ fn render_header(f: &mut Frame, area: Rect, d: &Debate) {
         format!("  {}", truncate(&d.topic, area.width.saturating_sub(24) as usize)),
         Style::default().fg(theme::TEXT),
     );
-    let meta = Line::from(Span::styled(
-        format!(
-            "turn {} · {} in / {} out tok · {}",
-            d.turn_count, d.usage.input, d.usage.output, d.status
-        ),
+    let mut meta_spans = vec![Span::styled(
+        format!("{} · {}", progress_gauge(d.turn_count, d.max_turns), round_label(d.turn_count, d.max_turns)),
+        Style::default().fg(theme::MUTED),
+    )];
+    if let Some(cost) = &d.cost {
+        let approx = if cost.all_priced { "" } else { "≥" };
+        let style = if cost.note.is_some() {
+            Style::default().fg(theme::GOLD).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(theme::MUTED)
+        };
+        meta_spans.push(Span::styled(format!(" · {approx}${:.4}", cost.total_usd), style));
+    }
+    meta_spans.push(Span::styled(
+        format!(" · {} in / {} out tok · {}", d.usage.input, d.usage.output, d.status),
         Style::default().fg(theme::MUTED),
     ));
-    let para = Paragraph::new(vec![Line::from(vec![chip, topic]), meta]).block(
+    let para = Paragraph::new(vec![Line::from(vec![chip, topic]), Line::from(meta_spans)]).block(
         Block::default()
             .borders(Borders::BOTTOM)
             .border_style(Style::default().fg(theme::GOLD)),
@@ -132,6 +169,42 @@ fn wrapped_row_count(lines: &[Line<'_>], width: u16) -> usize {
 
 fn push_turn(lines: &mut Vec<Line<'static>>, t: &TurnView, show_thinking: bool, streaming: bool) {
     let color = theme::speaker_color(&t.agent_id);
+
+    // Private advisor whispers and oracle tool results get their own compact
+    // treatments — no thinking panel, no canvas.
+    match t.kind {
+        TurnKind::Whisper => {
+            lines.push(Line::from(Span::styled(
+                format!("🔒 {}", t.name),
+                Style::default().fg(color).add_modifier(Modifier::ITALIC),
+            )));
+            for line in t.content.lines() {
+                lines.push(Line::from(Span::styled(
+                    format!("  {line}"),
+                    Style::default().fg(theme::DIM).add_modifier(Modifier::ITALIC),
+                )));
+            }
+            lines.push(Line::from(""));
+            return;
+        }
+        TurnKind::Tool => {
+            let cyan = Color::Rgb(0x22, 0xD3, 0xEE);
+            lines.push(Line::from(Span::styled(
+                format!("⌕ {}", t.name),
+                Style::default().fg(cyan),
+            )));
+            for line in t.content.lines() {
+                lines.push(Line::from(Span::styled(
+                    format!("  {line}"),
+                    Style::default().fg(theme::DIM),
+                )));
+            }
+            lines.push(Line::from(""));
+            return;
+        }
+        TurnKind::Agent | TurnKind::Note => {}
+    }
+
     let name = if streaming { format!("{} ▌", t.name) } else { t.name.clone() };
     let mut header =
         vec![Span::styled(name, Style::default().fg(color).add_modifier(Modifier::BOLD))];
@@ -448,21 +521,159 @@ fn render_roster(f: &mut Frame, area: Rect, d: &Debate, frame: u64) {
     f.render_widget(list, area);
 }
 
+/// The Tensions pane — the conflict graph as a ranked pair list.
+fn render_tensions(f: &mut Frame, area: Rect, d: &Debate) {
+    let mut pairs: Vec<&PairScore> = d.conflicts.iter().collect();
+    pairs.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+    let hot = pairs.iter().filter(|p| p.score >= 0.75).count();
+
+    let mut lines: Vec<Line> = Vec::new();
+    if pairs.is_empty() {
+        lines.push(Line::from(Span::styled(
+            " no signal yet…",
+            Style::default().fg(theme::DIM),
+        )));
+    }
+    for p in pairs.iter().take(14) {
+        let color = if p.score >= 0.75 {
+            Color::Rgb(0xFB, 0x71, 0x85)
+        } else if p.score >= 0.40 {
+            theme::GOLD
+        } else {
+            theme::DIM
+        };
+        lines.push(Line::from(vec![
+            Span::styled(
+                format!(" {:<7}", p.a_name),
+                Style::default().fg(theme::speaker_color(&p.a_id)),
+            ),
+            Span::styled("↔ ", Style::default().fg(theme::DIM)),
+            Span::styled(
+                format!("{:<7}", p.b_name),
+                Style::default().fg(theme::speaker_color(&p.b_id)),
+            ),
+        ]));
+        let cells = 10usize;
+        let filled = ((p.score * cells as f32).round() as usize).min(cells);
+        let bar: String =
+            "▮".repeat(filled) + &"▯".repeat(cells - filled);
+        lines.push(Line::from(vec![
+            Span::styled(format!("  {:.2} ", p.score), Style::default().fg(color)),
+            Span::styled(bar, Style::default().fg(color)),
+        ]));
+    }
+
+    let title = format!(" Tensions · {hot} hot ");
+    let para = Paragraph::new(lines).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(theme::DIM))
+            .title(Span::styled(title, Style::default().fg(theme::MUTED))),
+    );
+    f.render_widget(para, area);
+}
+
+/// The Costs pane — the live ledger: per-speaker rows, lanes, budget line.
+fn render_costs(f: &mut Frame, area: Rect, d: &Debate) {
+    let mut lines: Vec<Line> = Vec::new();
+    match &d.cost {
+        None => lines.push(Line::from(Span::styled(
+            " no usage yet…",
+            Style::default().fg(theme::DIM),
+        ))),
+        Some(snap) => {
+            for row in snap.rows.iter().take(12) {
+                lines.push(Line::from(vec![
+                    Span::styled(
+                        format!(" {:<9}", truncate(&row.name, 9)),
+                        Style::default().fg(theme::speaker_color(&row.agent_id)),
+                    ),
+                    Span::styled(
+                        format!("{}${:.4}", if row.priced { "" } else { "≥" }, row.usd),
+                        Style::default().fg(theme::TEXT),
+                    ),
+                ]));
+                lines.push(Line::from(Span::styled(
+                    format!("   {} in · {} out", compact(row.input), compact(row.output + row.reasoning)),
+                    Style::default().fg(theme::DIM),
+                )));
+            }
+            lines.push(Line::from(Span::styled(
+                format!(" {}", "─".repeat((area.width.saturating_sub(4)) as usize)),
+                Style::default().fg(theme::DIM),
+            )));
+            for (lane, usd) in &snap.lane_usd {
+                lines.push(Line::from(Span::styled(
+                    format!(" {:<10} ${usd:.4}", lane.label()),
+                    Style::default().fg(theme::MUTED),
+                )));
+            }
+            lines.push(Line::from(vec![
+                Span::styled(" total      ", Style::default().fg(theme::TEXT).add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    format!("{}${:.4}", if snap.all_priced { "" } else { "≥" }, snap.total_usd),
+                    Style::default().fg(theme::GOLD).add_modifier(Modifier::BOLD),
+                ),
+            ]));
+            if snap.session_cap > 0.0 {
+                lines.push(Line::from(Span::styled(
+                    format!(" cap        ${:.2}/session", snap.session_cap),
+                    Style::default().fg(theme::MUTED),
+                )));
+            }
+            if snap.daily_cap > 0.0 {
+                lines.push(Line::from(Span::styled(
+                    format!(" today      ${:.2} of ${:.2}", snap.daily_usd, snap.daily_cap),
+                    Style::default().fg(theme::MUTED),
+                )));
+            }
+            if let Some(note) = &snap.note {
+                lines.push(Line::from(Span::styled(
+                    format!(" ⚠ {note}"),
+                    Style::default().fg(theme::GOLD),
+                )));
+            }
+        }
+    }
+    let para = Paragraph::new(lines).wrap(Wrap { trim: false }).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(theme::DIM))
+            .title(Span::styled(" Costs ", Style::default().fg(theme::MUTED))),
+    );
+    f.render_widget(para, area);
+}
+
+/// `12.3k` token formatting for the costs pane.
+fn compact(n: u64) -> String {
+    if n >= 1_000_000 {
+        format!("{:.1}M", n as f64 / 1_000_000.0)
+    } else if n >= 1_000 {
+        format!("{:.1}k", n as f64 / 1_000.0)
+    } else {
+        n.to_string()
+    }
+}
+
 fn render_footer(f: &mut Frame, area: Rect, d: &Debate) {
     let mut spans = vec![
         key("Esc"),
-        Span::styled(" home   ", Style::default().fg(theme::MUTED)),
+        Span::styled(" home  ", Style::default().fg(theme::MUTED)),
         key("Tab"),
-        Span::styled(" history   ", Style::default().fg(theme::MUTED)),
+        Span::styled(" history  ", Style::default().fg(theme::MUTED)),
         key("t"),
-        Span::styled(" thinking   ", Style::default().fg(theme::MUTED)),
+        Span::styled(" thinking  ", Style::default().fg(theme::MUTED)),
+        key("c"),
+        Span::styled(" tensions  ", Style::default().fg(theme::MUTED)),
+        key("$"),
+        Span::styled(" costs  ", Style::default().fg(theme::MUTED)),
         key("↑/↓"),
-        Span::styled(" scroll   ", Style::default().fg(theme::MUTED)),
+        Span::styled(" scroll  ", Style::default().fg(theme::MUTED)),
         key("g"),
         Span::styled(" follow", Style::default().fg(theme::MUTED)),
     ];
     if d.is_live() {
-        spans.push(Span::styled("   · debating…", Style::default().fg(theme::GOLD)));
+        spans.push(Span::styled("  · debating…", Style::default().fg(theme::GOLD)));
     }
     f.render_widget(Paragraph::new(Line::from(spans)), area);
 }

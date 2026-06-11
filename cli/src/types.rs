@@ -328,6 +328,97 @@ pub struct PeerEvalRound {
     pub summaries: Vec<PeerEvalSummary>,
 }
 
+/// Which engine lane a completion is billed to in the cost ledger.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default)]
+pub enum CostLane {
+    #[default]
+    Council,
+    Advisors,
+    Moderator,
+    Utility,
+}
+
+impl CostLane {
+    pub fn label(self) -> &'static str {
+        match self {
+            CostLane::Council => "council",
+            CostLane::Advisors => "advisors",
+            CostLane::Moderator => "moderator",
+            CostLane::Utility => "utility",
+        }
+    }
+}
+
+/// One speaker's accumulated tokens + estimated cost.
+#[derive(Debug, Clone)]
+pub struct CostRow {
+    pub agent_id: String,
+    pub name: String,
+    pub lane: CostLane,
+    pub input: u64,
+    pub output: u64,
+    pub reasoning: u64,
+    pub usd: f64,
+    /// False when this row includes usage on a model with no published price
+    /// (the USD figure is then a lower bound).
+    pub priced: bool,
+}
+
+/// A point-in-time view of the session's cost ledger.
+#[derive(Debug, Clone, Default)]
+pub struct CostSnapshot {
+    /// Per-speaker rows, sorted by USD descending.
+    pub rows: Vec<CostRow>,
+    /// Subtotals per lane (council / advisors / moderator / utility).
+    pub lane_usd: Vec<(CostLane, f64)>,
+    pub total_usd: f64,
+    pub total_input: u64,
+    pub total_output: u64,
+    pub total_reasoning: u64,
+    /// True when every recorded model had published pricing.
+    pub all_priced: bool,
+    /// The rolling UTC-day total (this session included), if tracked.
+    pub daily_usd: f64,
+    /// Active caps (0 = off) so the UI can show budget context.
+    pub session_cap: f64,
+    pub daily_cap: f64,
+    /// A budget warning/stop message, when one fired with this snapshot.
+    pub note: Option<String>,
+}
+
+/// A private note an outer-circle advisor passed to its council partner.
+#[derive(Debug, Clone)]
+pub struct AdvisorNote {
+    pub observer_id: String,
+    pub observer_name: String,
+    pub partner_id: String,
+    pub partner_name: String,
+    pub text: String,
+}
+
+/// One executed oracle tool call (web search / file search / verify / cite).
+#[derive(Debug, Clone)]
+pub struct ToolUse {
+    /// Tool name, e.g. `oracle.web_search`.
+    pub name: String,
+    /// The query/claim the agent asked about.
+    pub query: String,
+    /// The formatted result text (sanitized; shared with the whole council).
+    pub output: String,
+    /// The agent that requested the call.
+    pub agent_name: String,
+}
+
+/// Pairwise tension between two agents, normalized to 0..1.
+#[derive(Debug, Clone)]
+pub struct PairScore {
+    pub a_id: String,
+    pub a_name: String,
+    pub b_id: String,
+    pub b_name: String,
+    pub score: f32,
+}
+
 /// A council agent's ballot when someone moves to end the session.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VoteChoice {
