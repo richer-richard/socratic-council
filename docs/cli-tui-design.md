@@ -4,6 +4,14 @@ Goal: a ratatui TUI that **looks like the desktop app**, has the **same core
 debate functionality**, and **shares the app's keys + config** so the user never
 re-enters an API key the desktop already holds.
 
+> **v1.0.0 addendum.** The chamber gained a header progress gauge
+> (`turn 12/40 ▰▰▰▱▱▱▱▱ · round 2/5 · $…`), 🔒 advisor-whisper and ⌕ tool-result
+> turn kinds, and a right pane that cycles roster / **Tensions** (`c`) /
+> **Costs** (`$`). Settings gained an editable **Options** section
+> (discussion cap, advisor interval, session budget, budget action, proxy —
+> proxy values render with userinfo redacted and edit masked). Streamed
+> tokens are control-character-sanitized before they reach the buffer.
+
 This supersedes the v0.1 "plain prompt" TUI (a transcript + roster with no
 visual identity). The new TUI ports the app's three surfaces — Home, the
 history sidebar, and the Chat/debate chamber — plus a Settings/Models overlay.
@@ -15,20 +23,21 @@ history sidebar, and the Chat/debate chamber — plus a Settings/Models overlay.
 The desktop app persists everything under the Tauri identifier
 `com.socratic-council.desktop`:
 
-| Datum | Location | Format |
-| --- | --- | --- |
-| DEK (32 bytes) | `<app_data_dir>/vault.key` (`0600`) | raw bytes |
-| API keys | localStorage `socratic-council-secret:apiKey:<provider>` | `ENC1:` envelope |
-| Proxy password | localStorage `socratic-council-secret:proxy:password` | `ENC1:` envelope |
-| Non-secret config | localStorage `socratic-council-config` | plaintext JSON |
-| Session index | localStorage `socratic-council-session-index-v1` | `ENC1:` envelope → JSON `SessionSummary[]` |
-| Session blob | localStorage `socratic-council-session:<id>` | `ENC1:` envelope → JSON `DiscussionSession` |
+| Datum             | Location                                                 | Format                                      |
+| ----------------- | -------------------------------------------------------- | ------------------------------------------- |
+| DEK (32 bytes)    | `<app_data_dir>/vault.key` (`0600`)                      | raw bytes                                   |
+| API keys          | localStorage `socratic-council-secret:apiKey:<provider>` | `ENC1:` envelope                            |
+| Proxy password    | localStorage `socratic-council-secret:proxy:password`    | `ENC1:` envelope                            |
+| Non-secret config | localStorage `socratic-council-config`                   | plaintext JSON                              |
+| Session index     | localStorage `socratic-council-session-index-v1`         | `ENC1:` envelope → JSON `SessionSummary[]`  |
+| Session blob      | localStorage `socratic-council-session:<id>`             | `ENC1:` envelope → JSON `DiscussionSession` |
 
 `<app_data_dir>` = `dirs::data_dir()/com.socratic-council.desktop` →
 `~/Library/Application Support/...` (macOS), `~/.local/share/...` (Linux),
 `%APPDATA%\...` (Windows).
 
 localStorage is a WebKit/WebView store:
+
 - **macOS (WKWebView):** `~/Library/WebKit/<id>/**/LocalStorage/localstorage.sqlite3`
   (`ItemTable(key TEXT, value BLOB)`; value is UTF‑16LE or UTF‑8).
 - **Linux (WebKitGTK):** best-effort glob under the app data dir.
@@ -113,7 +122,7 @@ enum View { Home, Chat, Settings }
 ### Terminal-only / VPS is first-class (v0.3.0)
 
 Sharing the desktop app's keys is a **convenience, not a requirement**. The TUI
-opens even with **zero keys** (`main.rs` passes the *allowed* provider set — the
+opens even with **zero keys** (`main.rs` passes the _allowed_ provider set — the
 `--providers` filter or all eight — rather than configured-only; only `--no-tui`
 still needs a key up front). A first-run VPS user lands on Home, presses `^P`,
 adds a key in Settings, and convenes immediately — no desktop app, no shell

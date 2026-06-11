@@ -46,6 +46,27 @@ enum Command {
         /// Skip the closing peer-evaluation scorecard (saves one call per agent).
         #[arg(long)]
         no_peer_eval: bool,
+        /// Attach a plain-text file (repeatable) — searchable via oracle.file_search.
+        #[arg(long = "file", value_name = "PATH")]
+        files: Vec<std::path::PathBuf>,
+        /// Disable the outer advisor circle (paired agents passing private notes).
+        #[arg(long)]
+        no_observers: bool,
+        /// Advisors whisper every N turns (0 = off; default 2).
+        #[arg(long)]
+        observer_interval: Option<u32>,
+        /// USD budget cap for this session (0 = unlimited).
+        #[arg(long)]
+        budget: Option<f64>,
+        /// What happens at the budget cap: warn | stop.
+        #[arg(long)]
+        budget_action: Option<String>,
+        /// Disable the oracle tools (web/file search, claim verification).
+        #[arg(long)]
+        no_search: bool,
+        /// Proxy URL for this run (http://, https://, socks5://…).
+        #[arg(long)]
+        proxy: Option<String>,
         /// Plain streaming output instead of the TUI.
         #[arg(long)]
         no_tui: bool,
@@ -95,6 +116,13 @@ async fn main() {
             reflect,
             deep_research,
             no_peer_eval,
+            files,
+            no_observers,
+            observer_interval,
+            budget,
+            budget_action,
+            no_search,
+            proxy,
             no_tui,
             scan,
         }) => {
@@ -106,6 +134,13 @@ async fn main() {
                 reflect,
                 deep_research,
                 no_peer_eval,
+                files,
+                no_observers,
+                observer_interval,
+                budget,
+                budget_action,
+                no_search,
+                proxy,
                 no_tui,
                 scan,
             })
@@ -130,6 +165,13 @@ struct RunArgs {
     reflect: Option<Reflection>,
     deep_research: bool,
     no_peer_eval: bool,
+    files: Vec<std::path::PathBuf>,
+    no_observers: bool,
+    observer_interval: Option<u32>,
+    budget: Option<f64>,
+    budget_action: Option<String>,
+    no_search: bool,
+    proxy: Option<String>,
     no_tui: bool,
     scan: bool,
 }
@@ -156,6 +198,32 @@ async fn cmd_run(args: RunArgs) -> anyhow::Result<()> {
     }
     config.deep_research = args.deep_research;
     config.peer_eval = !args.no_peer_eval;
+    config.search_enabled = !args.no_search;
+    if args.no_observers {
+        config.observers_enabled = false;
+    }
+    if let Some(interval) = args.observer_interval {
+        config.observers_enabled = interval > 0;
+        config.observer_interval = interval;
+    }
+    if let Some(budget) = args.budget {
+        anyhow::ensure!(budget.is_finite() && budget >= 0.0, "--budget must be ≥ 0");
+        config.budget_per_session_usd = budget;
+    }
+    if let Some(action) = &args.budget_action {
+        anyhow::ensure!(
+            matches!(action.to_ascii_lowercase().as_str(), "warn" | "stop"),
+            "--budget-action must be warn or stop"
+        );
+        config.budget_action = action.to_ascii_lowercase();
+    }
+    if let Some(proxy) = &args.proxy {
+        config.proxy = Some(proxy.clone());
+    }
+
+    // Attachments (plain text only; searched via oracle.file_search).
+    let attachments =
+        socratic_council::attach::load_attachments(&args.files).map_err(anyhow::Error::msg)?;
 
     // The *allowed* set: the `--providers` filter, or all eight. We deliberately
     // do NOT pre-filter by which keys are configured — a terminal-only/VPS user
@@ -210,21 +278,33 @@ async fn cmd_run(args: RunArgs) -> anyhow::Result<()> {
                  var — or drop --no-tui and add a key in Settings (press ^P)."
             );
         }
-        return run_plain_debate(config, http, available, prefetched_keys, &args, &configured).await;
+        return run_plain_debate(
+            config,
+            http,
+            available,
+            prefetched_keys,
+            attachments,
+            &args,
+            &configured,
+        )
+        .await;
     }
 
     let initial_topic =
         if args.topic.trim().is_empty() { None } else { Some(args.topic.clone()) };
-    let ctx = AppContext { http, config, available, providers: allowed, prefetched_keys };
+    let ctx =
+        AppContext { http, config, available, providers: allowed, prefetched_keys, attachments };
     tui::run(ctx, initial_topic).await
 }
 
 /// Plain (non-TUI) streaming debate for piping / scripting.
+#[allow(clippy::too_many_arguments)]
 async fn run_plain_debate(
     config: Config,
     http: reqwest::Client,
     available: HashMap<Provider, Vec<DiscoveredModel>>,
     mut keys: HashMap<Provider, String>,
+    attachments: Vec<socratic_council::attach::Attachment>,
     args: &RunArgs,
     providers: &[Provider],
 ) -> anyhow::Result<()> {
@@ -265,12 +345,15 @@ async fn run_plain_debate(
         0 => 1000,
         n => n,
     };
-    let engine = Engine::new(http, config, topic, agents, available, keys, max_turns);
-    run_plain(engine).await;
+    let display_cap = if config.max_turns == 0 { 0 } else { max_turns };
+    let engine = Engine::new(http, config, topic, agents, available, keys, max_turns)
+        .with_attachments(attachments);
+    run_plain(engine, display_cap).await;
     Ok(())
 }
 
-async fn run_plain(engine: Engine) {
+async fn run_plain(engine: Engine, max_turns: u32) {
+    use socratic_council::engine::sanitize_terminal as clean;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
     use tokio::sync::mpsc::unbounded_channel;
@@ -281,6 +364,9 @@ async fn run_plain(engine: Engine) {
     let handle = tokio::spawn(async move { engine.run(tx, engine_cancel).await });
 
     let mut current = String::new();
+    let mut turn_no: u32 = 0;
+    let mut last_tension: f32 = 0.0;
+    let mut final_cost: Option<socratic_council::types::CostSnapshot> = None;
     loop {
         tokio::select! {
             _ = tokio::signal::ctrl_c() => {
@@ -291,21 +377,27 @@ async fn run_plain(engine: Engine) {
             maybe = rx.recv() => {
                 let Some(ev) = maybe else { break };
                 match ev {
-                    DebateEvent::Moderator(text) => println!("\n— {text}\n"),
+                    DebateEvent::Moderator(text) => println!("\n— {}\n", clean(&text)),
                     DebateEvent::Conclusion(c) => {
                         println!("\n── Council Verdict ──");
                         println!("{} {}    Score {}/10", c.status.glyph(), c.status.label(), c.score);
-                        println!("{}", c.summary);
+                        println!("{}", clean(&c.summary));
                         if !c.reason.trim().is_empty() {
-                            println!("Reason: {}", c.reason);
+                            println!("Reason: {}", clean(&c.reason));
                         }
                         if let Some(next) = &c.next {
-                            println!("Next:   {next}");
+                            println!("Next:   {}", clean(next));
                         }
                         println!();
                     }
                     DebateEvent::TurnStarted { name, model, .. } => {
-                        print!("\n{name} ({model}):\n");
+                        turn_no += 1;
+                        let marker = if max_turns > 0 {
+                            format!("[{turn_no}/{max_turns}] ")
+                        } else {
+                            format!("[{turn_no}] ")
+                        };
+                        print!("\n{marker}{name} ({model}):\n");
                         let _ = std::io::stdout().flush();
                         current.clear();
                     }
@@ -313,17 +405,45 @@ async fn run_plain(engine: Engine) {
                     // the end so piped output stays clean (no @canvas/@end lines).
                     DebateEvent::Token(t) => current.push_str(&t),
                     DebateEvent::TurnEnded { .. } => {
-                        let (clean, _) = socratic_council::engine::strip_directives(&current);
-                        for line in clean.lines() {
+                        let (stripped, _) = socratic_council::engine::strip_directives(&current);
+                        for line in clean(&stripped).lines() {
                             println!("  {line}");
                         }
                         println!();
+                    }
+                    DebateEvent::AdvisorNote(n) => {
+                        println!("  🔒 ({} → {}): {}", n.observer_name, n.partner_name, clean(&n.text));
+                    }
+                    DebateEvent::Tool(t) => {
+                        println!("\n[tool] {} — “{}” (asked by {})", t.name, clean(&t.query), t.agent_name);
+                        for line in clean(&t.output).lines() {
+                            println!("  {line}");
+                        }
+                        println!();
+                    }
+                    DebateEvent::Conflict(pairs) => {
+                        // Only narrate meaningful shifts of the top tension.
+                        let top = pairs
+                            .iter()
+                            .max_by(|a, b| a.score.partial_cmp(&b.score).unwrap_or(std::cmp::Ordering::Equal));
+                        if let Some(p) = top {
+                            if p.score >= 0.40 && (p.score - last_tension).abs() >= 0.10 {
+                                last_tension = p.score;
+                                println!("  ⚡ tension {} ↔ {} {:.2}", p.a_name, p.b_name, p.score);
+                            }
+                        }
+                    }
+                    DebateEvent::Cost(snap) => {
+                        if let Some(note) = &snap.note {
+                            eprintln!("  [budget] {}", clean(note));
+                        }
+                        final_cost = Some(snap);
                     }
                     DebateEvent::EndVoteStarted { proposer, threshold, total } => {
                         println!("\n── End Vote · moved by {proposer} (needs {threshold}/{total} YES) ──");
                     }
                     DebateEvent::Vote { name, choice, reason, .. } => {
-                        println!("  {name}: {} — {reason}", choice.label());
+                        println!("  {name}: {} — {}", choice.label(), clean(&reason));
                     }
                     DebateEvent::EndVoteResult { passed, yes, no, abstain } => {
                         println!(
@@ -344,20 +464,49 @@ async fn run_plain(engine: Engine) {
                         println!();
                     }
                     DebateEvent::DeepResearch(r) => {
-                        println!("\n══ Deep Research Report — {} ({}) ══", r.title, r.confidence.label());
-                        println!("{}\n", r.abstract_text);
+                        println!("\n══ Deep Research Report — {} ({}) ══", clean(&r.title), r.confidence.label());
+                        println!("{}\n", clean(&r.abstract_text));
                         for sec in &r.sections {
-                            println!("• {} [{}]", sec.heading, sec.confidence.label());
-                            println!("  {}\n", sec.body);
+                            println!("• {} [{}]", clean(&sec.heading), sec.confidence.label());
+                            println!("  {}\n", clean(&sec.body));
                         }
                     }
-                    DebateEvent::Error(e) => eprintln!("\n[error] {e}"),
+                    DebateEvent::Error(e) => eprintln!("\n[error] {}", clean(&e)),
                     DebateEvent::Done => break,
                     _ => {}
                 }
             }
         }
     }
+
+    // Closing cost ledger.
+    if let Some(snap) = final_cost {
+        println!("\n── Cost Ledger ──");
+        for row in &snap.rows {
+            println!(
+                "  {:<10} {:>9} in {:>9} out  {}${:.4}",
+                row.name,
+                row.input,
+                row.output + row.reasoning,
+                if row.priced { "" } else { "≥" },
+                row.usd
+            );
+        }
+        for (lane, usd) in &snap.lane_usd {
+            println!("  {:<10} ${usd:.4}", lane.label());
+        }
+        println!(
+            "  total      {}${:.4}{}",
+            if snap.all_priced { "" } else { "≥" },
+            snap.total_usd,
+            if snap.daily_cap > 0.0 || snap.session_cap > 0.0 {
+                format!("  (today ${:.2})", snap.daily_usd)
+            } else {
+                String::new()
+            }
+        );
+    }
+
     handle.abort();
     let _ = handle.await;
 }

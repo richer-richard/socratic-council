@@ -3,7 +3,9 @@
 //! two-round `EndVote` protocol — the motion passes on a simple majority.
 
 use crate::providers::stream_completion;
-use crate::types::{ChatMessage, CompletionChunk, CompletionRequest, ReasoningTier, VoteChoice};
+use crate::types::{
+    ChatMessage, CompletionChunk, CompletionRequest, ReasoningTier, Usage, VoteChoice,
+};
 use regex::Regex;
 
 /// Majority threshold: `floor(n/2) + 1`.
@@ -37,7 +39,8 @@ pub fn build_messages(
     messages
 }
 
-/// A non-streaming ballot completion for one voter.
+/// A non-streaming ballot completion for one voter. Also returns the usage the
+/// ballot cost (zero when the call failed).
 #[allow(clippy::too_many_arguments)]
 pub async fn cast(
     http: &reqwest::Client,
@@ -51,7 +54,7 @@ pub async fn cast(
     proposer: &str,
     total: usize,
     tier: ReasoningTier,
-) -> (VoteChoice, String) {
+) -> (VoteChoice, String, Usage) {
     let req = CompletionRequest {
         model: model.to_string(),
         system: Some(system.to_string()),
@@ -61,14 +64,18 @@ pub async fn cast(
         tier,
     };
     let mut out = String::new();
-    {
+    let usage = {
         let mut on_chunk = |c: &CompletionChunk| out.push_str(&c.content);
-        if stream_completion(http, provider, base_url, key, &req, &mut on_chunk).await.is_err() {
-            // A failed ballot abstains (and never blocks the motion).
-            return (VoteChoice::Abstain, "(no response)".to_string());
+        match stream_completion(http, provider, base_url, key, &req, &mut on_chunk).await {
+            Ok(usage) => usage,
+            Err(_) => {
+                // A failed ballot abstains (and never blocks the motion).
+                return (VoteChoice::Abstain, "(no response)".to_string(), Usage::default());
+            }
         }
-    }
-    parse_vote(&out)
+    };
+    let (choice, reason) = parse_vote(&out);
+    (choice, reason, usage)
 }
 
 /// Parse a ballot's visible text into `(choice, reason)`. Mirrors the app's

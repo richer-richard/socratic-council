@@ -9,7 +9,7 @@ use crate::config::Config;
 use crate::providers::stream_completion;
 use crate::types::{
     Agent, ChatMessage, CompletionChunk, CompletionRequest, PeerCritique, PeerEvalRound,
-    PeerEvalScores, PeerEvalSummary, Provider, Stance,
+    PeerEvalScores, PeerEvalSummary, Provider, Stance, Usage,
 };
 use std::collections::HashMap;
 
@@ -136,7 +136,9 @@ fn parse_eval(raw: &str) -> Vec<(String, PeerEvalScores, u8, Stance, String)> {
     out
 }
 
-/// Run the full peer-evaluation round. Returns `None` if nothing usable came back.
+/// Run the full peer-evaluation round. Returns the round (None if nothing
+/// usable came back) plus per-evaluator `(agent_id, model, usage)` records so
+/// the caller can attribute the cost.
 pub async fn run(
     http: &reqwest::Client,
     config: &Config,
@@ -145,11 +147,12 @@ pub async fn run(
     agents: &[Agent],
     topic: &str,
     transcript: &[Turn],
-) -> Option<PeerEvalRound> {
+) -> (Option<PeerEvalRound>, Vec<(String, String, Usage)>) {
     if agents.len() < 2 {
-        return None;
+        return (None, Vec::new());
     }
     let mut critiques: Vec<PeerCritique> = Vec::new();
+    let mut usages: Vec<(String, String, Usage)> = Vec::new();
 
     for evaluator in agents {
         let Some(key) = keys.get(&evaluator.provider) else {
@@ -169,7 +172,7 @@ pub async fn run(
             config.selection(evaluator.provider, evaluator.tier).as_deref(),
         );
         let req = CompletionRequest {
-            model,
+            model: model.clone(),
             system: Some(evaluator_system(&evaluator.system_prompt, &evaluator.name)),
             messages: vec![ChatMessage::user(build_user(topic, &peers, transcript))],
             max_tokens: 2048,
@@ -179,7 +182,7 @@ pub async fn run(
         let mut out = String::new();
         {
             let mut on_chunk = |c: &CompletionChunk| out.push_str(&c.content);
-            if stream_completion(
+            match stream_completion(
                 http,
                 evaluator.provider,
                 &config.base_url(evaluator.provider),
@@ -188,9 +191,9 @@ pub async fn run(
                 &mut on_chunk,
             )
             .await
-            .is_err()
             {
-                continue;
+                Ok(usage) => usages.push((evaluator.id.clone(), model.clone(), usage)),
+                Err(_) => continue,
             }
         }
         for (target_id, scores, overall, stance, critique) in parse_eval(&out) {
@@ -210,11 +213,11 @@ pub async fn run(
     }
 
     if critiques.is_empty() {
-        return None;
+        return (None, usages);
     }
 
     let summaries = aggregate(agents, &critiques);
-    Some(PeerEvalRound { critiques, summaries })
+    (Some(PeerEvalRound { critiques, summaries }), usages)
 }
 
 /// Average each agent's received critiques into a ranked scorecard.

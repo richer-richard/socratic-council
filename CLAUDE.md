@@ -18,7 +18,7 @@ The per-character `LOCKED_MODELS` lock was replaced by an Auto resolver + live
 scanning so model ids never need hand-editing on a new release.
 
 - **`packages/shared/src/models/resolver.ts`** — `resolveModel(provider, tier,
-  available, selection)`; version-dominant ranking adopts a newer scanned
+available, selection)`; version-dominant ranking adopts a newer scanned
   flagship automatically. Never fabricates ids (see user memory).
 - **`apps/desktop/src/services/modelScan.ts`** — GET each provider's own
   `/models` endpoint (Chinese endpoints included); graceful catalog fallback.
@@ -49,7 +49,7 @@ a tokio task. `theme.rs` holds the palette (gold `#F5C542`) + the 8 agents'
 provider colors. Render paths are smoke-tested with `TestBackend` down to 1×1.
 
 **Terminal-only / VPS is first-class (v0.3.0).** The TUI opens even with zero
-keys — `main.rs` passes the *allowed* provider set (`--providers` filter, else
+keys — `main.rs` passes the _allowed_ provider set (`--providers` filter, else
 all 8), not configured-only, and only `--no-tui` still requires a key up front.
 **Settings is an interactive key manager** (`settings.rs` + `handle_settings_key`):
 `↑/↓` select, `Enter`/`e` edit (masked paste → `KeyDraft.buffer`, bullets only,
@@ -72,7 +72,7 @@ C dep) stays gated behind `desktop-bridge`. **The CLI's own keys live in `keys.e
 (ENC1, under a `0600` `vault.key` in the config dir) — `Config::save_keys`/
 `load_encrypted_keys`; legacy plaintext `keys.toml` is migrated on load then deleted.
 A 256-bit AEAD key is already post-quantum-safe at rest (Grover → ~128-bit), so this —
-not an ML-KEM-style PQ KEM (that solves key *exchange*, not local encryption) — is the
+not an ML-KEM-style PQ KEM (that solves key _exchange_, not local encryption) — is the
 right primitive. **No keychain anywhere in the CLI** (removed July 2026).
 
 ### Debate engine (`cli/src/engine/`, July 2026 — app-faithful orchestration)
@@ -122,16 +122,49 @@ so inline `@end()` triggers the vote and `@endorse` is left alone) and strips
 MiniMax `<think>…</think>` reasoning (was leaking into Mary's message + the
 transcript). The peer-eval/deep-research transcript truncation snaps to a char
 boundary (was a CJK byte-slice panic that hung the close). The TUI render scrubs
-the *live* stream each frame; `run_loop` marks the debate done on channel
+the _live_ stream each frame; `run_loop` marks the debate done on channel
 disconnect (no hang if the engine task dies); `http_client` has 30s connect / 300s
 request timeouts. Peer-eval is on by default but `--no-peer-eval` opts out (N calls).
 
+**Feature parity (v1.0.0, June 2026).** Five app features ported in one pass —
+**advisor circle** (`engine/observer.rs`: the 8 paired observers from
+`useObserverCircle.ts`, partner's provider at Low tier, every
+`observer_interval` turns (default 2), <80-word notes injected as
+`[Private note from your advisor …]` into ONLY the partner's next context,
+🔒 whisper rows in the TUI); **conflict engine** (`engine/conflict.rs`: faithful
+port of `core/conflict.ts` cue tables + pairwise scoring incl. cooldown/
+engagement/reciprocity bonuses, plus the `semanticConflict.ts` NLI refinement on
+the utility model when the strongest pair ≥ floor 40 — `DebateEvent::Conflict`,
+TUI Tensions pane on `c`); **cost ledger + budgets** (`engine/cost.rs`: real
+`MODEL_REGISTRY` prices only — unknown ids are _unpriced_ (`≥` lower bound),
+never guessed; lanes council/advisors/moderator/utility; every helper now
+returns `Usage`; budget warn at 80% / `warn|stop` at cap; rolling UTC-day total
+in `daily-spend.json`; TUI Costs pane on `$`); **oracle tools**
+(`engine/oracle.rs` + `search.rs` + `attach.rs`: `@tool(oracle.web_search|
+file_search|verify, {...})` parsed string-literal-aware, ≤2/turn, 25s cap;
+keyless 3-tier search DDG-html → Bing RSS → DDG instant JSON; attachments via
+`--file` ≤8×5MB text, CJK-bigram file search with boundary-extended snippets;
+results post to the shared transcript as `Tool result (…)`); **turn progress
+gauge** in the chat header + `[n/max]` markers in `--no-tui`; **Settings
+Options rows** (cap / advisor interval / budget / action / proxy — proxy
+display redacts userinfo, edit is masked, persisted to `config.toml`); plain
+mode output is **ANSI/OSC-sanitized** (`sanitize_terminal`, fixes the escape-
+injection audit finding). New flags: `--file --no-observers
+--observer-interval --budget --budget-action --no-search --proxy`. 98 tests,
+clippy clean both feature sets. CI/CD: `ci.yml` gained 3-OS CLI test + clippy
+jobs and a `src-tauri cargo test --lib` step; `audit.yml` audits the CLI crate;
+`release-cli.yml` (tags `cli-v*`) builds 4-target binaries, attaches them to
+the GitHub release, and publishes to crates.io (`CARGO_REGISTRY_TOKEN` secret,
+skips if the version is live). Deliberate non-port: LLM relevance bidding —
+CLI agents are persona-free by design, so least-recently-spoke round-robin is
+already the fairness optimum.
+
 **Hardening (v0.12.0, from a repo-wide 11-agent adversarial bug scan).** The three
-balanced-delimiter scanners — `balanced_paren_end` (strip_directives),
+balanced-delimiter scanners — `balanced_paren_end` (strip*directives),
 `balanced_object` (canvas), `extract_json` (peer-eval + deep-research) — are now
 **string-literal aware** (track `in_string`/`escaped`), so a `(`/`)`/`{`/`}` inside
 a directive's JSON string no longer (a) leaks the directive's tail — incl. an
-agent's *private* canvas notes — into the shared transcript, (b) drops a canvas
+agent's \_private* canvas notes — into the shared transcript, (b) drops a canvas
 update, or (c) truncates the eval/report JSON so a whole scorecard row / the report
 silently vanishes. **MiniMax reasoning tier was silently dropped** (`ant_profile`
 only matched Claude ids → no thinking knob ever sent for Mary); MiniMax now routes
@@ -171,7 +204,7 @@ uses its own `keys.enc`). `Config::load()` merges the bridge at lowest precedenc
 
 ```bash
 pnpm typecheck                                       # whole workspace
-pnpm test                                            # vitest, 323 tests
+pnpm test                                            # vitest, 385 tests
 pnpm --filter @socratic-council/desktop tauri:dev    # dev hot-reload
 pnpm --filter @socratic-council/desktop tauri:build  # signed release .app
 ./install.sh                                         # quick install (macOS)
@@ -268,7 +301,7 @@ vault_file::vault_reset     // delete the DEK file (destructive)
 
 Every outbound HTTP call passes through `allowlist.rs`
 (host allowlist + `https://` enforcement + 4MB body cap +
-200 req/min token bucket) and `redact.rs` (strips userinfo from any URL
+600 req/min token bucket) and `redact.rs` (strips userinfo from any URL
 that ends up in an error string).
 
 ---

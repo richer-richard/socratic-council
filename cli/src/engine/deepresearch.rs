@@ -12,7 +12,7 @@ use crate::config::Config;
 use crate::providers::stream_completion;
 use crate::types::{
     ChatMessage, CompletionChunk, CompletionRequest, Confidence, DeepResearchReport, Provider,
-    ReasoningTier, ResearchSection,
+    ReasoningTier, ResearchSection, Usage,
 };
 use std::collections::HashMap;
 
@@ -26,6 +26,7 @@ Respond with EXACTLY one JSON object and nothing else — no markdown fences:\n\
 {\"title\":\"a 2-6 word Title Case title, no punctuation\",\"abstract\":\"a 3-4 sentence lede\",\"confidence\":\"high|medium|low\",\"sections\":[{\"heading\":\"...\",\"body\":\"2-5 analytical sentences\",\"confidence\":\"high|medium|low\"}]}\n\
 Produce 3 to 6 sections. JSON only.";
 
+/// Synthesize the report. Returns it plus `(model, usage)` for the ledger.
 pub async fn run(
     http: &reqwest::Client,
     config: &Config,
@@ -33,7 +34,7 @@ pub async fn run(
     keys: &HashMap<Provider, String>,
     topic: &str,
     transcript: &[Turn],
-) -> Option<DeepResearchReport> {
+) -> Option<(DeepResearchReport, String, Usage)> {
     if transcript.is_empty() {
         return None;
     }
@@ -64,13 +65,13 @@ pub async fn run(
     };
 
     let mut out = String::new();
-    {
+    let usage = {
         let mut on_chunk = |c: &CompletionChunk| out.push_str(&c.content);
         stream_completion(http, pick.provider, &pick.base_url, &pick.key, &req, &mut on_chunk)
             .await
-            .ok()?;
-    }
-    parse_report(&out)
+            .ok()?
+    };
+    parse_report(&out).map(|report| (report, pick.model.clone(), usage))
 }
 
 fn parse_report(raw: &str) -> Option<DeepResearchReport> {

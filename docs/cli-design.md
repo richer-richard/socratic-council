@@ -1,10 +1,23 @@
 # `socratic-council` — Rust CLI / TUI design
 
-> Status: design (June 2026). A standalone Rust crate publishable to
-> crates.io (`cargo install socratic-council`) that runs the multi-agent
-> debate in the terminal with a ratatui TUI. Reuses the provider
-> endpoint/format knowledge and the reasoning-tier model from the desktop
-> app (`docs/model-flexibility-design.md`) — **no fabricated model ids**.
+> Status: original design (June 2026), **shipped and since extended through
+> v1.0.0**. A standalone Rust crate publishable to crates.io
+> (`cargo install socratic-council`) that runs the multi-agent debate in the
+> terminal with a ratatui TUI. Reuses the provider endpoint/format knowledge
+> and the reasoning-tier model from the desktop app
+> (`docs/model-flexibility-design.md`) — **no fabricated model ids**.
+>
+> **v1.0.0 (June 2026) superseded this document's "out of scope" list.** The
+> shipped crate now also includes: the **advisor circle** (8 paired silent
+> observers, `engine/observer.rs`), **conflict detection + the Tensions pane**
+> (`engine/conflict.rs`, a faithful port of `core/conflict.ts` + the NLI
+> refinement), a **cost ledger with budget caps + daily tracking**
+> (`engine/cost.rs`, real registry pricing only), **oracle web/file search +
+> claim verification** (`engine/oracle.rs`, `search.rs`, `attach.rs`), a
+> header **turn progress gauge**, **editable Settings options** (cap, advisor
+> interval, budget, proxy), and ANSI-sanitized `--no-tui` output. Peer-eval,
+> deep research, reflection, end-votes, and canvases shipped earlier
+> (v0.6–v0.10). Still deferred: argument map, fact-check badges, exports.
 
 ## Why Rust + ratatui
 
@@ -105,7 +118,7 @@ light form:
   whichever provider is configured (Auto-resolved), not a hardcoded id.
 - **Events**: the orchestrator runs on a tokio task and emits
   `DebateEvent::{TurnStarted, Token, ThinkingToken, TurnEnded, Moderator,
-  Phase, Error}` over an `mpsc` channel; the TUI consumes them to animate.
+Phase, Error}` over an `mpsc` channel; the TUI consumes them to animate.
 
 Out of scope for v1 (documented as follow-ups, mirroring core/): observers,
 whispers, peer-eval graph, argument map, fact-check. The trait + event model

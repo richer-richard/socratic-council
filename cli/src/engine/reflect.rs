@@ -4,7 +4,7 @@
 
 use crate::providers::stream_completion;
 use crate::types::{
-    ChatMessage, CompletionChunk, CompletionRequest, Provider, ReasoningTier, Reflection,
+    ChatMessage, CompletionChunk, CompletionRequest, Provider, ReasoningTier, Reflection, Usage,
 };
 
 const LIGHT_RUBRIC: &str = "Tighten the draft without changing its core position. Remove filler, collapse repetition, make claims more specific, and address the latest point more directly.";
@@ -18,7 +18,7 @@ const DEEP_RUBRIC: &str = "Review the draft against this rubric before rewriting
 For each \"no\" in items 1-4, fix it in the revised version. For item 5, state the assumption explicitly.";
 
 /// Revise `draft` per the reflection rubric using the agent's own model. Returns
-/// the revised text, or `None` to keep the original.
+/// the revised text plus its usage, or `None` to keep the original.
 #[allow(clippy::too_many_arguments)]
 pub async fn revise(
     http: &reqwest::Client,
@@ -31,7 +31,7 @@ pub async fn revise(
     draft: &str,
     name: &str,
     mode: Reflection,
-) -> Option<String> {
+) -> Option<(String, Usage)> {
     let rubric = match mode {
         Reflection::Light => LIGHT_RUBRIC,
         Reflection::Deep => DEEP_RUBRIC,
@@ -54,10 +54,10 @@ Write ONLY the revised final response that will be shown to the council. Do not 
         tier: ReasoningTier::Low,
     };
     let mut out = String::new();
-    {
+    let usage = {
         let mut on_chunk = |c: &CompletionChunk| out.push_str(&c.content);
-        stream_completion(http, provider, base_url, key, &req, &mut on_chunk).await.ok()?;
-    }
+        stream_completion(http, provider, base_url, key, &req, &mut on_chunk).await.ok()?
+    };
     let out = out.trim().to_string();
-    (!out.is_empty()).then_some(out)
+    (!out.is_empty()).then_some((out, usage))
 }

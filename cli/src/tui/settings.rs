@@ -7,7 +7,7 @@
 //! shared automatically and shown as `shared`. The key buffer is always rendered
 //! masked; the plaintext never reaches the screen or a log.
 
-use super::{theme, App};
+use super::{redact_proxy, theme, App, OptionRow};
 use crate::catalog::resolve_model;
 use crate::config::KeySource;
 use ratatui::layout::{Constraint, Layout, Rect};
@@ -18,17 +18,19 @@ use ratatui::Frame;
 
 pub fn render(f: &mut Frame, area: Rect, app: &App) {
     let rows = Layout::vertical([
-        Constraint::Length(2), // header
-        Constraint::Min(0),    // providers
-        Constraint::Length(6), // council
-        Constraint::Length(1), // footer
+        Constraint::Length(2),  // header
+        Constraint::Length(10), // providers (8 rows + borders)
+        Constraint::Length(7),  // options (5 rows + borders)
+        Constraint::Min(4),     // council
+        Constraint::Length(1),  // footer
     ])
     .split(area);
 
     render_header(f, rows[0]);
     render_providers(f, rows[1], app);
-    render_council(f, rows[2], app);
-    render_footer(f, rows[3], app);
+    render_options(f, rows[2], app);
+    render_council(f, rows[3], app);
+    render_footer(f, rows[4], app);
 }
 
 fn render_header(f: &mut Frame, area: Rect) {
@@ -118,16 +120,86 @@ fn source_color(source: KeySource) -> Color {
     }
 }
 
+/// The editable option rows: discussion cap, advisors, budget, proxy.
+fn render_options(f: &mut Frame, area: Rect, app: &App) {
+    let config = &app.ctx.config;
+    let editing = app.option_draft.as_ref();
+    let mut lines: Vec<Line> = Vec::new();
+
+    for (i, row) in OptionRow::ALL.into_iter().enumerate() {
+        let sel_index = theme::AGENTS.len() + i;
+        let selected = sel_index == app.settings_sel;
+        let cursor = if selected { "▸" } else { " " };
+
+        // The row being edited becomes an input line (masked for the proxy).
+        if let Some(draft) = editing.filter(|d| d.row == row) {
+            let shown = if row.masked() {
+                "•".repeat(draft.buffer.chars().count().min(40))
+            } else {
+                draft.buffer.clone()
+            };
+            lines.push(Line::from(vec![
+                Span::styled(format!(" {cursor} "), Style::default().fg(theme::GOLD)),
+                Span::styled("⌨ ", Style::default().fg(theme::GOLD)),
+                Span::styled(
+                    format!("{:<17}", row.label()),
+                    Style::default().fg(theme::TEXT).add_modifier(Modifier::BOLD),
+                ),
+                Span::styled("▶ ", Style::default().fg(theme::MUTED)),
+                Span::styled(shown, Style::default().fg(theme::GOLD)),
+            ]));
+            continue;
+        }
+
+        let value = match row {
+            OptionRow::MaxTurns => match config.max_turns {
+                0 => "no cap".to_string(),
+                n => format!("{n} turns"),
+            },
+            OptionRow::ObserverInterval => {
+                if !config.observers_enabled || config.observer_interval == 0 {
+                    "off".to_string()
+                } else {
+                    format!("every {} turns", config.observer_interval)
+                }
+            }
+            OptionRow::BudgetSession => {
+                if config.budget_per_session_usd > 0.0 {
+                    format!("${:.2} / session", config.budget_per_session_usd)
+                } else {
+                    "unlimited".to_string()
+                }
+            }
+            OptionRow::BudgetAction => config.budget_action.clone(),
+            OptionRow::Proxy => match config.proxy.as_deref() {
+                Some(url) => redact_proxy(url),
+                None => "none".to_string(),
+            },
+        };
+        let name_style = if selected {
+            Style::default().fg(theme::TEXT).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(theme::TEXT)
+        };
+        lines.push(Line::from(vec![
+            Span::styled(format!(" {cursor} "), Style::default().fg(theme::GOLD)),
+            Span::styled(format!("{:<19}", row.label()), name_style),
+            Span::styled(value, Style::default().fg(theme::MUTED)),
+        ]));
+    }
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(theme::DIM))
+        .title(Span::styled(" Options ", Style::default().fg(theme::MUTED)));
+    f.render_widget(Paragraph::new(lines).block(block), area);
+}
+
 fn render_council(f: &mut Frame, area: Rect, app: &App) {
     let config = &app.ctx.config;
-    let cap = match config.max_turns {
-        0 => "no cap".to_string(),
-        n => format!("{n} turns"),
-    };
     let lines = vec![
         kv("Council tier", config.council_tier.label(), Color::Rgb(0x34, 0xD3, 0x99)),
         kv("Utility tier", config.utility_tier.label(), theme::MUTED),
-        kv("Discussion cap", &cap, theme::MUTED),
         Line::from(Span::styled(
             "  Models auto-resolve per provider; run `models --scan` to refresh from the API.",
             Style::default().fg(theme::DIM),
@@ -157,16 +229,25 @@ fn render_footer(f: &mut Frame, area: Rect, app: &App) {
             key("^U"),
             Span::styled(" clear   ·   key is masked & stored 0600", Style::default().fg(theme::DIM)),
         ])
+    } else if app.option_draft.is_some() {
+        Line::from(vec![
+            key("Enter"),
+            Span::styled(" save   ", Style::default().fg(theme::MUTED)),
+            key("Esc"),
+            Span::styled(" cancel   ", Style::default().fg(theme::MUTED)),
+            key("^U"),
+            Span::styled(" clear", Style::default().fg(theme::MUTED)),
+        ])
     } else {
         Line::from(vec![
             key("↑↓"),
             Span::styled(" select   ", Style::default().fg(theme::MUTED)),
             key("Enter"),
-            Span::styled(" add / replace key   ", Style::default().fg(theme::MUTED)),
+            Span::styled(" edit / set key   ", Style::default().fg(theme::MUTED)),
             key("d"),
-            Span::styled(" remove   ", Style::default().fg(theme::MUTED)),
+            Span::styled(" remove / reset   ", Style::default().fg(theme::MUTED)),
             key("Esc"),
-            Span::styled(" home", Style::default().fg(theme::MUTED)),
+            Span::styled(" back", Style::default().fg(theme::MUTED)),
         ])
     };
     f.render_widget(Paragraph::new(hint), area);
