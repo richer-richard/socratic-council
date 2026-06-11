@@ -50,3 +50,15 @@ jobs:
         # `audit.toml` in the src-tauri directory when justified (with a
         # documented reason and follow-up plan).
         run: cargo audit --deny warnings
+
+  cargo-audit-cli:
+    name: cargo audit (CLI)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked
+      - name: Run cargo audit on the CLI crate
+        working-directory: cli
+        run: cargo audit --deny warnings
