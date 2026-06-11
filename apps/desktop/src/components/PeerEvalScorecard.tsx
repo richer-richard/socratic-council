@@ -73,10 +73,7 @@ export function PeerEvalScorecard({ round, agents }: PeerEvalScorecardProps) {
   const [collapsed, setCollapsed] = useState(false);
   const [expandedTarget, setExpandedTarget] = useState<AgentId | null>(null);
 
-  const nameById = useMemo(
-    () => new Map(agents.map((a) => [a.id, a.name] as const)),
-    [agents],
-  );
+  const nameById = useMemo(() => new Map(agents.map((a) => [a.id, a.name] as const)), [agents]);
   const colorById = useMemo(
     () => new Map(agents.map((a) => [a.id, AGENT_HEX[a.color] ?? "#9aa6bd"] as const)),
     [agents],
@@ -325,8 +322,8 @@ export function PeerEvalScorecard({ round, agents }: PeerEvalScorecardProps) {
             style={{ fontFamily: "var(--font-mono)" }}
           >
             Each agent rates the others 0–100 on rigor, evidence, novelty, civility, and on-topic.
-            Cells redden as scores drop, and gild as they climb. Click any row to see the per-evaluator
-            breakdown and the sharpest critique that agent received.
+            Cells redden as scores drop, and gild as they climb. Click any row to see the
+            per-evaluator breakdown and the sharpest critique that agent received.
           </p>
         </div>
       )}

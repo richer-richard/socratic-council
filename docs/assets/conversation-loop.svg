@@ -1,162 +1,134 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 660" role="img" aria-labelledby="title desc" preserveAspectRatio="xMidYMid meet">
-  <title id="title">Conversation loop</title>
-  <desc id="desc">A circular runtime diagram. Six stations arranged on an orbit are traversed once per turn: build context, bid, dispatch, reflect, analyze, persist. A faint outer ring marks the parallel observer loop where each silent advisor decides whether to whisper.</desc>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 700" role="img" aria-labelledby="title desc" preserveAspectRatio="xMidYMid meet">
+  <title id="title">Conversation loop: one turn of the council</title>
+  <desc id="desc">A five-step pipeline that repeats every turn — build context, bid for relevance, stream the winner's turn, optionally reflect, then analyze for conflict, facts, and argument structure. Two parallel lanes run beneath it: the advisors who whisper private notes, and the moderator. A closing strip shows the end-vote, peer evaluation, and final verdict.</desc>
   <defs>
-    <radialGradient id="page" cx="50%" cy="48%" r="75%">
-      <stop offset="0%" stop-color="#0d1117"/>
-      <stop offset="60%" stop-color="#080a10"/>
-      <stop offset="100%" stop-color="#04050a"/>
-    </radialGradient>
-    <pattern id="dotgrid" width="22" height="22" patternUnits="userSpaceOnUse">
-      <circle cx="1" cy="1" r="0.7" fill="#1c2434" fill-opacity="0.55"/>
-    </pattern>
-    <radialGradient id="centerGlow" cx="50%" cy="50%" r="50%">
-      <stop offset="0%" stop-color="#f5c542" stop-opacity="0.10"/>
-      <stop offset="100%" stop-color="#f5c542" stop-opacity="0"/>
-    </radialGradient>
-    <marker id="motionTip" markerWidth="10" markerHeight="10" refX="6" refY="5" orient="auto">
-      <path d="M0 0L10 5L0 10z" fill="#3a4866"/>
-    </marker>
     <style>
-      .display { font-family: 'Cormorant Garamond', 'Hoefler Text', Garamond, 'Times New Roman', serif; }
-      .body    { font-family: 'Manrope', -apple-system, BlinkMacSystemFont, 'Helvetica Neue', sans-serif; }
-      .mono    { font-family: 'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace; }
-      .ink     { fill: #ecf0f6; }
-      .body-c  { fill: #b9c2d6; }
-      .muted   { fill: #5d667a; }
-      .gold    { fill: #f5c542; }
-      .stroke-hair { stroke: #20283c; stroke-width: 1; fill: none; }
-      .stroke-hair-strong { stroke: #344166; stroke-width: 1.2; fill: none; }
-      .stroke-rule { stroke: #1a2233; stroke-width: 1; fill: none; }
-      .orbit { fill: none; stroke: #2a3550; stroke-width: 1; }
-      .orbit-faint { fill: none; stroke: #1c2440; stroke-width: 1; stroke-dasharray: 1 6; }
-      .orbit-arc { fill: none; stroke: #364568; stroke-width: 1.4; }
-      .station-bullet { fill: #0d1320; stroke: #4a5878; stroke-width: 1.4; }
-      .station-bullet-active { fill: #1a1605; stroke: #f5c542; stroke-width: 1.6; }
+      .sans { font-family: -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; }
+      .mono { font-family: 'SF Mono', 'Cascadia Code', 'JetBrains Mono', Menlo, Consolas, monospace; }
+      .h1   { fill: #F2F5FA; font-size: 27px; font-weight: 700; letter-spacing: -0.3px; }
+      .sub  { fill: #97A2B8; font-size: 14px; }
+      .tag  { fill: #F5C542; font-size: 11px; font-weight: 600; letter-spacing: 2.6px; }
+      .meta { fill: #6B7690; font-size: 11px; letter-spacing: 2px; }
+      .stepnum  { fill: #F5C542; font-size: 12px; font-weight: 700; letter-spacing: 1.5px; }
+      .steptitle{ fill: #ECF0F6; font-size: 16px; font-weight: 650; }
+      .stepbody { fill: #A6B0C5; font-size: 12.5px; }
+      .lanetitle{ fill: #ECF0F6; font-size: 15px; font-weight: 650; }
+      .lanebody { fill: #A6B0C5; font-size: 13px; }
+      .lanetag  { fill: #6B7690; font-size: 10.5px; letter-spacing: 2px; }
+      .footer   { fill: #6B7690; font-size: 11px; letter-spacing: 1.8px; }
+      .edgegold { stroke: #F5C542; stroke-width: 1.8; fill: none; }
+      .edge     { stroke: #516080; stroke-width: 1.5; fill: none; }
+      .edgedash { stroke: #516080; stroke-width: 1.4; fill: none; stroke-dasharray: 5 5; }
     </style>
+    <radialGradient id="bgGlow3" cx="50%" cy="25%" r="80%">
+      <stop offset="0%" stop-color="#11182A"/>
+      <stop offset="100%" stop-color="#0A0E16"/>
+    </radialGradient>
+    <marker id="arr3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#516080"/>
+    </marker>
+    <marker id="arrGold3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#F5C542"/>
+    </marker>
   </defs>
 
-  <rect width="1280" height="660" fill="url(#page)"/>
-  <rect width="1280" height="660" fill="url(#dotgrid)"/>
+  <rect width="1200" height="700" rx="18" fill="url(#bgGlow3)"/>
+  <rect x="0.5" y="0.5" width="1199" height="699" rx="18" fill="none" stroke="#222B3F"/>
 
   <!-- masthead -->
-  <line x1="64" y1="60" x2="1216" y2="60" class="stroke-hair"/>
-  <text x="64" y="48" class="mono ink" font-size="10" font-weight="600" letter-spacing="2">FIG. 03 / RUNTIME</text>
-  <text x="1216" y="48" class="mono muted" font-size="10" letter-spacing="2" text-anchor="end">one turn, six stations</text>
+  <text x="64" y="58" class="mono tag">SOCRATIC COUNCIL</text>
+  <text x="1136" y="58" class="mono meta" text-anchor="end">FIG. 03 — CONVERSATION LOOP</text>
+  <text x="64" y="98" class="sans h1">What happens every single turn</text>
+  <text x="64" y="126" class="sans sub">The loop repeats until the turn cap, a passed end-vote, or you stop it. Advisors and the moderator work alongside, not inside, the pipeline.</text>
 
-  <!-- title -->
-  <text x="64" y="120" class="display ink" font-style="italic" font-size="46">A Single Turn</text>
-  <text x="64" y="148" class="body body-c" font-size="13">Each pass round the orbit produces one council message. The advisors run their own quieter loop in parallel, slipping notes into the inner agent's context before the next turn begins.</text>
+  <!-- loop-back arrow (5 -> 1) -->
+  <path d="M 1007 196 L 1007 170 L 159 170 L 159 196" class="edgedash" marker-end="url(#arr3)"/>
+  <text x="583" y="162" class="mono meta" text-anchor="middle">NEXT TURN</text>
 
-  <!-- ============ CIRCULAR LOOP ============ -->
-  <!-- center 640, 380; radius 200 -->
+  <!-- ============ MAIN PIPELINE ============ -->
+  <!-- 1 CONTEXT -->
+  <g transform="translate(64,200)">
+    <rect width="190" height="128" rx="12" fill="#121826" stroke="#283349"/>
+    <text x="18" y="30" class="mono stepnum">01</text>
+    <text x="18" y="54" class="sans steptitle">Context</text>
+    <text x="18" y="78" class="sans stepbody">Recent window, rolling</text>
+    <text x="18" y="95" class="sans stepbody">summary, attachments —</text>
+    <text x="18" y="112" class="sans stepbody">plus your advisor's note.</text>
+  </g>
+  <line x1="254" y1="264" x2="276" y2="264" class="edgegold" marker-end="url(#arrGold3)"/>
 
-  <circle cx="640" cy="380" r="220" fill="url(#centerGlow)"/>
+  <!-- 2 BID -->
+  <g transform="translate(276,200)">
+    <rect width="190" height="128" rx="12" fill="#121826" stroke="#283349"/>
+    <text x="18" y="30" class="mono stepnum">02</text>
+    <text x="18" y="54" class="sans steptitle">Bid</text>
+    <text x="18" y="78" class="sans stepbody">One utility call scores all</text>
+    <text x="18" y="95" class="sans stepbody">eight 0–100; fairness damps</text>
+    <text x="18" y="112" class="sans stepbody">whoever just spoke.</text>
+  </g>
+  <line x1="466" y1="264" x2="488" y2="264" class="edgegold" marker-end="url(#arrGold3)"/>
 
-  <!-- outer observer orbit (radius 250) -->
-  <circle cx="640" cy="380" r="250" class="orbit-faint"/>
-  <text x="640" y="118" class="mono muted" font-size="10" letter-spacing="2" text-anchor="middle">OBSERVER ORBIT · 8 ADVISORS · ASYNC</text>
+  <!-- 3 SPEAK -->
+  <g transform="translate(488,200)">
+    <rect width="190" height="128" rx="12" fill="#161408" stroke="#F5C542" stroke-width="1.2"/>
+    <text x="18" y="30" class="mono stepnum">03</text>
+    <text x="18" y="54" class="sans steptitle">Speak</text>
+    <text x="18" y="78" class="sans stepbody">The winner streams its turn</text>
+    <text x="18" y="95" class="sans stepbody">over SSE — reasoning is</text>
+    <text x="18" y="112" class="sans stepbody">captured separately.</text>
+  </g>
+  <line x1="678" y1="264" x2="700" y2="264" class="edgegold" marker-end="url(#arrGold3)"/>
 
-  <!-- main orbit (radius 200) -->
-  <circle cx="640" cy="380" r="200" class="orbit"/>
+  <!-- 4 REFLECT -->
+  <g transform="translate(700,200)">
+    <rect width="190" height="128" rx="12" fill="#121826" stroke="#283349"/>
+    <text x="18" y="30" class="mono stepnum">04</text>
+    <text x="18" y="54" class="sans steptitle">Reflect</text>
+    <text x="18" y="78" class="sans stepbody">Optional draft → critique →</text>
+    <text x="18" y="95" class="sans stepbody">revise before the turn is</text>
+    <text x="18" y="112" class="sans stepbody">shown (light or deep).</text>
+  </g>
+  <line x1="890" y1="264" x2="912" y2="264" class="edgegold" marker-end="url(#arrGold3)"/>
 
-  <!-- Inner ring + center -->
-  <circle cx="640" cy="380" r="58" class="orbit"/>
-
-  <!-- 6 motion arcs between stations (clockwise) - using path arcs -->
-  <!-- Station angles: -90°, -30°, 30°, 90°, 150°, 210°  -->
-  <!-- Station coords:
-       0 (-90°): (640, 180)
-       1 (-30°): (813.2, 280)
-       2 (30°):  (813.2, 480)
-       3 (90°):  (640, 580)
-       4 (150°): (466.8, 480)
-       5 (210°): (466.8, 280)
-  -->
-  <g class="orbit-arc">
-    <path d="M 661 184 A 200 200 0 0 1 808 268" marker-end="url(#motionTip)"/>
-    <path d="M 818 305 A 200 200 0 0 1 818 455" marker-end="url(#motionTip)"/>
-    <path d="M 808 492 A 200 200 0 0 1 661 576" marker-end="url(#motionTip)"/>
-    <path d="M 619 576 A 200 200 0 0 1 472 492" marker-end="url(#motionTip)"/>
-    <path d="M 462 455 A 200 200 0 0 1 462 305" marker-end="url(#motionTip)"/>
-    <path d="M 472 268 A 200 200 0 0 1 619 184" marker-end="url(#motionTip)"/>
+  <!-- 5 ANALYZE -->
+  <g transform="translate(912,200)">
+    <rect width="190" height="128" rx="12" fill="#121826" stroke="#283349"/>
+    <text x="18" y="30" class="mono stepnum">05</text>
+    <text x="18" y="54" class="sans steptitle">Analyze</text>
+    <text x="18" y="78" class="sans stepbody">Conflict scoring (regex →</text>
+    <text x="18" y="95" class="sans stepbody">NLI), fact-check badges,</text>
+    <text x="18" y="112" class="sans stepbody">argument map, cost ledger.</text>
   </g>
 
-  <!-- station bullets -->
-  <circle cx="640"   cy="180" r="9" class="station-bullet-active"/>
-  <circle cx="813.2" cy="280" r="9" class="station-bullet"/>
-  <circle cx="813.2" cy="480" r="9" class="station-bullet"/>
-  <circle cx="640"   cy="580" r="9" class="station-bullet"/>
-  <circle cx="466.8" cy="480" r="9" class="station-bullet"/>
-  <circle cx="466.8" cy="280" r="9" class="station-bullet"/>
+  <!-- ============ PARALLEL LANES ============ -->
+  <!-- advisors lane -->
+  <g transform="translate(64,376)">
+    <rect width="1038" height="86" rx="12" fill="#0E1422" stroke="#283349" stroke-dasharray="6 4"/>
+    <text x="20" y="24" class="mono lanetag">PARALLEL · EVERY FEW TURNS</text>
+    <text x="20" y="50" class="sans lanetitle">Advisors</text>
+    <text x="130" y="50" class="sans lanebody">Each of the eight advisors reads the public record and may slip a private note to its partner.</text>
+    <text x="130" y="70" class="sans lanebody">The note lands only in that partner's next context — no other agent ever sees it.</text>
+  </g>
+  <path d="M 159 376 L 159 328" class="edge" marker-end="url(#arr3)"/>
 
-  <!-- Station labels (offset outward from each bullet) -->
-  <!-- 0: top -->
-  <g transform="translate(640,180)">
-    <text x="0" y="-32" class="mono gold" font-size="9.5" letter-spacing="2" text-anchor="middle">I · CONTEXT</text>
-    <text x="0" y="-12" class="display ink" font-style="italic" font-size="20" text-anchor="middle">Build the room</text>
+  <!-- moderator lane -->
+  <g transform="translate(64,486)">
+    <rect width="1038" height="86" rx="12" fill="#0E1422" stroke="#283349"/>
+    <text x="20" y="24" class="mono lanetag">SYSTEM VOICE</text>
+    <text x="20" y="50" class="sans lanetitle">Moderator</text>
+    <text x="130" y="50" class="sans lanebody">Opens the session, synthesizes periodically, spotlights contradictions when conflict spikes,</text>
+    <text x="130" y="70" class="sans lanebody">calls the closing ballot, and writes the final scored verdict.</text>
   </g>
 
-  <!-- 1: upper-right -->
-  <g transform="translate(813.2,280)">
-    <text x="22" y="-22" class="mono muted" font-size="9.5" letter-spacing="2">II · BID</text>
-    <text x="22" y="-2"  class="display ink" font-style="italic" font-size="20">Score &amp; pick</text>
-    <text x="22" y="20"  class="body body-c" font-size="11">scoreAgentsRelevance</text>
-    <text x="22" y="34"  class="body muted" font-size="10.5">+ fairness, conflict bonus</text>
-  </g>
-
-  <!-- 2: lower-right -->
-  <g transform="translate(813.2,480)">
-    <text x="22" y="-22" class="mono muted" font-size="9.5" letter-spacing="2">III · DISPATCH</text>
-    <text x="22" y="-2"  class="display ink" font-style="italic" font-size="20">Stream</text>
-    <text x="22" y="20"  class="body body-c" font-size="11">SDK → Tauri → reqwest</text>
-    <text x="22" y="34"  class="body muted" font-size="10.5">SSE, abort, replay buffer</text>
-  </g>
-
-  <!-- 3: bottom -->
-  <g transform="translate(640,580)">
-    <text x="0" y="32" class="mono muted" font-size="9.5" letter-spacing="2" text-anchor="middle">IV · REFLECT</text>
-    <text x="0" y="52" class="display ink" font-style="italic" font-size="20" text-anchor="middle">Critique &amp; revise</text>
-    <text x="0" y="72" class="body muted" font-size="10.5" text-anchor="middle">off · light · deep</text>
-  </g>
-
-  <!-- 4: lower-left -->
-  <g transform="translate(466.8,480)">
-    <text x="-22" y="-22" class="mono muted" font-size="9.5" letter-spacing="2" text-anchor="end">V · ANALYZE</text>
-    <text x="-22" y="-2"  class="display ink" font-style="italic" font-size="20" text-anchor="end">Make sense</text>
-    <text x="-22" y="20"  class="body body-c" font-size="11" text-anchor="end">conflict · fact-check</text>
-    <text x="-22" y="34"  class="body muted" font-size="10.5" text-anchor="end">argument map · NLI</text>
-  </g>
-
-  <!-- 5: upper-left -->
-  <g transform="translate(466.8,280)">
-    <text x="-22" y="-22" class="mono muted" font-size="9.5" letter-spacing="2" text-anchor="end">VI · PERSIST</text>
-    <text x="-22" y="-2"  class="display ink" font-style="italic" font-size="20" text-anchor="end">Settle</text>
-    <text x="-22" y="20"  class="body body-c" font-size="11" text-anchor="end">cost ledger · fairness</text>
-    <text x="-22" y="34"  class="body muted" font-size="10.5" text-anchor="end">summary · vault write</text>
-  </g>
-
-  <!-- center compass -->
-  <text x="640" y="368" class="mono muted" font-size="9" letter-spacing="2" text-anchor="middle">TURN n</text>
-  <text x="640" y="388" class="display gold" font-style="italic" font-size="22" text-anchor="middle">→</text>
-  <text x="640" y="408" class="mono muted" font-size="9" letter-spacing="2" text-anchor="middle">TURN n+1</text>
-
-  <!-- four observer ticks on outer ring (at 45°, 135°, 225°, 315°) -->
-  <!-- positions on r=250 -->
-  <g>
-    <!-- 4 evenly spaced advisor blips -->
-    <circle cx="816.8" cy="203.2" r="3" fill="#5d667a"/>
-    <circle cx="816.8" cy="556.8" r="3" fill="#5d667a"/>
-    <circle cx="463.2" cy="556.8" r="3" fill="#5d667a"/>
-    <circle cx="463.2" cy="203.2" r="3" fill="#5d667a"/>
-    <circle cx="890" cy="380" r="3" fill="#5d667a"/>
-    <circle cx="390" cy="380" r="3" fill="#5d667a"/>
-    <circle cx="640" cy="130" r="3" fill="#f5c542"/>
-    <circle cx="640" cy="630" r="3" fill="#5d667a"/>
+  <!-- ============ CLOSING STRIP ============ -->
+  <g transform="translate(64,596)">
+    <rect width="1038" height="56" rx="12" fill="#161408" stroke="#F5C542" stroke-width="1.1"/>
+    <text x="20" y="24" class="mono stepnum">WHEN THE ROOM CONVERGES</text>
+    <text x="20" y="44" class="sans lanebody">Any agent moves <tspan class="mono" fill="#F5C542">@end()</tspan> → majority vote → peer-eval scorecard (rigor · evidence · novelty · civility · on-topic) → scored verdict · optional deep-research report.</text>
   </g>
 
   <!-- footer -->
-  <line x1="64" y1="618" x2="1216" y2="618" class="stroke-hair"/>
-  <text x="64" y="640" class="mono muted" font-size="9.5" letter-spacing="2">PUBLIC LOOP · 6 STATIONS · ~10–40 SECONDS PER TURN</text>
-  <text x="1216" y="640" class="mono muted" font-size="9.5" letter-spacing="2" text-anchor="end">SILENT LOOP · 8 ADVISORS · PARALLEL · MAY PASS</text>
+  <line x1="64" y1="672" x2="1136" y2="672" stroke="#222B3F"/>
+  <text x="64" y="690" class="mono footer">PAUSE / RESUME / STOP AT ANY POINT</text>
+  <text x="1136" y="690" class="mono footer" text-anchor="end">BUDGET CAPS CAN WARN, PAUSE, OR STOP THE LOOP</text>
 </svg>

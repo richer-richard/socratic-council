@@ -26,10 +26,7 @@ const DIMENSIONS: { key: keyof PeerEvalScores; label: string }[] = [
   { key: "onTopic", label: "on-topic" },
 ];
 
-const STANCE_STYLE: Record<
-  PeerCritique["stance"],
-  { label: string; bg: string; fg: string }
-> = {
+const STANCE_STYLE: Record<PeerCritique["stance"], { label: string; bg: string; fg: string }> = {
   agree: { label: "agree", bg: "rgba(20, 184, 166, 0.18)", fg: "#5eead4" },
   disagree: { label: "disagree", bg: "rgba(251, 113, 133, 0.18)", fg: "#fda4af" },
   mixed: { label: "mixed", bg: "rgba(245, 197, 66, 0.16)", fg: "#fcd34d" },
@@ -50,10 +47,7 @@ export function PeerCritiqueGraph({ round, agents }: PeerCritiqueGraphProps) {
   const [selectedTo, setSelectedTo] = useState<AgentId | null>(null);
   const [hoverId, setHoverId] = useState<AgentId | null>(null);
 
-  const nameById = useMemo(
-    () => new Map(agents.map((a) => [a.id, a.name] as const)),
-    [agents],
-  );
+  const nameById = useMemo(() => new Map(agents.map((a) => [a.id, a.name] as const)), [agents]);
   const colorById = useMemo(
     () => new Map(agents.map((a) => [a.id, AGENT_HEX[a.color] ?? "#9aa6bd"] as const)),
     [agents],
@@ -317,10 +311,7 @@ export function PeerCritiqueGraph({ round, agents }: PeerCritiqueGraphProps) {
             </svg>
 
             <div className="flex items-center justify-between mt-2 px-1">
-              <span
-                className="text-[10px] text-ink-500"
-                style={{ fontFamily: "var(--font-mono)" }}
-              >
+              <span className="text-[10px] text-ink-500" style={{ fontFamily: "var(--font-mono)" }}>
                 {selectedFrom
                   ? selectedTo
                     ? `${nameById.get(selectedFrom) ?? selectedFrom} → ${nameById.get(selectedTo) ?? selectedTo}`
@@ -510,10 +501,7 @@ function CritiqueDetailPanel({
       >
         Critique
       </div>
-      <div
-        className="text-[15px] mb-2"
-        style={{ fontFamily: "var(--font-display)" }}
-      >
+      <div className="text-[15px] mb-2" style={{ fontFamily: "var(--font-display)" }}>
         <span style={{ color: fromColor }}>{fromName}</span>
         <span className="text-ink-500"> → </span>
         <span style={{ color: toColor }}>{toName}</span>

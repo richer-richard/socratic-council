@@ -169,8 +169,7 @@ describe("parsePeerEvalResponse", () => {
   });
 
   it("handles a chatty preamble before the JSON object", () => {
-    const raw =
-      "Sure, here's my evaluation:\n\n" + makeFullResponse("zara") + "\n\nLet me know.";
+    const raw = "Sure, here's my evaluation:\n\n" + makeFullResponse("zara") + "\n\nLet me know.";
     const critiques = parsePeerEvalResponse(raw, "zara", AGENT_IDS);
     expect(critiques).toHaveLength(7);
   });
@@ -186,10 +185,7 @@ describe("parsePeerEvalResponse", () => {
 
   it("dedupes duplicate target entries (first wins)", () => {
     const body = JSON.stringify({
-      ratings: [
-        makeRating("cathy", { overall: 50 }),
-        makeRating("cathy", { overall: 99 }),
-      ],
+      ratings: [makeRating("cathy", { overall: 50 }), makeRating("cathy", { overall: 99 })],
     });
     const critiques = parsePeerEvalResponse(body, "george", AGENT_IDS);
     expect(critiques).toHaveLength(1);

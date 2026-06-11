@@ -3,7 +3,12 @@
  * Uses the Gemini API format with contents, systemInstruction, and generationConfig
  */
 
-import type { AgentConfig, GeminiModel, GeminiRequest, ReasoningTier } from "@socratic-council/shared";
+import type {
+  AgentConfig,
+  GeminiModel,
+  GeminiRequest,
+  ReasoningTier,
+} from "@socratic-council/shared";
 import { API_ENDPOINTS, getModelInfo } from "@socratic-council/shared";
 import type {
   BaseProvider,

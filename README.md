@@ -6,19 +6,21 @@
 
 Socratic Council is a local-first desktop app that runs a sixteen-agent seminar on any topic. You bring provider API keys, type a topic, optionally attach files, and watch eight council members debate in public while eight paired advisors slip private notes to their partners. Live conflict detection, an evolving argument map, fact-check badges, deep-research synthesis, and per-message cost accounting are built in.
 
+The same workstation also ships as a standalone **terminal sibling**: the [`socratic-council` CLI/TUI](cli/README.md), installable with one `cargo install socratic-council` — no Node, no desktop app required, first-class on a headless VPS.
+
 This repo ships source only (no installer downloads). Follow this guide to build it from source.
 
-> Use `install.sh` as the quick install script on macOS, or follow the manual installation guide in this README for the current step-by-step setup on macOS, Windows, or Linux.
+> Use `install.sh` as the quick install script on macOS, follow the manual installation guide in this README for the current step-by-step setup on macOS, Windows, or Linux — or `cargo install socratic-council` for the terminal CLI.
 
 ## Snapshot
 
-| Dimension        | Details                                                                                  |
-| ---------------- | ---------------------------------------------------------------------------------------- |
-| Product          | Local-first Tauri desktop app                                                            |
-| Stack            | React + TypeScript frontend, Rust backend, pnpm monorepo                                 |
-| Discussion model | Eight council debaters, eight silent advisors paired one-to-one, optional moderator      |
-| Providers        | OpenAI, Anthropic, Google Gemini, DeepSeek, Kimi, Qwen, MiniMax, Z.AI                    |
-| Research tools   | File search, web search, claim verification, source-anchored citations                   |
+| Dimension        | Details                                                                                                                         |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| Product          | Local-first Tauri desktop app + standalone terminal CLI/TUI                                                                     |
+| Stack            | React + TypeScript frontend, Rust backend, pnpm monorepo, Rust CLI crate                                                        |
+| Discussion model | Eight council debaters, eight silent advisors paired one-to-one, optional moderator                                             |
+| Providers        | OpenAI, Anthropic, Google Gemini, DeepSeek, Kimi, Qwen, MiniMax, Z.AI                                                           |
+| Research tools   | File search, web search, claim verification, source-anchored citations                                                          |
 | Outputs          | Searchable transcript, argument map, fact-check badges, conflict graph, peer evaluation, deep research report, exports, bundles |
 
 | Workflow Surface   | Included                                                                            |
@@ -51,10 +53,11 @@ The eight council debaters speak in public. Each is shadowed by a silent advisor
 
 ## Installation Paths
 
-| Path                                         | Platform                | Best for                                        | Result                                                        |
-| -------------------------------------------- | ----------------------- | ----------------------------------------------- | ------------------------------------------------------------- |
-| Quick install via [`install.sh`](install.sh) | macOS                   | Fastest way to get the app installed locally    | Builds the app, copies it to `/Applications`, and launches it |
-| Manual install via the guide below           | macOS / Windows / Linux | Full control over prerequisites and build steps | Sets up a reusable local development/build environment        |
+| Path                                         | Platform                          | Best for                                          | Result                                                        |
+| -------------------------------------------- | --------------------------------- | ------------------------------------------------- | ------------------------------------------------------------- |
+| Quick install via [`install.sh`](install.sh) | macOS                             | Fastest way to get the app installed locally      | Builds the app, copies it to `/Applications`, and launches it |
+| Manual install via the guide below           | macOS / Windows / Linux           | Full control over prerequisites and build steps   | Sets up a reusable local development/build environment        |
+| `cargo install socratic-council`             | macOS / Windows / Linux / any VPS | The terminal workstation, no desktop app required | Installs the [`socratic-council` CLI/TUI](cli/README.md)      |
 
 ![Installation paths diagram](docs/assets/installation-paths.svg)
 
@@ -134,6 +137,7 @@ For the current manual installation guide, see [Build from source (manual instal
 - [Tool calling (oracle)](#tool-calling-oracle)
 - [Troubleshooting](#troubleshooting)
 - [Developer workflows](#developer-workflows)
+- [Terminal CLI](#terminal-cli)
 - [Monorepo layout](#monorepo-layout)
 - [License](#license)
 
@@ -865,6 +869,29 @@ cd apps/desktop/src-tauri && cargo clean && cd -
 
 ---
 
+## Terminal CLI
+
+The repo also ships `cli/` — a standalone Rust crate (`socratic-council` on
+crates.io) that runs the same council in a ratatui TUI:
+
+```bash
+cargo install socratic-council
+socratic-council run "Is P = NP?"
+```
+
+It mirrors the app's three surfaces (Home with the animated council mark, a
+history sidebar, the debate chamber), shares the desktop app's keys and saved
+sessions through a read-only bridge (optional — the CLI is fully self-contained
+with its own encrypted `keys.enc` store), and ports the debate engine:
+moderator with scored verdicts, the eight silent advisors whispering private
+notes, live conflict tracking with a tension board, a per-agent cost ledger
+with budget caps, oracle web/file search over attached files, end-votes,
+reflection, peer-eval scorecards, deep research, per-agent canvases, and a
+turn progress gauge. See [`cli/README.md`](cli/README.md) for keys, flags,
+and keybindings.
+
+---
+
 ## Monorepo layout
 
 ```
@@ -889,6 +916,14 @@ socratic-council/
 │   ├── shared/                                 # Types, agent and observer rosters, model registry
 │   ├── sdk/                                    # Provider SDK + streaming transport
 │   └── core/                                   # Council orchestration (provider-agnostic)
+├── cli/                                        # Standalone Rust CLI/TUI (crates.io: socratic-council)
+│   ├── src/
+│   │   ├── engine/                             # Debate engine: moderator, votes, advisors, analysis
+│   │   ├── providers/                          # 8 providers, 4 wire styles, SSE streaming
+│   │   ├── tui/                                # ratatui surfaces: Home, Chat, Settings, sidebar
+│   │   ├── crypto.rs                           # XChaCha20-Poly1305 key store (keys.enc)
+│   │   └── bridge.rs                           # Read-only bridge into the desktop app's vault
+│   └── Cargo.toml
 ├── docs/                                       # Diagrams and the code-signing playbook
 ├── scripts/                                    # Static-site builder for GitHub Pages
 ├── website/                                    # Source for the marketing site

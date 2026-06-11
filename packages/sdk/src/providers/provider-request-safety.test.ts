@@ -481,5 +481,4 @@ describe("DeepSeek + Zhipu request shapes (fix 12.1)", () => {
     );
     expect(body.model).toBe("qwen3.7-max");
   });
-
 });

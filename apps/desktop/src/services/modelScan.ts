@@ -130,8 +130,7 @@ export function parseModelsResponse(provider: Provider, body: string): Discovere
     return models
       .filter(
         (m) =>
-          !m.supportedGenerationMethods ||
-          m.supportedGenerationMethods.includes("generateContent"),
+          !m.supportedGenerationMethods || m.supportedGenerationMethods.includes("generateContent"),
       )
       .flatMap((m): DiscoveredModel[] => {
         const id = (m.name ?? "").replace(/^models\//, "");

@@ -865,7 +865,9 @@ export function ConfigModal({
                           className="text-xs text-blue-400 hover:text-blue-300 disabled:opacity-40
                             px-3 py-1.5 rounded-lg hover:bg-blue-500/10 transition-colors"
                           title={
-                            hasKey ? `Scan ${info.name} for available models` : "Add an API key first"
+                            hasKey
+                              ? `Scan ${info.name} for available models`
+                              : "Add an API key first"
                           }
                         >
                           {status?.status === "scanning" ? "Scanning…" : "⟳ Scan"}

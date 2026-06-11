@@ -1599,7 +1599,8 @@ function recoverOrphanedDeepResearch(messages: ChatMessage[]): ChatMessage[] {
         ...drr,
         phase: "error" as const,
         error:
-          drr.error ?? "Report generation was interrupted before completion. Click Retry to regenerate.",
+          drr.error ??
+          "Report generation was interrupted before completion. Click Retry to regenerate.",
       },
     };
   });
@@ -3599,10 +3600,7 @@ Write the official moderator wrap-up in 4 short sentences:
     if (evaluators.length < 2) return;
 
     const transcript = messagesRef.current.filter(
-      (m) =>
-        isCouncilAgent(m.agentId) &&
-        !m.isStreaming &&
-        (m.content ?? "").trim().length > 0,
+      (m) => isCouncilAgent(m.agentId) && !m.isStreaming && (m.content ?? "").trim().length > 0,
     );
 
     // Mount the artifact upfront so the UI can stream into it. The empty
@@ -4916,37 +4914,34 @@ Write the official moderator wrap-up in 4 short sentences:
     }
   }, [buildEndVoteBoard, configuredAgentIds, generateEndVoteResponse, upsertEndVoteBoardMessage]);
 
-  const beginClosingRound = useCallback(
-    (notice: string) => {
-      phaseRef.current = "resolution";
-      pausedRef.current = false;
-      setIsPaused(false);
-      endVoteRef.current = null;
-      pendingHandoffRef.current = null;
-      setDuoLogue(null);
-      duoLogueRef.current = null;
-      setConflictState(null);
-      // Peer-evaluation has replaced the per-agent goodbye queue. The closing
-      // pass runs once via runPeerEvaluation in runDiscussion; no per-agent
-      // resolution turns are queued.
-      resolutionQueueRef.current = [];
-      moderatorResolutionPromptPostedRef.current = true;
+  const beginClosingRound = useCallback((notice: string) => {
+    phaseRef.current = "resolution";
+    pausedRef.current = false;
+    setIsPaused(false);
+    endVoteRef.current = null;
+    pendingHandoffRef.current = null;
+    setDuoLogue(null);
+    duoLogueRef.current = null;
+    setConflictState(null);
+    // Peer-evaluation has replaced the per-agent goodbye queue. The closing
+    // pass runs once via runPeerEvaluation in runDiscussion; no per-agent
+    // resolution turns are queued.
+    resolutionQueueRef.current = [];
+    moderatorResolutionPromptPostedRef.current = true;
 
-      if (!resolutionNoticePostedRef.current) {
-        resolutionNoticePostedRef.current = true;
-        setMessages((prev) => [
-          ...prev,
-          {
-            id: `msg_${Date.now()}_resolution_notice`,
-            agentId: "system",
-            content: notice,
-            timestamp: Date.now(),
-          },
-        ]);
-      }
-    },
-    [],
-  );
+    if (!resolutionNoticePostedRef.current) {
+      resolutionNoticePostedRef.current = true;
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: `msg_${Date.now()}_resolution_notice`,
+          agentId: "system",
+          content: notice,
+          timestamp: Date.now(),
+        },
+      ]);
+    }
+  }, []);
 
   // Main discussion loop
   const runDiscussion = useCallback(
@@ -5502,7 +5497,14 @@ Write the official moderator wrap-up in 4 short sentences:
       const drr = message.deepResearchReport;
       const drrFingerprint = drr
         ? ((
-            { planning: 1, research: 2, synthesis: 3, formatting: 4, complete: 5, error: 6 } as const
+            {
+              planning: 1,
+              research: 2,
+              synthesis: 3,
+              formatting: 4,
+              complete: 5,
+              error: 6,
+            } as const
           )[drr.phase] ?? 0) *
             1009 +
           drr.title.length +
