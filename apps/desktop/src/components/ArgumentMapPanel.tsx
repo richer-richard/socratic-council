@@ -13,9 +13,6 @@
  * surfaces every source, every incoming/outgoing edge with rationale,
  * and per-source "Jump" + "Re-extract" affordances.
  */
-import { ReactFlowProvider, useReactFlow } from "@xyflow/react";
-import { useEffect, useMemo, useRef, useState } from "react";
-
 import {
   ARG_EDGE_RELATIONS,
   ARG_NODE_KINDS,
@@ -25,13 +22,14 @@ import {
   type ArgGraph,
   type ArgNodeKind,
 } from "@socratic-council/core";
+import { ReactFlowProvider, useReactFlow } from "@xyflow/react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
-import { exportArgGraphSvg, exportArgGraphPng } from "./argumentMap/imageExport";
-import { downloadBytes, downloadText } from "./argumentMap/download";
-
-import { applyFilters } from "./argumentMap/filters";
 import { computeSpineNodeIds } from "./argumentMap/centrality";
+import { downloadBytes, downloadText } from "./argumentMap/download";
 import { FilterBar } from "./argumentMap/FilterBar";
+import { applyFilters } from "./argumentMap/filters";
+import { exportArgGraphSvg, exportArgGraphPng } from "./argumentMap/imageExport";
 import { ARGMAP_GOLD, ARGMAP_GOLD_HEX, styleFor, styleForRelation } from "./argumentMap/kindStyle";
 import { SelectionDrawer } from "./argumentMap/SelectionDrawer";
 import {
@@ -754,7 +752,6 @@ function Footer({
         downloadBytes(`${baseName}.png`, blob);
       }
     } catch (err) {
-      // eslint-disable-next-line no-console
       console.error("[argmap export] failed:", err);
     } finally {
       setBusyFormat(null);

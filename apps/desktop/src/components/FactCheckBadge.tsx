@@ -1,6 +1,5 @@
-import { useState } from "react";
-
 import type { VerificationBadge } from "@socratic-council/core";
+import { useState } from "react";
 
 /**
  * Inline superscript badge for a fact-checked claim (wave 2.5 UI).

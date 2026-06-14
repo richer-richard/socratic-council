@@ -1,5 +1,6 @@
 import type { AgentId, PairwiseConflict } from "@socratic-council/shared";
 import type { FileChild } from "docx";
+
 import { splitIntoInlineQuoteSegments, stripQuoteTokens } from "../utils/inlineQuotes";
 
 export type ConversationExportFormat = "pdf" | "docx" | "markdown" | "pptx";

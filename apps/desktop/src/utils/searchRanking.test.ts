@@ -1,5 +1,6 @@
-import { describe, expect, it } from "vitest";
 import type { SearchResult } from "@socratic-council/shared";
+import { describe, expect, it } from "vitest";
+
 import { filterAndRankSearchResults, normalizeSearchQuery } from "./searchRanking";
 
 describe("searchRanking", () => {

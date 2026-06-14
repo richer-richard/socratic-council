@@ -85,6 +85,12 @@ const PRICES: &[(&str, Pricing)] = &[
     ("moonshot-v1-8k", p(0.17, 0.17)),
     // MiniMax
     ("minimax-m2.7-highspeed", p(0.6, 2.4)),
+    // Qwen / Alibaba DashScope (must stay in sync with MODEL_REGISTRY — Quinn is
+    // seated as Provider::Qwen, so a missing row bills her at $0 and slips the cap)
+    ("qwen3.7-max", p(1.3, 7.8)),
+    ("qwen3.6-max-preview", p(1.3, 7.8)),
+    ("qwen3.6-plus", p(0.56, 1.68)),
+    ("qwen3.5-plus", p(0.56, 1.68)),
     // Zhipu / Z.AI
     ("glm-5.1", p(1.4, 4.4)),
     ("glm-5", p(0.5, 2.0)),
@@ -385,6 +391,16 @@ mod tests {
         // Unknown models are unpriced — never guessed.
         assert_eq!(price_for("totally-new-model"), None);
         assert_eq!(price_for(""), None);
+    }
+
+    #[test]
+    fn qwen_council_models_are_priced() {
+        // Regression: Quinn is seated as Provider::Qwen; missing rows billed her
+        // at $0 and slipped the budget cap. Values mirror MODEL_REGISTRY.
+        assert_eq!(price_for("qwen3.7-max"), Some(p(1.3, 7.8)));
+        assert_eq!(price_for("qwen3.6-max-preview"), Some(p(1.3, 7.8)));
+        assert_eq!(price_for("qwen3.6-plus"), Some(p(0.56, 1.68)));
+        assert_eq!(price_for("qwen3.5-plus"), Some(p(0.56, 1.68)));
     }
 
     #[test]

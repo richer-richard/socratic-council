@@ -1,16 +1,16 @@
 import { useRef, useState } from "react";
 
 import {
+  loadSessionAttachmentBlobs,
+  persistRawAttachmentsForSession,
+} from "../services/attachments";
+import {
   BundleError,
   exportBundle,
   importBundleSession,
   parseBundle,
   type BundleAttachment,
 } from "../services/bundle";
-import {
-  loadSessionAttachmentBlobs,
-  persistRawAttachmentsForSession,
-} from "../services/attachments";
 import type { DiscussionSession } from "../services/sessions";
 
 /**

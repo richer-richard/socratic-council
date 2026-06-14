@@ -101,10 +101,10 @@ fn redact_api_keys_in(text: &str) -> String {
 }
 
 fn utf8_char_len(b: u8) -> usize {
-    if b < 0x80 {
+    // < 0x80 is ASCII (1 byte); 0x80..0xC0 are continuation bytes that shouldn't
+    // appear at the head — treat them permissively as 1 byte too.
+    if b < 0xC0 {
         1
-    } else if b < 0xC0 {
-        1 // continuation byte — shouldn't be at the head, but be permissive
     } else if b < 0xE0 {
         2
     } else if b < 0xF0 {

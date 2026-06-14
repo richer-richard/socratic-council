@@ -4,6 +4,8 @@
  * Uses shared SDK providers with a Tauri transport layer for desktop.
  */
 
+import { ProviderManager, TransportFailure, replayBufferedStream } from "@socratic-council/sdk";
+import type { ChatAttachment, CompletionOptions } from "@socratic-council/sdk";
 import { DEFAULT_AGENTS } from "@socratic-council/shared";
 import type {
   AgentConfig,
@@ -12,12 +14,11 @@ import type {
   ProviderCredentials,
   ReasoningTier,
 } from "@socratic-council/shared";
-import { ProviderManager, TransportFailure, replayBufferedStream } from "@socratic-council/sdk";
-import type { ChatAttachment, CompletionOptions } from "@socratic-council/sdk";
 
 import type { Provider, ProxyConfig, ProviderCredential } from "../stores/config";
-import { createTauriTransport } from "./tauriTransport";
 import { redact, redactValue } from "../utils/redact";
+
+import { createTauriTransport } from "./tauriTransport";
 
 export interface ChatMessage {
   role: "system" | "user" | "assistant";

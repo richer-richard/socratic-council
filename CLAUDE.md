@@ -27,7 +27,8 @@ available, selection)`; version-dominant ranking adopts a newer scanned
   DERIVED/live-resolved — keep it so the many read sites in `Chat.tsx` work.
 - **Reasoning tier → effort** threads via `CompletionOptions.reasoningTier`.
   Anthropic uses a per-model thinking profile (`anthropic.ts`): 4.6 adaptive,
-  4.7 adaptive-only + prohibits sampling, **4.8 reverted to extended budgets**.
+  4.7 **and 4.8** adaptive-only + prohibit sampling (the live 4.8 API rejects
+  `thinking.type.enabled` → 400; the SDK + CLI agree — see [[anthropic-thinking-profile]]).
 - Settings → Models tab: per-provider Scan + per-tier dropdowns + per-agent
   debate level.
 
@@ -214,6 +215,32 @@ Refuted
 no-AAD (attacker needs a strictly stronger primitive), unbounded SSE buffer
 (trusted endpoint only). 99 CLI tests + 386 vitest, clippy clean both sets.
 
+**Improvements (CLI v1.0.2 / app v2.2.4, from a verified improvement assessment).**
+Two confirmed bugs + perf/hardening/test wins. **Bugs:** (1) the desktop SDK
+mapped `claude-opus-4-8` to _extended_ thinking (`packages/sdk/.../anthropic.ts`),
+which the live API 400s → a silent per-turn fallback to the previous-gen
+opus-4-7; now adaptive-only, matching the CLI + [[anthropic-thinking-profile]]
+(regression test added; the contradictory CLAUDE.md line corrected). (2)
+`cli/src/engine/cost.rs` had no Qwen rows → Quinn billed $0 and slipped the
+budget cap; the 4 real `MODEL_REGISTRY` prices are ported, and a new
+`packages/shared/.../priceParity.test.ts` now fails CI on any future TS↔Rust
+price drift. **Perf:** `components/Markdown.tsx` is `React.memo`'d (unchanged
+transcript rows skip the remark/KaTeX/highlight re-parse on every stream flush);
+the CLI TUI `run_loop` only repaints on change/animation — no idle ~14fps redraw
+on a finished debate. **Hardening:** `jspdf`→dompurify pinned `>=3.4.0` clears 8
+moderate sanitizer-bypass advisories (**prod `pnpm audit` now fully clean**); the
+desktop Rust half gained a clippy gate that surfaced + fixed a real
+`clippy::never_loop` in the SSE UTF-8 decoder (`http.rs`) and an identical-`if`
+in `redact.rs`; `ci.yml`/`audit.yml` pin `dtolnay/rust-toolchain` (a moving
+_branch_ ref) and a new `.github/dependabot.yml` keeps actions + deps current.
+**DX:** ESLint is gated via a root `--max-warnings` ratchet after a one-pass
+autofix cleared ~194 warnings (`lint:fix` added; `varsIgnorePattern: ^_`). Dead
+`vault_file::write_dek_atomic` removed; `allowlist.rs` rate-limit doc corrected
+(200→600). 100 CLI tests + 390 vitest, clippy clean both halves. _Deferred (need
+a WKWebView smoke test or a fragile-file refactor): a strict CSP + self-hosted
+fonts, the moderator-stream `setMessages` throttle, and the full 7.8k-line
+`Chat.tsx` monolith split._
+
 ### Desktop bridge (`cli/src/bridge.rs`, feature `desktop-bridge`, default on)
 
 Shares the **desktop app's keys + config + sessions** so the user never re-enters a
@@ -236,7 +263,7 @@ uses its own `keys.enc`). `Config::load()` merges the bridge at lowest precedenc
 
 ```bash
 pnpm typecheck                                       # whole workspace
-pnpm test                                            # vitest, 385 tests
+pnpm test                                            # vitest, 390 tests
 pnpm --filter @socratic-council/desktop tauri:dev    # dev hot-reload
 pnpm --filter @socratic-council/desktop tauri:build  # signed release .app
 ./install.sh                                         # quick install (macOS)

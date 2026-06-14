@@ -1,7 +1,6 @@
+import type { ArgGraph } from "@socratic-council/core";
 import Graph from "graphology";
 import betweennessCentrality from "graphology-metrics/centrality/betweenness";
-
-import type { ArgGraph } from "@socratic-council/core";
 
 /**
  * Compute the "debate spine" — the set of nodes in the top-10% of

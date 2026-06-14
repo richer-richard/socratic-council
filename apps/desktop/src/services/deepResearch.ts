@@ -7,6 +7,8 @@
  * `callProvider`, reusing existing transport/proxy/cancellation.
  */
 
+import type { Provider, ProviderCredential, ProxyConfig } from "../stores/config";
+
 import { callProvider, type ChatMessage as APIChatMessage } from "./api";
 import type {
   DeepResearchReportSnapshot,
@@ -17,7 +19,6 @@ import type {
   ResearchSection,
   ResearchSubQuestion,
 } from "./sessions";
-import type { Provider, ProviderCredential, ProxyConfig } from "../stores/config";
 
 // ---------------------------------------------------------------------------
 // Types

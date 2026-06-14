@@ -1,9 +1,25 @@
 import { useState, useCallback, useEffect } from "react";
-import { Home } from "./pages/Home";
-import { Settings } from "./pages/Settings";
+
+import { AmbientStars } from "./components/AmbientStars";
+import { CommandPalette, useCommandPaletteShortcut } from "./components/CommandPalette";
+import { DiagnosticsPanel } from "./components/DiagnosticsPanel";
+import { ErrorBoundary } from "./components/ErrorBoundary";
 import { Chat } from "./pages/Chat";
+import { Home } from "./pages/Home";
 import { ProjectDetail } from "./pages/ProjectDetail";
+import { Settings } from "./pages/Settings";
 import type { ComposerAttachment } from "./services/attachments";
+import {
+  archiveProject,
+  createProject,
+  deleteProject,
+  listProjectSummaries,
+  loadProject,
+  refreshProjectSummary,
+  restoreProject,
+  touchProject,
+  type Project,
+} from "./services/projects";
 import {
   archiveDiscussionSession,
   createDiscussionSession,
@@ -17,28 +33,13 @@ import {
   type DiscussionSession,
 } from "./services/sessions";
 import {
-  archiveProject,
-  createProject,
-  deleteProject,
-  listProjectSummaries,
-  loadProject,
-  refreshProjectSummary,
-  restoreProject,
-  touchProject,
-  type Project,
-} from "./services/projects";
-import {
   getDecryptFailureCount,
   getQuarantinePath,
   getVaultStatus,
   initVault,
 } from "./services/vault";
-import { ErrorBoundary } from "./components/ErrorBoundary";
-import { AmbientStars } from "./components/AmbientStars";
-import { CommandPalette, useCommandPaletteShortcut } from "./components/CommandPalette";
-import { DiagnosticsPanel } from "./components/DiagnosticsPanel";
-import { registerCommand, resetCommandsForTests } from "./utils/commandPalette";
 import { useConfig } from "./stores/config";
+import { registerCommand, resetCommandsForTests } from "./utils/commandPalette";
 
 export type Page = "home" | "settings" | "chat" | "project";
 

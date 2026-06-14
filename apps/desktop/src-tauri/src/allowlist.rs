@@ -7,7 +7,7 @@
 //!   2. **Scheme rule** — external hosts must be `https://`; `http://` is
 //!      only allowed for loopback (`127.0.0.1`, `localhost`, `::1`).
 //!   3. **Body size cap** — 4MB upper bound on the outbound request body.
-//!   4. **Process-wide rate limit** — a simple token-bucket, 200 requests per
+//!   4. **Process-wide rate limit** — a simple token-bucket, 600 requests per
 //!      60-second window, to blunt any kind of runaway loop.
 //!
 //! None of these change the shape of the request; they only decide whether

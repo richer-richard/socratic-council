@@ -1,6 +1,5 @@
-import { useMemo } from "react";
-
 import type { ArgNode } from "@socratic-council/core";
+import { useMemo } from "react";
 
 import { ARGMAP_GOLD } from "../kindStyle";
 import type { ViewProps } from "../types";

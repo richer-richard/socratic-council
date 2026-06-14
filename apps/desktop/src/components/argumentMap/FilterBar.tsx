@@ -1,6 +1,5 @@
-import { useMemo } from "react";
-
 import type { ArgEdgeRelation, ArgGraph } from "@socratic-council/core";
+import { useMemo } from "react";
 
 import { ALL_RELATIONS } from "./filters";
 import { ARGMAP_GOLD, styleForRelation } from "./kindStyle";

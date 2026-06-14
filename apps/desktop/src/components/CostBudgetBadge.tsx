@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 
-import { evaluateBudget } from "../utils/budgetEnforcer";
 import type { BudgetPolicy } from "../stores/config";
+import { evaluateBudget } from "../utils/budgetEnforcer";
 
 /**
  * A thin gold chip that lives anywhere additive (chat header right edge,

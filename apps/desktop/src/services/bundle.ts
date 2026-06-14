@@ -14,9 +14,8 @@
  * the bundle stands alone (the DEK stays on the exporting machine).
  */
 
-import { strFromU8, strToU8, unzipSync, zipSync } from "fflate";
-
 import { exportArgGraphToJSON, exportArgGraphToMermaid } from "@socratic-council/core";
+import { strFromU8, strToU8, unzipSync, zipSync } from "fflate";
 
 import { loadDiscussionSession, saveDiscussionSession, type DiscussionSession } from "./sessions";
 

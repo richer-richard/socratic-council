@@ -1,6 +1,8 @@
-import { describe, expect, it, vi } from "vitest";
 import type { AgentConfig } from "@socratic-council/shared";
+import { describe, expect, it, vi } from "vitest";
+
 import type { StreamHandlers, StreamRequest, Transport, TransportResponse } from "../transport.js";
+
 import { KimiProvider } from "./kimi.js";
 
 function createAgent(overrides: Partial<AgentConfig> = {}): AgentConfig {

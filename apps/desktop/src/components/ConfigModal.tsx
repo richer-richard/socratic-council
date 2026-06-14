@@ -1,4 +1,16 @@
+import {
+  AUTO_MODEL,
+  REASONING_TIERS,
+  resolveModel,
+  type AgentId,
+  type DiscoveredModel,
+} from "@socratic-council/shared";
 import { useEffect, useMemo, useRef, useState } from "react";
+
+import desktopPkg from "../../package.json";
+import { testProviderConnection } from "../services/api";
+import { clearAllAttachmentBlobs } from "../services/attachments";
+import { scanProviderModels, getCachedScan, type ScanResult } from "../services/modelScan";
 import {
   type Provider,
   type ProxyType,
@@ -12,22 +24,13 @@ import {
   availableModelsForProvider,
   isProvider,
 } from "../stores/config";
-import {
-  AUTO_MODEL,
-  REASONING_TIERS,
-  resolveModel,
-  type AgentId,
-  type DiscoveredModel,
-} from "@socratic-council/shared";
+
 import { ProviderIcon } from "./icons/ProviderIcons";
-import { testProviderConnection } from "../services/api";
-import { scanProviderModels, getCachedScan, type ScanResult } from "../services/modelScan";
-import { clearAllAttachmentBlobs } from "../services/attachments";
+
 // Single source of truth for the version + identifier shown in the About
 // tab. Reading from the desktop package.json means a version bump in a
 // new release commit (e.g. v2.1.0 → v2.1.1) is automatically reflected
 // here at build time — no separate constant to forget to update.
-import desktopPkg from "../../package.json";
 
 // Stroked SVG icons in the same visual language as the Chat header
 // (HeaderIconLogs / HeaderIconSearch / etc.) — 16x16 viewBox, 1.4 stroke,

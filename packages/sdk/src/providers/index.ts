@@ -4,16 +4,18 @@
  */
 
 import type { Provider, ProviderCredentials } from "@socratic-council/shared";
-import type { BaseProvider } from "./base.js";
-import { OpenAIProvider } from "./openai.js";
-import { AnthropicProvider } from "./anthropic.js";
-import { GoogleProvider } from "./google.js";
-import { DeepSeekProvider } from "./deepseek.js";
-import { KimiProvider } from "./kimi.js";
-import { QwenProvider } from "./qwen.js";
-import { MiniMaxProvider } from "./minimax.js";
-import { ZhipuProvider } from "./zhipu.js";
+
 import type { Transport } from "../transport.js";
+
+import { AnthropicProvider } from "./anthropic.js";
+import type { BaseProvider } from "./base.js";
+import { DeepSeekProvider } from "./deepseek.js";
+import { GoogleProvider } from "./google.js";
+import { KimiProvider } from "./kimi.js";
+import { MiniMaxProvider } from "./minimax.js";
+import { OpenAIProvider } from "./openai.js";
+import { QwenProvider } from "./qwen.js";
+import { ZhipuProvider } from "./zhipu.js";
 
 // Re-export all providers
 export { OpenAIProvider } from "./openai.js";

@@ -120,11 +120,19 @@ jobs:
         with:
           node-version: 22
           cache: "pnpm"
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+        with:
+          toolchain: stable
+          components: clippy
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: apps/desktop/src-tauri -> target
       - run: pnpm install --frozen-lockfile
+      # The security-sensitive Rust half (http / allowlist / vault) had no clippy
+      # gate while the CLI did. Close that gap.
+      - name: Rust backend clippy
+        working-directory: apps/desktop/src-tauri
+        run: cargo clippy --all-targets -- -D warnings
       - name: Rust backend unit tests
         working-directory: apps/desktop/src-tauri
         run: cargo test --lib
@@ -141,7 +149,9 @@ jobs:
         os: [ubuntu-latest, macos-14, windows-latest]
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+        with:
+          toolchain: stable
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: cli -> target
@@ -160,8 +170,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
         with:
+          toolchain: stable
           components: clippy
       - uses: Swatinem/rust-cache@v2
         with:

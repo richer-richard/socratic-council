@@ -135,35 +135,6 @@ fn create_new_owner_only(path: &Path) -> std::io::Result<fs::File> {
     fs::OpenOptions::new().write(true).create_new(true).open(path)
 }
 
-/// Atomic write: write to a sibling tempfile, fsync (best-effort), then
-/// rename over the target. Avoids the "half-written 16-byte DEK" failure
-/// mode if the process is killed mid-write or the disk loses power.
-///
-/// Currently unused — `create_new_dek` does its own atomic write so this
-/// helper is left for future callers (e.g., a vault-rotation feature).
-#[allow(dead_code)]
-fn write_dek_atomic(path: &Path, bytes: &[u8]) -> Result<(), String> {
-    let tmp_path = path.with_extension("key.tmp");
-
-    // Best-effort cleanup of a stale tempfile from a prior crashed run.
-    let _ = fs::remove_file(&tmp_path);
-
-    {
-        let mut tmp = fs::File::create(&tmp_path)
-            .map_err(|e| format!("Failed to create DEK temp file: {}", e))?;
-        tmp.write_all(bytes)
-            .map_err(|e| format!("Failed to write DEK temp file: {}", e))?;
-        tmp.sync_all()
-            .map_err(|e| format!("Failed to sync DEK temp file: {}", e))?;
-    }
-
-    restrict_permissions(&tmp_path)?;
-
-    fs::rename(&tmp_path, path)
-        .map_err(|e| format!("Failed to install DEK file: {}", e))?;
-    Ok(())
-}
-
 fn read_dek(path: &Path) -> Result<Vec<u8>, String> {
     let bytes = fs::read(path).map_err(|e| format!("Failed to read DEK file: {}", e))?;
     if bytes.len() != DEK_LEN {

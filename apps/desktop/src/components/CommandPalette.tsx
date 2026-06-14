@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import { ChamberSurface } from "./ChamberSurface";
 import {
   filterCommands,
   listCommands,
   type Command,
   type ScoredCommand,
 } from "../utils/commandPalette";
+
+import { ChamberSurface } from "./ChamberSurface";
 
 /**
  * Command palette — ⌘K opens a hushed floating surface with a fuzzy filter.

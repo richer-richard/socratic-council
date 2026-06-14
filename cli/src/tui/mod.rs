@@ -1151,6 +1151,9 @@ async fn run_loop(
     terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
     app: &mut App,
 ) -> anyhow::Result<()> {
+    // Track whether the rendered state changed since the last draw, so we can
+    // skip repainting an unchanging screen (idle-CPU saver, see below).
+    let mut dirty = true;
     loop {
         // Drain any pending debate events. If the channel disconnects (the engine
         // task ended — including an unexpected panic), mark the debate done so the
@@ -1172,6 +1175,7 @@ async fn run_loop(
                 }
             }
         }
+        let had_events = !pending.is_empty() || disconnected;
         if let Some(d) = app.debate.as_mut() {
             for ev in pending {
                 d.apply(ev);
@@ -1186,9 +1190,21 @@ async fn run_loop(
 
         if app.toast.is_some() && app.frame >= app.toast_expire {
             app.toast = None;
+            dirty = true;
+        }
+        if had_events {
+            dirty = true;
         }
 
-        terminal.draw(|f| render(f, app))?;
+        // Redraw only when something changed, or while an animation is live: the
+        // Home council-mark logo, or an in-progress debate (streaming spinner /
+        // progress gauge). When idle — e.g. reviewing a finished debate — skip the
+        // draw rather than repaint an unchanging screen ~14×/second.
+        let animating = app.view == View::Home || app.debate.as_ref().is_some_and(|d| !d.done);
+        if dirty || animating {
+            terminal.draw(|f| render(f, app))?;
+        }
+        dirty = false;
 
         // Block up to one frame for animation cadence, then drain everything
         // queued this tick — so a char-by-char paste (terminals without
@@ -1199,8 +1215,12 @@ async fn run_loop(
                 match event::read()? {
                     Event::Key(key) if key.kind == KeyEventKind::Press => {
                         quit = app.handle_key(key);
+                        dirty = true;
                     }
-                    Event::Paste(text) => app.handle_paste(text),
+                    Event::Paste(text) => {
+                        app.handle_paste(text);
+                        dirty = true;
+                    }
                     _ => {}
                 }
                 if quit {

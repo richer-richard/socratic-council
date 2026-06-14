@@ -1,6 +1,5 @@
-import { useLayoutEffect, useMemo, useRef, useState } from "react";
-
 import type { ArgEdge, ArgNode } from "@socratic-council/core";
+import { useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { ARGMAP_GOLD, styleFor, styleForRelation } from "../kindStyle";
 import type { ViewProps } from "../types";

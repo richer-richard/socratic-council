@@ -2,8 +2,8 @@ import { useState } from "react";
 
 import type { Page } from "../App";
 import type { ComposerAttachment } from "../services/attachments";
-import type { SessionSummary, SessionStatus } from "../services/sessions";
 import { saveProject, removeDossierEntry, type Project } from "../services/projects";
+import type { SessionSummary, SessionStatus } from "../services/sessions";
 
 interface ProjectDetailProps {
   project: Project;

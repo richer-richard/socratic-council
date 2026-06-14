@@ -1,0 +1,38 @@
+version: 2
+updates:
+  # Keep GitHub Actions current. Release-cli.yml + the rust-toolchain steps are
+  # SHA-pinned with a `# vX` / `# stable` comment; Dependabot bumps both the SHA
+  # and the comment, so pinned actions stay immutable AND maintained.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      actions:
+        patterns: ["*"]
+
+  # JS dependencies (monorepo root, single pnpm lockfile).
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 10
+    groups:
+      js-minor-patch:
+        update-types: ["minor", "patch"]
+
+  # Rust — the two independent lockfiles.
+  - package-ecosystem: "cargo"
+    directory: "/cli"
+    schedule:
+      interval: "weekly"
+    groups:
+      cli-rust:
+        patterns: ["*"]
+  - package-ecosystem: "cargo"
+    directory: "/apps/desktop/src-tauri"
+    schedule:
+      interval: "weekly"
+    groups:
+      tauri-rust:
+        patterns: ["*"]

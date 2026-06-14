@@ -1,13 +1,14 @@
-import { describe, expect, it } from "vitest";
 import type { AgentConfig } from "@socratic-council/shared";
-import { OpenAIProvider } from "./openai.js";
+import { describe, expect, it } from "vitest";
+
 import { AnthropicProvider } from "./anthropic.js";
-import { MiniMaxProvider } from "./minimax.js";
-import { GoogleProvider } from "./google.js";
-import { DeepSeekProvider } from "./deepseek.js";
-import { ZhipuProvider } from "./zhipu.js";
-import { QwenProvider } from "./qwen.js";
 import { createHeaders } from "./base.js";
+import { DeepSeekProvider } from "./deepseek.js";
+import { GoogleProvider } from "./google.js";
+import { MiniMaxProvider } from "./minimax.js";
+import { OpenAIProvider } from "./openai.js";
+import { QwenProvider } from "./qwen.js";
+import { ZhipuProvider } from "./zhipu.js";
 
 const messages = [
   { role: "system" as const, content: "System prompt" },
@@ -84,6 +85,33 @@ describe("provider request safety", () => {
       }),
       messages,
       "claude-opus-4-7",
+      { stream: false },
+    );
+
+    expect(request.thinking).toEqual({ type: "adaptive" });
+    expect(request.temperature).toBeUndefined();
+    expect(request.top_p).toBeUndefined();
+  });
+
+  it("uses adaptive thinking (NOT an extended budget) for Claude Opus 4.8", () => {
+    // Regression: 4.8 is adaptive-only on the live API — a thinking.type.enabled
+    // budget or an explicit temperature both 400. Sending an extended budget here
+    // silently fell back to the previous-gen opus-4-7 on every turn.
+    const provider = new AnthropicProvider("test-key");
+    const request = (
+      provider as unknown as {
+        buildRequestBody: (...args: unknown[]) => Record<string, unknown>;
+      }
+    ).buildRequestBody(
+      createAgent({
+        id: "cathy",
+        name: "Cathy",
+        provider: "anthropic",
+        model: "claude-opus-4-8",
+        maxTokens: 8192,
+      }),
+      messages,
+      "claude-opus-4-8",
       { stream: false },
     );
 
@@ -413,36 +441,6 @@ describe("DeepSeek + Zhipu request shapes (fix 12.1)", () => {
     expect(body.temperature).toBe(2);
   });
 
-  it("uses extended thinking (NOT adaptive) for Claude Opus 4.8", () => {
-    // 4.8 reverted the adaptive-only mode 4.7 introduced; it is back to
-    // extended thinking budgets. Temperature is still omitted because
-    // thinking is enabled.
-    const provider = new AnthropicProvider("test-key");
-    const request = (
-      provider as unknown as {
-        buildRequestBody: (...args: unknown[]) => Record<string, unknown>;
-      }
-    ).buildRequestBody(
-      createAgent({
-        id: "cathy",
-        name: "Cathy",
-        provider: "anthropic",
-        model: "claude-opus-4-8",
-        maxTokens: 8192,
-      }),
-      messages,
-      "claude-opus-4-8",
-      { stream: false },
-    );
-
-    const thinking = request.thinking as { type: string; budget_tokens?: number };
-    expect(thinking.type).toBe("enabled");
-    expect(thinking.budget_tokens).toBeGreaterThanOrEqual(1024);
-    expect(thinking.budget_tokens).toBeLessThan(request.max_tokens as number);
-    expect(request.temperature).toBeUndefined();
-    expect(request.top_p).toBeUndefined();
-  });
-
   it("maps the low reasoning tier to no thinking for Claude Opus 4.8", () => {
     const provider = new AnthropicProvider("test-key");
     const request = (
@@ -462,9 +460,10 @@ describe("DeepSeek + Zhipu request shapes (fix 12.1)", () => {
       { stream: false, reasoningTier: "low" },
     );
 
-    // Low tier omits extended thinking; 4.8 allows sampling params again.
+    // Low tier omits thinking entirely (adaptive can't take a budget); 4.8 still
+    // prohibits sampling, so temperature is omitted regardless of tier.
     expect(request.thinking).toBeUndefined();
-    expect(request.temperature).toBe(1);
+    expect(request.temperature).toBeUndefined();
   });
 
   it("routes Quinn's qwen3.7-max through without falling back to an older model", () => {

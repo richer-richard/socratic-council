@@ -1,7 +1,7 @@
+import type { Message } from "@socratic-council/shared";
 import { describe, expect, it } from "vitest";
 
 import { ConversationMemoryManager } from "./memory.js";
-import type { Message } from "@socratic-council/shared";
 
 function msg(id: string, agentId: string, content: string, ts = id.charCodeAt(0)): Message {
   return { id, agentId: agentId as Message["agentId"], content, timestamp: ts };

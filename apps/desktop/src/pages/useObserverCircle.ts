@@ -4,13 +4,14 @@
  * their inner-circle partners.
  */
 
-import { useCallback, useRef, useState } from "react";
 import { OBSERVER_CONFIG, OBSERVER_IDS, PARTNER_TO_OBSERVER } from "@socratic-council/shared";
 import type { AgentId as CouncilAgentId, ObserverId } from "@socratic-council/shared";
+import { useCallback, useRef, useState } from "react";
+
 import { callProvider, apiLogger } from "../services/api";
 import type { ChatMessage as APIChatMessage } from "../services/api";
-import type { Provider, ProviderCredential, ProxyConfig } from "../stores/config";
 import type { ModeratorUsageSnapshot, ObserverNoteSnapshot } from "../services/sessions";
+import type { Provider, ProviderCredential, ProxyConfig } from "../stores/config";
 import { calculateMessageCost } from "../utils/cost";
 
 // ---------------------------------------------------------------------------

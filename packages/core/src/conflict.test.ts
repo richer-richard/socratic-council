@@ -1,6 +1,7 @@
-import { describe, expect, it } from "vitest";
-import { ConflictDetector } from "./conflict.js";
 import type { Message } from "@socratic-council/shared";
+import { describe, expect, it } from "vitest";
+
+import { ConflictDetector } from "./conflict.js";
 
 const now = Date.now();
 
