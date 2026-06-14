@@ -4,6 +4,13 @@ name: Release CLI
 # binaries on all three OSes, attach them to the GitHub release, and publish to
 # crates.io (skipped automatically when the version is already live — e.g.
 # after a manual local publish).
+#
+# Supply-chain hardening: every third-party action is pinned to a full commit
+# SHA. A mutable @tag / @branch ref could be moved to run attacker code inside a
+# job that holds `CARGO_REGISTRY_TOKEN`, yielding a backdoored crate. The
+# `publish` job additionally runs with a read-only `GITHUB_TOKEN` that is kept
+# OFF the runner's git config (`persist-credentials: false`), so even a poisoned
+# step can't recover a write-capable token.
 
 on:
   push:
@@ -13,19 +20,21 @@ concurrency:
   group: release-cli-${{ github.ref }}
   cancel-in-progress: false
 
+# Read-only by default; only the `release` job opts back up to contents: write.
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   validate:
     name: Validate
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
         with:
+          toolchain: stable
           components: clippy
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           workspaces: cli -> target
       - name: Test (default features)
@@ -68,11 +77,12 @@ jobs:
           - os: windows-latest
             target: x86_64-pc-windows-msvc
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
         with:
+          toolchain: stable
           targets: ${{ matrix.target }}
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           workspaces: cli -> target
           key: ${{ matrix.target }}
@@ -92,7 +102,7 @@ jobs:
         run: |
           $version = $env:GITHUB_REF_NAME -replace '^cli-v',''
           Compress-Archive -Path "target/${{ matrix.target }}/release/socratic-council.exe" -DestinationPath "socratic-council-$version-${{ matrix.target }}.zip"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: cli-${{ matrix.target }}
           path: |
@@ -104,11 +114,14 @@ jobs:
     name: GitHub Release
     needs: build
     runs-on: ubuntu-latest
+    # Only this job needs to write the release; scope the elevation to it.
+    permissions:
+      contents: write
     env:
       GH_TOKEN: ${{ github.token }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           path: dist
           merge-multiple: true
@@ -126,9 +139,17 @@ jobs:
     name: Publish to crates.io
     needs: validate
     runs-on: ubuntu-latest
+    # Inherits the top-level read-only token. The runner holds
+    # CARGO_REGISTRY_TOKEN, so withhold GITHUB_TOKEN from git config too.
+    permissions:
+      contents: read
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+        with:
+          toolchain: stable
       - name: Publish (skips if the version is already live)
         working-directory: cli
         env:

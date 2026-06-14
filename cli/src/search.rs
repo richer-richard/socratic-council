@@ -71,13 +71,17 @@ pub fn percent_decode(s: &str) -> String {
     while i < bytes.len() {
         match bytes[i] {
             b'%' if i + 2 < bytes.len() => {
-                let hex = &s[i + 1..i + 3];
-                match u8::from_str_radix(hex, 16) {
-                    Ok(b) => {
-                        out.push(b);
+                // Decode the two trailing bytes directly. Never slice the &str
+                // by computed offsets (`&s[i+1..i+3]`): when a multibyte UTF-8
+                // char follows the '%', the byte index lands mid-character and
+                // panics ("not a char boundary"), crashing the engine task on a
+                // crafted/tampered search response.
+                match (hex_val(bytes[i + 1]), hex_val(bytes[i + 2])) {
+                    (Some(hi), Some(lo)) => {
+                        out.push(hi * 16 + lo);
                         i += 3;
                     }
-                    Err(_) => {
+                    _ => {
                         out.push(b'%');
                         i += 1;
                     }
@@ -94,6 +98,16 @@ pub fn percent_decode(s: &str) -> String {
         }
     }
     String::from_utf8_lossy(&out).into_owned()
+}
+
+/// Value of a single ASCII hex digit (`0-9a-fA-F`), or `None`.
+fn hex_val(b: u8) -> Option<u8> {
+    match b {
+        b'0'..=b'9' => Some(b - b'0'),
+        b'a'..=b'f' => Some(b - b'a' + 10),
+        b'A'..=b'F' => Some(b - b'A' + 10),
+        _ => None,
+    }
 }
 
 fn strip_tags(s: &str) -> String {
@@ -343,6 +357,21 @@ mod tests {
         assert_eq!(decode_entities("AT&T stays"), "AT&T stays");
         assert_eq!(percent_decode("https%3A%2F%2Fexample.com%2Fa+b"), "https://example.com/a b");
         assert_eq!(url_encode("rust 1.82 论"), "rust+1.82+%E8%AE%BA");
+    }
+
+    #[test]
+    fn percent_decode_survives_multibyte_after_percent() {
+        // Regression: a crafted/tampered DDG href where a multibyte UTF-8 char
+        // immediately follows '%' used to panic ("not a char boundary") because
+        // the decoder sliced the &str by byte offset. It must now degrade to a
+        // literal '%' and never panic.
+        assert_eq!(percent_decode("%论abc"), "%论abc");
+        assert_eq!(percent_decode("%41%论"), "A%论");
+        // Trailing/garbage escapes stay literal rather than crashing.
+        assert_eq!(percent_decode("%zz"), "%zz");
+        assert_eq!(percent_decode("a%"), "a%");
+        // Reached through the real DDG-redirect path with a hostile uddg value.
+        let _ = resolve_ddg_href("//duckduckgo.com/l/?uddg=%论rest");
     }
 
     #[test]

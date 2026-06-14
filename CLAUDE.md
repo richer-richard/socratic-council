@@ -182,6 +182,32 @@ reachable. App-side (**v2.2.1**): the desktop DEK temp file is created `0600` (w
 brief world-readable window before `chmod`). 59 CLI tests (+10 regressions), clippy
 clean on both feature sets.
 
+**Security patch (CLI v1.0.1 / app v2.2.2, from a 46-agent adversarial review).**
+Nine confirmed findings fixed across both halves. **App:** (F1) `build_client`
+(`src-tauri/http.rs`) now sets `redirect(Policy::none())` — reqwest followed up to
+10 redirects and `validate_outbound_url` only checked the _initial_ URL, so a 3xx
+from an allowlisted host could reach loopback/LAN/internal targets (allowlist/SSRF
+bypass). (F5) `services/bundle.ts` `parseBundle` caps the compressed container +
+per-entry/total decompressed bytes + entry count via fflate's pre-inflation
+`filter`, so a `.scbundle` deflate bomb can't OOM the renderer. (F10)
+`importBundleSession` re-mints attachment ids on import and rewrites references,
+and `persistRawAttachmentsForSession` reads-before-write — a crafted bundle can no
+longer clobber an existing IndexedDB attachment blob. **CLI:** (F3) every
+model-derived TUI string (moderator/conclusion/vote/peer-eval/deep-research/tool
+query/canvas) is now run through `sanitize_terminal` at the `apply()` ingest
+boundary — the no-tui path already scrubbed these; the TUI buffer was the gap
+(ANSI/OSC escape injection). (F4) `search.rs::percent_decode` decodes the two
+trailing bytes directly instead of slicing the `&str` by offset — a `%` followed by
+a multibyte char no longer panics the engine task on a tampered DDG response. (F7)
+`Config::load` unconditionally removes a stale plaintext `keys.toml` whenever
+`keys.enc` exists. **CI/CD:** (F6) `release-cli.yml` pins every action to a commit
+SHA and runs the publish job read-only with `persist-credentials: false`; (F11)
+`ci.yml`/`audit.yml` gained top-level `permissions: contents: read`; (F12) the
+blocking `pnpm audit` dropped `--prod` so dev-dep advisories block too. Refuted
+(not fixed, not vulns): `csp:null`+`vault_get_dek` (no XSS sink exists), ENC1
+no-AAD (attacker needs a strictly stronger primitive), unbounded SSE buffer
+(trusted endpoint only). 99 CLI tests + 386 vitest, clippy clean both sets.
+
 ### Desktop bridge (`cli/src/bridge.rs`, feature `desktop-bridge`, default on)
 
 Shares the **desktop app's keys + config + sessions** so the user never re-enters a

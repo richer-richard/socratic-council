@@ -1464,7 +1464,29 @@ export async function persistRawAttachmentsForSession(
   }
 
   await withStore("readwrite", async (store) => {
-    for (const record of prepared) store.put(record);
+    // Read-before-write: never blind-`put` over an existing id. Even though
+    // bundle import now re-mints attachment ids, a residual collision must not
+    // overwrite an unrelated blob — co-own it for this session instead. Fire all
+    // reads synchronously, then await, to keep the transaction alive (fix 2.12).
+    const reads = prepared.map((record) => ({
+      record,
+      request: store.get(record.id) as IDBRequest<StoredAttachmentBlob | undefined>,
+    }));
+    const resolved = await Promise.all(
+      reads.map(async ({ record, request }) => ({
+        record,
+        current: await requestToPromise(request),
+      })),
+    );
+    for (const { record, current } of resolved) {
+      if (current) {
+        const sessionIds = readSessionIds(current);
+        if (!sessionIds.includes(sessionId)) sessionIds.push(sessionId);
+        store.put(withSessionIds(current, sessionIds));
+      } else {
+        store.put(record);
+      }
+    }
   });
 }
 
