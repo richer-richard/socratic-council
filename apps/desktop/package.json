@@ -18,6 +18,9 @@
   },
   "dependencies": {
     "@dagrejs/dagre": "^3.0.0",
+    "@fontsource/cormorant-garamond": "^5.2.11",
+    "@fontsource/jetbrains-mono": "^5.2.8",
+    "@fontsource/manrope": "^5.2.8",
     "@noble/ciphers": "^2.2.0",
     "@socratic-council/core": "workspace:*",
     "@socratic-council/sdk": "workspace:*",

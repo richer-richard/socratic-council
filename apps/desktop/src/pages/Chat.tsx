@@ -39,6 +39,20 @@ import type { CSSProperties, HTMLAttributes } from "react";
 import { Virtuoso, type VirtuosoHandle } from "react-virtuoso";
 
 import type { Page } from "../App";
+import { normalizeMessageText } from "../chat/text";
+import {
+  buildEndVoteBoardContent,
+  buildModeratorConclusionContent,
+  countEndVoteChoices,
+  extractVoteReasonFromVisibleText,
+  getEndVoteThreshold,
+  getRoundOneAdvanceThreshold,
+  hasRequiredVoteReason,
+  parseModeratorConclusionFromText,
+  parseVoteChoiceFromVisibleText,
+  stripLegacyEndVoteDirective,
+  type EndVoteChoiceMap,
+} from "../chat/transcriptParsers";
 import { AgentCanvas } from "../components/AgentCanvas";
 import { ArgumentMapPanel } from "../components/ArgumentMapPanel";
 import { BranchAction, BranchPointBadge, type BranchPointEntry } from "../components/BranchAction";
@@ -137,7 +151,6 @@ interface DuoLogueState {
 }
 
 type EndVoteState = EndVoteSnapshot;
-type EndVoteChoiceMap = Partial<Record<CouncilAgentId, EndVoteChoice>>;
 
 type EndVoteReasonMap = Partial<Record<CouncilAgentId, string>>;
 type PendingHandoffState = HandoffSnapshot;
@@ -785,162 +798,6 @@ function createWhisperBonuses(): Record<CouncilAgentId, number> {
   };
 }
 
-function countEndVoteChoices(
-  votes: EndVoteChoiceMap,
-  configuredAgentIds: readonly CouncilAgentId[],
-): { yes: number; no: number; abstain: number } {
-  let yes = 0;
-  let no = 0;
-  let abstain = 0;
-
-  for (const agentId of configuredAgentIds) {
-    if (votes[agentId] === "yes") yes += 1;
-    else if (votes[agentId] === "no") no += 1;
-    else if (votes[agentId] === "abstain") abstain += 1;
-  }
-
-  return { yes, no, abstain };
-}
-
-function getEndVoteThreshold(configuredAgentIds: readonly CouncilAgentId[]) {
-  return Math.floor(configuredAgentIds.length / 2) + 1;
-}
-
-// Round 1 needs at least this many YES votes to advance to round 2.
-// Below this, round 2 is skipped and the council resumes discussion.
-// At full agreement (every agent), the session concludes immediately
-// without round 2.
-function getRoundOneAdvanceThreshold(configuredAgentIds: readonly CouncilAgentId[]) {
-  // For an 8-agent council this is 5 (the user-specified rule).
-  // For a smaller or larger council, scale to "more than half".
-  return Math.max(2, Math.floor(configuredAgentIds.length / 2) + 1);
-}
-
-function parseVoteChoiceFromVisibleText(content: string): EndVoteChoice | null {
-  // Look for "Vote: YES", "Vote: NO", or "Vote: ABSTAIN" anywhere in the
-  // content. Loose anchor (not start-of-string) because models sometimes
-  // emit a one-word preamble before the formal Vote: line.
-  const match = content.match(/\bVote:\s*(YES|NO|ABSTAIN)\b/i);
-  if (!match) return null;
-  const upper = match[1]?.toUpperCase();
-  if (upper === "NO") return "no";
-  if (upper === "ABSTAIN") return "abstain";
-  return "yes";
-}
-
-function stripLegacyEndVoteDirective(raw: string) {
-  let voteChoice: EndVoteChoice | null = null;
-
-  const cleaned = raw.replace(
-    /(^|\n)[ \t]*@vote\(end,\s*(yes|no|abstain)\)[ \t]*(\n|$)/gi,
-    (_match, prefix: string, choice: string, suffix: string) => {
-      const lc = choice.toLowerCase();
-      voteChoice = lc === "no" ? "no" : lc === "abstain" ? "abstain" : "yes";
-      return prefix && suffix ? "\n" : "";
-    },
-  );
-
-  return {
-    cleaned: normalizeMessageText(cleaned),
-    voteChoice,
-  };
-}
-
-function extractVoteReasonFromVisibleText(choice: EndVoteChoice | null, content: string) {
-  if (!choice) return "";
-  // Strip the "Vote: YES/NO/ABSTAIN" marker wherever it appears (loose match)
-  // and any short trailing punctuation, then return the rest as the reason.
-  // Global flag handles the rare double-emit some models do.
-  const pattern =
-    choice === "no"
-      ? /\bVote:\s*NO\b[:.!-]?\s*/gi
-      : choice === "abstain"
-        ? /\bVote:\s*ABSTAIN\b[:.!-]?\s*/gi
-        : /\bVote:\s*YES\b[:.!-]?\s*/gi;
-  return normalizeMessageText(content.replace(pattern, " ")).trim();
-}
-
-// NO requires a concrete objection. YES and ABSTAIN don't require a reason
-// — abstain is "I don't have a clear position" and shouldn't be punished
-// for terseness.
-function hasRequiredVoteReason(choice: EndVoteChoice | null, reason: string) {
-  return choice !== "no" || reason.trim().length >= 16;
-}
-
-function buildEndVoteBoardContent(board: EndVoteBoardSnapshot) {
-  const { yes, no, abstain } = countEndVoteChoices(board.votes, board.agentOrder);
-  const pending = Math.max(board.totalAgents - yes - no - abstain, 0);
-  const statusText =
-    board.status === "passed"
-      ? "Passed"
-      : board.status === "failed"
-        ? "Failed"
-        : board.status === "complete"
-          ? "Complete"
-          : "Active";
-
-  return `End vote round ${board.round}: YES ${yes}, NO ${no}, ABSTAIN ${abstain}, Pending ${pending}. ${statusText}${
-    board.outcome ? ` ${board.outcome}` : ""
-  }`;
-}
-
-function buildModeratorConclusionContent(conclusion: ModeratorConclusionSnapshot) {
-  const label =
-    conclusion.status === "consensus"
-      ? "Consensus"
-      : conclusion.status === "majority"
-        ? "Majority with dissent"
-        : "Unresolved";
-
-  return [
-    `${label}: ${conclusion.summary}`,
-    `Score: ${conclusion.score}/10.`,
-    conclusion.reason,
-    conclusion.next ? `Next: ${conclusion.next}` : "",
-  ]
-    .filter(Boolean)
-    .join("\n");
-}
-
-function parseModeratorConclusionFromText(content: string): ModeratorConclusionSnapshot | null {
-  const normalized = normalizeMessageText(content);
-  if (!normalized) return null;
-
-  const lines = normalized
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean);
-
-  const labelLine = lines[0] ?? "";
-  const summaryMatch = labelLine.match(/^(Consensus|Majority with dissent|Unresolved):\s*(.+)$/i);
-  if (!summaryMatch) return null;
-
-  const scoreLine = lines.find((line) => /^Score:\s*\d+\s*\/\s*10\.?$/i.test(line));
-  if (!scoreLine) return null;
-  const scoreMatch = scoreLine.match(/^Score:\s*(\d+)\s*\/\s*10\.?$/i);
-  if (!scoreMatch) return null;
-
-  const statusLabel = summaryMatch[1]?.toLowerCase();
-  const status =
-    statusLabel === "consensus"
-      ? "consensus"
-      : statusLabel === "majority with dissent"
-        ? "majority"
-        : "unresolved";
-
-  const reasonCandidates = lines.filter((line) => line !== labelLine && line !== scoreLine);
-  const reason = reasonCandidates[0] ?? "";
-  if (!reason) return null;
-
-  return {
-    status,
-    summary: summaryMatch[2]?.trim() ?? "",
-    score: Math.max(0, Math.min(10, Number(scoreMatch[1]))),
-    reason,
-    ...(reasonCandidates[1] ? { next: reasonCandidates[1].replace(/^Next:\s*/i, "").trim() } : {}),
-  };
-}
-
 function normalizeSessionForChat(session: DiscussionSession): DiscussionSession {
   return {
     ...session,
@@ -1500,14 +1357,6 @@ const DiscordVirtuosoList = forwardRef<HTMLDivElement, HTMLAttributes<HTMLDivEle
 );
 
 const TOOL_SYNTAX_LEAK_PATTERN = /\b(?:tool_use|tool_call|function_call|minimax:tool_call)\b/i;
-
-function normalizeMessageText(raw: string) {
-  return raw
-    .replace(/\r\n/g, "\n")
-    .replace(/[ \t]+\n/g, "\n")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
-}
 
 function getToolDisplayName(toolName: ToolCall["name"]): string {
   switch (toolName) {
@@ -3107,6 +2956,11 @@ ${firstRoundObjections.length > 0 ? firstRoundObjections.join("\n") : "- None. E
 
       let streamingContent = "";
       let streamingThinking = "";
+      // Coalesce the moderator's live-preview updates to ~20fps. The final
+      // content is set authoritatively from `result.content` after the stream,
+      // so throttling the per-token preview can never drop content — it only
+      // avoids a setMessages + transcript re-render on every single token.
+      let lastModeratorFlushAt = 0;
       try {
         const recentForContext =
           options.kind === "opening"
@@ -3221,7 +3075,9 @@ Write the official moderator wrap-up in 4 short sentences:
             if (chunk.thinking) {
               streamingThinking += chunk.thinking;
             }
-            if (chunk.content || chunk.thinking) {
+            const now = Date.now();
+            if ((chunk.content || chunk.thinking) && now - lastModeratorFlushAt >= 50) {
+              lastModeratorFlushAt = now;
               setMessages((prev) =>
                 prev.map((m) =>
                   m.id === newMessage.id
@@ -3271,6 +3127,7 @@ Write the official moderator wrap-up in 4 short sentences:
           ];
           streamingContent = "";
           streamingThinking = "";
+          lastModeratorFlushAt = 0;
 
           result = await callProvider(
             provider,
@@ -3285,7 +3142,9 @@ Write the official moderator wrap-up in 4 short sentences:
               if (chunk.thinking) {
                 streamingThinking += chunk.thinking;
               }
-              if (chunk.content || chunk.thinking) {
+              const now = Date.now();
+              if ((chunk.content || chunk.thinking) && now - lastModeratorFlushAt >= 50) {
+                lastModeratorFlushAt = now;
                 setMessages((prev) =>
                   prev.map((m) =>
                     m.id === newMessage.id
