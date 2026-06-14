@@ -39,7 +39,7 @@
     "jspdf": "^4.2.1",
     "katex": "^0.16.28",
     "mammoth": "^1.10.0",
-    "pdfjs-dist": "^4.10.38",
+    "pdfjs-dist": "^6.0.227",
     "pptxgenjs": "^4.0.1",
     "react": "^18.3.0",
     "react-dom": "^18.3.0",
