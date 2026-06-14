@@ -199,6 +199,13 @@ async fn read_response_text_truncated(
 fn build_client(proxy_config: Option<&ProxyConfig>, timeout_ms: u64) -> Result<Client, String> {
     let mut builder = Client::builder()
         .timeout(Duration::from_millis(timeout_ms))
+        // Never follow redirects. `validate_outbound_url()` only checks the
+        // INITIAL request URL, so a 3xx `Location` from an allowlisted host
+        // would otherwise let the backend silently fetch an arbitrary target
+        // (loopback / LAN / internal service) without re-validation — an
+        // allowlist/SSRF bypass. Provider + search APIs never need redirects,
+        // so we refuse the whole class rather than re-validate each hop.
+        .redirect(reqwest::redirect::Policy::none())
         .danger_accept_invalid_certs(false);
 
     if let Some(proxy) = proxy_config {

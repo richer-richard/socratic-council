@@ -250,15 +250,58 @@ pub struct Debate {
     engine: Option<EngineHandle>,
 }
 
+/// Scrub raw terminal control/escape bytes out of model-derived text before it
+/// enters the TUI buffer. The Token/Thinking stream and the `--no-tui` printer
+/// already do this; these helpers close the same gap for the moderator,
+/// conclusion, votes, canvas, peer-eval and deep-research surfaces so no
+/// provider/endpoint output can inject ANSI/OSC escapes into the terminal.
+fn scrub(s: &str) -> String {
+    crate::engine::sanitize_terminal(s)
+}
+
+fn scrub_conclusion(mut c: ModeratorConclusion) -> ModeratorConclusion {
+    c.summary = scrub(&c.summary);
+    c.reason = scrub(&c.reason);
+    c.next = c.next.as_deref().map(scrub);
+    c
+}
+
+fn scrub_canvas(sections: Vec<CanvasSection>) -> Vec<CanvasSection> {
+    sections
+        .into_iter()
+        .map(|s| CanvasSection { label: scrub(&s.label), text: scrub(&s.text) })
+        .collect()
+}
+
+fn scrub_peer_eval(mut r: PeerEvalRound) -> PeerEvalRound {
+    for c in &mut r.critiques {
+        c.critique = scrub(&c.critique);
+    }
+    for s in &mut r.summaries {
+        s.standout = s.standout.as_deref().map(scrub);
+    }
+    r
+}
+
+fn scrub_research(mut r: DeepResearchReport) -> DeepResearchReport {
+    r.title = scrub(&r.title);
+    r.abstract_text = scrub(&r.abstract_text);
+    for s in &mut r.sections {
+        s.heading = scrub(&s.heading);
+        s.body = scrub(&s.body);
+    }
+    r
+}
+
 impl Debate {
     fn apply(&mut self, ev: DebateEvent) {
         match ev {
             DebateEvent::Phase(p) => self.status = p,
             DebateEvent::Moderator(text) => {
-                self.turns.push(TurnView::note("system", "Moderator", text))
+                self.turns.push(TurnView::note("system", "Moderator", scrub(&text)))
             }
             DebateEvent::Conclusion(c) => {
-                self.conclusion = Some(c);
+                self.conclusion = Some(scrub_conclusion(c));
                 self.active = None;
             }
             DebateEvent::TurnStarted { agent_id, name, model, .. } => {
@@ -314,7 +357,7 @@ impl Debate {
             }
             DebateEvent::Vote { name, choice, reason, .. } => {
                 if let Some(b) = self.vote_boards.last_mut() {
-                    b.votes.push((name, choice, reason));
+                    b.votes.push((name, choice, scrub(&reason)));
                 }
             }
             DebateEvent::EndVoteResult { passed, yes, no, abstain } => {
@@ -323,6 +366,7 @@ impl Debate {
                 }
             }
             DebateEvent::Canvas { agent_id, sections, .. } => {
+                let sections = scrub_canvas(sections);
                 // Attach to this agent's live or most-recent turn.
                 if let Some(s) = self.streaming.as_mut().filter(|s| s.agent_id == agent_id) {
                     s.canvas = sections;
@@ -331,8 +375,8 @@ impl Debate {
                     t.canvas = sections;
                 }
             }
-            DebateEvent::PeerEval(round) => self.peer_eval = Some(round),
-            DebateEvent::DeepResearch(r) => self.deep_research = Some(r),
+            DebateEvent::PeerEval(round) => self.peer_eval = Some(scrub_peer_eval(round)),
+            DebateEvent::DeepResearch(r) => self.deep_research = Some(scrub_research(r)),
             DebateEvent::AdvisorNote(n) => {
                 // A private whisper — rendered against the partner's color.
                 self.turns.push(TurnView::of_kind(
@@ -343,11 +387,13 @@ impl Debate {
                 ));
             }
             DebateEvent::Tool(t) => {
+                // `t.output` is already sanitized at the oracle boundary, but the
+                // tool name and the agent-supplied query are raw model text.
                 self.turns.push(TurnView::of_kind(
                     TurnKind::Tool,
                     "tool",
-                    &format!("{} · asked by {}", t.name, t.agent_name),
-                    format!("“{}”\n{}", t.query, t.output),
+                    &format!("{} · asked by {}", scrub(&t.name), t.agent_name),
+                    format!("“{}”\n{}", scrub(&t.query), t.output),
                 ));
             }
             DebateEvent::Conflict(pairs) => self.conflicts = pairs,

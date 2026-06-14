@@ -9,6 +9,10 @@ on:
   # Allow a manual run from the Actions tab.
   workflow_dispatch:
 
+# Read-only token: auditing never needs write access to the repo.
+permissions:
+  contents: read
+
 concurrency:
   group: audit-${{ github.ref }}
   cancel-in-progress: true
@@ -27,11 +31,12 @@ jobs:
           node-version: 22
           cache: "pnpm"
       - run: pnpm install --frozen-lockfile
-      # --audit-level=high fails on HIGH or CRITICAL advisories. Low/moderate
-      # are surfaced as warnings but don't block — we re-evaluate those on the
-      # nightly cron rather than holding every PR.
+      # --audit-level=high fails on HIGH or CRITICAL advisories. We audit the
+      # FULL graph (no --prod): devDependencies (eslint, vitest, the build
+      # toolchain) all execute code at lint/test/build time on CI and dev
+      # machines, so a HIGH advisory against one of them must block too.
       - name: Run pnpm audit (high)
-        run: pnpm audit --audit-level=high --prod
+        run: pnpm audit --audit-level=high
 
   cargo-audit:
     name: cargo audit

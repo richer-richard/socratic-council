@@ -149,6 +149,17 @@ describe("bundle — export/import round-trip", () => {
     expect(() => parseBundle(junk)).toThrow(/valid zip archive/i);
   });
 
+  it("rejects a bundle with too many entries (decompression-bomb guard)", () => {
+    // A tiny multi-entry archive is the cheapest deflate bomb: thousands of
+    // small entries that inflate cheaply but flood the parser. The entry-count
+    // cap must fire (and its BundleError must survive the catch, not be wrapped
+    // as a generic "not a valid zip" error).
+    const entries: Record<string, Uint8Array> = {};
+    for (let i = 0; i < 8200; i += 1) entries[`f${i}.bin`] = strToU8("x");
+    const bomb = zipSync(entries);
+    expect(() => parseBundle(bomb)).toThrow(/too many entries/i);
+  });
+
   it("includes argmap.json + argmap.mmd when the session has an ArgGraph", () => {
     const session: DiscussionSession = {
       ...tinySession(),

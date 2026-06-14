@@ -5,6 +5,12 @@ on:
     branches: ["main", "master"]
   pull_request:
 
+# Least privilege: these jobs build and run untrusted PR code (pnpm lifecycle
+# scripts, build.rs, tests), so the default GITHUB_TOKEN must be read-only. No
+# job here needs write — there is nothing to elevate.
+permissions:
+  contents: read
+
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true

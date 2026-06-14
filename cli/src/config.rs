@@ -259,6 +259,15 @@ impl Config {
         let legacy_path = Self::key_path()?;
         if enc_path.exists() {
             config.load_encrypted_keys(&enc_path);
+            // The encrypted store is authoritative, so a plaintext `keys.toml`
+            // here is stale residue — from a crash between `save_keys`' write
+            // and its best-effort unlink, or an unlink that failed. This branch
+            // never re-enters the migration path below, so without this the
+            // plaintext keys would linger at rest (in backups/Time-Machine
+            // snapshots) forever, defeating the at-rest-encryption design.
+            if legacy_path.exists() {
+                let _ = std::fs::remove_file(&legacy_path);
+            }
         } else if legacy_path.exists() {
             // Legacy plaintext `keys.toml` from an earlier CLI — read it, then
             // re-write it encrypted and delete the plaintext (one-time migration).
