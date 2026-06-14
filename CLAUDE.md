@@ -182,7 +182,7 @@ reachable. App-side (**v2.2.1**): the desktop DEK temp file is created `0600` (w
 brief world-readable window before `chmod`). 59 CLI tests (+10 regressions), clippy
 clean on both feature sets.
 
-**Security patch (CLI v1.0.1 / app v2.2.2, from a 46-agent adversarial review).**
+**Security patch (CLI v1.0.1 / app v2.2.3, from a 46-agent adversarial review).**
 Nine confirmed findings fixed across both halves. **App:** (F1) `build_client`
 (`src-tauri/http.rs`) now sets `redirect(Policy::none())` — reqwest followed up to
 10 redirects and `validate_outbound_url` only checked the _initial_ URL, so a 3xx
@@ -202,8 +202,14 @@ a multibyte char no longer panics the engine task on a tampered DDG response. (F
 `Config::load` unconditionally removes a stale plaintext `keys.toml` whenever
 `keys.enc` exists. **CI/CD:** (F6) `release-cli.yml` pins every action to a commit
 SHA and runs the publish job read-only with `persist-credentials: false`; (F11)
-`ci.yml`/`audit.yml` gained top-level `permissions: contents: read`; (F12) the
-blocking `pnpm audit` dropped `--prod` so dev-dep advisories block too. Refuted
+`ci.yml`/`audit.yml` gained top-level `permissions: contents: read`; (F12)
+`audit.yml` keeps a `--prod` blocking gate (shipped advisories) plus a
+non-blocking full-graph step (dev-dep visibility). **F12 surfaced a pre-existing
+CRITICAL + 11 HIGH in _shipped_ deps the gate had been failing on, now cleared:**
+`jspdf`→`^4.2.1` (critical HTML-injection in `conversationExport.ts`'s PDF path),
+`@xmldom/xmldom`→`0.8.13` (pnpm override, transitive via `mammoth`, 5× XML
+injection), `undici`→`^6.24.0` (via `@socratic-council/sdk`, 3× WebSocket).
+Refuted
 (not fixed, not vulns): `csp:null`+`vault_get_dek` (no XSS sink exists), ENC1
 no-AAD (attacker needs a strictly stronger primitive), unbounded SSE buffer
 (trusted endpoint only). 99 CLI tests + 386 vitest, clippy clean both sets.
