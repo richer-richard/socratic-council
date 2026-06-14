@@ -1,4 +1,7 @@
 import { describe, it, expect } from "vitest";
+
+import type { DiscoveredModel } from "../types/index.js";
+
 import {
   resolveModel,
   capabilityScore,
@@ -9,7 +12,6 @@ import {
   mergeDiscoveredWithCatalog,
   catalogModelsForProvider,
 } from "./resolver.js";
-import type { DiscoveredModel } from "../types/index.js";
 
 function scanned(id: string, extra: Partial<DiscoveredModel> = {}): DiscoveredModel {
   return { id, provider: "openai", source: "scanned", ...extra };

@@ -1,6 +1,5 @@
-import { describe, it, expect, vi } from "vitest";
-
 import type { Message } from "@socratic-council/shared";
+import { describe, it, expect, vi } from "vitest";
 
 import {
   buildSummarizationPrompt,

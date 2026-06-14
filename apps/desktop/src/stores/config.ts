@@ -27,7 +27,6 @@
  *   `secretsPut` throw from fix 1.2.
  */
 
-import { useCallback, useSyncExternalStore } from "react";
 import {
   AUTO_MODEL,
   type AgentId,
@@ -37,6 +36,8 @@ import {
   mergeDiscoveredWithCatalog,
   resolveModel,
 } from "@socratic-council/shared";
+import { useCallback, useSyncExternalStore } from "react";
+
 import {
   apiKeyAccount,
   isSecretStoreReady,

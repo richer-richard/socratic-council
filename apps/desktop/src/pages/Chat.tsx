@@ -1,56 +1,3 @@
-import { useState, useEffect, useRef, useCallback, useMemo, forwardRef } from "react";
-import type { CSSProperties, HTMLAttributes } from "react";
-import type { Page } from "../App";
-import {
-  useConfig,
-  PROVIDER_INFO,
-  ANTHROPIC_OPUS_FALLBACK_MODEL,
-  TURNS_PER_ROUND,
-  resolveUtilityModel,
-  getAgentReasoningTier,
-  type Provider,
-} from "../stores/config";
-import { callProvider, apiLogger, type ChatMessage as APIChatMessage } from "../services/api";
-import { loadSessionAttachmentBlobs, type SessionAttachment } from "../services/attachments";
-import {
-  getBranchLineage,
-  listChildBranches,
-  type DeepResearchReportSnapshot,
-  type DiscussionSession,
-  type EndVoteChoice,
-  type EndVoteBallotSnapshot,
-  type EndVoteBoardSnapshot,
-  type EndVoteSnapshot,
-  type HandoffSnapshot,
-  type ModeratorConclusionSnapshot,
-  type ModeratorUsageSnapshot,
-  type SessionMessage as PersistedSessionMessage,
-  type SessionPhase,
-  type SessionStatus,
-  type SessionSummary,
-  type SessionToolEvent,
-} from "../services/sessions";
-import { getToolPrompt, runToolCall, type ToolCall, type ToolContext } from "../services/tools";
-import {
-  generateDeepResearchReport,
-  generateSessionTitle,
-  type TranscriptMessage as DeepResearchTranscriptMessage,
-} from "../services/deepResearch";
-import { addDossierEntry, loadProject } from "../services/projects";
-import { CouncilMark } from "../components/CouncilMark";
-import { ProviderIcon, SystemIcon, UserIcon } from "../components/icons/ProviderIcons";
-import {
-  ReactionIcon,
-  DEFAULT_REACTION,
-  REACTION_CATALOG,
-  type ReactionId,
-} from "../components/icons/ReactionIcons";
-import { Markdown } from "../components/Markdown";
-import { ConversationSearch } from "../components/ConversationSearch";
-import { ConversationExport } from "../components/ConversationExport";
-import { ConflictGraph } from "../components/ConflictGraph";
-import { PeerEvalScorecard } from "../components/PeerEvalScorecard";
-import { PeerCritiqueGraph } from "../components/PeerCritiqueGraph";
 import {
   ConflictDetector,
   CostTrackerEngine,
@@ -69,20 +16,6 @@ import {
   type RelevanceScores,
   type VerificationBadge,
 } from "@socratic-council/core";
-import { calculateMessageCost } from "../utils/cost";
-import { evaluateBudget, recordDailyCostDelta } from "../utils/budgetEnforcer";
-import { extractHandoffDirective } from "../utils/handoff";
-import {
-  createStreamingToolCallDetector,
-  extractActions,
-  stripProviderToolSyntax,
-} from "../utils/toolActions";
-import { splitIntoInlineQuoteSegments, stripQuoteTokens } from "../utils/inlineQuotes";
-import { CostBudgetBadge } from "../components/CostBudgetBadge";
-import { ArgumentMapPanel } from "../components/ArgumentMapPanel";
-import { BundleExportButton } from "../components/BundleActions";
-import { BranchAction, BranchPointBadge, type BranchPointEntry } from "../components/BranchAction";
-import { FactCheckStrip } from "../components/FactCheckBadge";
 import {
   applyFactCheckBadgesToGraph,
   buildExtractPrompt,
@@ -93,17 +26,6 @@ import {
   updateArgumentMap,
   type ArgGraph,
 } from "@socratic-council/core";
-import {
-  type CanvasState,
-  applyCanvasDirective,
-  deriveFinalMessageMetadata,
-  extractCanvasDirectives,
-  hasVisibleReplyContent,
-} from "../utils/canvasActions";
-import { AgentCanvas } from "../components/AgentCanvas";
-import { useObserverCircle } from "./useObserverCircle";
-import type { ObserverNoteSnapshot } from "../services/sessions";
-import { Virtuoso, type VirtuosoHandle } from "react-virtuoso";
 import type {
   ConflictDetection,
   CostTracker,
@@ -112,6 +34,86 @@ import type {
   AgentId as CouncilAgentId,
   ModelId,
 } from "@socratic-council/shared";
+import { useState, useEffect, useRef, useCallback, useMemo, forwardRef } from "react";
+import type { CSSProperties, HTMLAttributes } from "react";
+import { Virtuoso, type VirtuosoHandle } from "react-virtuoso";
+
+import type { Page } from "../App";
+import { AgentCanvas } from "../components/AgentCanvas";
+import { ArgumentMapPanel } from "../components/ArgumentMapPanel";
+import { BranchAction, BranchPointBadge, type BranchPointEntry } from "../components/BranchAction";
+import { BundleExportButton } from "../components/BundleActions";
+import { ConflictGraph } from "../components/ConflictGraph";
+import { ConversationExport } from "../components/ConversationExport";
+import { ConversationSearch } from "../components/ConversationSearch";
+import { CostBudgetBadge } from "../components/CostBudgetBadge";
+import { CouncilMark } from "../components/CouncilMark";
+import { FactCheckStrip } from "../components/FactCheckBadge";
+import { ProviderIcon, SystemIcon, UserIcon } from "../components/icons/ProviderIcons";
+import {
+  ReactionIcon,
+  DEFAULT_REACTION,
+  REACTION_CATALOG,
+  type ReactionId,
+} from "../components/icons/ReactionIcons";
+import { Markdown } from "../components/Markdown";
+import { PeerCritiqueGraph } from "../components/PeerCritiqueGraph";
+import { PeerEvalScorecard } from "../components/PeerEvalScorecard";
+import { callProvider, apiLogger, type ChatMessage as APIChatMessage } from "../services/api";
+import { loadSessionAttachmentBlobs, type SessionAttachment } from "../services/attachments";
+import {
+  generateDeepResearchReport,
+  generateSessionTitle,
+  type TranscriptMessage as DeepResearchTranscriptMessage,
+} from "../services/deepResearch";
+import { addDossierEntry, loadProject } from "../services/projects";
+import {
+  getBranchLineage,
+  listChildBranches,
+  type DeepResearchReportSnapshot,
+  type DiscussionSession,
+  type EndVoteChoice,
+  type EndVoteBallotSnapshot,
+  type EndVoteBoardSnapshot,
+  type EndVoteSnapshot,
+  type HandoffSnapshot,
+  type ModeratorConclusionSnapshot,
+  type ModeratorUsageSnapshot,
+  type SessionMessage as PersistedSessionMessage,
+  type SessionPhase,
+  type SessionStatus,
+  type SessionSummary,
+  type SessionToolEvent,
+} from "../services/sessions";
+import type { ObserverNoteSnapshot } from "../services/sessions";
+import { getToolPrompt, runToolCall, type ToolCall, type ToolContext } from "../services/tools";
+import {
+  useConfig,
+  PROVIDER_INFO,
+  ANTHROPIC_OPUS_FALLBACK_MODEL,
+  TURNS_PER_ROUND,
+  resolveUtilityModel,
+  getAgentReasoningTier,
+  type Provider,
+} from "../stores/config";
+import { evaluateBudget, recordDailyCostDelta } from "../utils/budgetEnforcer";
+import {
+  type CanvasState,
+  applyCanvasDirective,
+  deriveFinalMessageMetadata,
+  extractCanvasDirectives,
+  hasVisibleReplyContent,
+} from "../utils/canvasActions";
+import { calculateMessageCost } from "../utils/cost";
+import { extractHandoffDirective } from "../utils/handoff";
+import { splitIntoInlineQuoteSegments, stripQuoteTokens } from "../utils/inlineQuotes";
+import {
+  createStreamingToolCallDetector,
+  extractActions,
+  stripProviderToolSyntax,
+} from "../utils/toolActions";
+
+import { useObserverCircle } from "./useObserverCircle";
 
 interface ChatProps {
   session: DiscussionSession;
@@ -6037,7 +6039,7 @@ Write the official moderator wrap-up in 4 short sentences:
     argmapConsolidatorBusyRef.current = false;
     argmapConsolidatorLastMessageCountRef.current =
       normalizedSession.argmapConsolidationLastMessageCount ?? 0;
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- deliberately
+
     // keying only on session.id; argGraph/argmapExtractedIds props update on
     // load, but in-session mutations should NOT re-trigger this reset.
   }, [normalizedSession.id]);

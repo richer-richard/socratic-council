@@ -12,13 +12,14 @@
  * provider keys even if a misbehaving library logged them.
  */
 
+import desktopPkg from "../../package.json";
 import { apiLogger } from "../services/api";
 import type { AppConfig } from "../stores/config";
+
 import { redactValue } from "./redact";
 // Single source of truth for the version. The desktop package.json is
 // bumped on every release commit, so importing it directly avoids the
 // drift this file used to have ("1.0.0" hardcoded forever).
-import desktopPkg from "../../package.json";
 
 export interface ProviderHealth {
   provider: string;

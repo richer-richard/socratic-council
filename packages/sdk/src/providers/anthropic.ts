@@ -11,6 +11,9 @@
 
 import type { AgentConfig, AnthropicModel, ReasoningTier } from "@socratic-council/shared";
 import { API_ENDPOINTS } from "@socratic-council/shared";
+
+import { type Transport, createFetchTransport } from "../transport.js";
+
 import {
   type BaseProvider,
   type ChatMessage,
@@ -21,7 +24,6 @@ import {
   resolveEndpoint,
 } from "./base.js";
 import { createSseParser } from "./sse.js";
-import { type Transport, createFetchTransport } from "../transport.js";
 
 interface AnthropicMessage {
   role: "user" | "assistant";
@@ -118,7 +120,7 @@ type AnthropicThinkingMode = "adaptive" | "extended" | "none";
 
 interface AnthropicThinkingProfile {
   mode: AnthropicThinkingMode;
-  /** Opus 4.7's adaptive mode rejects any non-default sampling param (400). */
+  /** Opus 4.7 & 4.8's adaptive mode rejects any non-default sampling param (400). */
   prohibitsSampling: boolean;
 }
 
@@ -128,13 +130,16 @@ interface AnthropicThinkingProfile {
  *  - Opus 4.6 INTRODUCED adaptive thinking (extended budgets still allowed).
  *  - Opus 4.7 made adaptive the ONLY thinking-on mode (extended budget → 400)
  *    and rejects non-default sampling params.
- *  - Opus 4.8 REVERTED adaptive: back to extended thinking budgets, and
- *    sampling params are allowed again.
+ *  - Opus 4.8 keeps adaptive-only (NOT a revert): the live API rejects
+ *    `thinking.type.enabled` ("Use thinking.type.adaptive") and an explicit
+ *    temperature, both 400 — identical to 4.7. (Verified against the live API;
+ *    sending an extended budget here silently 400s every turn and falls back to
+ *    the previous-gen opus-4-7. See [[anthropic-thinking-profile]] / cli ant_profile.)
  *  - Other 4.x (Sonnet 4 / Haiku 4 / Opus 4.1 / 4.5): extended budgets.
  *  - Claude 3.x and anything else: no thinking.
  */
 function anthropicThinkingProfile(model: AnthropicModel): AnthropicThinkingProfile {
-  if (model.includes("opus-4-8")) return { mode: "extended", prohibitsSampling: false };
+  if (model.includes("opus-4-8")) return { mode: "adaptive", prohibitsSampling: true };
   if (model.includes("opus-4-7")) return { mode: "adaptive", prohibitsSampling: true };
   if (model.includes("opus-4-6")) return { mode: "adaptive", prohibitsSampling: false };
   if (model.includes("opus-4") || model.includes("sonnet-4") || model.includes("haiku-4")) {

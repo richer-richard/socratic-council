@@ -1,12 +1,13 @@
 import { useMemo, useState } from "react";
 
-import { ChamberSurface } from "./ChamberSurface";
+import type { AppConfig } from "../stores/config";
 import {
   buildDiagnosticsSnapshot,
   diagnosticsToText,
   type DiagnosticsSnapshot,
 } from "../utils/diagnostics";
-import type { AppConfig } from "../stores/config";
+
+import { ChamberSurface } from "./ChamberSurface";
 
 /**
  * Diagnostics — a dense monospaced dossier rendered like a terminal printout.

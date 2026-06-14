@@ -1,4 +1,5 @@
 import dagre from "@dagrejs/dagre";
+import type { ArgEdge, ArgNode, ArgNodeKind } from "@socratic-council/core";
 import {
   Background,
   BackgroundVariant,
@@ -13,10 +14,7 @@ import {
   type NodeProps,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-
 import { useMemo } from "react";
-
-import type { ArgEdge, ArgNode, ArgNodeKind } from "@socratic-council/core";
 
 import {
   ARGMAP_GOLD,

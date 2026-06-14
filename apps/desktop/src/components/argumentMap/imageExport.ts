@@ -1,5 +1,5 @@
-import { toPng, toSvg } from "html-to-image";
 import type { ReactFlowInstance } from "@xyflow/react";
+import { toPng, toSvg } from "html-to-image";
 
 import type { PanelView } from "./types";
 

@@ -13,9 +13,9 @@
  * Reused by both the desktop app and the Rust CLI design (parity).
  */
 
+import { getModelsByProvider, getDefaultModelForProvider } from "../constants/index.js";
 import type { DiscoveredModel, ModelInfo, Provider, ReasoningTier } from "../types/index.js";
 import { AUTO_MODEL } from "../types/index.js";
-import { getModelsByProvider, getDefaultModelForProvider } from "../constants/index.js";
 
 // Markers that flag a fast / cheap variant rather than a flagship.
 const SPEED_MARKERS =

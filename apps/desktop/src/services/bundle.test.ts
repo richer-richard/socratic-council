@@ -1,8 +1,22 @@
 import { strFromU8, strToU8, unzipSync, zipSync } from "fflate";
-import { describe, it, expect, beforeAll } from "vitest";
+import { describe, it, expect, beforeAll, vi } from "vitest";
 
-import { BUNDLE_SCHEMA_VERSION, exportBundle, parseBundle, type BundleAttachment } from "./bundle";
-import type { DiscussionSession } from "./sessions";
+import {
+  BUNDLE_SCHEMA_VERSION,
+  exportBundle,
+  importBundleSession,
+  parseBundle,
+  type BundleAttachment,
+} from "./bundle";
+import { loadDiscussionSession, type DiscussionSession } from "./sessions";
+
+// importBundleSession persists through ./sessions (localStorage + the vault),
+// which isn't initialized in unit tests. Mock the storage layer so the test
+// exercises only the pure id-remapping it does before persisting.
+vi.mock("./sessions", () => ({
+  loadDiscussionSession: vi.fn(() => null),
+  saveDiscussionSession: vi.fn((session: unknown) => session),
+}));
 
 // Install a minimal localStorage shim so `sessions.ts` modules don't crash at
 // import-time under the default node environment. The tests here never
@@ -218,5 +232,79 @@ describe("bundle — export/import round-trip", () => {
       "manifest.json": strToU8(JSON.stringify(manifest)),
     });
     expect(() => parseBundle(broken)).toThrow(/session\.json/);
+  });
+});
+
+describe("bundle — import re-mints attachment ids (F10 security fix)", () => {
+  function sessionWithAttachment(): DiscussionSession {
+    return {
+      ...tinySession(),
+      attachments: [
+        {
+          id: "att_orig_1",
+          name: "a.txt",
+          mimeType: "text/plain",
+          size: 8,
+          kind: "document",
+          source: "upload",
+          addedAt: 1,
+          width: null,
+          height: null,
+          fallbackText: "",
+        },
+      ],
+      messages: [
+        {
+          id: "m1",
+          role: "assistant",
+          agentId: "george",
+          content: "see file",
+          timestamp: 1,
+          attachmentIds: ["att_orig_1"],
+        },
+      ],
+    } as unknown as DiscussionSession;
+  }
+
+  function roundTrip() {
+    const session = sessionWithAttachment();
+    const attachments = new Map<string, BundleAttachment>();
+    attachments.set("att_orig_1", fakeAttachment("att_orig_1", "file one"));
+    return parseBundle(exportBundle({ session, attachments }));
+  }
+
+  it("re-mints every attachment id and rewrites all references", () => {
+    vi.mocked(loadDiscussionSession).mockReturnValueOnce(null);
+    const parsed = roundTrip();
+    const saved = importBundleSession(parsed);
+
+    // The id the caller will persist under is freshly minted, not attacker-supplied.
+    expect(parsed.attachments).toHaveLength(1);
+    expect(parsed.attachments[0].id).toMatch(/^att_imp_/);
+    expect(parsed.attachments[0].id).not.toBe("att_orig_1");
+
+    // Session + message references were rewritten to the SAME fresh id.
+    const freshId = parsed.attachments[0].id;
+    expect(saved.attachments[0].id).toBe(freshId);
+    expect(saved.messages[0].attachmentIds).toEqual([freshId]);
+
+    // The original (attacker-known) id must survive NOWHERE in the saved session —
+    // that is exactly what prevents the IndexedDB blob-clobber.
+    expect(JSON.stringify(saved)).not.toContain("att_orig_1");
+  });
+
+  it("re-mints the session id too when the id already exists locally", () => {
+    // A pre-existing local session forces a new session id — the original row
+    // (and its attachments) must be left untouched.
+    vi.mocked(loadDiscussionSession).mockReturnValueOnce({
+      id: "session_test_1",
+    } as unknown as DiscussionSession);
+    const parsed = roundTrip();
+    const saved = importBundleSession(parsed);
+
+    expect(saved.id).not.toBe("session_test_1");
+    expect(saved.id).toContain("_imp_");
+    expect(saved.title).toContain("(imported)");
+    expect(saved.attachments[0].id).toMatch(/^att_imp_/);
   });
 });

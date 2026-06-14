@@ -409,10 +409,20 @@ pub async fn http_request_stream(
 
                     pending_bytes.extend_from_slice(&bytes);
 
-                    loop {
-                        match std::str::from_utf8(&pending_bytes) {
-                            Ok(text) => {
-                                if !text.is_empty() {
+                    // Single pass (not a loop): decode the buffer, emit the valid
+                    // prefix, and keep any incomplete trailing multibyte sequence
+                    // buffered for the next chunk.
+                    match std::str::from_utf8(&pending_bytes) {
+                        Ok(text) => {
+                            if !text.is_empty() {
+                                emit_stream_event(&app, &request_id, text.to_string(), false, None);
+                            }
+                            pending_bytes.clear();
+                        }
+                        Err(error) => {
+                            let valid_up_to = error.valid_up_to();
+                            if valid_up_to > 0 {
+                                if let Ok(text) = std::str::from_utf8(&pending_bytes[..valid_up_to]) {
                                     emit_stream_event(
                                         &app,
                                         &request_id,
@@ -421,33 +431,18 @@ pub async fn http_request_stream(
                                         None,
                                     );
                                 }
-                                pending_bytes.clear();
-                                break;
+
+                                let remaining = pending_bytes.split_off(valid_up_to);
+                                pending_bytes = remaining;
                             }
-                            Err(error) => {
-                                let valid_up_to = error.valid_up_to();
-                                if valid_up_to > 0 {
-                                    if let Ok(text) = std::str::from_utf8(&pending_bytes[..valid_up_to])
-                                    {
-                                        emit_stream_event(
-                                            &app,
-                                            &request_id,
-                                            text.to_string(),
-                                            false,
-                                            None,
-                                        );
-                                    }
 
-                                    let remaining = pending_bytes.split_off(valid_up_to);
-                                    pending_bytes = remaining;
-                                }
-
-                                if error.error_len().is_none() {
-                                    break;
-                                }
-
+                            // `error_len().is_none()` => an incomplete sequence at the
+                            // end of the buffer; leave it for the next chunk. Otherwise
+                            // it's a genuinely invalid byte — fail the stream.
+                            if error.error_len().is_some() {
                                 let error_msg =
-                                    "Stream error: invalid UTF-8 sequence in response body".to_string();
+                                    "Stream error: invalid UTF-8 sequence in response body"
+                                        .to_string();
                                 emit_stream_event(
                                     &app,
                                     &request_id,

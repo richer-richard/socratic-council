@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+
 import { CostTrackerEngine } from "./cost.js";
 
 const agentIds = ["george", "cathy"] as const;

@@ -1,6 +1,7 @@
 import pdfWorkerUrl from "pdfjs-dist/legacy/build/pdf.worker.min.mjs?url";
 
 import type { Provider } from "../stores/config";
+
 import { decryptBytes, encryptBytes, isVaultReady } from "./vault";
 
 const ENCRYPTED_BLOB_MIME = "application/x-socratic-council-encrypted";

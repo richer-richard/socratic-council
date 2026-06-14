@@ -11,6 +11,9 @@
 
 import type { AgentConfig, OpenAIModel, ReasoningTier } from "@socratic-council/shared";
 import { API_ENDPOINTS } from "@socratic-council/shared";
+
+import { type Transport, createFetchTransport } from "../transport.js";
+
 import {
   type BaseProvider,
   type ChatMessage,
@@ -21,7 +24,6 @@ import {
   resolveEndpoint,
 } from "./base.js";
 import { createSseParser } from "./sse.js";
-import { type Transport, createFetchTransport } from "../transport.js";
 
 // Models that support reasoning.effort parameter
 const REASONING_MODELS: OpenAIModel[] = [

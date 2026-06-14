@@ -3,15 +3,15 @@
  * Discord-style circular avatars using provider logo marks (SVG assets)
  */
 
-import type { Provider } from "../../stores/config";
-import openaiLogo from "../../assets/providers/openai.svg";
 import anthropicLogo from "../../assets/providers/anthropic.svg";
-import googleLogo from "../../assets/providers/google.svg";
 import deepseekLogo from "../../assets/providers/deepseek.svg";
+import googleLogo from "../../assets/providers/google.svg";
 import kimiLogo from "../../assets/providers/kimi.svg";
-import qwenLogo from "../../assets/providers/qwen.png";
 import minimaxLogo from "../../assets/providers/minimax.png";
+import openaiLogo from "../../assets/providers/openai.svg";
+import qwenLogo from "../../assets/providers/qwen.png";
 import zhipuLogo from "../../assets/providers/zhipu.svg";
+import type { Provider } from "../../stores/config";
 
 interface IconProps {
   className?: string;

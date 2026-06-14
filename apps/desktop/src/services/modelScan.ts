@@ -22,7 +22,9 @@ import {
   mergeDiscoveredWithCatalog,
   catalogModelsForProvider,
 } from "@socratic-council/shared";
+
 import { PROVIDER_INFO, type ProviderCredential, type ProxyConfig } from "../stores/config";
+
 import { makeHttpRequest } from "./api";
 
 const SCAN_CACHE_PREFIX = "socratic-council-models:";

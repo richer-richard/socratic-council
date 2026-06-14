@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+
 import { parseModelsResponse, modelsEndpointFor } from "./modelScan";
 
 describe("parseModelsResponse", () => {

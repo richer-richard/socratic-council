@@ -1,9 +1,10 @@
+import { memo } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
+import rehypeHighlight from "rehype-highlight";
+import rehypeKatex from "rehype-katex";
+import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
-import remarkBreaks from "remark-breaks";
-import rehypeKatex from "rehype-katex";
-import rehypeHighlight from "rehype-highlight";
 
 interface MarkdownProps {
   content: string;
@@ -25,7 +26,12 @@ const defaultAnchor: Components["a"] = ({ href, children, ...props }) => {
   );
 };
 
-export function Markdown({ content, className, components }: MarkdownProps) {
+// Memoized: the markdown → remark/rehype/KaTeX/highlight.js pipeline is the most
+// expensive thing on the transcript render path, and it re-runs for EVERY visible
+// row on each ~50ms streaming flush. A shallow prop compare lets every row whose
+// `content` didn't change skip the re-parse entirely (callers that pass an inline
+// `components` object should memoize it so this compare stays effective).
+export const Markdown = memo(function Markdown({ content, className, components }: MarkdownProps) {
   return (
     <div className={className}>
       <ReactMarkdown
@@ -37,4 +43,4 @@ export function Markdown({ content, className, components }: MarkdownProps) {
       </ReactMarkdown>
     </div>
   );
-}
+});

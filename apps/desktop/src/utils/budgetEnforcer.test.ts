@@ -1,7 +1,8 @@
 import { describe, it, expect, beforeAll, beforeEach } from "vitest";
 
-import { evaluateBudget, getDailyCostUSD, recordDailyCostDelta } from "./budgetEnforcer";
 import type { BudgetPolicy } from "../stores/config";
+
+import { evaluateBudget, getDailyCostUSD, recordDailyCostDelta } from "./budgetEnforcer";
 
 // vitest's default "node" environment has no localStorage — install a minimal
 // in-memory shim so the enforcer's daily-total persistence works.

@@ -1,10 +1,11 @@
+import { getModelInfo } from "@socratic-council/shared";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
-import { CouncilMark } from "../components/CouncilMark";
-import { ConfigModal } from "../components/ConfigModal";
-import { Starfield } from "../components/Starfield";
-import { ProviderIcon } from "../components/icons/ProviderIcons";
 import { BundleImportButton } from "../components/BundleActions";
+import { ConfigModal } from "../components/ConfigModal";
+import { CouncilMark } from "../components/CouncilMark";
+import { ProviderIcon } from "../components/icons/ProviderIcons";
+import { Starfield } from "../components/Starfield";
 import {
   MAX_ATTACHMENT_BYTES,
   buildAttachmentListLabel,
@@ -13,10 +14,9 @@ import {
   revokeComposerAttachmentPreview,
   type ComposerAttachment,
 } from "../services/attachments";
-import type { SessionSummary, SessionStatus } from "../services/sessions";
 import type { ProjectSummary } from "../services/projects";
+import type { SessionSummary, SessionStatus } from "../services/sessions";
 import { useConfig, getShuffledTopics, LOCKED_MODELS, type Provider } from "../stores/config";
-import { getModelInfo } from "@socratic-council/shared";
 
 interface HomeProps {
   sessions: SessionSummary[];

@@ -6,6 +6,9 @@
 
 import type { AgentConfig, MiniMaxRequest, ReasoningTier } from "@socratic-council/shared";
 import { API_ENDPOINTS } from "@socratic-council/shared";
+
+import { type Transport, createFetchTransport } from "../transport.js";
+
 import type {
   BaseProvider,
   ChatMessage,
@@ -15,7 +18,6 @@ import type {
 } from "./base.js";
 import { createHeaders, resolveEndpoint } from "./base.js";
 import { createSseParser } from "./sse.js";
-import { type Transport, createFetchTransport } from "../transport.js";
 
 interface MiniMaxUsage {
   input_tokens?: number;
