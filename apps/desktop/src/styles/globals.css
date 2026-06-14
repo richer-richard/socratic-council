@@ -1,5 +1,5 @@
-@import url("https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Manrope:wght@300;400;500;600;700;800&display=swap");
-
+/* Fonts are self-hosted via @fontsource (imported in main.tsx) — no remote
+   @import, so the CSP can forbid all off-origin style/font sources. */
 @tailwind base;
 @tailwind components;
 @tailwind utilities;

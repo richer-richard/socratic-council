@@ -236,10 +236,24 @@ _branch_ ref) and a new `.github/dependabot.yml` keeps actions + deps current.
 **DX:** ESLint is gated via a root `--max-warnings` ratchet after a one-pass
 autofix cleared ~194 warnings (`lint:fix` added; `varsIgnorePattern: ^_`). Dead
 `vault_file::write_dek_atomic` removed; `allowlist.rs` rate-limit doc corrected
-(200→600). 100 CLI tests + 390 vitest, clippy clean both halves. _Deferred (need
-a WKWebView smoke test or a fragile-file refactor): a strict CSP + self-hosted
-fonts, the moderator-stream `setMessages` throttle, and the full 7.8k-line
-`Chat.tsx` monolith split._
+(200→600). 100 CLI tests + 390 vitest, clippy clean both halves.
+
+**Follow-up batch (app v2.2.5).** The previously-deferred items landed: (1)
+**fonts self-hosted** via `@fontsource` (Manrope/JetBrains Mono/Cormorant
+Garamond) — the Google-Fonts `@import` (a launch-time network beacon) is gone,
+76 woff2 bundled, zero remote refs. (2) **A strict CSP** in `tauri.conf.json`
+(`script-src 'self'`, `connect-src 'self' ipc: http://ipc.localhost` — all
+traffic is Rust-brokered so no provider hosts; Tauri augments the platform IPC/
+asset protocols). _The CSP builds clean but still wants one `pnpm tauri dev`
+smoke test (WKWebView can't be driven headlessly); revert is a one-line `"csp":
+null`._ (3) **Chat.tsx parser extraction** — the pure end-vote/conclusion
+parsers + `normalizeMessageText` moved to `src/chat/{transcriptParsers,text}.ts`
+with a `transcriptParsers.test.ts` (Chat.tsx 7845 → 7696 lines; enables TS↔Rust
+parity with `vote.rs`/`moderator.rs`). (4) **Moderator-stream throttle** — its
+per-token preview `setMessages` now coalesces to ~20fps (final content is set
+authoritatively post-stream, so no content is dropped). 396 vitest, typecheck +
+build + clippy + lint-ratchet green. _Still deferred: the full Chat.tsx monolith
+reorg beyond the parser slice._
 
 ### Desktop bridge (`cli/src/bridge.rs`, feature `desktop-bridge`, default on)
 
