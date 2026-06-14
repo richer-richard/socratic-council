@@ -1,6 +1,6 @@
 {
   "name": "socratic-council",
-  "version": "2.2.2",
+  "version": "2.2.3",
   "description": "A real-time multi-agent group chat where eight AI agents debate any topic",
   "private": true,
   "type": "module",
@@ -53,5 +53,11 @@
     "prettier": "^3.3.3",
     "typescript-eslint": "^8.13.0",
     "vitest": "^2.1.5"
+  },
+  "pnpm": {
+    "overrides": {
+      "@xmldom/xmldom@<0.8.13": "0.8.13",
+      "undici@<6.24.0": ">=6.24.0"
+    }
   }
 }

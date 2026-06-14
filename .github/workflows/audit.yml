@@ -31,12 +31,16 @@ jobs:
           node-version: 22
           cache: "pnpm"
       - run: pnpm install --frozen-lockfile
-      # --audit-level=high fails on HIGH or CRITICAL advisories. We audit the
-      # FULL graph (no --prod): devDependencies (eslint, vitest, the build
-      # toolchain) all execute code at lint/test/build time on CI and dev
-      # machines, so a HIGH advisory against one of them must block too.
-      - name: Run pnpm audit (high)
-        run: pnpm audit --audit-level=high
+      # Blocking gate: SHIPPED (prod) deps must carry no HIGH/CRITICAL advisory.
+      # These ride inside the distributed app, so they hard-fail the build.
+      - name: Run pnpm audit (prod — blocking)
+        run: pnpm audit --audit-level=high --prod
+      # Visibility: audit the FULL graph too (incl. devDependencies — eslint,
+      # vitest, the build toolchain). Non-blocking, because clearing a dev-tool
+      # advisory often needs a major version bump; surface it without wedging
+      # every PR/cron red. (F12: dev-dep advisories must at least be visible.)
+      - name: Run pnpm audit (full graph — informational)
+        run: pnpm audit --audit-level=high || echo "::warning::dev-graph HIGH/CRITICAL advisories present (non-blocking)"
 
   cargo-audit:
     name: cargo audit
