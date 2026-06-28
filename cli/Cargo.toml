@@ -35,16 +35,16 @@ desktop-bridge = ["dep:rusqlite"]
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "io-std", "io-util", "signal"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls", "socks"] }
 futures-util = "0.3"
-ratatui = "0.29"
-crossterm = "0.28"
+ratatui = "0.30"
+crossterm = "0.29"
 clap = { version = "4", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-toml = "0.8"
+toml = "1.1"
 regex = "1"
 thiserror = "2"
 anyhow = "1"
-directories = "5"
+directories = "6"
 unicode-width = "0.2"
 textwrap = "0.16"
 
@@ -53,11 +53,11 @@ textwrap = "0.16"
 # envelopes with the same primitive. No OS keychain, builds on every platform.
 chacha20poly1305 = "0.10"
 base64 = "0.22"
-getrandom = "0.2"
+getrandom = "0.4"
 
 # Desktop bridge (feature-gated): a bundled sqlite to read the app's WebView
 # localStorage. The only C dependency, and only when the bridge is enabled.
-rusqlite = { version = "0.32", features = ["bundled"], optional = true }
+rusqlite = { version = "0.40", features = ["bundled"], optional = true }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["rt", "macros"] }
