@@ -1235,7 +1235,7 @@ export const DEFAULT_AGENTS: Record<AgentId, AgentConfig> = {
     model: "gpt-6-astra",
     systemPrompt: baseSystemPrompt("George"),
     temperature: 1,
-    maxTokens: 4096,
+    maxTokens: 8192,
   },
   cathy: {
     id: "cathy",
@@ -1253,7 +1253,7 @@ export const DEFAULT_AGENTS: Record<AgentId, AgentConfig> = {
     model: "gemini-3.1-pro-preview",
     systemPrompt: baseSystemPrompt("Grace"),
     temperature: 1,
-    maxTokens: 4096,
+    maxTokens: 8192,
   },
   douglas: {
     id: "douglas",
@@ -1262,7 +1262,7 @@ export const DEFAULT_AGENTS: Record<AgentId, AgentConfig> = {
     model: "deepseek-v4-pro",
     systemPrompt: baseSystemPrompt("Douglas"),
     temperature: 1,
-    maxTokens: 4096,
+    maxTokens: 8192,
   },
   kate: {
     id: "kate",
@@ -1271,7 +1271,7 @@ export const DEFAULT_AGENTS: Record<AgentId, AgentConfig> = {
     model: "kimi-k3",
     systemPrompt: baseSystemPrompt("Kate"),
     temperature: 1,
-    maxTokens: 4096,
+    maxTokens: 8192,
   },
   quinn: {
     id: "quinn",
@@ -1280,7 +1280,7 @@ export const DEFAULT_AGENTS: Record<AgentId, AgentConfig> = {
     model: "qwen3.8-max",
     systemPrompt: baseSystemPrompt("Quinn"),
     temperature: 1,
-    maxTokens: 4096,
+    maxTokens: 8192,
   },
   mary: {
     id: "mary",
@@ -1289,7 +1289,7 @@ export const DEFAULT_AGENTS: Record<AgentId, AgentConfig> = {
     model: "MiniMax-M3",
     systemPrompt: baseSystemPrompt("Mary"),
     temperature: 1,
-    maxTokens: 4096,
+    maxTokens: 8192,
   },
   zara: {
     id: "zara",
@@ -1298,7 +1298,7 @@ export const DEFAULT_AGENTS: Record<AgentId, AgentConfig> = {
     model: "glm-5.3",
     systemPrompt: baseSystemPrompt("Zara"),
     temperature: 1,
-    maxTokens: 4096,
+    maxTokens: 8192,
   },
 };
 

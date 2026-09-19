@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 
 import { describe, it, expect } from "vitest";
 
-import { MODEL_REGISTRY } from "./index.js";
+import { DEFAULT_AGENTS, MODEL_REGISTRY } from "./index.js";
 
 /**
  * Drift guard for the hand-mirrored price tables. The CLI's `cli/src/engine/
@@ -57,5 +57,15 @@ describe("TS↔Rust price parity (drift guard)", () => {
       }
     }
     expect(mismatches).toEqual([]);
+  });
+});
+
+describe("default council seats", () => {
+  it("give every seat room to reason and then speak", () => {
+    // Kimi K3 at high effort and MiniMax-M3 adaptive both spent a 4096-token
+    // reply budget entirely on reasoning in a full debate and came back silent.
+    for (const agent of Object.values(DEFAULT_AGENTS)) {
+      expect(agent.maxTokens, agent.id).toBeGreaterThanOrEqual(8192);
+    }
   });
 });

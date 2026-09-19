@@ -33,6 +33,7 @@ import type {
   WhisperMessage,
   AgentId as CouncilAgentId,
   ModelId,
+  ReasoningTier,
 } from "@socratic-council/shared";
 import { useState, useEffect, useRef, useCallback, useMemo, forwardRef } from "react";
 import type { CSSProperties, HTMLAttributes } from "react";
@@ -3565,7 +3566,10 @@ Write the official moderator wrap-up in 4 short sentences:
 
   // Generate agent response using real API
   const generateAgentResponse = useCallback(
-    async (agentId: CouncilAgentId): Promise<ChatMessage | null> => {
+    async (
+      agentId: CouncilAgentId,
+      opts?: { reasoningTier?: ReasoningTier },
+    ): Promise<ChatMessage | null> => {
       if (abortRef.current) return null;
 
       const currentConfig = configRef.current;
@@ -3843,7 +3847,7 @@ Write the official moderator wrap-up in 4 short sentences:
               requestTimeoutMs,
               signal: requestController.signal,
               disableThinking: requestOptions?.disableThinking,
-              reasoningTier: getAgentReasoningTier(agentConfig.provider),
+              reasoningTier: opts?.reasoningTier ?? getAgentReasoningTier(agentConfig.provider),
             },
           );
 
@@ -5004,6 +5008,28 @@ Write the official moderator wrap-up in 4 short sentences:
             errMsg.includes("billing");
           if (looksTransient && !looksPermanent) {
             response = await generateAgentResponse(selectedSpeaker);
+          }
+        }
+        // A reasoning model can spend its whole reply budget thinking and
+        // come back "successful" with no text at all (Kimi K3 at high effort
+        // and MiniMax-M3 adaptive both did in an eight-seat debate). Retry
+        // once with the reasoning turned down; if the seat is still silent,
+        // record it as a failed turn instead of committing an empty message.
+        const cameBackEmpty = (r: ChatMessage | null): boolean =>
+          !!r &&
+          !r.error &&
+          !r.content.trim() &&
+          !r.requestedEnd &&
+          !(r.toolEvents && r.toolEvents.length > 0);
+        if (cameBackEmpty(response) && !abortRef.current) {
+          apiLogger.log(
+            "warn",
+            AGENT_CONFIG[selectedSpeaker].provider,
+            `${selectedSpeaker} returned no text (reply budget spent on reasoning); retrying with reduced reasoning`,
+          );
+          response = await generateAgentResponse(selectedSpeaker, { reasoningTier: "low" });
+          if (cameBackEmpty(response) && response) {
+            response = { ...response, error: "The model produced no answer this turn." };
           }
         }
         if (

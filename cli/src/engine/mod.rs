@@ -30,6 +30,43 @@ mod vote;
 use cost::{BudgetAction, BudgetPolicy, BudgetVerdict, CostLedger, DailyLedger};
 use moderator::ModeratorPick;
 
+/// Reply budget for one council turn. Reasoning models count their thinking
+/// against it, and 2048 was not enough for Kimi K3 or MiniMax-M3 to think and
+/// then speak in a full eight-seat debate.
+const COUNCIL_TURN_MAX_TOKENS: u32 = 8192;
+
+/// Stream one council turn: the outcome, the text that came back, and whether
+/// any reasoning was streamed. Tokens are forwarded live unless the draft is
+/// being held back for a reflection pass.
+async fn stream_turn(
+    http: &reqwest::Client,
+    provider: Provider,
+    base_url: &str,
+    api_key: &str,
+    req: &CompletionRequest,
+    tx: &UnboundedSender<DebateEvent>,
+    live: bool,
+) -> (crate::error::Result<Usage>, String, bool) {
+    let mut full = String::new();
+    let mut had_thinking = false;
+    let result = {
+        let mut on_chunk = |chunk: &CompletionChunk| {
+            if !chunk.content.is_empty() {
+                full.push_str(&chunk.content);
+                if live {
+                    let _ = tx.send(DebateEvent::Token(chunk.content.clone()));
+                }
+            }
+            if !chunk.thinking.is_empty() {
+                had_thinking = true;
+                let _ = tx.send(DebateEvent::Thinking(chunk.thinking.clone()));
+            }
+        };
+        stream_completion(http, provider, base_url, api_key, req, &mut on_chunk).await
+    };
+    (result, full, had_thinking)
+}
+
 /// Events streamed from the orchestrator to whatever drives the UI.
 #[derive(Debug, Clone)]
 pub enum DebateEvent {
@@ -490,7 +527,7 @@ impl Engine {
                 canvases.get(&agent.id).map(|c| canvas::summary(c)).unwrap_or_default();
             // Consume this agent's pending advisor whisper (latest note only).
             let advisor_note = pending_notes.remove(&agent.id);
-            let req = CompletionRequest {
+            let mut req = CompletionRequest {
                 model: model.clone(),
                 system: Some(agent.system_prompt.clone()),
                 messages: build_messages(
@@ -502,7 +539,7 @@ impl Engine {
                     advisor_note.as_ref(),
                     &tools_line,
                 ),
-                max_tokens: 2048,
+                max_tokens: COUNCIL_TURN_MAX_TOKENS,
                 temperature: 1.0,
                 tier: agent.tier,
             };
@@ -513,35 +550,41 @@ impl Engine {
             let reflecting = reflect_mode != Reflection::Off;
 
             let started = Instant::now();
-            let mut full = String::new();
-            let mut had_thinking = false;
-            let result = {
-                let mut on_chunk = |chunk: &CompletionChunk| {
-                    if !chunk.content.is_empty() {
-                        full.push_str(&chunk.content);
-                        if !reflecting {
-                            let _ = tx.send(DebateEvent::Token(chunk.content.clone()));
-                        }
-                    }
-                    if !chunk.thinking.is_empty() {
-                        had_thinking = true;
-                        let _ = tx.send(DebateEvent::Thinking(chunk.thinking.clone()));
-                    }
-                };
-                stream_completion(
-                    &self.http,
-                    provider,
-                    &base_url,
-                    &api_key,
-                    &req,
-                    &mut on_chunk,
-                )
-                .await
-            };
+            let (mut result, mut full, mut had_thinking) =
+                stream_turn(&self.http, provider, &base_url, &api_key, &req, &tx, !reflecting)
+                    .await;
+            // A reasoning model can spend the whole reply budget thinking and
+            // return no text at all (Kimi K3 at `high` and MiniMax-M3 adaptive
+            // both did in an eight-seat debate, silently seating an empty
+            // turn). Bill the empty attempt, say so, and retry once with the
+            // reasoning turned down before giving up on the seat.
+            let empty_reply = result.is_ok()
+                && full.trim().is_empty()
+                && req.tier != ReasoningTier::Low
+                && !cancel.load(Ordering::Relaxed);
+            if empty_reply {
+                if let Ok(usage) = result {
+                    ledger.record(&agent.id, &agent.name, CostLane::Council, &model, usage);
+                }
+                let _ = tx.send(DebateEvent::Error(format!(
+                    "{} returned no text (the reply budget went to reasoning); retrying with reduced reasoning",
+                    agent.name
+                )));
+                req.tier = ReasoningTier::Low;
+                (result, full, had_thinking) =
+                    stream_turn(&self.http, provider, &base_url, &api_key, &req, &tx, !reflecting)
+                        .await;
+            }
 
             let mut proposed_end = false;
             match result {
                 Ok(usage) => {
+                    if full.trim().is_empty() {
+                        let _ = tx.send(DebateEvent::Error(format!(
+                            "{} produced no answer this turn",
+                            agent.name
+                        )));
+                    }
                     let thinking_ms = if had_thinking {
                         started.elapsed().as_millis() as u64
                     } else {
