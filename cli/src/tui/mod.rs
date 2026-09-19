@@ -11,6 +11,7 @@ mod home;
 mod settings;
 mod sidebar;
 pub mod theme;
+pub mod view;
 
 use crate::attach::Attachment;
 use crate::catalog::{resolve_model, DiscoveredModel};

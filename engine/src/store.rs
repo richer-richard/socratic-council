@@ -46,10 +46,19 @@ pub struct StoredSessionSummary {
     pub updated_at: i64,
     /// `"cli"` or `"app"` — which surface last wrote it.
     pub origin: String,
+    /// The file format: 2 for a v3 deliberation, 1 for a chat-era transcript.
+    pub version: u8,
+    /// The record's deliverable (or the plan's), when the run reached one.
+    pub deliverable: Option<String>,
+    /// The record's answer, when the run reached one.
+    pub answer: String,
+    pub total_usd: f64,
+    /// Why the run ended early, when it did ("cancelled", "budget", …).
+    pub stopped_early: Option<String>,
 }
 
 /// One transcript message as the store serialises it.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StoredMessage {
     /// Council id (`george`…`zara`), or `moderator` / `system` / `tool` / `error`.
     pub agent_id: String,
@@ -158,6 +167,18 @@ impl SessionStore {
                     message_count: v["messages"].as_array().map(|m| m.len()).unwrap_or(0) as u32,
                     updated_at: v["updatedAt"].as_i64().unwrap_or(0),
                     origin: v["origin"].as_str().unwrap_or("app").to_string(),
+                    version: if v["version"].as_u64() == Some(2) {
+                        2
+                    } else {
+                        1
+                    },
+                    deliverable: v["record"]["deliverable"]
+                        .as_str()
+                        .or_else(|| v["plan"]["deliverable"].as_str())
+                        .map(str::to_string),
+                    answer: v["record"]["answer"].as_str().unwrap_or("").to_string(),
+                    total_usd: v["costs"]["total_usd"].as_f64().unwrap_or(0.0),
+                    stopped_early: v["stoppedEarly"].as_str().map(str::to_string),
                 })
             })
             .collect();
@@ -364,6 +385,8 @@ mod tests {
         assert_eq!(list[0].id, id);
         assert_eq!(list[0].origin, "cli");
         assert_eq!(list[0].message_count, 3, "error rows are not persisted");
+        assert_eq!(list[0].version, 1);
+        assert!(list[0].deliverable.is_none() && list[0].answer.is_empty());
 
         let back = store.load(&id).unwrap();
         assert_eq!(back["topic"], "Should we X?");
@@ -436,7 +459,9 @@ mod tests {
         doc["version"] = json!(2);
         doc["protocol"] = json!("rounds");
         doc["rounds"] = json!([{ "kind": "positions", "entries": [] }]);
-        doc["record"] = json!({ "answer": "A" });
+        doc["record"] = json!({ "answer": "A", "deliverable": "decision" });
+        doc["costs"] = json!({ "total_usd": 0.25 });
+        doc["stoppedEarly"] = json!("budget");
         store.save(&doc).unwrap();
         let back = store.load("sc-v2-1").unwrap();
         assert_eq!(back["version"], 2);
@@ -448,6 +473,11 @@ mod tests {
         assert_eq!(restored[0].agent_id, "george");
         let summary = &store.list()[0];
         assert_eq!(summary.id, "sc-v2-1");
+        assert_eq!(summary.version, 2);
+        assert_eq!(summary.deliverable.as_deref(), Some("decision"));
+        assert_eq!(summary.answer, "A");
+        assert_eq!(summary.total_usd, 0.25);
+        assert_eq!(summary.stopped_early.as_deref(), Some("budget"));
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
