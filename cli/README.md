@@ -137,7 +137,7 @@ Three surfaces mirror the desktop app:
   one read-only, `r` reconvenes it.
 - **Session** — the deliberation as the engine runs it. The header shows the
   status, the deliverable, the phase trail (`Framing ▸ Prep ▸ Positions ▸
-  Cross-examination 1 ▸ …`), the estimate and the running cost. The main
+Cross-examination 1 ▸ …`), the estimate and the running cost. The main
   column puts the **decision record** first (answer, confidence, votes,
   dissent, options, assumptions, evidence, open questions, next actions),
   then the document, then every round with a card per seat — live seats
@@ -145,7 +145,7 @@ Three surfaces mirror the desktop app:
   reasoning trace out. The side column has **Plan**, **Board**, **Converge**,
   **Cost** and **Seats** tabs (`p` `b` `v` `$` `s`). When the moderator asks
   its clarifying question, or a seat asks to run a tool under `approval =
-  "ask"`, an overlay takes the keyboard (`Enter`/`Esc` answer; `y`/`n`
+"ask"`, an overlay takes the keyboard (`Enter`/`Esc` answer; `y`/`n`
   approve). `Esc` twice stops a live council; on a finished one `r`
   reconvenes it (the record becomes the planner's notes) and `e` exports the
   record and document as Markdown.

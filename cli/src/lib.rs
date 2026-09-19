@@ -5,8 +5,8 @@
 //! paths (`socratic_council::deliberation`, `::catalog`, ...).
 
 pub use socratic_council_engine::{
-    attach, catalog, cost, crypto, deliberation, error, http_client, providers, search, store,
-    text, tools, types,
+    attach, catalog, cost, crypto, deliberation, error, handoff, http_client, providers, search,
+    store, text, tools, types,
 };
 
 pub mod bridge;

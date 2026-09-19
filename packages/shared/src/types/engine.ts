@@ -204,6 +204,7 @@ export type EngineEvent =
   | { event: "document"; markdown: string }
   | { event: "cost"; snapshot: EngineCostSnapshot }
   | { event: "error"; message: string }
+  | { event: "handoff"; dir: string; files: string[] }
   | { event: "done"; session_id: string };
 
 /** One tool use a seat made during a turn, as persisted in the session file. */
@@ -247,6 +248,14 @@ export interface EngineSessionData {
   stoppedEarly: string | null;
   /** The roster the run was started with (for names and provider colours). */
   seats: EngineSeat[];
+  /** The hand-off folder the run wrote, when it did. */
+  handoff?: EngineHandoff | null;
+}
+
+/** The folder a run leaves behind: the brief, record, document, board, session. */
+export interface EngineHandoff {
+  dir: string;
+  files: string[];
 }
 
 export type EngineInput =

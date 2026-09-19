@@ -547,6 +547,13 @@ function normalizeEngineData(record: Record<string, unknown>): EngineSessionData
     costs: (isObject(source.costs) ? source.costs : null) as EngineSessionData["costs"],
     stoppedEarly: str(source.stoppedEarly),
     seats,
+    handoff:
+      isObject(source.handoff) && typeof source.handoff.dir === "string"
+        ? {
+            dir: source.handoff.dir,
+            files: arr(source.handoff.files).filter((f): f is string => typeof f === "string"),
+          }
+        : null,
   };
   const empty =
     !data.plan && !data.record && !data.document && !data.board && data.rounds.length === 0;

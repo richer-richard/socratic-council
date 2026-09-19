@@ -208,6 +208,15 @@ describe("session reducer", () => {
     expect(view.stoppedEarly).toBe("stopped");
   });
 
+  it("keeps the hand-off folder and ignores unknown events", () => {
+    let view = initialSessionView();
+    view = applyEvent(view, { event: "handoff", dir: "/ws/handoff", files: ["handoff.md"] });
+    expect(view.handoff).toEqual({ dir: "/ws/handoff", files: ["handoff.md"] });
+    const before = view;
+    view = applyEvent(view, { event: "something_new" } as unknown as EngineEvent);
+    expect(view).toBe(before);
+  });
+
   it("accepts a seat_finished without a matching seat_started", () => {
     const view = applyEvent(initialSessionView(), {
       event: "seat_finished",
@@ -249,8 +258,10 @@ describe("session reducer", () => {
       costs: cost(1),
       stoppedEarly: null,
       seats: [{ id: "grace", name: "Grace", provider: "google", model: "auto" }],
+      handoff: { dir: "/ws/handoff", files: ["handoff.md", "record.md"] },
     };
     const view = viewFromStored(data);
+    expect(view.handoff?.files).toEqual(["handoff.md", "record.md"]);
     expect(view.rounds[0]?.label).toBe("Cross-examination 2");
     expect(view.rounds[0]?.entries[0]?.provider).toBe("google");
     expect(view.document).toBe("# Doc");

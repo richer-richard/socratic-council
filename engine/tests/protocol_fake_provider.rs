@@ -188,6 +188,7 @@ fn config(
         workspace,
         daily_ledger_dir: None,
         session_id: Some("sc-test-1".into()),
+        handoff_dir: None,
     };
     let roster = Roster {
         seats: vec![
@@ -310,6 +311,22 @@ async fn whole_protocol_runs_with_a_tool_call_and_writes_a_v2_session() {
         .as_ref()
         .map(|c| c.total_input > 0)
         .unwrap_or(false));
+    let handoff = events
+        .iter()
+        .find_map(|e| match e {
+            DebateEvent::Handoff { dir, files } => Some((dir.clone(), files.clone())),
+            _ => None,
+        })
+        .expect("a hand-off event");
+    assert!(handoff.0.ends_with("/handoff"), "{}", handoff.0);
+    assert!(
+        handoff.1.iter().any(|f| f == "record.md"),
+        "{:?}",
+        handoff.1
+    );
+    let brief = std::fs::read_to_string(std::path::Path::new(&handoff.0).join("handoff.md"))
+        .expect("the brief was written");
+    assert!(brief.contains("The fake council is effective."), "{brief}");
     assert!(
         matches!(events.last(), Some(DebateEvent::Done { session_id }) if session_id == "sc-test-1")
     );
@@ -332,6 +349,7 @@ async fn whole_protocol_runs_with_a_tool_call_and_writes_a_v2_session() {
         .load("sc-test-1")
         .expect("the session was saved");
     assert_eq!(stored["record"]["answer"], "The fake council is effective.");
+    assert_eq!(stored["handoff"]["dir"], handoff.0);
     assert!(stored["messages"].as_array().unwrap().len() >= 6);
     assert!(
         stored["costs"]["total_input"].as_u64().unwrap_or(0) > 0,

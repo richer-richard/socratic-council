@@ -14,6 +14,7 @@ import {
   type EngineDecisionRecord,
   type EngineEstimate,
   type EngineEvent,
+  type EngineHandoff,
   type EnginePlan,
   type EngineProvider,
   type EngineRoundKind,
@@ -67,6 +68,8 @@ export interface SessionView {
   done: boolean;
   /** Set when the run ended early: "cancelled", "budget", "failed", … */
   stoppedEarly: string | null;
+  /** The hand-off folder, once the engine wrote it. */
+  handoff: EngineHandoff | null;
 }
 
 export function initialSessionView(): SessionView {
@@ -89,6 +92,7 @@ export function initialSessionView(): SessionView {
     active: [],
     done: false,
     stoppedEarly: null,
+    handoff: null,
   };
 }
 
@@ -243,6 +247,8 @@ export function applyEvent(state: SessionView, event: EngineEvent): SessionView 
       return { ...state, cost: event.snapshot };
     case "error":
       return { ...state, errors: [...state.errors, event.message] };
+    case "handoff":
+      return { ...state, handoff: { dir: event.dir, files: event.files } };
     case "done":
       return {
         ...state,
@@ -296,5 +302,6 @@ export function viewFromStored(data: EngineSessionData): SessionView {
     cost: data.costs,
     done: true,
     stoppedEarly: data.stoppedEarly,
+    handoff: data.handoff ?? null,
   };
 }

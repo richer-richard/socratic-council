@@ -623,6 +623,19 @@ export function Session({ session, live, onNavigate, onCancel, onAnswer, onDecid
             {view.board && <BoardCard board={view.board} />}
             {view.convergences.length > 0 && <ConvergenceCard items={view.convergences} />}
             <CostCard cost={view.cost} estimate={view.estimate} />
+            {view.handoff && (
+              <section className="session-card">
+                <h3 className="session-card-title">Hand-off</h3>
+                <p className="session-muted" title={view.handoff.dir}>
+                  {view.handoff.dir}
+                </p>
+                <ul className="session-list">
+                  {view.handoff.files.map((f) => (
+                    <li key={f}>{f}</li>
+                  ))}
+                </ul>
+              </section>
+            )}
           </aside>
         )}
       </div>

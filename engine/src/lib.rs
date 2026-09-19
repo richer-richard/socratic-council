@@ -14,6 +14,7 @@ pub mod cost;
 pub mod crypto;
 pub mod deliberation;
 pub mod error;
+pub mod handoff;
 pub mod providers;
 pub mod search;
 pub mod store;

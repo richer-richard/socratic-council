@@ -291,6 +291,7 @@ pub async fn engine_start(
         workspace,
         daily_ledger_dir: Some(data_dir),
         session_id: Some(session_id.clone()),
+        handoff_dir: None,
     };
     let attachments: Vec<Attachment> = request
         .attachments

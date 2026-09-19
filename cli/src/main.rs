@@ -77,6 +77,9 @@ enum Command {
         /// Workspace directory for tool files and commands (default: per session under the config dir).
         #[arg(long)]
         workspace: Option<std::path::PathBuf>,
+        /// Where to write the hand-off folder (record, document, board, brief, session; default: <workspace>/handoff).
+        #[arg(long, value_name = "DIR")]
+        handoff: Option<std::path::PathBuf>,
         /// Proxy URL for this run (http://, https://, socks5://…).
         #[arg(long)]
         proxy: Option<String>,
@@ -96,6 +99,15 @@ enum Command {
     },
     /// List stored sessions — shared with the desktop app when it is installed.
     Sessions,
+    /// Write (or rewrite) the hand-off folder for a stored session: the brief
+    /// with the next steps, the record, the document, the board and the session file.
+    Handoff {
+        /// The session id (see `sessions`).
+        session_id: String,
+        /// Destination folder (default: the session workspace's `handoff`).
+        #[arg(long, value_name = "DIR")]
+        to: Option<std::path::PathBuf>,
+    },
     /// List catalog models, or scan a provider's live models.
     Models {
         /// Limit to one provider slug.
@@ -163,6 +175,7 @@ async fn main() {
             budget,
             budget_action,
             workspace,
+            handoff,
             proxy,
             no_tui,
             json,
@@ -185,6 +198,7 @@ async fn main() {
                 budget,
                 budget_action,
                 workspace,
+                handoff,
                 proxy,
                 no_tui: no_tui || json,
                 json,
@@ -194,6 +208,7 @@ async fn main() {
             .await
         }
         Some(Command::Sessions) => cmd_sessions(),
+        Some(Command::Handoff { session_id, to }) => cmd_handoff(&session_id, to),
         Some(Command::Models { provider, scan }) => cmd_models(provider, scan).await,
         Some(Command::Providers) => cmd_providers(),
         Some(Command::Probe {
@@ -227,6 +242,7 @@ struct RunArgs {
     budget: Option<f64>,
     budget_action: Option<String>,
     workspace: Option<std::path::PathBuf>,
+    handoff: Option<std::path::PathBuf>,
     proxy: Option<String>,
     no_tui: bool,
     json: bool,
@@ -322,6 +338,32 @@ fn apply_run_flags(config: &mut Config, args: &RunArgs) -> anyhow::Result<()> {
     }
     if let Some(ws) = &args.workspace {
         config.workspace = Some(ws.clone());
+    }
+    if let Some(dir) = &args.handoff {
+        config.handoff = Some(dir.clone());
+    }
+    Ok(())
+}
+
+/// `socratic-council handoff <id> [--to DIR]`: rebuild the hand-off folder
+/// from the stored session.
+fn cmd_handoff(session_id: &str, to: Option<std::path::PathBuf>) -> anyhow::Result<()> {
+    let config = Config::load()?;
+    let store = socratic_council::bridge::open_store(config.bridge())
+        .ok_or_else(|| anyhow::anyhow!("no session store available"))?;
+    let doc = store.load(session_id).ok_or_else(|| {
+        anyhow::anyhow!(
+            "session {session_id} not found in {}",
+            store.dir().display()
+        )
+    })?;
+    let dir = to
+        .or_else(|| doc["handoff"]["dir"].as_str().map(std::path::PathBuf::from))
+        .unwrap_or_else(|| config.workspace_for(session_id).join("handoff"));
+    let files = socratic_council::handoff::write_handoff(&dir, &doc).map_err(anyhow::Error::msg)?;
+    println!("Hand-off written to {}", dir.display());
+    for f in files {
+        println!("  {f}");
     }
     Ok(())
 }
@@ -719,6 +761,9 @@ async fn run_plain(
                 }
             }
             DebateEvent::Error { message } => eprintln!("[error] {}", clean(&message)),
+            DebateEvent::Handoff { dir, files } => {
+                println!("\nHand-off: {} ({})", clean(&dir), files.join(", "));
+            }
             DebateEvent::Done { session_id } => {
                 println!("\nSaved as session {session_id}");
                 break;

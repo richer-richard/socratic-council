@@ -301,6 +301,12 @@ pub enum DebateEvent {
     Error {
         message: String,
     },
+    /// The hand-off folder was written: the brief, the record, the document,
+    /// the board and the session file.
+    Handoff {
+        dir: String,
+        files: Vec<String>,
+    },
     Done {
         session_id: String,
     },
@@ -400,6 +406,8 @@ pub struct EngineConfig {
     pub workspace: PathBuf,
     pub daily_ledger_dir: Option<PathBuf>,
     pub session_id: Option<String>,
+    /// Where the hand-off folder goes (default: `<workspace>/handoff`).
+    pub handoff_dir: Option<PathBuf>,
 }
 
 impl EngineConfig {
@@ -1436,7 +1444,22 @@ impl Deliberation {
         } else {
             "completed"
         };
-        let doc = this.session_json(&session_id, created_at, &state, &ledger, status);
+        let mut doc = this.session_json(&session_id, created_at, &state, &ledger, status);
+        let handoff_dir = this
+            .config
+            .handoff_dir
+            .clone()
+            .unwrap_or_else(|| this.config.workspace.join("handoff"));
+        match crate::handoff::write_handoff(&handoff_dir, &doc) {
+            Ok(files) => {
+                let dir = handoff_dir.display().to_string();
+                doc["handoff"] = json!({ "dir": dir, "files": files });
+                send(DebateEvent::Handoff { dir, files });
+            }
+            Err(e) => send(DebateEvent::Error {
+                message: format!("could not write the hand-off folder: {e}"),
+            }),
+        }
         if let Some(store) = &this.store {
             if let Err(e) = store.save(&doc) {
                 send(DebateEvent::Error {

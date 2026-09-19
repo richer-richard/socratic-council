@@ -85,6 +85,8 @@ pub struct SessionView {
     pub stopped_early: Option<String>,
     /// A v1 file's flat transcript (a session written before v3).
     pub legacy: Vec<StoredMessage>,
+    /// The hand-off folder and the files in it, once written.
+    pub handoff: Option<(String, Vec<String>)>,
 }
 
 /// A stable key per round: `prep`, `positions`, `cross-1`, `revision`, `critique`.
@@ -253,6 +255,9 @@ impl SessionView {
             DebateEvent::Document { markdown } => self.document = Some(scrub(&markdown)),
             DebateEvent::Cost { snapshot } => self.cost = Some(snapshot),
             DebateEvent::Error { message } => self.errors.push(scrub(&message)),
+            DebateEvent::Handoff { dir, files } => {
+                self.handoff = Some((scrub(&dir), files.iter().map(|f| scrub(f)).collect()));
+            }
             DebateEvent::Done { .. } => {
                 self.done = true;
                 self.active.clear();
@@ -345,6 +350,13 @@ impl SessionView {
             .ok()
             .filter(|_| doc["costs"].is_object());
         view.stopped_early = doc["stoppedEarly"].as_str().map(scrub);
+        if let Some(dir) = doc["handoff"]["dir"].as_str() {
+            let files = doc["handoff"]["files"]
+                .as_array()
+                .map(|a| a.iter().filter_map(|v| v.as_str()).map(scrub).collect())
+                .unwrap_or_default();
+            view.handoff = Some((scrub(dir), files));
+        }
         view.phase = (view.record.is_some() || view.document.is_some()).then(|| "Record".into());
         view.done = true;
         view
@@ -552,10 +564,18 @@ mod tests {
                 ..Default::default()
             },
         });
+        v.apply(DebateEvent::Handoff {
+            dir: "/ws/handoff".into(),
+            files: vec!["handoff.md".into()],
+        });
         v.apply(DebateEvent::Done {
             session_id: "s".into(),
         });
 
+        assert_eq!(
+            v.handoff.as_ref().map(|h| h.0.as_str()),
+            Some("/ws/handoff")
+        );
         assert_eq!(v.rounds.len(), 1);
         assert_eq!(v.rounds[0].kind, RoundKind::Positions);
         assert_eq!(v.rounds[0].entries.len(), 2);
@@ -731,6 +751,17 @@ mod tests {
         assert_eq!(v.cost.as_ref().unwrap().total_usd, 0.5);
         assert_eq!(v.stopped_early.as_deref(), Some("budget"));
         assert_eq!(v.phase.as_deref(), Some("Record"));
+        assert!(v.handoff.is_none());
+        let mut with = doc.clone();
+        with["handoff"] = json!({"dir": "/tmp/h", "files": ["handoff.md", "record.md"]});
+        let v = SessionView::from_stored(&with);
+        assert_eq!(
+            v.handoff,
+            Some((
+                "/tmp/h".to_string(),
+                vec!["handoff.md".to_string(), "record.md".to_string()]
+            ))
+        );
         assert!(v.done);
 
         // A v2 file that never reached a board or a record.

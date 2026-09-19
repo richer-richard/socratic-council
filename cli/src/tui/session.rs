@@ -188,6 +188,18 @@ fn render_main(f: &mut Frame, area: Rect, s: &mut SessionScreen, frame: u64) {
     if let Some(r) = &v.record {
         push_record(&mut lines, r, &names);
     }
+    if let Some((dir, files)) = &v.handoff {
+        push_section(&mut lines, "Hand-off");
+        lines.push(Line::from(vec![
+            Span::styled("  ", Style::default()),
+            Span::styled(dir.clone(), Style::default().fg(theme::TEXT)),
+        ]));
+        lines.push(Line::from(Span::styled(
+            format!("  {}", files.join(" · ")),
+            Style::default().fg(theme::DIM),
+        )));
+        lines.push(Line::from(""));
+    }
     if let Some(d) = &v.document {
         push_section(&mut lines, "Document");
         for line in d.lines() {

@@ -145,6 +145,9 @@ pub struct Config {
     /// `workspaces/<session>` folder under the config dir).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub workspace: Option<PathBuf>,
+    /// Where the hand-off folder goes (default: `<workspace>/handoff`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub handoff: Option<PathBuf>,
     /// USD cap per session (0 = unlimited).
     #[serde(default)]
     pub budget_per_session_usd: f64,
@@ -218,6 +221,7 @@ impl Default for Config {
             tools: ToolPolicy::default(),
             protocol: ProtocolPolicy::default(),
             workspace: None,
+            handoff: None,
             budget_per_session_usd: 0.0,
             budget_per_day_usd: 0.0,
             budget_action: "warn".to_string(),
@@ -642,6 +646,7 @@ impl Config {
             workspace: self.workspace_for(session_id),
             daily_ledger_dir: Self::config_dir().ok(),
             session_id: Some(session_id.to_string()),
+            handoff_dir: self.handoff.clone(),
         }
     }
 }
