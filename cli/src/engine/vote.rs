@@ -65,11 +65,15 @@ pub async fn cast(
         max_tokens: 512,
         temperature: 0.7,
         tier,
+        ..Default::default()
     };
     let mut out = String::new();
     let usage = {
         let mut on_chunk = |c: &CompletionChunk| out.push_str(&c.content);
-        match stream_completion(http, provider, base_url, key, &req, &mut on_chunk).await {
+        match stream_completion(http, provider, base_url, key, &req, &mut on_chunk)
+            .await
+            .map(|o| o.usage)
+        {
             Ok(usage) => usage,
             Err(_) => {
                 // A failed ballot abstains (and never blocks the motion).

@@ -914,6 +914,16 @@ pub fn catalog_rows(provider: Provider) -> Vec<ModelRow> {
     }
 }
 
+/// The wire protocol a provider speaks, independent of model.
+pub fn api_family(provider: Provider) -> ApiFamily {
+    match provider {
+        Provider::OpenAI => Responses,
+        Provider::Anthropic | Provider::MiniMax => Messages,
+        Provider::Google => Gemini,
+        Provider::DeepSeek | Provider::Kimi | Provider::Qwen | Provider::Zhipu => ChatCompletions,
+    }
+}
+
 /// The contract an unknown id inherits from its family, by prefix. Documented
 /// here because the live `/models` scan surfaces ids before the table does.
 pub fn family_contract(provider: Provider, id: &str) -> Contract {

@@ -196,6 +196,7 @@ pub async fn run(
             max_tokens: 2048,
             temperature: 0.5,
             tier: crate::types::ReasoningTier::Low,
+            ..Default::default()
         };
         let mut out = String::new();
         {
@@ -209,6 +210,7 @@ pub async fn run(
                 &mut on_chunk,
             )
             .await
+            .map(|o| o.usage)
             {
                 Ok(usage) => usages.push((evaluator.id.clone(), model.clone(), usage)),
                 Err(_) => continue,

@@ -12,8 +12,8 @@ use std::sync::OnceLock;
 
 pub mod rows;
 pub use rows::{
-    catalog_rows, family_class, family_contract, model_row, ApiFamily, Contract, ModelClass,
-    ModelRow, Pricing, ThinkingKnob, CNY_PER_USD,
+    api_family, catalog_rows, family_class, family_contract, model_row, ApiFamily, Contract,
+    ModelClass, ModelRow, Pricing, ThinkingKnob, CNY_PER_USD,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]

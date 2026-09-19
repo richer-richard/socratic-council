@@ -62,7 +62,9 @@ async fn stream_turn(
                 let _ = tx.send(DebateEvent::Thinking(chunk.thinking.clone()));
             }
         };
-        stream_completion(http, provider, base_url, api_key, req, &mut on_chunk).await
+        stream_completion(http, provider, base_url, api_key, req, &mut on_chunk)
+            .await
+            .map(|o| o.usage)
     };
     (result, full, had_thinking)
 }
@@ -601,6 +603,7 @@ impl Engine {
                 max_tokens: COUNCIL_TURN_MAX_TOKENS,
                 temperature: 1.0,
                 tier: agent.tier,
+                ..Default::default()
             };
 
             // With reflection on, the streamed draft is internal: suppress live
@@ -781,6 +784,7 @@ impl Engine {
                                 max_tokens: 256,
                                 temperature: 0.7,
                                 tier: ReasoningTier::Low,
+                                ..Default::default()
                             };
                             let mut out = String::new();
                             let nli = {
@@ -794,6 +798,7 @@ impl Engine {
                                     &mut on_chunk,
                                 )
                                 .await
+                                .map(|o| o.usage)
                             };
                             if let Ok(usage) = nli {
                                 ledger.record(

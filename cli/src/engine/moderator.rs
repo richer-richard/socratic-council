@@ -148,6 +148,7 @@ pub async fn generate(
         max_tokens: 1024,
         temperature: 0.7,
         tier: ReasoningTier::Low,
+        ..Default::default()
     };
 
     let mut out = String::new();
@@ -168,6 +169,7 @@ pub async fn generate(
             .await
             .ok()?
             .ok()?
+            .usage
     };
     let out = out.trim().to_string();
     (!out.is_empty()).then_some((out, usage))

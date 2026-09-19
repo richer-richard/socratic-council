@@ -7,19 +7,12 @@ pub mod sse;
 
 use crate::error::{Error, Result};
 use crate::types::{
-    ChatMessage, CompletionChunk, CompletionRequest, Provider, ReasoningTier, Role, Usage,
+    ChatMessage, CompletionChunk, CompletionOutcome, CompletionRequest, Provider, ReasoningTier,
+    Role, StopReason, ToolCall, Usage,
 };
 use futures_util::StreamExt;
 use serde_json::{json, Value};
 use sse::SseDecoder;
-
-fn role_str(role: Role) -> &'static str {
-    match role {
-        Role::System => "system",
-        Role::User => "user",
-        Role::Assistant => "assistant",
-    }
-}
 
 pub(crate) fn ensure_path(base: &str, version: &str, endpoint: &str) -> String {
     let base = base.trim_end_matches('/');
@@ -39,7 +32,7 @@ pub(crate) fn google_v1beta(base: &str) -> String {
     }
 }
 
-use crate::catalog::{model_row, ApiFamily, ThinkingKnob};
+use crate::catalog::{api_family, model_row, ApiFamily, ThinkingKnob};
 
 /// `reasoning.effort` for the Responses API: the three tiers map onto the
 /// documented low / medium / high; xhigh and max are never sent by default
@@ -151,16 +144,183 @@ struct PreparedRequest {
     body: Value,
 }
 
-fn non_system(messages: &[ChatMessage]) -> Vec<Value> {
-    messages
-        .iter()
-        .filter(|m| m.role != Role::System)
-        .map(|m| json!({ "role": role_str(m.role), "content": m.content }))
-        .collect()
-}
-
 fn bearer(api_key: &str) -> Vec<(String, String)> {
     vec![("Authorization".into(), format!("Bearer {api_key}"))]
+}
+
+fn args_string(call: &ToolCall) -> String {
+    serde_json::to_string(&call.arguments).unwrap_or_else(|_| "{}".into())
+}
+
+/// Responses API `input` items: text turns, echoed `function_call` items for
+/// assistant tool requests, and `function_call_output` items for results.
+fn responses_input(messages: &[ChatMessage]) -> Vec<Value> {
+    let mut out = Vec::new();
+    for m in messages {
+        match m.role {
+            Role::System => {}
+            Role::User => out.push(json!({ "role": "user", "content": m.content })),
+            Role::Assistant => {
+                if !m.content.is_empty() {
+                    out.push(json!({ "role": "assistant", "content": m.content }));
+                }
+                for c in &m.tool_calls {
+                    out.push(json!({
+                        "type": "function_call",
+                        "call_id": c.id,
+                        "name": c.name,
+                        "arguments": args_string(c),
+                    }));
+                }
+            }
+            Role::Tool => out.push(json!({
+                "type": "function_call_output",
+                "call_id": m.tool_call_id.clone().unwrap_or_default(),
+                "output": m.content,
+            })),
+        }
+    }
+    out
+}
+
+/// Messages API turns: assistant `tool_use` blocks, and every run of tool
+/// results folded into one user turn of `tool_result` blocks (the API
+/// requires all results for a turn in the next user message).
+fn messages_turns(messages: &[ChatMessage]) -> Vec<Value> {
+    let mut out: Vec<Value> = Vec::new();
+    for m in messages {
+        match m.role {
+            Role::System => {}
+            Role::User => out.push(json!({ "role": "user", "content": m.content })),
+            Role::Assistant => {
+                if m.tool_calls.is_empty() {
+                    out.push(json!({ "role": "assistant", "content": m.content }));
+                } else {
+                    let mut blocks = Vec::new();
+                    if !m.content.trim().is_empty() {
+                        blocks.push(json!({ "type": "text", "text": m.content }));
+                    }
+                    for c in &m.tool_calls {
+                        blocks.push(json!({ "type": "tool_use", "id": c.id, "name": c.name, "input": c.arguments }));
+                    }
+                    out.push(json!({ "role": "assistant", "content": blocks }));
+                }
+            }
+            Role::Tool => {
+                let block = json!({
+                    "type": "tool_result",
+                    "tool_use_id": m.tool_call_id.clone().unwrap_or_default(),
+                    "content": m.content,
+                });
+                let merged = match out.last_mut() {
+                    Some(last)
+                        if last["role"] == "user"
+                            && last["content"].is_array()
+                            && last["content"][0]["type"] == "tool_result" =>
+                    {
+                        last["content"].as_array_mut().unwrap().push(block.clone());
+                        true
+                    }
+                    _ => false,
+                };
+                if !merged {
+                    out.push(json!({ "role": "user", "content": [block] }));
+                }
+            }
+        }
+    }
+    out
+}
+
+/// Gemini `contents`: model turns carry `functionCall` parts (with their
+/// thought signatures), tool results become `functionResponse` parts in one
+/// user turn per run of results.
+fn gemini_contents(messages: &[ChatMessage]) -> Vec<Value> {
+    let mut out: Vec<Value> = Vec::new();
+    for m in messages {
+        match m.role {
+            Role::System => {}
+            Role::User => out.push(json!({ "role": "user", "parts": [{ "text": m.content }] })),
+            Role::Assistant => {
+                let mut parts = Vec::new();
+                if !m.content.trim().is_empty() || m.tool_calls.is_empty() {
+                    parts.push(json!({ "text": m.content }));
+                }
+                for c in &m.tool_calls {
+                    let mut part =
+                        json!({ "functionCall": { "name": c.name, "args": c.arguments } });
+                    if let Some(sig) = &c.signature {
+                        part["thoughtSignature"] = json!(sig);
+                    }
+                    parts.push(part);
+                }
+                out.push(json!({ "role": "model", "parts": parts }));
+            }
+            Role::Tool => {
+                let part = json!({
+                    "functionResponse": {
+                        "name": m.tool_name.clone().unwrap_or_default(),
+                        "response": { "result": m.content },
+                    }
+                });
+                let merged = match out.last_mut() {
+                    Some(last)
+                        if last["role"] == "user"
+                            && last["parts"][0].get("functionResponse").is_some() =>
+                    {
+                        last["parts"].as_array_mut().unwrap().push(part.clone());
+                        true
+                    }
+                    _ => false,
+                };
+                if !merged {
+                    out.push(json!({ "role": "user", "parts": [part] }));
+                }
+            }
+        }
+    }
+    out
+}
+
+/// chat/completions messages, system prompt first; assistant `tool_calls`
+/// and `role: tool` results as OpenAI documents them.
+fn chat_messages(system: Option<&str>, messages: &[ChatMessage]) -> Vec<Value> {
+    let mut out = Vec::new();
+    if let Some(system) = system {
+        if !system.trim().is_empty() {
+            out.push(json!({ "role": "system", "content": system }));
+        }
+    }
+    for m in messages {
+        match m.role {
+            Role::System => {}
+            Role::User => out.push(json!({ "role": "user", "content": m.content })),
+            Role::Assistant => {
+                let mut v = json!({ "role": "assistant", "content": m.content });
+                if !m.tool_calls.is_empty() {
+                    v["tool_calls"] = Value::Array(
+                        m.tool_calls
+                            .iter()
+                            .map(|c| {
+                                json!({
+                                    "id": c.id,
+                                    "type": "function",
+                                    "function": { "name": c.name, "arguments": args_string(c) },
+                                })
+                            })
+                            .collect(),
+                    );
+                }
+                out.push(v);
+            }
+            Role::Tool => out.push(json!({
+                "role": "tool",
+                "tool_call_id": m.tool_call_id.clone().unwrap_or_default(),
+                "content": m.content,
+            })),
+        }
+    }
+    out
 }
 
 fn prepare(
@@ -171,11 +331,12 @@ fn prepare(
 ) -> PreparedRequest {
     let row = model_row(provider, &req.model);
     let contract = row.contract;
+    let tools_on = contract.tools && !req.tools.is_empty();
     match contract.api {
         ApiFamily::Responses => {
             let mut body = json!({
                 "model": req.model,
-                "input": non_system(&req.messages),
+                "input": responses_input(&req.messages),
                 "max_output_tokens": req.max_tokens,
                 "stream": true,
             });
@@ -193,6 +354,25 @@ fn prepare(
                     }
                 }
             }
+            if tools_on {
+                body["tools"] = Value::Array(
+                    req.tools
+                        .iter()
+                        .map(|t| {
+                            json!({
+                                "type": "function",
+                                "name": t.name,
+                                "description": t.description,
+                                "parameters": t.parameters,
+                                "strict": false,
+                            })
+                        })
+                        .collect(),
+                );
+            }
+            if let Some(key) = &req.cache_key {
+                body["prompt_cache_key"] = json!(key);
+            }
             PreparedRequest {
                 url: ensure_path(base_url, "v1", "responses"),
                 headers: bearer(api_key),
@@ -202,7 +382,7 @@ fn prepare(
         ApiFamily::Messages => {
             let mut body = json!({
                 "model": req.model,
-                "messages": non_system(&req.messages),
+                "messages": messages_turns(&req.messages),
                 "max_tokens": req.max_tokens,
                 "stream": true,
             });
@@ -226,6 +406,21 @@ fn prepare(
             if !thinking_on && contract.sampling {
                 body["temperature"] = json!(req.temperature.min(1.0));
             }
+            if tools_on {
+                body["tools"] = Value::Array(
+                    req.tools
+                        .iter()
+                        .map(|t| json!({ "name": t.name, "description": t.description, "input_schema": t.parameters }))
+                        .collect(),
+                );
+            }
+            // Automatic prompt caching (Claude only): one top-level marker caches
+            // everything up to the last cacheable block and moves forward as the
+            // conversation grows. MiniMax's Anthropic-shaped endpoint does not
+            // document the field, so it is not sent there.
+            if req.cache_key.is_some() && provider == Provider::Anthropic {
+                body["cache_control"] = json!({ "type": "ephemeral" });
+            }
             let headers = vec![
                 ("x-api-key".into(), api_key.to_string()),
                 ("anthropic-version".into(), "2023-06-01".into()),
@@ -239,20 +434,6 @@ fn prepare(
             }
         }
         ApiFamily::Gemini => {
-            let system = req.system.clone();
-            let contents: Vec<Value> = req
-                .messages
-                .iter()
-                .filter(|m| m.role != Role::System)
-                .map(|m| {
-                    let role = if m.role == Role::Assistant {
-                        "model"
-                    } else {
-                        "user"
-                    };
-                    json!({ "role": role, "parts": [{ "text": m.content }] })
-                })
-                .collect();
             let mut gen = json!({
                 "temperature": req.temperature,
                 "maxOutputTokens": req.max_tokens,
@@ -274,9 +455,18 @@ fn prepare(
                 }
                 _ => {}
             }
-            let mut body = json!({ "contents": contents, "generationConfig": gen });
-            if let Some(system) = system {
+            let mut body =
+                json!({ "contents": gemini_contents(&req.messages), "generationConfig": gen });
+            if let Some(system) = &req.system {
                 body["systemInstruction"] = json!({ "parts": [{ "text": system }] });
+            }
+            if tools_on {
+                let decls: Vec<Value> = req
+                    .tools
+                    .iter()
+                    .map(|t| json!({ "name": t.name, "description": t.description, "parameters": t.parameters }))
+                    .collect();
+                body["tools"] = json!([{ "functionDeclarations": decls }]);
             }
             let url = format!(
                 "{}/models/{}:streamGenerateContent?alt=sse",
@@ -293,21 +483,9 @@ fn prepare(
             // Carry the system prompt as the leading `system` message — these
             // providers have no separate field for it. Without this the agent
             // never learns its role/constraints and rambles or invents.
-            let mut messages: Vec<Value> = Vec::new();
-            if let Some(system) = &req.system {
-                if !system.trim().is_empty() {
-                    messages.push(json!({ "role": "system", "content": system }));
-                }
-            }
-            messages.extend(
-                req.messages
-                    .iter()
-                    .filter(|m| m.role != Role::System)
-                    .map(|m| json!({ "role": role_str(m.role), "content": m.content })),
-            );
             let mut body = json!({
                 "model": req.model,
-                "messages": messages,
+                "messages": chat_messages(req.system.as_deref(), &req.messages),
                 "max_tokens": req.max_tokens,
                 "stream": true,
                 "stream_options": { "include_usage": true },
@@ -360,6 +538,19 @@ fn prepare(
             {
                 body["temperature"] = json!(req.temperature);
             }
+            if tools_on {
+                body["tools"] = Value::Array(
+                    req.tools
+                        .iter()
+                        .map(|t| {
+                            json!({
+                                "type": "function",
+                                "function": { "name": t.name, "description": t.description, "parameters": t.parameters },
+                            })
+                        })
+                        .collect(),
+                );
+            }
             let (version, base_seg) = match provider {
                 Provider::Qwen => ("v1", "chat/completions"),
                 Provider::Zhipu => ("v4", "chat/completions"),
@@ -385,12 +576,121 @@ fn num(value: &Value) -> u64 {
     value.as_u64().unwrap_or(0)
 }
 
-/// Parse one SSE JSON payload into a chunk, updating `usage` in place.
-fn parse_event(provider: Provider, value: &Value, usage: &mut Usage) -> CompletionChunk {
+/// Collects streamed tool calls (argument fragments arrive over many events,
+/// keyed by the provider's index) and the stop reason.
+#[derive(Debug, Default)]
+pub struct ToolAccumulator {
+    calls: Vec<PendingCall>,
+    stop: Option<StopReason>,
+}
+
+#[derive(Debug, Default)]
+struct PendingCall {
+    index: u64,
+    id: String,
+    name: String,
+    args: String,
+    signature: Option<String>,
+}
+
+impl ToolAccumulator {
+    fn open(&mut self, index: u64, id: &str, name: &str, args: &str) {
+        if let Some(c) = self.calls.iter_mut().find(|c| c.index == index) {
+            if !id.is_empty() {
+                c.id = id.to_string();
+            }
+            if !name.is_empty() {
+                c.name = name.to_string();
+            }
+            c.args.push_str(args);
+            return;
+        }
+        self.calls.push(PendingCall {
+            index,
+            id: id.to_string(),
+            name: name.to_string(),
+            args: args.to_string(),
+            signature: None,
+        });
+    }
+    fn append(&mut self, index: u64, fragment: &str) {
+        match self.calls.iter_mut().find(|c| c.index == index) {
+            Some(c) => c.args.push_str(fragment),
+            None => self.open(index, "", "", fragment),
+        }
+    }
+    /// Replace the argument buffer with the provider's authoritative full text.
+    fn set_args(&mut self, index: u64, full: &str) {
+        if let Some(c) = self.calls.iter_mut().find(|c| c.index == index) {
+            c.args = full.to_string();
+        }
+    }
+    fn push_whole(&mut self, name: &str, args: Value, signature: Option<String>) {
+        let index = self.calls.len() as u64;
+        self.calls.push(PendingCall {
+            index,
+            id: format!("call-{}", index + 1),
+            name: name.to_string(),
+            args: args.to_string(),
+            signature,
+        });
+    }
+    pub fn has_calls(&self) -> bool {
+        !self.calls.is_empty()
+    }
+    /// The finished calls; malformed argument text is kept under `_raw` so
+    /// the tool layer can report it instead of guessing.
+    pub fn finish(self) -> (Vec<ToolCall>, StopReason) {
+        // A provider may report a plain stop even though it emitted calls
+        // (Gemini finishes with STOP): the calls decide.
+        let stop = match self.stop {
+            Some(StopReason::MaxTokens) => StopReason::MaxTokens,
+            _ if !self.calls.is_empty() => StopReason::ToolUse,
+            Some(s) => s,
+            None => StopReason::EndTurn,
+        };
+        let calls = self
+            .calls
+            .into_iter()
+            .filter(|c| !c.name.is_empty())
+            .map(|c| {
+                let arguments = if c.args.trim().is_empty() {
+                    json!({})
+                } else {
+                    serde_json::from_str::<Value>(&c.args)
+                        .ok()
+                        .filter(|v| v.is_object())
+                        .unwrap_or_else(|| json!({ "_raw": c.args }))
+                };
+                ToolCall {
+                    id: if c.id.is_empty() {
+                        format!("call-{}", c.index + 1)
+                    } else {
+                        c.id
+                    },
+                    name: c.name,
+                    arguments,
+                    signature: c.signature,
+                }
+            })
+            .collect();
+        (calls, stop)
+    }
+}
+
+/// Parse one SSE JSON payload into a chunk, updating `usage` and the tool
+/// accumulator in place.
+fn parse_event(
+    provider: Provider,
+    value: &Value,
+    usage: &mut Usage,
+    acc: &mut ToolAccumulator,
+) -> CompletionChunk {
     let mut chunk = CompletionChunk::default();
-    match provider {
-        Provider::OpenAI => {
+    match api_family(provider) {
+        ApiFamily::Responses => {
             let t = value["type"].as_str().unwrap_or("");
+            let index = num(&value["output_index"]);
             if t == "response.output_text.delta" {
                 chunk.content = value["delta"].as_str().unwrap_or("").to_string();
             } else if t.ends_with(".delta") && (t.contains("reasoning") || t.contains("summary")) {
@@ -399,21 +699,62 @@ fn parse_event(provider: Provider, value: &Value, usage: &mut Usage) -> Completi
                 // FULL summary text; matching those re-emitted the whole trace
                 // 2-3× into the thinking panel.
                 chunk.thinking = value["delta"].as_str().unwrap_or("").to_string();
-            } else if t == "response.completed" {
+            } else if t == "response.output_item.added" && value["item"]["type"] == "function_call"
+            {
+                let item = &value["item"];
+                acc.open(
+                    index,
+                    item["call_id"].as_str().unwrap_or(""),
+                    item["name"].as_str().unwrap_or(""),
+                    item["arguments"].as_str().unwrap_or(""),
+                );
+            } else if t == "response.function_call_arguments.delta" {
+                acc.append(index, value["delta"].as_str().unwrap_or(""));
+            } else if t == "response.function_call_arguments.done" {
+                if let Some(full) = value["arguments"].as_str() {
+                    acc.set_args(index, full);
+                }
+            } else if t == "response.output_item.done" && value["item"]["type"] == "function_call" {
+                let item = &value["item"];
+                acc.open(
+                    index,
+                    item["call_id"].as_str().unwrap_or(""),
+                    item["name"].as_str().unwrap_or(""),
+                    "",
+                );
+                if let Some(full) = item["arguments"].as_str() {
+                    acc.set_args(index, full);
+                }
+            } else if t == "response.completed" || t == "response.incomplete" {
                 let u = &value["response"]["usage"];
                 usage.input = num(&u["input_tokens"]);
                 usage.output = num(&u["output_tokens"]);
                 usage.reasoning = num(&u["output_tokens_details"]["reasoning_tokens"]);
+                usage.cached_input = num(&u["input_tokens_details"]["cached_tokens"]);
+                if value["response"]["incomplete_details"]["reason"] == "max_output_tokens" {
+                    acc.stop = Some(StopReason::MaxTokens);
+                }
             }
         }
-        Provider::Anthropic | Provider::MiniMax => {
+        ApiFamily::Messages => {
             let t = value["type"].as_str().unwrap_or("");
-            if t == "content_block_delta" {
+            let index = num(&value["index"]);
+            if t == "content_block_start" && value["content_block"]["type"] == "tool_use" {
+                let b = &value["content_block"];
+                acc.open(
+                    index,
+                    b["id"].as_str().unwrap_or(""),
+                    b["name"].as_str().unwrap_or(""),
+                    "",
+                );
+            } else if t == "content_block_delta" {
                 let d = &value["delta"];
                 if let Some(tk) = d["thinking"].as_str() {
                     chunk.thinking = tk.to_string();
                 } else if let Some(tx) = d["text"].as_str() {
                     chunk.content = tx.to_string();
+                } else if d["type"] == "input_json_delta" {
+                    acc.append(index, d["partial_json"].as_str().unwrap_or(""));
                 }
             } else if t == "message_delta" {
                 if let Some(o) = value["usage"]["output_tokens"].as_u64() {
@@ -427,12 +768,22 @@ fn parse_event(provider: Provider, value: &Value, usage: &mut Usage) -> Completi
                         usage.input = i;
                     }
                 }
+                match value["delta"]["stop_reason"].as_str() {
+                    Some("tool_use") => acc.stop = Some(StopReason::ToolUse),
+                    Some("max_tokens") => acc.stop = Some(StopReason::MaxTokens),
+                    Some("end_turn") | Some("stop_sequence") => {
+                        acc.stop = Some(StopReason::EndTurn)
+                    }
+                    _ => {}
+                }
             } else if t == "message_start" {
                 let u = &value["message"]["usage"];
                 usage.input = num(&u["input_tokens"]);
+                usage.cached_input = num(&u["cache_read_input_tokens"]);
+                usage.cache_write = num(&u["cache_creation_input_tokens"]);
             }
         }
-        Provider::Google => {
+        ApiFamily::Gemini => {
             if let Some(parts) = value["candidates"][0]["content"]["parts"].as_array() {
                 for p in parts {
                     if let Some(tx) = p["text"].as_str() {
@@ -442,7 +793,20 @@ fn parse_event(provider: Provider, value: &Value, usage: &mut Usage) -> Completi
                             chunk.content.push_str(tx);
                         }
                     }
+                    if let Some(fc) = p.get("functionCall") {
+                        let args = fc["args"].clone();
+                        acc.push_whole(
+                            fc["name"].as_str().unwrap_or(""),
+                            if args.is_null() { json!({}) } else { args },
+                            p["thoughtSignature"].as_str().map(|s| s.to_string()),
+                        );
+                    }
                 }
+            }
+            match value["candidates"][0]["finishReason"].as_str() {
+                Some("MAX_TOKENS") => acc.stop = Some(StopReason::MaxTokens),
+                Some("STOP") if acc.stop.is_none() => acc.stop = Some(StopReason::EndTurn),
+                _ => {}
             }
             let u = &value["usageMetadata"];
             if let Some(i) = u["promptTokenCount"].as_u64() {
@@ -451,28 +815,69 @@ fn parse_event(provider: Provider, value: &Value, usage: &mut Usage) -> Completi
             if let Some(o) = u["candidatesTokenCount"].as_u64() {
                 usage.output = o;
             }
+            if let Some(r) = u["thoughtsTokenCount"].as_u64() {
+                usage.reasoning = r;
+            }
+            if let Some(c) = u["cachedContentTokenCount"].as_u64() {
+                usage.cached_input = c;
+            }
         }
-        Provider::DeepSeek | Provider::Kimi | Provider::Qwen | Provider::Zhipu => {
-            let delta = &value["choices"][0]["delta"];
+        ApiFamily::ChatCompletions => {
+            let choice = &value["choices"][0];
+            let delta = &choice["delta"];
             if let Some(c) = delta["content"].as_str() {
                 chunk.content = c.to_string();
             }
             if let Some(r) = delta["reasoning_content"].as_str() {
                 chunk.thinking = r.to_string();
             }
+            if let Some(calls) = delta["tool_calls"].as_array() {
+                for (i, c) in calls.iter().enumerate() {
+                    let index = c["index"].as_u64().unwrap_or(i as u64);
+                    acc.open(
+                        index,
+                        c["id"].as_str().unwrap_or(""),
+                        c["function"]["name"].as_str().unwrap_or(""),
+                        c["function"]["arguments"].as_str().unwrap_or(""),
+                    );
+                }
+            }
+            match choice["finish_reason"].as_str() {
+                Some("tool_calls") => acc.stop = Some(StopReason::ToolUse),
+                Some("length") => acc.stop = Some(StopReason::MaxTokens),
+                Some("stop") if acc.stop.is_none() => acc.stop = Some(StopReason::EndTurn),
+                _ => {}
+            }
             let u = &value["usage"];
             if u.is_object() {
                 usage.input = num(&u["prompt_tokens"]);
                 usage.output = num(&u["completion_tokens"]);
+                if let Some(r) = u["completion_tokens_details"]["reasoning_tokens"].as_u64() {
+                    usage.reasoning = r;
+                }
+                // OpenAI-compatible (Qwen, Kimi, Zhipu) report cache hits under
+                // prompt_tokens_details; DeepSeek uses prompt_cache_hit_tokens.
+                let cached = u["prompt_tokens_details"]["cached_tokens"]
+                    .as_u64()
+                    .or_else(|| u["prompt_cache_hit_tokens"].as_u64());
+                if let Some(c) = cached {
+                    usage.cached_input = c;
+                }
+                if let Some(w) = u["prompt_tokens_details"]["cache_creation_input_tokens"].as_u64()
+                {
+                    usage.cache_write = w;
+                }
             }
         }
     }
     chunk
 }
 
-/// Stream a completion, invoking `on_chunk` for each token, returning usage.
-/// `on_chunk` is synchronous (the orchestrator forwards into an unbounded
-/// channel), which keeps this borrow-friendly and avoids extra tasks.
+/// Stream a completion, invoking `on_chunk` for each live token, and return
+/// everything it produced: usage (with cache hits), the full text and
+/// thinking, any tool calls, and why it stopped. `on_chunk` is synchronous
+/// (the orchestrator forwards into an unbounded channel), which keeps this
+/// borrow-friendly and avoids extra tasks.
 pub async fn stream_completion(
     http: &reqwest::Client,
     provider: Provider,
@@ -480,7 +885,7 @@ pub async fn stream_completion(
     api_key: &str,
     req: &CompletionRequest,
     on_chunk: &mut (dyn FnMut(&CompletionChunk) + Send),
-) -> Result<Usage> {
+) -> Result<CompletionOutcome> {
     let prepared = prepare(provider, base_url, api_key, req);
     let mut builder = http.post(&prepared.url).json(&prepared.body);
     for (name, value) in &prepared.headers {
@@ -500,6 +905,9 @@ pub async fn stream_completion(
     let mut stream = resp.bytes_stream();
     let mut decoder = SseDecoder::new();
     let mut usage = Usage::default();
+    let mut acc = ToolAccumulator::default();
+    let mut text = String::new();
+    let mut thinking = String::new();
     // Carry incomplete UTF-8 sequences across network chunks so a multibyte
     // character (CJK/emoji) split on a chunk boundary isn't corrupted.
     let mut byte_buf: Vec<u8> = Vec::new();
@@ -515,10 +923,10 @@ pub async fn stream_completion(
             continue;
         }
         // The prefix is valid UTF-8 by construction.
-        let text: String = String::from_utf8_lossy(&byte_buf[..valid_len]).into_owned();
+        let chunk_text: String = String::from_utf8_lossy(&byte_buf[..valid_len]).into_owned();
         byte_buf.drain(..valid_len);
 
-        for payload in decoder.push(&text) {
+        for payload in decoder.push(&chunk_text) {
             if payload == "[DONE]" {
                 continue;
             }
@@ -530,15 +938,24 @@ pub async fn stream_completion(
                         eprintln!("[stream:{}] {t}", provider.slug());
                     }
                 }
-                let chunk = parse_event(provider, &value, &mut usage);
+                let chunk = parse_event(provider, &value, &mut usage, &mut acc);
                 if !chunk.content.is_empty() || !chunk.thinking.is_empty() {
+                    text.push_str(&chunk.content);
+                    thinking.push_str(&chunk.thinking);
                     on_chunk(&chunk);
                 }
             }
         }
     }
 
-    Ok(usage)
+    let (tool_calls, stop) = acc.finish();
+    Ok(CompletionOutcome {
+        usage,
+        text,
+        thinking,
+        tool_calls,
+        stop,
+    })
 }
 
 #[cfg(test)]
@@ -554,7 +971,278 @@ mod tests {
             max_tokens: 256,
             temperature: 1.0,
             tier: ReasoningTier::High,
+            tools: Vec::new(),
+            cache_key: None,
         }
+    }
+
+    fn spec() -> crate::types::ToolSpec {
+        crate::types::ToolSpec {
+            name: "web_search".into(),
+            description: "Search the web".into(),
+            parameters: json!({ "type": "object", "properties": { "query": { "type": "string" } }, "required": ["query"] }),
+        }
+    }
+
+    fn call(id: &str, q: &str) -> ToolCall {
+        ToolCall {
+            id: id.into(),
+            name: "web_search".into(),
+            arguments: json!({ "query": q }),
+            signature: None,
+        }
+    }
+
+    fn tool_round_trip() -> Vec<ChatMessage> {
+        vec![
+            ChatMessage::user("debate this"),
+            ChatMessage::assistant_with_calls(
+                "",
+                vec![call("c1", "rust 2026"), call("c2", "go 2026")],
+            ),
+            ChatMessage::tool("c1", "web_search", "rust: fine"),
+            ChatMessage::tool("c2", "web_search", "go: fine"),
+        ]
+    }
+
+    #[test]
+    fn responses_request_encodes_tools_function_calls_and_prompt_cache_key() {
+        let mut r = req("gpt-6-astra");
+        r.tools = vec![spec()];
+        r.cache_key = Some("sc-session-1".into());
+        r.messages = tool_round_trip();
+        let p = prepare(Provider::OpenAI, "https://api.openai.com", "k", &r);
+        assert_eq!(p.body["tools"][0]["type"], "function");
+        assert_eq!(p.body["tools"][0]["name"], "web_search");
+        assert_eq!(p.body["tools"][0]["parameters"]["required"][0], "query");
+        assert_eq!(p.body["prompt_cache_key"], "sc-session-1");
+        let input = p.body["input"].as_array().unwrap();
+        assert_eq!(input[0]["role"], "user");
+        assert_eq!(input[1]["type"], "function_call");
+        assert_eq!(input[1]["call_id"], "c1");
+        assert_eq!(input[1]["arguments"], "{\"query\":\"rust 2026\"}");
+        assert_eq!(input[3]["type"], "function_call_output");
+        assert_eq!(input[3]["call_id"], "c1");
+        assert_eq!(input[3]["output"], "rust: fine");
+        assert_eq!(input.len(), 5);
+    }
+
+    #[test]
+    fn messages_request_encodes_tool_use_results_and_cache_control() {
+        let mut r = req("claude-opus-5");
+        r.tools = vec![spec()];
+        r.cache_key = Some("sc-session-1".into());
+        r.messages = tool_round_trip();
+        let p = prepare(Provider::Anthropic, "https://api.anthropic.com", "k", &r);
+        assert_eq!(p.body["tools"][0]["input_schema"]["type"], "object");
+        assert_eq!(p.body["cache_control"]["type"], "ephemeral");
+        let msgs = p.body["messages"].as_array().unwrap();
+        assert_eq!(msgs.len(), 3, "both tool results fold into one user turn");
+        assert_eq!(msgs[1]["role"], "assistant");
+        assert_eq!(msgs[1]["content"][0]["type"], "tool_use");
+        assert_eq!(msgs[1]["content"][0]["id"], "c1");
+        assert_eq!(msgs[1]["content"][0]["input"]["query"], "rust 2026");
+        assert_eq!(msgs[2]["role"], "user");
+        assert_eq!(msgs[2]["content"][0]["type"], "tool_result");
+        assert_eq!(msgs[2]["content"][1]["tool_use_id"], "c2");
+        // MiniMax rides the same shape but does not get the cache marker.
+        let p = prepare(
+            Provider::MiniMax,
+            "https://api.minimaxi.com/anthropic",
+            "k",
+            &r,
+        );
+        assert!(p.body.get("cache_control").is_none());
+        assert_eq!(p.body["tools"][0]["name"], "web_search");
+    }
+
+    #[test]
+    fn gemini_request_encodes_function_declarations_and_responses() {
+        let mut r = req("gemini-3.1-pro-preview");
+        r.tools = vec![spec()];
+        let mut msgs = tool_round_trip();
+        msgs[1].tool_calls[0].signature = Some("sig-abc".into());
+        r.messages = msgs;
+        let p = prepare(
+            Provider::Google,
+            "https://generativelanguage.googleapis.com",
+            "k",
+            &r,
+        );
+        assert_eq!(
+            p.body["tools"][0]["functionDeclarations"][0]["name"],
+            "web_search"
+        );
+        let contents = p.body["contents"].as_array().unwrap();
+        assert_eq!(contents.len(), 3);
+        assert_eq!(contents[1]["role"], "model");
+        assert_eq!(
+            contents[1]["parts"][0]["functionCall"]["name"],
+            "web_search"
+        );
+        assert_eq!(contents[1]["parts"][0]["thoughtSignature"], "sig-abc");
+        assert_eq!(
+            contents[2]["parts"][1]["functionResponse"]["name"],
+            "web_search"
+        );
+        assert_eq!(
+            contents[2]["parts"][1]["functionResponse"]["response"]["result"],
+            "go: fine"
+        );
+    }
+
+    #[test]
+    fn chat_request_encodes_tool_calls_and_role_tool_results() {
+        let mut r = req("deepseek-v4-pro");
+        r.tools = vec![spec()];
+        r.messages = tool_round_trip();
+        let p = prepare(Provider::DeepSeek, "https://api.deepseek.com", "k", &r);
+        assert_eq!(p.body["tools"][0]["function"]["name"], "web_search");
+        let msgs = p.body["messages"].as_array().unwrap();
+        assert_eq!(msgs[0]["role"], "system");
+        assert_eq!(msgs[2]["role"], "assistant");
+        assert_eq!(msgs[2]["tool_calls"][1]["id"], "c2");
+        assert_eq!(
+            msgs[2]["tool_calls"][1]["function"]["arguments"],
+            "{\"query\":\"go 2026\"}"
+        );
+        assert_eq!(msgs[3]["role"], "tool");
+        assert_eq!(msgs[3]["tool_call_id"], "c1");
+        assert_eq!(msgs[4]["content"], "go: fine");
+    }
+
+    #[test]
+    fn tools_are_omitted_when_none_are_offered() {
+        for provider in Provider::ALL {
+            let p = prepare(provider, "https://example.com", "k", &req("some-model"));
+            assert!(p.body.get("tools").is_none(), "{provider:?}");
+            assert!(p.body.get("prompt_cache_key").is_none(), "{provider:?}");
+            assert!(p.body.get("cache_control").is_none(), "{provider:?}");
+        }
+    }
+
+    #[test]
+    fn responses_stream_accumulates_a_function_call() {
+        let mut usage = Usage::default();
+        let mut acc = ToolAccumulator::default();
+        for ev in [
+            json!({"type":"response.output_item.added","output_index":0,"item":{"type":"function_call","call_id":"call_1","name":"web_search","arguments":""}}),
+            json!({"type":"response.function_call_arguments.delta","output_index":0,"delta":"{\"query\":\"ru"}),
+            json!({"type":"response.function_call_arguments.delta","output_index":0,"delta":"st 2026\"}"}),
+            json!({"type":"response.output_item.done","output_index":0,"item":{"type":"function_call","call_id":"call_1","name":"web_search","arguments":"{\"query\":\"rust 2026\"}"}}),
+            json!({"type":"response.completed","response":{"usage":{"input_tokens":100,"output_tokens":10,"input_tokens_details":{"cached_tokens":60},"output_tokens_details":{"reasoning_tokens":3}}}}),
+        ] {
+            parse_event(Provider::OpenAI, &ev, &mut usage, &mut acc);
+        }
+        let (calls, stop) = acc.finish();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].id, "call_1");
+        assert_eq!(calls[0].name, "web_search");
+        assert_eq!(calls[0].arguments["query"], "rust 2026");
+        assert_eq!(stop, StopReason::ToolUse);
+        assert_eq!(usage.cached_input, 60);
+        assert_eq!(usage.reasoning, 3);
+    }
+
+    #[test]
+    fn messages_stream_accumulates_tool_use_and_cache_reads() {
+        let mut usage = Usage::default();
+        let mut acc = ToolAccumulator::default();
+        for ev in [
+            json!({"type":"message_start","message":{"usage":{"input_tokens":500,"cache_read_input_tokens":300,"cache_creation_input_tokens":50}}}),
+            json!({"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}),
+            json!({"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Let me check."}}),
+            json!({"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"toolu_1","name":"web_search","input":{}}}),
+            json!({"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{\"query\": \"San"}}),
+            json!({"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":" Francisco\"}"}}),
+            json!({"type":"content_block_stop","index":1}),
+            json!({"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"output_tokens":42}}),
+        ] {
+            let chunk = parse_event(Provider::Anthropic, &ev, &mut usage, &mut acc);
+            if ev["type"] == "content_block_delta" && ev["index"] == 0 {
+                assert_eq!(chunk.content, "Let me check.");
+            }
+        }
+        let (calls, stop) = acc.finish();
+        assert_eq!(calls[0].id, "toolu_1");
+        assert_eq!(calls[0].arguments["query"], "San Francisco");
+        assert_eq!(stop, StopReason::ToolUse);
+        assert_eq!(
+            (
+                usage.input,
+                usage.cached_input,
+                usage.cache_write,
+                usage.output
+            ),
+            (500, 300, 50, 42)
+        );
+    }
+
+    #[test]
+    fn gemini_function_call_arrives_whole_with_its_signature() {
+        let mut usage = Usage::default();
+        let mut acc = ToolAccumulator::default();
+        let ev = json!({
+            "candidates":[{"content":{"parts":[
+                {"text":"thinking...","thought":true},
+                {"functionCall":{"name":"web_search","args":{"query":"rust 2026"}},"thoughtSignature":"sig-1"}
+            ]},"finishReason":"STOP"}],
+            "usageMetadata":{"promptTokenCount":80,"candidatesTokenCount":12,"thoughtsTokenCount":30,"cachedContentTokenCount":20}
+        });
+        let chunk = parse_event(Provider::Google, &ev, &mut usage, &mut acc);
+        assert_eq!(chunk.thinking, "thinking...");
+        let (calls, stop) = acc.finish();
+        assert_eq!(calls[0].name, "web_search");
+        assert_eq!(calls[0].signature.as_deref(), Some("sig-1"));
+        assert_eq!(calls[0].id, "call-1");
+        assert_eq!(stop, StopReason::ToolUse, "a function call wins over STOP");
+        assert_eq!(
+            (
+                usage.input,
+                usage.output,
+                usage.reasoning,
+                usage.cached_input
+            ),
+            (80, 12, 30, 20)
+        );
+    }
+
+    #[test]
+    fn chat_completions_tool_call_deltas_by_index() {
+        let mut usage = Usage::default();
+        let mut acc = ToolAccumulator::default();
+        for ev in [
+            json!({"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_a","type":"function","function":{"name":"web_search","arguments":""}}]}}]}),
+            json!({"choices":[{"delta":{"tool_calls":[{"index":1,"id":"call_b","type":"function","function":{"name":"read_file","arguments":"{\"path\":"}}]}}]}),
+            json!({"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\"query\":\"x\"}"}}]}}]}),
+            json!({"choices":[{"delta":{"tool_calls":[{"index":1,"function":{"arguments":"\"a.txt\"}"}}]}}]}),
+            json!({"choices":[{"delta":{},"finish_reason":"tool_calls"}]}),
+            json!({"choices":[],"usage":{"prompt_tokens":200,"completion_tokens":20,"prompt_cache_hit_tokens":150,"completion_tokens_details":{"reasoning_tokens":5}}}),
+        ] {
+            parse_event(Provider::DeepSeek, &ev, &mut usage, &mut acc);
+        }
+        let (calls, stop) = acc.finish();
+        assert_eq!(calls.len(), 2);
+        assert_eq!(calls[0].id, "call_a");
+        assert_eq!(calls[0].arguments["query"], "x");
+        assert_eq!(calls[1].name, "read_file");
+        assert_eq!(calls[1].arguments["path"], "a.txt");
+        assert_eq!(stop, StopReason::ToolUse);
+        assert_eq!((usage.cached_input, usage.reasoning), (150, 5));
+        // Qwen / Kimi shape.
+        let mut usage = Usage::default();
+        let mut acc = ToolAccumulator::default();
+        let ev = json!({"choices":[],"usage":{"prompt_tokens":100,"completion_tokens":1,"prompt_tokens_details":{"cached_tokens":64}}});
+        parse_event(Provider::Qwen, &ev, &mut usage, &mut acc);
+        assert_eq!(usage.cached_input, 64);
+    }
+
+    #[test]
+    fn malformed_tool_arguments_are_kept_raw_not_guessed() {
+        let mut acc = ToolAccumulator::default();
+        acc.open(0, "c1", "web_search", "{not json");
+        let (calls, _) = acc.finish();
+        assert_eq!(calls[0].arguments["_raw"], "{not json");
     }
 
     /// Regression: every provider must actually transmit the system prompt.
@@ -860,8 +1548,9 @@ mod tests {
         let delta = json!({ "type": "response.reasoning_summary_text.delta", "delta": "step " });
         let done =
             json!({ "type": "response.reasoning_summary_text.done", "text": "step step step" });
-        let d = parse_event(Provider::OpenAI, &delta, &mut usage);
-        let f = parse_event(Provider::OpenAI, &done, &mut usage);
+        let mut acc = ToolAccumulator::default();
+        let d = parse_event(Provider::OpenAI, &delta, &mut usage, &mut acc);
+        let f = parse_event(Provider::OpenAI, &done, &mut usage, &mut acc);
         assert_eq!(d.thinking, "step ");
         assert!(
             f.thinking.is_empty(),

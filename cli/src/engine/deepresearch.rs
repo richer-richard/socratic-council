@@ -62,6 +62,7 @@ pub async fn run(
         max_tokens: 3072,
         temperature: 0.5,
         tier: ReasoningTier::Low,
+        ..Default::default()
     };
 
     let mut out = String::new();
@@ -76,6 +77,7 @@ pub async fn run(
             &mut on_chunk,
         )
         .await
+        .map(|o| o.usage)
         .ok()?
     };
     parse_report(&out).map(|report| (report, pick.model.clone(), usage))

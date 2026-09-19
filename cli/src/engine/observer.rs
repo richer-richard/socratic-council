@@ -124,6 +124,7 @@ pub async fn run_pass(
             max_tokens: 256,
             temperature: 0.7,
             tier,
+            ..Default::default()
         };
         let base_url = config.base_url(provider);
         let key = key.clone();
@@ -134,6 +135,7 @@ pub async fn run_pass(
                 let mut on_chunk = |c: &CompletionChunk| out.push_str(&c.content);
                 stream_completion(&http, provider, &base_url, &key, &req, &mut on_chunk)
                     .await
+                    .map(|o| o.usage)
                     .ok()?
             };
             let text: String = super::sanitize_terminal(out.trim())

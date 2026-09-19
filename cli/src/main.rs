@@ -856,6 +856,7 @@ async fn cmd_probe(
             max_tokens: 1024,
             temperature: 1.0,
             tier,
+            ..Default::default()
         };
         let mut content = String::new();
         let mut thinking = 0usize;
@@ -865,7 +866,9 @@ async fn cmd_probe(
                 content.push_str(&c.content);
                 thinking += c.thinking.chars().count();
             };
-            stream_completion(&http, provider, &base, &key, &req, &mut on_chunk).await
+            stream_completion(&http, provider, &base, &key, &req, &mut on_chunk)
+                .await
+                .map(|o| o.usage)
         };
         let secs = started.elapsed().as_secs_f32();
         match result {

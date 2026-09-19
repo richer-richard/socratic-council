@@ -52,12 +52,14 @@ Write ONLY the revised final response that will be shown to the council. Do not 
         temperature: 0.7,
         // Low tier keeps the revise pass cheap (the app disables thinking here).
         tier: ReasoningTier::Low,
+        ..Default::default()
     };
     let mut out = String::new();
     let usage = {
         let mut on_chunk = |c: &CompletionChunk| out.push_str(&c.content);
         stream_completion(http, provider, base_url, key, &req, &mut on_chunk)
             .await
+            .map(|o| o.usage)
             .ok()?
     };
     let out = out.trim().to_string();
