@@ -1159,8 +1159,7 @@ async function buildPdfBytes(options: {
 
     // Pre-compute layout for all segments
     type SegmentLayout =
-      | { kind: "text"; lines: string[] }
-      | { kind: "quote"; header: string; lines: string[] };
+      { kind: "text"; lines: string[] } | { kind: "quote"; header: string; lines: string[] };
 
     const segmentLayouts: SegmentLayout[] = [];
     const contentMaxW = maxWidth - cardPad * 2;

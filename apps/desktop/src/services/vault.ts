@@ -50,12 +50,7 @@ const DEK_LEN = 32;
  * banner on boot.
  */
 export type VaultStatus =
-  | "uninitialized"
-  | "existing"
-  | "freshly_created"
-  | "quarantined"
-  | "init_failed"
-  | "non_tauri";
+  "uninitialized" | "existing" | "freshly_created" | "quarantined" | "init_failed" | "non_tauri";
 
 interface VaultGetDekResponse {
   dek: number[];

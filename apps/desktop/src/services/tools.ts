@@ -8,11 +8,7 @@ import { apiLogger, makeHttpRequest } from "./api";
 import { type SessionAttachment, loadSessionAttachmentDocuments } from "./attachments";
 
 export type ToolName =
-  | "oracle.search"
-  | "oracle.web_search"
-  | "oracle.file_search"
-  | "oracle.verify"
-  | "oracle.cite";
+  "oracle.search" | "oracle.web_search" | "oracle.file_search" | "oracle.verify" | "oracle.cite";
 
 export interface ToolCall {
   name: ToolName;

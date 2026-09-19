@@ -50,14 +50,7 @@ import { initVault } from "../services/vault";
 export type { ReasoningTier } from "@socratic-council/shared";
 
 export type Provider =
-  | "openai"
-  | "anthropic"
-  | "google"
-  | "deepseek"
-  | "kimi"
-  | "qwen"
-  | "minimax"
-  | "zhipu";
+  "openai" | "anthropic" | "google" | "deepseek" | "kimi" | "qwen" | "minimax" | "zhipu";
 export type ProxyType = "none" | "http" | "https" | "socks5" | "socks5h";
 
 const VALID_PROVIDERS = [

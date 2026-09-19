@@ -46,20 +46,27 @@
     "@eslint/js": "^9.13.0",
     "@vitest/coverage-v8": "^2.1.5",
     "eslint": "^9.13.0",
-    "eslint-config-prettier": "^9.1.0",
+    "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-import": "^2.31.0",
     "eslint-plugin-jsx-a11y": "^6.10.0",
     "eslint-plugin-react": "^7.37.0",
     "eslint-plugin-react-hooks": "^5.1.0",
-    "prettier": "^3.3.3",
-    "typescript-eslint": "^8.13.0",
+    "prettier": "^3.9.6",
+    "typescript-eslint": "^8.69.0",
     "vitest": "^2.1.5"
   },
   "pnpm": {
     "overrides": {
-      "@xmldom/xmldom@<0.8.13": "0.8.13",
+      "@xmldom/xmldom@<0.8.15": "0.8.15",
       "undici@<6.24.0": ">=6.24.0",
-      "dompurify@<3.4.0": ">=3.4.0"
+      "nanoid@<5.1.16": ">=5.1.16",
+      "dompurify@<3.4.13": ">=3.4.13"
+    },
+    "auditConfig": {
+      "ignoreGhsas": [
+        "GHSA-w3rx-r6r6-pgpr",
+        "GHSA-5p2g-fcmc-qvqq"
+      ]
     }
   }
 }

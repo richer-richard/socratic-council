@@ -10,14 +10,7 @@ import { z } from "zod";
 // =============================================================================
 
 export type Provider =
-  | "openai"
-  | "anthropic"
-  | "google"
-  | "deepseek"
-  | "kimi"
-  | "qwen"
-  | "minimax"
-  | "zhipu";
+  "openai" | "anthropic" | "google" | "deepseek" | "kimi" | "qwen" | "minimax" | "zhipu";
 
 // =============================================================================
 // OPENAI MODELS & PARAMETERS

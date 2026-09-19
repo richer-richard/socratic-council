@@ -105,12 +105,7 @@ export interface ModeratorConclusionSnapshot {
 export type ResearchConfidence = "high" | "medium" | "low";
 
 export type ResearchReportPhase =
-  | "planning"
-  | "research"
-  | "synthesis"
-  | "formatting"
-  | "complete"
-  | "error";
+  "planning" | "research" | "synthesis" | "formatting" | "complete" | "error";
 
 export interface ResearchCitation {
   id: string; // short id like "c1"
