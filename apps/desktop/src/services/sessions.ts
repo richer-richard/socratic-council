@@ -1774,13 +1774,42 @@ function replaceIndexEntry(index: SessionSummary[], summary: SessionSummary): Se
   );
 }
 
+/**
+ * Hooks the shared-store sync layer (services/sessionSync.ts) registers so
+ * this module stays free of any Tauri/IPC dependency. Both are optional.
+ */
+interface SessionHooks {
+  onSaved?: (session: DiscussionSession) => void;
+  onDeleted?: (id: string) => void;
+}
+let sessionHooks: SessionHooks = {};
+
+export function registerSessionHooks(hooks: SessionHooks): void {
+  sessionHooks = hooks;
+}
+
+/**
+ * Persist a session that arrived from the shared store (written by the CLI or
+ * another app instance). Same normalisation + atomic save as
+ * `saveDiscussionSession`, but never re-exported — that would echo it straight
+ * back to the file it came from.
+ */
+export function importDiscussionSession(raw: unknown): DiscussionSession | null {
+  const normalized = normalizeDiscussionSession(raw);
+  if (!normalized) return null;
+  return saveDiscussionSession(normalized, { silent: true });
+}
+
 export function listSessionSummaries(): SessionSummary[] {
   return readIndex().sort(
     (a, b) => Math.max(b.lastOpenedAt, b.updatedAt) - Math.max(a.lastOpenedAt, a.updatedAt),
   );
 }
 
-export function saveDiscussionSession(session: DiscussionSession): DiscussionSession {
+export function saveDiscussionSession(
+  session: DiscussionSession,
+  options: { silent?: boolean } = {},
+): DiscussionSession {
   const storage = getStorage();
   if (!storage) {
     return session;
@@ -1834,6 +1863,14 @@ export function saveDiscussionSession(session: DiscussionSession): DiscussionSes
     );
   }
 
+  if (!options.silent) {
+    try {
+      sessionHooks.onSaved?.(safeSession);
+    } catch (error) {
+      console.warn("[sessions] onSaved hook failed", error);
+    }
+  }
+
   return safeSession;
 }
 
@@ -1876,6 +1913,11 @@ export function deleteDiscussionSession(id: string): boolean {
   try {
     storage.removeItem(createSessionStorageKey(id));
     writeIndex(readIndex().filter((entry) => entry.id !== id));
+    try {
+      sessionHooks.onDeleted?.(id);
+    } catch (error) {
+      console.warn("[sessions] onDeleted hook failed", error);
+    }
     return true;
   } catch (error) {
     console.error("Failed to delete session:", error);

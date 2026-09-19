@@ -14,6 +14,7 @@ pub mod engine;
 pub mod error;
 pub mod providers;
 pub mod search;
+pub mod store;
 pub mod tui;
 pub mod types;
 

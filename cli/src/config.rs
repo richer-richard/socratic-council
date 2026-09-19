@@ -239,6 +239,10 @@ impl Config {
 
     /// The CLI's own 32-byte data-encryption key (0600). Distinct from — and in
     /// a different directory than — the desktop app's `vault.key`.
+    pub fn cli_dek_path() -> Result<PathBuf> {
+        Self::dek_path()
+    }
+
     fn dek_path() -> Result<PathBuf> {
         Ok(Self::dirs()?.config_dir().join("vault.key"))
     }

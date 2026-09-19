@@ -6,6 +6,7 @@
 mod allowlist;
 mod http;
 mod redact;
+mod session_sync;
 mod vault_file;
 
 #[cfg(debug_assertions)]
@@ -18,7 +19,8 @@ pub fn run() {
     let mut builder = tauri::Builder::default()
         .manage(http::RequestRegistry::default())
         .plugin(tauri_plugin_store::Builder::new().build())
-        .plugin(tauri_plugin_http::init())
+        // No tauri-plugin-http: the webview has NO direct network path. Every
+        // outbound call is brokered by http.rs behind the allowlist.
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_opener::init());
@@ -51,6 +53,10 @@ pub fn run() {
             http::http_cancel,
             vault_file::vault_get_dek,
             vault_file::vault_reset,
+            session_sync::session_sync_list,
+            session_sync::session_sync_read,
+            session_sync::session_sync_write,
+            session_sync::session_sync_delete,
         ])
         .setup(|_app| {
             #[cfg(debug_assertions)]

@@ -32,6 +32,7 @@ import {
   touchDiscussionSession,
   type DiscussionSession,
 } from "./services/sessions";
+import { importSharedSessions } from "./services/sessionSync";
 import {
   getDecryptFailureCount,
   getQuarantinePath,
@@ -112,6 +113,17 @@ export default function App() {
       setSessions(sessionSummaries);
       setProjects(listProjectSummaries());
 
+      // Pull in anything the CLI wrote to the shared session store (and push
+      // app-only sessions out so the terminal can see them). Best-effort.
+      try {
+        const synced = await importSharedSessions();
+        if (!cancelled && (synced.imported > 0 || synced.exported > 0)) {
+          setSessions(listSessionSummaries());
+        }
+      } catch (error) {
+        console.warn("[App] session sync failed:", error);
+      }
+
       const status = getVaultStatus();
       const failedDecrypts = getDecryptFailureCount();
       if (status === "init_failed") {
@@ -127,6 +139,23 @@ export default function App() {
     return () => {
       cancelled = true;
     };
+  }, []);
+
+  // Re-sync with the shared session store whenever the window regains focus
+  // (the user may have just finished a debate in the terminal). Throttled so
+  // rapid focus flips don't hammer the disk.
+  useEffect(() => {
+    let last = 0;
+    const onFocus = () => {
+      const now = Date.now();
+      if (now - last < 5000) return;
+      last = now;
+      void importSharedSessions().then((synced) => {
+        if (synced.imported > 0 || synced.exported > 0) setSessions(listSessionSummaries());
+      });
+    };
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
   }, []);
 
   // Register a baseline command set — other pages can register additional

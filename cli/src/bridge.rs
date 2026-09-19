@@ -21,7 +21,7 @@
 use crate::config::TierSelection;
 use crate::types::{Provider, ReasoningTier};
 use std::collections::BTreeMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// Tauri bundle identifier of the desktop app — the key to every on-disk path.
 #[allow(dead_code)] // used only by the `desktop-bridge` feature's path resolver
@@ -82,6 +82,10 @@ pub struct DesktopBridge {
     dek: Option<[u8; 32]>,
     #[allow(dead_code)]
     localstorage_path: Option<PathBuf>,
+    /// The app data dir whose `vault.key` was readable — also where the shared
+    /// session store (`sessions/`) lives.
+    #[allow(dead_code)]
+    app_data_dir: Option<PathBuf>,
 }
 
 impl std::fmt::Debug for DesktopBridge {
@@ -117,6 +121,19 @@ impl DesktopBridge {
     /// eagerly from the file vault — kept for call-site symmetry. Never prompts.
     pub fn resolve_key(&self, provider: Provider) -> Option<String> {
         self.api_key(provider).map(|s| s.to_string())
+    }
+
+    /// The app data directory the bridge unlocked (its `vault.key` was
+    /// readable) — the home of the shared session store. `None` without the
+    /// app (or without the bridge feature).
+    pub fn app_data_dir(&self) -> Option<&Path> {
+        self.app_data_dir.as_deref()
+    }
+
+    /// The app's file DEK, when readable. Used only to seal/unseal the shared
+    /// session files with the same key the app uses. Never logged.
+    pub fn dek(&self) -> Option<[u8; 32]> {
+        self.dek
     }
 
     /// The desktop app's proxy password (unused until proxy wiring lands).
@@ -215,6 +232,7 @@ mod imp {
                 let dek_path = dir.join("vault.key");
                 if let Some(dek) = crypto::load_dek(&dek_path) {
                     bridge.dek = Some(dek);
+                    bridge.app_data_dir = Some(dir.clone());
                     dlog!("vault.key = {} dek_loaded=true", dek_path.display());
                     break;
                 }

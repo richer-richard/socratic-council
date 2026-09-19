@@ -107,7 +107,18 @@ socratic-council run "…" --scan        # scan live models before starting
 
 socratic-council models --scan         # list live models per provider
 socratic-council models --provider openai
+socratic-council probe                 # one tiny live call per provider: model, latency,
+                                       # content vs thinking, usage — proves keys + contracts
+socratic-council sessions              # list stored sessions
+socratic-council run --no-tui --resume <id> --max-turns 5   # continue a stored session
 ```
+
+Sessions are stored as encrypted files (one per session) in the desktop
+app's data directory when the app is installed — so a debate started in the
+terminal shows up in the app's history and can be opened there, and the
+app's sessions appear in the TUI history sidebar (`Tab`), where `Enter`
+continues one. Without the app, the same store lives under the CLI's own
+config dir; the terminal never needs the app.
 
 ### TUI
 

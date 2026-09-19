@@ -10,12 +10,13 @@ mod chat;
 mod home;
 mod settings;
 mod sidebar;
-mod theme;
+pub mod theme;
 
 use crate::attach::Attachment;
 use crate::catalog::{resolve_model, DiscoveredModel};
 use crate::config::{Config, KeySource};
-use crate::engine::{default_agents, DebateEvent, Engine};
+use crate::engine::{default_agents, DebateEvent, Engine, Turn};
+use crate::store::{self, SessionStore, StoredMessage};
 use crate::types::{
     Agent, CanvasSection, CostSnapshot, DeepResearchReport, ModeratorConclusion, PairScore,
     PeerEvalRound, Provider, Usage, VoteChoice,
@@ -94,6 +95,8 @@ pub struct TurnView {
     /// Snapshot of this agent's private canvas as of this turn (if updated).
     pub canvas: Vec<CanvasSection>,
     pub kind: TurnKind,
+    /// Unix milliseconds when the turn landed (persisted to the session store).
+    pub at_ms: u64,
 }
 
 impl TurnView {
@@ -107,7 +110,40 @@ impl TurnView {
             thinking_ms: 0,
             canvas: Vec::new(),
             kind,
+            at_ms: store::now_ms(),
         }
+    }
+
+    /// A stored message re-hydrated for the chamber (thinking + model kept).
+    fn from_stored(m: &StoredMessage) -> Self {
+        let council = theme::AGENTS.iter().any(|a| a.id == m.agent_id);
+        let kind = match m.agent_id.as_str() {
+            "tool" => TurnKind::Tool,
+            _ if council => TurnKind::Agent,
+            _ => TurnKind::Note,
+        };
+        let mut t = Self::of_kind(kind, &m.agent_id, &m.display_name, m.content.clone());
+        t.thinking = m.thinking.clone();
+        t.model = m.model.clone();
+        if m.at_ms > 0 {
+            t.at_ms = m.at_ms;
+        }
+        t
+    }
+
+    /// The store-shaped message for this turn (`None` for private whispers).
+    fn to_stored(&self) -> Option<StoredMessage> {
+        if self.kind == TurnKind::Whisper {
+            return None;
+        }
+        Some(StoredMessage {
+            agent_id: self.agent_id.clone(),
+            display_name: self.name.clone(),
+            content: self.content.clone(),
+            thinking: self.thinking.clone(),
+            model: self.model.clone(),
+            at_ms: self.at_ms,
+        })
     }
 
     fn note(agent_id: &str, name: &str, content: String) -> Self {
@@ -149,6 +185,8 @@ pub struct SessionRow {
     pub status: String,
     pub turns: u32,
     pub archived: bool,
+    /// `"cli"` / `"app"` — which surface last wrote the session.
+    pub origin: String,
 }
 
 struct EngineHandle {
@@ -248,6 +286,12 @@ pub struct Debate {
     pub done: bool,
     pub read_only: bool,
     engine: Option<EngineHandle>,
+    /// Identity in the shared session store (kept across resume).
+    pub session_id: String,
+    pub created_at_ms: u64,
+    /// What the store last saw, so persistence only runs on change.
+    persisted_len: usize,
+    persisted_done: bool,
 }
 
 /// Scrub raw terminal control/escape bytes out of model-derived text before it
@@ -316,6 +360,8 @@ impl Debate {
                     thinking_ms: 0,
                     canvas: Vec::new(),
                     kind: TurnKind::Agent,
+                    at_ms: store::now_ms(),
+
                 });
             }
             DebateEvent::Token(t) => {
@@ -420,6 +466,56 @@ impl Debate {
     }
 }
 
+/// Everything needed to resume a stored session in place.
+struct ResumeInfo {
+    session_id: String,
+    created_at_ms: u64,
+    turns: Vec<TurnView>,
+    turn_count: u32,
+}
+
+impl TurnView {
+    fn clone_shallow(&self) -> TurnView {
+        TurnView {
+            agent_id: self.agent_id.clone(),
+            name: self.name.clone(),
+            model: self.model.clone(),
+            content: self.content.clone(),
+            thinking: self.thinking.clone(),
+            thinking_ms: self.thinking_ms,
+            canvas: self.canvas.clone(),
+            kind: self.kind,
+            at_ms: self.at_ms,
+        }
+    }
+}
+
+/// Sidebar rows: the shared store first (newest first), then any app-index
+/// session the store doesn't have yet. Ids are unique across both.
+fn merge_session_rows(store: Option<&SessionStore>, bridge_rows: Vec<SessionRow>) -> Vec<SessionRow> {
+    let mut rows: Vec<SessionRow> = store
+        .map(|s| {
+            s.list()
+                .into_iter()
+                .map(|s| SessionRow {
+                    id: s.id,
+                    title: if s.title.is_empty() { s.topic } else { s.title },
+                    status: s.status,
+                    turns: s.current_turn,
+                    archived: false,
+                    origin: s.origin,
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    for r in bridge_rows {
+        if !rows.iter().any(|x| x.id == r.id) {
+            rows.push(r);
+        }
+    }
+    rows
+}
+
 pub struct App {
     ctx: AppContext,
     view: View,
@@ -442,6 +538,10 @@ pub struct App {
     key_draft: Option<KeyDraft>,
     /// Active option-row edit (discussion cap, advisors, budget, proxy).
     option_draft: Option<OptionDraft>,
+    /// The shared session store (the app's data dir when installed, else the
+    /// CLI's own). `None` only when neither location is usable.
+    store: Option<SessionStore>,
+    persist_warned: bool,
 }
 
 /// Total selectable rows in Settings: 8 providers + the option rows.
@@ -451,7 +551,8 @@ pub(crate) fn settings_row_count() -> usize {
 
 impl App {
     fn new(ctx: AppContext) -> Self {
-        let sessions = ctx
+        let store = SessionStore::open(ctx.config.bridge());
+        let bridge_rows = ctx
             .config
             .bridge()
             .sessions()
@@ -462,9 +563,13 @@ impl App {
                 status: s.status.clone(),
                 turns: s.current_turn,
                 archived: s.archived,
+                origin: "app".into(),
             })
             .collect::<Vec<_>>();
+        let sessions = merge_session_rows(store.as_ref(), bridge_rows);
         Self {
+            store,
+            persist_warned: false,
             view: View::Home,
             prev_view: View::Home,
             frame: 0,
@@ -502,24 +607,106 @@ impl App {
             return;
         }
         self.sessions_loaded = true;
-        if !self.ctx.config.bridge().has_sessions_to_unlock() {
+        let bridge_rows: Vec<SessionRow> = if self.ctx.config.bridge().has_sessions_to_unlock() {
+            self.ctx
+                .config
+                .bridge()
+                .read_sessions()
+                .into_iter()
+                .map(|s| SessionRow {
+                    id: s.id,
+                    title: s.title,
+                    status: s.status,
+                    turns: s.current_turn,
+                    archived: s.archived,
+                    origin: "app".into(),
+                })
+                .collect()
+        } else {
+            self.sessions.iter().filter(|r| r.origin == "app").cloned().collect()
+        };
+        self.sessions = merge_session_rows(self.store.as_ref(), bridge_rows);
+    }
+
+    /// Re-read the store (a debate just ended, or the app wrote something).
+    fn refresh_sessions(&mut self) {
+        self.sessions_loaded = false;
+        self.ensure_sessions();
+    }
+
+    /// Write the live debate's transcript to the shared store when it changed
+    /// (a new turn landed, or the debate finished). Best-effort: a failure is
+    /// surfaced once as a toast and never interrupts the debate.
+    fn persist_debate(&mut self) {
+        let Some(store) = self.store.as_ref() else { return };
+        let Some(d) = self.debate.as_mut() else { return };
+        if d.read_only || (d.turns.len() == d.persisted_len && d.done == d.persisted_done) {
             return;
         }
-        let loaded = self.ctx.config.bridge().read_sessions();
-        if loaded.is_empty() {
-            self.toast("No readable history (the app's vault couldn't be opened).");
+        let mut messages: Vec<StoredMessage> = d.turns.iter().filter_map(TurnView::to_stored).collect();
+        if let (true, Some(c)) = (d.done, d.conclusion.as_ref()) {
+            messages.push(StoredMessage {
+                agent_id: "moderator".into(),
+                display_name: "Moderator".into(),
+                content: format!(
+                    "Verdict: {} · Score {}/10\n{}\n{}",
+                    c.status.label(),
+                    c.score,
+                    c.summary,
+                    c.reason
+                ),
+                thinking: String::new(),
+                model: String::new(),
+                at_ms: store::now_ms(),
+            });
+        }
+        let status = if d.done { "completed" } else { "paused" };
+        let json = store::build_session_json(
+            &d.session_id,
+            &d.topic,
+            d.created_at_ms,
+            &messages,
+            status,
+            d.turn_count,
+            d.usage,
+        );
+        match store.save(&json) {
+            Ok(()) => {
+                d.persisted_len = d.turns.len();
+                d.persisted_done = d.done;
+                if d.done {
+                    self.refresh_sessions();
+                }
+            }
+            Err(e) if !self.persist_warned => {
+                self.persist_warned = true;
+                self.toast(format!("Couldn't save the session: {e}"));
+            }
+            Err(_) => {}
+        }
+    }
+
+    /// Continue the open read-only session: the stored transcript becomes
+    /// history and the council resumes on the same topic + session id.
+    fn continue_session(&mut self) {
+        let Some(d) = self.debate.as_ref() else { return };
+        if !d.read_only {
             return;
         }
-        self.sessions = loaded
-            .into_iter()
-            .map(|s| SessionRow {
-                id: s.id,
-                title: s.title,
-                status: s.status,
-                turns: s.current_turn,
-                archived: s.archived,
-            })
+        let prior: Vec<Turn> = d
+            .turns
+            .iter()
+            .filter(|t| t.kind != TurnKind::Whisper && t.agent_id != "error")
+            .map(|t| Turn { agent_id: t.agent_id.clone(), name: t.name.clone(), content: t.content.clone() })
             .collect();
+        let resume = ResumeInfo {
+            session_id: d.session_id.clone(),
+            created_at_ms: d.created_at_ms,
+            turns: d.turns.iter().map(|t| TurnView { canvas: Vec::new(), ..t.clone_shallow() }).collect(),
+            turn_count: d.turn_count,
+        };
+        let topic = d.topic.clone();
+        self.launch_debate(topic, prior, Some(resume));
     }
 
     fn toggle_sidebar(&mut self) {
@@ -533,6 +720,10 @@ impl App {
     /// Resolve keys (caching them for the session) and spawn the debate engine
     /// on a background task.
     fn start_debate(&mut self, topic: String) {
+        self.launch_debate(topic, Vec::new(), None);
+    }
+
+    fn launch_debate(&mut self, topic: String, prior: Vec<Turn>, resume: Option<ResumeInfo>) {
         let topic = topic.trim().to_string();
         if topic.is_empty() {
             return;
@@ -608,20 +799,29 @@ impl App {
         let display_cap = if config.max_turns == 0 { 0 } else { max_turns };
         let http = self.ctx.http.clone();
         let engine = Engine::new(http, config, topic.clone(), agents, available, keys, max_turns)
-            .with_attachments(self.ctx.attachments.clone());
+            .with_attachments(self.ctx.attachments.clone())
+            .with_prior_transcript(prior);
         let (tx, rx) = unbounded_channel();
         let cancel = Arc::new(AtomicBool::new(false));
         let engine_cancel = cancel.clone();
         let handle = tokio::spawn(async move { engine.run(tx, engine_cancel).await });
 
+        let (session_id, created_at_ms, turns, turn_count) = match resume {
+            Some(r) => (r.session_id, r.created_at_ms, r.turns, r.turn_count),
+            None => (store::new_session_id(), store::now_ms(), Vec::new(), 0),
+        };
         self.debate = Some(Debate {
             topic,
             roster,
-            turns: Vec::new(),
+            persisted_len: turns.len(),
+            persisted_done: false,
+            session_id,
+            created_at_ms,
+            turns,
             streaming: None,
             active: None,
             usage: Usage::default(),
-            turn_count: 0,
+            turn_count,
             max_turns: display_cap,
             conflicts: Vec::new(),
             cost: None,
@@ -656,6 +856,12 @@ impl App {
     /// Stop a running debate (if any) and return to Home.
     fn stop_debate(&mut self) {
         self.abort_engine();
+        if let Some(d) = self.debate.as_mut() {
+            if !d.read_only {
+                d.done = true; // a stopped debate is stored as "completed so far"
+            }
+        }
+        self.persist_debate();
         self.debate = None;
         self.view = View::Home;
     }
@@ -665,8 +871,36 @@ impl App {
         let Some(row) = self.sessions.get(self.sidebar_sel).cloned() else {
             return;
         };
-        let messages =
-            self.ctx.config.bridge().load_session_transcript(&row.id).unwrap_or_default();
+        // The shared store first (both surfaces write it); the app's
+        // localStorage index is the fallback for sessions the app has not
+        // exported yet.
+        let stored = self.store.as_ref().and_then(|s| s.load(&row.id));
+        let (messages, topic, created_at_ms): (Vec<StoredMessage>, String, u64) = match &stored {
+            Some(v) => (
+                store::messages_from_json(v),
+                v["topic"].as_str().unwrap_or(&row.title).to_string(),
+                v["createdAt"].as_u64().unwrap_or_else(store::now_ms),
+            ),
+            None => (
+                self.ctx
+                    .config
+                    .bridge()
+                    .load_session_transcript(&row.id)
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|m| StoredMessage {
+                        agent_id: m.agent_id,
+                        display_name: m.name,
+                        content: m.content,
+                        thinking: String::new(),
+                        model: String::new(),
+                        at_ms: 0,
+                    })
+                    .collect(),
+                row.title.clone(),
+                store::now_ms(),
+            ),
+        };
         if messages.is_empty() {
             self.toast("Couldn't read that session (locked, empty, or needs the app's key).");
             return;
@@ -677,7 +911,7 @@ impl App {
         // Derive a roster from the distinct speakers in the transcript.
         let mut roster: Vec<RosterEntry> = Vec::new();
         for m in &messages {
-            if matches!(m.agent_id.as_str(), "user" | "system" | "tool" | "error") {
+            if matches!(m.agent_id.as_str(), "user" | "system" | "tool" | "error" | "moderator") {
                 continue;
             }
             if roster.iter().any(|r| r.id == m.agent_id) {
@@ -690,21 +924,22 @@ impl App {
                 .unwrap_or(Provider::OpenAI);
             roster.push(RosterEntry {
                 id: m.agent_id.clone(),
-                name: m.name.clone(),
+                name: m.display_name.clone(),
                 provider,
-                model: String::new(),
+                model: m.model.clone(),
                 color: theme::speaker_color(&m.agent_id),
             });
         }
 
-        let turns = messages
-            .into_iter()
-            .map(|m| TurnView::note(&m.agent_id, &m.name, m.content))
-            .collect();
+        let turns: Vec<TurnView> = messages.iter().map(TurnView::from_stored).collect();
 
         self.debate = Some(Debate {
-            topic: row.title,
+            topic,
             roster,
+            session_id: row.id.clone(),
+            created_at_ms,
+            persisted_len: turns.len(),
+            persisted_done: true,
             turns,
             streaming: None,
             active: None,
@@ -714,7 +949,7 @@ impl App {
             conflicts: Vec::new(),
             cost: None,
             pane: SidePane::Roster,
-            status: "Saved session · read-only".into(),
+            status: "Saved session · Enter to continue it".into(),
             vote_boards: Vec::new(),
             peer_eval: None,
             conclusion: None,
@@ -803,6 +1038,10 @@ impl App {
             _ => {}
         }
 
+        if key.code == KeyCode::Enter && self.debate.as_ref().is_some_and(|d| d.read_only) {
+            self.continue_session();
+            return false;
+        }
         let Some(d) = self.debate.as_mut() else {
             self.view = View::Home;
             return false;
@@ -1180,6 +1419,11 @@ async fn run_loop(
             for ev in pending {
                 d.apply(ev);
             }
+        }
+        if had_events {
+            app.persist_debate();
+        }
+        if let Some(d) = app.debate.as_mut() {
             if disconnected && !d.done {
                 d.done = true;
                 d.active = None;
@@ -1318,6 +1562,8 @@ mod tests {
                         text: "- cost vs benefit\n- who decides".into(),
                     }],
                     kind: TurnKind::Agent,
+                    at_ms: 0,
+
                 },
                 TurnView::of_kind(
                     TurnKind::Whisper,
@@ -1341,6 +1587,8 @@ mod tests {
                 thinking_ms: 0,
                 canvas: Vec::new(),
                 kind: TurnKind::Agent,
+                at_ms: 0,
+
             }),
             active: Some("Cathy".into()),
             usage: Usage::default(),
@@ -1385,6 +1633,10 @@ mod tests {
             done: false,
             read_only: false,
             engine: None,
+            session_id: "sc-test".into(),
+            created_at_ms: 0,
+            persisted_len: 0,
+            persisted_done: false,
         }
     }
 
@@ -1501,8 +1753,8 @@ mod tests {
     fn renders_with_sidebar_open() {
         let mut app = test_app();
         app.sessions = vec![
-            SessionRow { id: "a".into(), title: "A debate".into(), status: "completed".into(), turns: 12, archived: false },
-            SessionRow { id: "b".into(), title: "Archived one".into(), status: "paused".into(), turns: 3, archived: true },
+            SessionRow { id: "a".into(), title: "A debate".into(), status: "completed".into(), turns: 12, archived: false, origin: "app".into() },
+            SessionRow { id: "b".into(), title: "Archived one".into(), status: "paused".into(), turns: 3, archived: true, origin: "cli".into() },
         ];
         app.sidebar_open = true;
         app.toast = Some("hello".into());
