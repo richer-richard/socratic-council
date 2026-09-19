@@ -84,7 +84,7 @@ impl fmt::Display for Provider {
 
 /// Council-wide reasoning level. Maps to a chosen model per provider and to a
 /// provider-specific reasoning-effort knob.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ReasoningTier {
     Low,
@@ -261,7 +261,7 @@ impl ChatMessage {
 }
 
 /// Token usage reported by a completion.
-#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Usage {
     pub input: u64,
     pub output: u64,
@@ -440,7 +440,7 @@ pub struct PeerEvalRound {
 }
 
 /// Which engine lane a completion is billed to in the cost ledger.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default, Serialize, Deserialize)]
 pub enum CostLane {
     #[default]
     Council,
@@ -461,7 +461,7 @@ impl CostLane {
 }
 
 /// One speaker's accumulated tokens + estimated cost.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CostRow {
     pub agent_id: String,
     pub name: String,
@@ -476,7 +476,7 @@ pub struct CostRow {
 }
 
 /// A point-in-time view of the session's cost ledger.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct CostSnapshot {
     /// Per-speaker rows, sorted by USD descending.
     pub rows: Vec<CostRow>,
@@ -571,5 +571,105 @@ impl ConclusionStatus {
             ConclusionStatus::Majority => "≈",
             ConclusionStatus::Unresolved => "✕",
         }
+    }
+}
+
+/// How a seat picks its model: the Auto resolver at a tier (High = flagship,
+/// Medium = balanced, Low = fast) or an explicit id from the provider.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum ModelChoice {
+    Auto(ReasoningTier),
+    Id(String),
+}
+
+impl ModelChoice {
+    /// `"auto"`, `"auto-fast"`, `"auto-balanced"`, or a model id.
+    pub fn parse(s: &str) -> ModelChoice {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "" | "auto" | "auto-flagship" => ModelChoice::Auto(ReasoningTier::High),
+            "auto-balanced" => ModelChoice::Auto(ReasoningTier::Medium),
+            "auto-fast" => ModelChoice::Auto(ReasoningTier::Low),
+            _ => ModelChoice::Id(s.trim().to_string()),
+        }
+    }
+    pub fn label(&self) -> String {
+        match self {
+            ModelChoice::Auto(ReasoningTier::High) => "auto".into(),
+            ModelChoice::Auto(ReasoningTier::Medium) => "auto-balanced".into(),
+            ModelChoice::Auto(ReasoningTier::Low) => "auto-fast".into(),
+            ModelChoice::Id(id) => id.clone(),
+        }
+    }
+}
+
+/// A provider plus a model choice (the moderator and utility slots).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ModelRef {
+    pub provider: Provider,
+    pub model: ModelChoice,
+}
+
+/// One council seat: a name, a provider and a model. Several seats may share
+/// a provider.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Seat {
+    pub id: String,
+    pub name: String,
+    pub provider: Provider,
+    pub model: ModelChoice,
+    /// Overrides the round's reasoning tier for this seat.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning: Option<ReasoningTier>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Roster {
+    pub seats: Vec<Seat>,
+}
+
+/// The eight named seats, one per provider, in the traditional order.
+pub const DEFAULT_SEATS: [(&str, &str, Provider); 8] = [
+    ("george", "George", Provider::OpenAI),
+    ("cathy", "Cathy", Provider::Anthropic),
+    ("grace", "Grace", Provider::Google),
+    ("douglas", "Douglas", Provider::DeepSeek),
+    ("kate", "Kate", Provider::Kimi),
+    ("quinn", "Quinn", Provider::Qwen),
+    ("mary", "Mary", Provider::MiniMax),
+    ("zara", "Zara", Provider::Zhipu),
+];
+
+impl Roster {
+    /// The default roster on Auto flagships.
+    pub fn default_eight() -> Roster {
+        Roster {
+            seats: DEFAULT_SEATS
+                .iter()
+                .map(|(id, name, provider)| Seat {
+                    id: id.to_string(),
+                    name: name.to_string(),
+                    provider: *provider,
+                    model: ModelChoice::Auto(ReasoningTier::High),
+                    reasoning: None,
+                })
+                .collect(),
+        }
+    }
+    /// Keep only seats whose provider has a key.
+    pub fn with_keys(mut self, has_key: impl Fn(Provider) -> bool) -> Roster {
+        self.seats.retain(|s| has_key(s.provider));
+        self
+    }
+    /// The first `n` seats (presets: quick 3, standard 4, full 8).
+    pub fn take(mut self, n: usize) -> Roster {
+        self.seats.truncate(n);
+        self
+    }
+    pub fn seat(&self, id: &str) -> Option<&Seat> {
+        self.seats.iter().find(|s| s.id == id)
+    }
+    pub fn names(&self) -> Vec<String> {
+        self.seats.iter().map(|s| s.name.clone()).collect()
     }
 }

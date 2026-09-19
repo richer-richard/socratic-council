@@ -428,4 +428,44 @@ mod tests {
         let _ = std::fs::remove_dir_all(store.dir());
         let _ = std::fs::remove_dir_all(other.dir());
     }
+
+    #[test]
+    fn session_v2_round_trip_and_v1_read() {
+        let dir = std::env::temp_dir().join(format!("sc-store-v2-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let store = SessionStore::at(dir.clone(), [3u8; crypto::DEK_LEN], StoreLocation::CliOwn);
+        let msgs = vec![StoredMessage {
+            agent_id: "george".into(),
+            display_name: "George".into(),
+            content: "yes".into(),
+            thinking: String::new(),
+            model: "m".into(),
+            at_ms: 1_700_000_000_000,
+        }];
+        let mut doc = build_session_json(
+            "sc-v2-1",
+            "topic",
+            1_700_000_000_000,
+            &msgs,
+            "completed",
+            1,
+            Usage::default(),
+        );
+        doc["version"] = json!(2);
+        doc["protocol"] = json!("rounds");
+        doc["rounds"] = json!([{ "kind": "positions", "entries": [] }]);
+        doc["record"] = json!({ "answer": "A" });
+        store.save(&doc).unwrap();
+        let back = store.load("sc-v2-1").unwrap();
+        assert_eq!(back["version"], 2);
+        assert_eq!(back["record"]["answer"], "A");
+        assert_eq!(back["rounds"][0]["kind"], "positions");
+        // A v1 reader still sees the flat transcript.
+        let restored = messages_from_json(&back);
+        assert_eq!(restored.len(), 1);
+        assert_eq!(restored[0].agent_id, "george");
+        let summary = &store.list()[0];
+        assert_eq!(summary.id, "sc-v2-1");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

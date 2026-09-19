@@ -19,7 +19,7 @@ use tokio::sync::mpsc::UnboundedSender;
 
 mod canvas;
 pub mod conflict;
-pub mod cost;
+pub use crate::cost;
 mod deepresearch;
 mod moderator;
 mod observer;
