@@ -771,9 +771,11 @@ export function Home({
     updatePreferences,
     updateModel,
     updateModelSelection,
-    updateAgentTier,
-    updateCouncilTier,
-    updateUtilityTier,
+    updateRoster,
+    updateModerator,
+    updateUtility,
+    updateTools,
+    updateProtocol,
     refreshResolvedModels,
     hasAnyApiKey,
     getConfiguredProviders,
@@ -1829,9 +1831,11 @@ export function Home({
         onUpdatePreferences={updatePreferences}
         onUpdateModel={updateModel}
         onUpdateModelSelection={updateModelSelection}
-        onUpdateAgentTier={updateAgentTier}
-        onUpdateCouncilTier={updateCouncilTier}
-        onUpdateUtilityTier={updateUtilityTier}
+        onUpdateRoster={updateRoster}
+        onUpdateModerator={updateModerator}
+        onUpdateUtility={updateUtility}
+        onUpdateTools={updateTools}
+        onUpdateProtocol={updateProtocol}
         onModelsScanned={refreshResolvedModels}
         vaultReady={vaultReady}
       />

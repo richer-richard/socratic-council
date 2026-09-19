@@ -2,10 +2,13 @@ import {
   AUTO_MODEL,
   REASONING_TIERS,
   resolveModel,
-  type AgentId,
   type DiscoveredModel,
+  type EngineProtocolPolicy,
+  type EngineSeat,
+  type EngineSlot,
+  type EngineToolPolicy,
 } from "@socratic-council/shared";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 
 import desktopPkg from "../../package.json";
 import { testProviderConnection } from "../services/api";
@@ -19,13 +22,15 @@ import {
   type ReasoningTier,
   PROVIDER_INFO,
   LOCKED_MODELS,
-  DISCUSSION_LENGTHS,
   REASONING_TIER_OPTIONS,
   availableModelsForProvider,
   isProvider,
 } from "../stores/config";
 
+import { Dropdown } from "./Dropdown";
 import { ProviderIcon } from "./icons/ProviderIcons";
+import { CouncilTab } from "./settings/CouncilTab";
+import { BudgetCard, ProtocolCard, ToolsCard } from "./settings/PolicyCards";
 
 // Single source of truth for the version + identifier shown in the About
 // tab. Reading from the desktop package.json means a version bump in a
@@ -175,96 +180,24 @@ function IconClose() {
   );
 }
 
-function IconChevronDown() {
+function IconCouncil() {
   return (
     <svg
-      width="12"
-      height="12"
+      width="16"
+      height="16"
       viewBox="0 0 16 16"
       fill="none"
       stroke="currentColor"
-      strokeWidth="1.5"
+      strokeWidth="1.4"
       strokeLinecap="round"
       strokeLinejoin="round"
       aria-hidden="true"
     >
-      <polyline points="4 6 8 10 12 6" />
+      <circle cx="8" cy="4.5" r="2" />
+      <circle cx="3.5" cy="11" r="2" />
+      <circle cx="12.5" cy="11" r="2" />
+      <path d="M6.6 6.2 4.6 9.1M9.4 6.2l2 2.9M5.5 11h5" />
     </svg>
-  );
-}
-
-/**
- * Custom dropdown that replaces the native <select>. Tauri renders the OS
- * default popup which fights the cinematic-dark theme; this listbox
- * panel inherits the same gold-on-dark palette as the rest of the app.
- */
-function Dropdown<T extends string>({
-  value,
-  options,
-  onChange,
-  ariaLabel,
-}: {
-  value: T;
-  options: ReadonlyArray<{ value: T; label: string }>;
-  onChange: (value: T) => void;
-  ariaLabel?: string;
-}) {
-  const [open, setOpen] = useState(false);
-  const containerRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const handlePointer = (event: MouseEvent) => {
-      if (!containerRef.current) return;
-      if (!containerRef.current.contains(event.target as Node)) setOpen(false);
-    };
-    const handleKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setOpen(false);
-    };
-    window.addEventListener("mousedown", handlePointer);
-    window.addEventListener("keydown", handleKey);
-    return () => {
-      window.removeEventListener("mousedown", handlePointer);
-      window.removeEventListener("keydown", handleKey);
-    };
-  }, [open]);
-
-  const current = options.find((option) => option.value === value);
-
-  return (
-    <div ref={containerRef} className="app-dropdown">
-      <button
-        type="button"
-        className="app-dropdown-trigger"
-        onClick={() => setOpen((prev) => !prev)}
-        aria-haspopup="listbox"
-        aria-expanded={open}
-        aria-label={ariaLabel}
-      >
-        <span className="app-dropdown-value">{current?.label ?? value}</span>
-        <span className={`app-dropdown-caret ${open ? "is-open" : ""}`}>
-          <IconChevronDown />
-        </span>
-      </button>
-      {open && (
-        <ul className="app-dropdown-panel" role="listbox" tabIndex={-1}>
-          {options.map((option) => (
-            <li key={option.value} role="option" aria-selected={option.value === value}>
-              <button
-                type="button"
-                className={`app-dropdown-item ${option.value === value ? "is-selected" : ""}`}
-                onClick={() => {
-                  onChange(option.value);
-                  setOpen(false);
-                }}
-              >
-                {option.label}
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
-    </div>
   );
 }
 
@@ -284,12 +217,13 @@ interface ConfigModalProps {
   onUpdateProxy: (proxy: AppConfig["proxy"]) => void;
   onUpdatePreferences: (preferences: Partial<AppConfig["preferences"]>) => void;
   onUpdateModel: (provider: Provider, model: string) => void;
-  /** Per-provider, per-tier model selection. */
+  /** Per-provider, per-tier model selection (what "Auto" means at each level). */
   onUpdateModelSelection: (provider: Provider, tier: ReasoningTier, model: string) => void;
-  /** Reasoning tier a character debates at. */
-  onUpdateAgentTier: (agentId: AgentId, tier: ReasoningTier) => void;
-  onUpdateCouncilTier: (tier: ReasoningTier) => void;
-  onUpdateUtilityTier: (tier: ReasoningTier) => void;
+  onUpdateRoster: (roster: EngineSeat[]) => void;
+  onUpdateModerator: (slot: EngineSlot) => void;
+  onUpdateUtility: (slot: EngineSlot) => void;
+  onUpdateTools: (patch: Partial<EngineToolPolicy>) => void;
+  onUpdateProtocol: (patch: Partial<EngineProtocolPolicy>) => void;
   /** Called after a successful live scan so the store re-resolves models. */
   onModelsScanned: () => void;
   /** Resolved proxy (for routing scan requests). */
@@ -297,21 +231,9 @@ interface ConfigModalProps {
   vaultReady: boolean;
 }
 
-type TabType = "api-keys" | "models" | "proxy" | "preferences" | "diagnostics" | "about";
+type TabType = "api-keys" | "council" | "models" | "proxy" | "preferences" | "about";
 
 const PROVIDERS = Object.keys(PROVIDER_INFO) as Provider[];
-
-/** Which inner-circle character runs on each provider. */
-const PROVIDER_AGENT_ID: Record<Provider, AgentId> = {
-  openai: "george",
-  anthropic: "cathy",
-  google: "grace",
-  deepseek: "douglas",
-  kimi: "kate",
-  qwen: "quinn",
-  minimax: "mary",
-  zhipu: "zara",
-};
 
 function relativeTime(ts: number): string {
   const secs = Math.max(0, Math.round((Date.now() - ts) / 1000));
@@ -393,9 +315,11 @@ export function ConfigModal({
   onUpdatePreferences,
   onUpdateModel,
   onUpdateModelSelection,
-  onUpdateAgentTier,
-  onUpdateCouncilTier,
-  onUpdateUtilityTier,
+  onUpdateRoster,
+  onUpdateModerator,
+  onUpdateUtility,
+  onUpdateTools,
+  onUpdateProtocol,
   onModelsScanned,
   proxy,
   vaultReady,
@@ -551,6 +475,7 @@ export function ConfigModal({
           <nav className="flex gap-1">
             {[
               { id: "api-keys" as TabType, label: "API Keys", Icon: IconKey },
+              { id: "council" as TabType, label: "Council", Icon: IconCouncil },
               { id: "models" as TabType, label: "Models", Icon: IconChip },
               { id: "proxy" as TabType, label: "Proxy", Icon: IconGlobe },
               { id: "preferences" as TabType, label: "Preferences", Icon: IconSliders },
@@ -775,13 +700,14 @@ export function ConfigModal({
               <div className="settings-card">
                 <div className="flex items-start justify-between gap-4 flex-wrap">
                   <div className="min-w-0">
-                    <h3 className="font-medium text-white mb-1">Models &amp; reasoning levels</h3>
+                    <h3 className="font-medium text-white mb-1">What Auto means</h3>
                     <p className="text-sm text-gray-400 max-w-2xl">
-                      Choose a model for each reasoning level, or leave it on{" "}
-                      <span className="text-primary">Auto</span> to always use the best available —
-                      newer flagships are adopted automatically once you scan. Scanning queries each
-                      provider&apos;s own endpoint with your key (Chinese endpoints for Chinese
-                      models).
+                      A seat or slot on <span className="text-primary">Auto</span> takes the model
+                      chosen here for the round&apos;s reasoning level: flagship for positions and
+                      the record, balanced for cross-examination, fast for prep and the board. Leave
+                      a level on Auto and the newest flagship is adopted once you scan. Scanning
+                      queries each provider&apos;s own endpoint with your key (Chinese endpoints for
+                      Chinese models).
                     </p>
                   </div>
                   <button
@@ -793,46 +719,14 @@ export function ConfigModal({
                     ⟳ Scan all keys
                   </button>
                 </div>
-                <div className="grid sm:grid-cols-2 gap-4 mt-4">
-                  <div>
-                    <label className="block text-xs uppercase tracking-wider text-gray-400 mb-2">
-                      Debate reasoning level
-                    </label>
-                    <Dropdown<ReasoningTier>
-                      value={config.councilTier}
-                      onChange={onUpdateCouncilTier}
-                      ariaLabel="Debate reasoning level"
-                      options={REASONING_TIER_OPTIONS.map((t) => ({
-                        value: t.value,
-                        label: `${t.label} — ${t.hint}`,
-                      }))}
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs uppercase tracking-wider text-gray-400 mb-2">
-                      Background tasks
-                    </label>
-                    <Dropdown<ReasoningTier>
-                      value={config.utilityTier}
-                      onChange={onUpdateUtilityTier}
-                      ariaLabel="Background task reasoning level"
-                      options={REASONING_TIER_OPTIONS.map((t) => ({
-                        value: t.value,
-                        label: `${t.label} — ${t.hint}`,
-                      }))}
-                    />
-                  </div>
-                </div>
               </div>
 
               {PROVIDERS.map((provider) => {
                 const info = PROVIDER_INFO[provider];
-                const agentId = PROVIDER_AGENT_ID[provider];
                 const available = availableByProvider[provider];
                 const status = scanStatus[provider];
                 const cached = getCachedScan(provider);
                 const hasKey = !!config.credentials[provider]?.apiKey;
-                const agentTier = config.agentTiers[agentId] ?? config.councilTier;
 
                 const modelOptions = [
                   { value: AUTO_MODEL, label: "Auto (best available)" },
@@ -889,20 +783,9 @@ export function ConfigModal({
                         const resolved = resolveModel(provider, tier, available, selection);
                         const tierLabel =
                           REASONING_TIER_OPTIONS.find((t) => t.value === tier)?.label ?? tier;
-                        const isDebateTier = tier === agentTier;
                         return (
                           <div key={tier} className="flex items-center gap-3">
-                            <div className="w-16 shrink-0 text-sm text-gray-300 flex items-center gap-1">
-                              {tierLabel}
-                              {isDebateTier && (
-                                <span
-                                  className="text-primary"
-                                  title="This character debates at this level"
-                                >
-                                  ●
-                                </span>
-                              )}
-                            </div>
+                            <div className="w-16 shrink-0 text-sm text-gray-300">{tierLabel}</div>
                             <div className="flex-1 min-w-0">
                               <Dropdown<string>
                                 value={selection}
@@ -921,27 +804,21 @@ export function ConfigModal({
                         );
                       })}
                     </div>
-
-                    <div className="mt-4 flex items-center gap-2 flex-wrap">
-                      <span className="text-xs text-gray-400">{info.agent} debates at:</span>
-                      {REASONING_TIER_OPTIONS.map((t) => (
-                        <button
-                          key={t.value}
-                          onClick={() => onUpdateAgentTier(agentId, t.value)}
-                          className={`text-xs px-3 py-1 rounded-full border transition-colors ${
-                            agentTier === t.value
-                              ? "border-primary text-primary bg-primary/10"
-                              : "border-gray-700 text-gray-400 hover:text-white hover:border-gray-500"
-                          }`}
-                        >
-                          {t.label}
-                        </button>
-                      ))}
-                    </div>
                   </div>
                 );
               })}
             </div>
+          )}
+
+          {activeTab === "council" && (
+            <CouncilTab
+              config={config}
+              keyedProviders={PROVIDERS.filter((p) => !!config.credentials[p]?.apiKey)}
+              availableByProvider={availableByProvider}
+              onUpdateRoster={onUpdateRoster}
+              onUpdateModerator={onUpdateModerator}
+              onUpdateUtility={onUpdateUtility}
+            />
           )}
 
           {activeTab === "proxy" && (
@@ -1064,122 +941,36 @@ export function ConfigModal({
 
           {activeTab === "preferences" && (
             <div className="space-y-6 scale-in">
-              {/* Discussion Settings */}
               <div className="settings-card">
-                <h3 className="font-medium text-white mb-4">Discussion Settings</h3>
-
-                <div className="space-y-4">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <div className="text-sm text-white">Show Bidding Scores</div>
-                      <div className="text-xs text-gray-400">
-                        Display agent bid scores after each round
-                      </div>
+                <h3 className="font-medium text-white mb-4">Display</h3>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <div className="text-sm text-white">Auto-scroll</div>
+                    <div className="text-xs text-gray-400">
+                      Follow the newest turn as it streams
                     </div>
-                    <label className="toggle-switch">
-                      <input
-                        type="checkbox"
-                        checked={config.preferences.showBiddingScores}
-                        onChange={(e) =>
-                          onUpdatePreferences({ showBiddingScores: e.target.checked })
-                        }
-                      />
-                      <div className="toggle-slider" />
-                    </label>
                   </div>
-
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <div className="text-sm text-white">Auto-scroll Messages</div>
-                      <div className="text-xs text-gray-400">
-                        Automatically scroll to new messages
-                      </div>
-                    </div>
-                    <label className="toggle-switch">
-                      <input
-                        type="checkbox"
-                        checked={config.preferences.autoScroll}
-                        onChange={(e) => onUpdatePreferences({ autoScroll: e.target.checked })}
-                      />
-                      <div className="toggle-slider" />
-                    </label>
-                  </div>
-
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <div className="text-sm text-white">Moderator Agent</div>
-                      <div className="text-xs text-gray-400">
-                        Adds occasional moderator notes to keep the discussion focused
-                      </div>
-                    </div>
-                    <label className="toggle-switch">
-                      <input
-                        type="checkbox"
-                        checked={config.preferences.moderatorEnabled}
-                        onChange={(e) =>
-                          onUpdatePreferences({ moderatorEnabled: e.target.checked })
-                        }
-                      />
-                      <div className="toggle-slider" />
-                    </label>
-                  </div>
+                  <label className="toggle-switch">
+                    <input
+                      type="checkbox"
+                      checked={config.preferences.autoScroll}
+                      onChange={(e) => onUpdatePreferences({ autoScroll: e.target.checked })}
+                    />
+                    <div className="toggle-slider" />
+                  </label>
                 </div>
               </div>
 
-              {/* Discussion cap */}
-              <div className="settings-card">
-                <h3 className="font-medium text-white mb-1">Default discussion cap</h3>
-                <p className="text-xs text-gray-400 mb-4">
-                  New sessions inherit this cap at creation. Existing sessions keep their original
-                  limit unless you adjust it from the chat header.
-                </p>
-                <Dropdown<AppConfig["preferences"]["defaultLength"]>
-                  value={config.preferences.defaultLength}
-                  onChange={(next) => onUpdatePreferences({ defaultLength: next })}
-                  ariaLabel="Default discussion cap"
-                  options={[
-                    {
-                      value: "quick",
-                      label: `Quick (3 rounds · ${DISCUSSION_LENGTHS.quick} turns)`,
-                    },
-                    {
-                      value: "standard",
-                      label: `Standard (5 rounds · ${DISCUSSION_LENGTHS.standard} turns)`,
-                    },
-                    {
-                      value: "extended",
-                      label: `Extended (10 rounds · ${DISCUSSION_LENGTHS.extended} turns)`,
-                    },
-                    { value: "marathon", label: "Marathon (no cap)" },
-                    { value: "custom", label: "Custom" },
-                  ]}
-                />
-                <div className="mb-4" />
+              <BudgetCard
+                budget={config.preferences.budget}
+                onChange={(patch) =>
+                  onUpdatePreferences({ budget: { ...config.preferences.budget, ...patch } })
+                }
+              />
 
-                {config.preferences.defaultLength === "custom" && (
-                  <div>
-                    <label className="block text-sm text-gray-300 mb-2">
-                      Custom turns (0 = unlimited):
-                    </label>
-                    <input
-                      type="number"
-                      value={config.preferences.customTurns}
-                      onChange={(e) =>
-                        onUpdatePreferences({ customTurns: parseInt(e.target.value) || 0 })
-                      }
-                      min={0}
-                      max={10000}
-                      className="w-full bg-gray-900 border border-gray-600 rounded-lg px-4 py-2.5
-                        text-white focus:outline-none focus:border-primary transition-all"
-                    />
-                    {config.preferences.customTurns === 0 && (
-                      <p className="text-sm text-yellow-400 mt-2">
-                        ⚠️ Unlimited turns - the discussion will continue until manually stopped.
-                      </p>
-                    )}
-                  </div>
-                )}
-              </div>
+              <ProtocolCard protocol={config.protocol} onChange={onUpdateProtocol} />
+
+              <ToolsCard tools={config.tools} onChange={onUpdateTools} />
 
               {/* Data Management */}
               <div className="settings-card">
@@ -1229,6 +1020,12 @@ export function ConfigModal({
                                 }
                               });
                             }
+                            // v3: the store sanitises each of these on the way in.
+                            if (Array.isArray(imported.roster)) onUpdateRoster(imported.roster);
+                            if (imported.moderator) onUpdateModerator(imported.moderator);
+                            if (imported.utility) onUpdateUtility(imported.utility);
+                            if (imported.tools) onUpdateTools(imported.tools);
+                            if (imported.protocol) onUpdateProtocol(imported.protocol);
                           } catch (err) {
                             console.error("Failed to import settings:", err);
                           }

@@ -20,6 +20,8 @@ import type {
   EngineToolPolicy,
 } from "@socratic-council/shared";
 
+import type { AppConfig, ProxyConfig } from "../stores/config";
+
 import { apiKeyAccount, secretsGet } from "./secrets";
 
 export const ENGINE_EVENT_CHANNEL = "engine://event";
@@ -178,4 +180,59 @@ export async function scan(
     apiKey,
     proxy: proxy ?? null,
   });
+}
+
+/** `scheme://[user[:pass]@]host:port`, or undefined when no proxy is configured. */
+export function proxyUrl(proxy: ProxyConfig | undefined, password?: string): string | undefined {
+  if (!proxy || proxy.type === "none" || !proxy.host || !(proxy.port > 0)) return undefined;
+  const user = proxy.username?.trim();
+  const secret = password ?? proxy.password;
+  const auth = user
+    ? `${encodeURIComponent(user)}${secret ? `:${encodeURIComponent(secret)}` : ""}@`
+    : "";
+  return `${proxy.type}://${auth}${proxy.host}:${proxy.port}`;
+}
+
+const TIERS: EngineReasoningTier[] = ["low", "medium", "high"];
+
+/**
+ * The engine's view of the settings: the roster and slots as stored, the
+ * policies, the budget (the engine knows warn/stop; a v2 "pause" means stop),
+ * per-provider base URL overrides, and only the explicit per-tier model
+ * overrides ("auto" rows are the engine's own default).
+ */
+export function engineSettingsFromConfig(
+  config: AppConfig,
+  proxyPassword?: string,
+): EngineSettings {
+  const baseUrls: Partial<Record<EngineProvider, string>> = {};
+  for (const [provider, cred] of Object.entries(config.credentials)) {
+    const url = cred?.baseUrl?.trim();
+    if (url) baseUrls[provider as EngineProvider] = url;
+  }
+  const selection: EngineSettings["selection"] = [];
+  for (const [provider, tiers] of Object.entries(config.modelSelection)) {
+    if (!tiers) continue;
+    for (const tier of TIERS) {
+      const model = tiers[tier]?.trim();
+      if (model && model !== "auto")
+        selection.push({ provider: provider as EngineProvider, tier, model });
+    }
+  }
+  const budget = config.preferences.budget;
+  return {
+    seats: config.roster,
+    moderator: config.moderator,
+    utility: config.utility,
+    tools: config.tools,
+    protocol: config.protocol,
+    budget: {
+      perSessionUsd: budget.perSession,
+      perDayUsd: budget.perDay,
+      action: budget.action === "warn" ? "warn" : "stop",
+    },
+    baseUrls,
+    selection,
+    proxy: proxyUrl(config.proxy, proxyPassword),
+  };
 }

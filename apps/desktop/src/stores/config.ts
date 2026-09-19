@@ -29,8 +29,15 @@
 
 import {
   AUTO_MODEL,
+  DEFAULT_ENGINE_PROTOCOL,
+  DEFAULT_ENGINE_SEATS,
+  DEFAULT_ENGINE_TOOL_POLICY,
   type AgentId,
   type DiscoveredModel,
+  type EngineProtocolPolicy,
+  type EngineSeat,
+  type EngineSlot,
+  type EngineToolPolicy,
   type ReasoningTier,
   catalogModelsForProvider,
   mergeDiscoveredWithCatalog,
@@ -94,11 +101,16 @@ export interface BudgetPolicy {
 export type ReflectionMode = "off" | "light" | "deep";
 
 export interface DiscussionPreferences {
+  /** @deprecated v2 chat loop; removed with Chat.tsx. */
   defaultLength: "quick" | "standard" | "extended" | "marathon" | "custom";
+  /** @deprecated v2 chat loop; removed with Chat.tsx. */
   customTurns: number;
+  /** @deprecated v2 chat loop; removed with Chat.tsx. */
   showBiddingScores: boolean;
   autoScroll: boolean;
+  /** @deprecated v2 chat loop; removed with Chat.tsx. */
   moderatorEnabled: boolean;
+  /** @deprecated v2 chat loop; removed with Chat.tsx. */
   observersEnabled: boolean;
   /** Cost circuit breaker. See `utils/budgetEnforcer.ts`. 0 caps disable. */
   budget: BudgetPolicy;
@@ -126,12 +138,26 @@ export interface AppConfig {
    * (catalog flagship, or a newer one once a scan surfaces it).
    */
   modelSelection: Partial<Record<Provider, ProviderModelTiers>>;
-  /** Reasoning tier each character debates at (defaults to `councilTier`). */
+  /** @deprecated v2: per-character tiers; migrated into `roster[].reasoning`. */
   agentTiers: Partial<Record<AgentId, ReasoningTier>>;
-  /** Default reasoning tier for debate turns. */
+  /** @deprecated v2: the engine's `protocol.tiers` replaces it. */
   councilTier: ReasoningTier;
-  /** Reasoning tier for fast background tasks (moderator utility, summaries…). */
+  /** @deprecated v2: the engine's `protocol.tiers.utility` replaces it. */
   utilityTier: ReasoningTier;
+  /**
+   * The council (v3 engine): one seat per row, any model of any provider,
+   * an optional reasoning override per seat. Seats whose provider has no
+   * key are skipped at start time.
+   */
+  roster: EngineSeat[];
+  /** Who frames the question, routes work, judges convergence and writes the record. */
+  moderator: EngineSlot;
+  /** The fast model for board rewrites and small summaries. */
+  utility: EngineSlot;
+  /** What seats may do between turns (attachments, web, files, shell). */
+  tools: EngineToolPolicy;
+  /** Rounds, participants, per-round reasoning levels, concurrency. */
+  protocol: EngineProtocolPolicy;
   /**
    * DERIVED, do not edit directly: the resolved debate model per provider,
    * recomputed from `modelSelection` + live scans. Kept on the config object
@@ -266,8 +292,167 @@ const DEFAULT_CONFIG: AppConfig = {
   agentTiers: {},
   councilTier: "high",
   utilityTier: "low",
+  roster: DEFAULT_ENGINE_SEATS.map((seat) => ({ ...seat })),
+  moderator: { provider: "google", model: AUTO_MODEL },
+  utility: { provider: "google", model: "auto-fast" },
+  tools: {
+    ...DEFAULT_ENGINE_TOOL_POLICY,
+    shell: { ...DEFAULT_ENGINE_TOOL_POLICY.shell },
+  },
+  protocol: { ...DEFAULT_ENGINE_PROTOCOL, tiers: { ...DEFAULT_ENGINE_PROTOCOL.tiers } },
   models: { ...LOCKED_MODELS },
 };
+
+/** Upper bound on council seats (the engine's protocol caps principals separately). */
+export const MAX_SEATS = 16;
+
+/** Editable ranges for the protocol and tool policies (inclusive). */
+export const POLICY_LIMITS = {
+  rounds: [1, 6],
+  principals: [1, MAX_SEATS],
+  concurrency: [1, 8],
+  shellTimeoutSecs: [1, 300],
+  shellOutputBytes: [1024, 1_048_576],
+  callsPerTurn: [0, 8],
+  iterations: [1, 4],
+} as const;
+
+const SEAT_ID_RE = /^[a-z0-9][a-z0-9_-]{0,31}$/;
+
+/** A stable seat id from a display name: lowercase, dashes, at most 32 chars. */
+export function seatIdFromName(name: string): string {
+  const slug = name
+    .normalize("NFKD")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 32)
+    .replace(/-+$/g, "");
+  return slug || "seat";
+}
+
+/** `base`, or `base-2`, `base-3`, … until it is not in `used`. */
+export function uniqueSeatId(base: string, used: ReadonlySet<string>): string {
+  if (!used.has(base)) return base;
+  for (let n = 2; n < 10_000; n++) {
+    const candidate = `${base}-${n}`;
+    if (!used.has(candidate)) return candidate;
+  }
+  return `${base}-${Date.now().toString(36)}`;
+}
+
+function defaultSeatName(provider: Provider): string {
+  return DEFAULT_ENGINE_SEATS.find((seat) => seat.provider === provider)?.name ?? provider;
+}
+
+function sanitizeSeat(raw: unknown, used: Set<string>): EngineSeat | null {
+  if (!raw || typeof raw !== "object") return null;
+  const r = raw as Record<string, unknown>;
+  if (!isProvider(r.provider)) return null;
+  const name =
+    typeof r.name === "string" && r.name.trim() !== ""
+      ? r.name.trim().slice(0, 40)
+      : defaultSeatName(r.provider);
+  const base = typeof r.id === "string" && SEAT_ID_RE.test(r.id) ? r.id : seatIdFromName(name);
+  const id = uniqueSeatId(base, used);
+  used.add(id);
+  const model = typeof r.model === "string" && r.model.trim() !== "" ? r.model.trim() : AUTO_MODEL;
+  const reasoning =
+    r.reasoning === "low" || r.reasoning === "medium" || r.reasoning === "high"
+      ? r.reasoning
+      : undefined;
+  return { id, name, provider: r.provider, model, ...(reasoning ? { reasoning } : {}) };
+}
+
+/** The default eight seats; v2 per-character tiers become reasoning overrides. */
+function defaultRoster(agentTiers?: Partial<Record<AgentId, ReasoningTier>>): EngineSeat[] {
+  return DEFAULT_ENGINE_SEATS.map((seat) => {
+    const reasoning = agentTiers?.[seat.id as AgentId];
+    return { ...seat, ...(reasoning ? { reasoning } : {}) };
+  });
+}
+
+function sanitizeRoster(
+  input: unknown,
+  agentTiers: Partial<Record<AgentId, ReasoningTier>>,
+): EngineSeat[] {
+  if (!Array.isArray(input)) return defaultRoster(agentTiers);
+  const used = new Set<string>();
+  const seats: EngineSeat[] = [];
+  for (const raw of input) {
+    const seat = sanitizeSeat(raw, used);
+    if (seat) seats.push(seat);
+    if (seats.length >= MAX_SEATS) break;
+  }
+  return seats.length > 0 ? seats : defaultRoster(agentTiers);
+}
+
+function sanitizeSlot(input: unknown, fallback: EngineSlot): EngineSlot {
+  if (!input || typeof input !== "object") return { ...fallback };
+  const r = input as Record<string, unknown>;
+  const provider = isProvider(r.provider) ? r.provider : fallback.provider;
+  const model =
+    typeof r.model === "string" && r.model.trim() !== "" ? r.model.trim() : fallback.model;
+  return { provider, model };
+}
+
+function clampInt(value: unknown, range: readonly [number, number], fallback: number): number {
+  const n = typeof value === "number" && Number.isFinite(value) ? Math.round(value) : fallback;
+  return Math.min(range[1], Math.max(range[0], n));
+}
+
+function sanitizeToolPolicy(input: unknown): EngineToolPolicy {
+  const d = DEFAULT_ENGINE_TOOL_POLICY;
+  const r = (input && typeof input === "object" ? input : {}) as Record<string, unknown>;
+  const shell = (r.shell && typeof r.shell === "object" ? r.shell : {}) as Record<string, unknown>;
+  return {
+    attachments: safeBoolean(r.attachments, d.attachments),
+    web: safeBoolean(r.web, d.web),
+    verify: safeBoolean(r.verify, d.verify),
+    workspace_files: safeBoolean(r.workspace_files, d.workspace_files),
+    shell: {
+      enabled: safeBoolean(shell.enabled, d.shell.enabled),
+      unsandboxed: safeBoolean(shell.unsandboxed, d.shell.unsandboxed),
+      timeout_secs: clampInt(
+        shell.timeout_secs,
+        POLICY_LIMITS.shellTimeoutSecs,
+        d.shell.timeout_secs,
+      ),
+      max_output_bytes: clampInt(
+        shell.max_output_bytes,
+        POLICY_LIMITS.shellOutputBytes,
+        d.shell.max_output_bytes,
+      ),
+    },
+    max_calls_per_turn: clampInt(
+      r.max_calls_per_turn,
+      POLICY_LIMITS.callsPerTurn,
+      d.max_calls_per_turn,
+    ),
+    max_iterations: clampInt(r.max_iterations, POLICY_LIMITS.iterations, d.max_iterations),
+    approval: r.approval === "ask" ? "ask" : "auto",
+  };
+}
+
+function sanitizeProtocol(input: unknown): EngineProtocolPolicy {
+  const d = DEFAULT_ENGINE_PROTOCOL;
+  const r = (input && typeof input === "object" ? input : {}) as Record<string, unknown>;
+  const tiers = (r.tiers && typeof r.tiers === "object" ? r.tiers : {}) as Record<string, unknown>;
+  return {
+    max_rounds: clampInt(r.max_rounds, POLICY_LIMITS.rounds, d.max_rounds),
+    max_principals: clampInt(r.max_principals, POLICY_LIMITS.principals, d.max_principals),
+    interactive: safeBoolean(r.interactive, d.interactive),
+    tiers: {
+      positions: sanitizeReasoningTier(tiers.positions, d.tiers.positions),
+      cross: sanitizeReasoningTier(tiers.cross, d.tiers.cross),
+      revision: sanitizeReasoningTier(tiers.revision, d.tiers.revision),
+      subtask: sanitizeReasoningTier(tiers.subtask, d.tiers.subtask),
+      utility: sanitizeReasoningTier(tiers.utility, d.tiers.utility),
+      record: sanitizeReasoningTier(tiers.record, d.tiers.record),
+    },
+    concurrency: clampInt(r.concurrency, POLICY_LIMITS.concurrency, d.concurrency),
+  };
+}
 
 const VALID_PROXY_TYPES: ProxyType[] = ["none", "http", "https", "socks5", "socks5h"];
 
@@ -428,6 +613,7 @@ function loadConfig(): AppConfig {
     if (!stored) return DEFAULT_CONFIG;
 
     const parsed = JSON.parse(stored);
+    const agentTiers = sanitizeAgentTiers(parsed.agentTiers);
     const merged: AppConfig = {
       credentials: sanitizeCredentials(parsed.credentials),
       proxy: normalizeProxyConfig({ ...DEFAULT_CONFIG.proxy, ...parsed.proxy }),
@@ -469,9 +655,15 @@ function loadConfig(): AppConfig {
         ),
       },
       modelSelection: sanitizeModelSelection(parsed.modelSelection),
-      agentTiers: sanitizeAgentTiers(parsed.agentTiers),
+      agentTiers,
       councilTier: sanitizeReasoningTier(parsed.councilTier, "high"),
       utilityTier: sanitizeReasoningTier(parsed.utilityTier, "low"),
+      // v3: a v2 blob has no roster; the default eight inherit the old per-character tiers.
+      roster: sanitizeRoster(parsed.roster, agentTiers),
+      moderator: sanitizeSlot(parsed.moderator, DEFAULT_CONFIG.moderator),
+      utility: sanitizeSlot(parsed.utility, DEFAULT_CONFIG.utility),
+      tools: sanitizeToolPolicy(parsed.tools),
+      protocol: sanitizeProtocol(parsed.protocol),
       // Derived; recomputed from modelSelection + live scans just below.
       models: {},
     };
@@ -734,6 +926,11 @@ export function __resetConfigStoreForTests(): void {
   listeners.clear();
 }
 
+/** Test hook — parse whatever is in localStorage exactly as boot does. */
+export function loadConfigForTests(): AppConfig {
+  return loadConfig();
+}
+
 /**
  * Read the current config snapshot from outside React. Useful for non-hook
  * consumers (services, utilities) that need access to the user's proxy
@@ -825,6 +1022,58 @@ export function useConfig() {
     setSnapshot((prev) => ({ ...prev, config: { ...prev.config, utilityTier: tier } }));
   }, []);
 
+  /** Replace the council roster (sanitised: unique ids, valid providers, at most MAX_SEATS). */
+  const updateRoster = useCallback((roster: EngineSeat[]) => {
+    setSnapshot((prev) => ({
+      ...prev,
+      config: { ...prev.config, roster: sanitizeRoster(roster, {}) },
+    }));
+  }, []);
+
+  const updateModerator = useCallback((slot: EngineSlot) => {
+    setSnapshot((prev) => ({
+      ...prev,
+      config: { ...prev.config, moderator: sanitizeSlot(slot, DEFAULT_CONFIG.moderator) },
+    }));
+  }, []);
+
+  const updateUtility = useCallback((slot: EngineSlot) => {
+    setSnapshot((prev) => ({
+      ...prev,
+      config: { ...prev.config, utility: sanitizeSlot(slot, DEFAULT_CONFIG.utility) },
+    }));
+  }, []);
+
+  /** Patch the tool policy; `shell` merges field by field. */
+  const updateTools = useCallback((patch: Partial<EngineToolPolicy>) => {
+    setSnapshot((prev) => ({
+      ...prev,
+      config: {
+        ...prev.config,
+        tools: sanitizeToolPolicy({
+          ...prev.config.tools,
+          ...patch,
+          shell: { ...prev.config.tools.shell, ...(patch.shell ?? {}) },
+        }),
+      },
+    }));
+  }, []);
+
+  /** Patch the protocol policy; `tiers` merges field by field. */
+  const updateProtocol = useCallback((patch: Partial<EngineProtocolPolicy>) => {
+    setSnapshot((prev) => ({
+      ...prev,
+      config: {
+        ...prev.config,
+        protocol: sanitizeProtocol({
+          ...prev.config.protocol,
+          ...patch,
+          tiers: { ...prev.config.protocol.tiers, ...(patch.tiers ?? {}) },
+        }),
+      },
+    }));
+  }, []);
+
   /** Recompute the derived `models` map (call after a live model scan). */
   const refreshResolvedModels = useCallback(() => {
     refreshResolvedModelsStore();
@@ -870,6 +1119,11 @@ export function useConfig() {
     updateAgentTier,
     updateCouncilTier,
     updateUtilityTier,
+    updateRoster,
+    updateModerator,
+    updateUtility,
+    updateTools,
+    updateProtocol,
     refreshResolvedModels,
     getConfiguredProviders,
     hasAnyApiKey,

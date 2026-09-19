@@ -4471,7 +4471,9 @@ textarea.workstation-input {
   position: absolute;
   top: calc(100% + 6px);
   left: 0;
-  right: 0;
+  min-width: 100%;
+  width: max-content;
+  max-width: min(420px, 80vw);
   z-index: 65;
   list-style: none;
   margin: 0;
@@ -4508,6 +4510,9 @@ textarea.workstation-input {
   padding: 8px 12px;
   border-radius: 6px;
   font-size: 0.86rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
   cursor: pointer;
   transition:
     background 120ms ease,

@@ -2,6 +2,7 @@ import { beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import {
   __resetConfigStoreForTests,
+  loadConfigForTests,
   resolveDebateModel,
   resolveUtilityModel,
   availableModelsForProvider,
@@ -65,5 +66,84 @@ describe("config model resolution", () => {
       }),
     );
     expect(resolveDebateModel("openai")).toBe("gpt-99-hypothetical");
+  });
+});
+
+describe("config engine settings (v3)", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    __resetConfigStoreForTests();
+  });
+
+  it("defaults to the eight-seat roster, a Google moderator and engine policies", () => {
+    const config = loadConfigForTests();
+    expect(config.roster.map((s) => s.id)).toEqual([
+      "george",
+      "cathy",
+      "grace",
+      "douglas",
+      "kate",
+      "quinn",
+      "mary",
+      "zara",
+    ]);
+    expect(config.roster.every((s) => s.model === "auto")).toBe(true);
+    expect(config.moderator).toEqual({ provider: "google", model: "auto" });
+    expect(config.utility).toEqual({ provider: "google", model: "auto-fast" });
+    expect(config.tools.shell.enabled).toBe(false);
+    expect(config.protocol.max_rounds).toBe(3);
+  });
+
+  it("migrates a v2 stored config: agent tiers become seat reasoning overrides", () => {
+    localStorage.setItem(
+      "socratic-council-config",
+      JSON.stringify({
+        credentials: {},
+        proxy: { type: "none", host: "", port: 0 },
+        preferences: { budget: { perSession: 1, perDay: 0, action: "warn" } },
+        agentTiers: { cathy: "medium", zara: "low" },
+        councilTier: "high",
+        utilityTier: "low",
+      }),
+    );
+    const config = loadConfigForTests();
+    expect(config.roster).toHaveLength(8);
+    expect(config.roster.find((s) => s.id === "cathy")?.reasoning).toBe("medium");
+    expect(config.roster.find((s) => s.id === "zara")?.reasoning).toBe("low");
+    expect(config.roster.find((s) => s.id === "george")?.reasoning).toBeUndefined();
+    expect(config.preferences.budget.perSession).toBe(1);
+  });
+
+  it("sanitises a stored roster: unique ids, valid providers, bounded size, clamped policies", () => {
+    localStorage.setItem(
+      "socratic-council-config",
+      JSON.stringify({
+        roster: [
+          { id: "george", name: "George", provider: "openai", model: "gpt-6-astra" },
+          { id: "george", name: "George II", provider: "openai", model: "" },
+          { id: "bad", name: "Bad", provider: "nope", model: "auto" },
+          { name: "Cathy Two", provider: "anthropic", model: "auto", reasoning: "silly" },
+        ],
+        moderator: { provider: "nope", model: "" },
+        tools: { shell: { enabled: true, timeout_secs: 99999 }, max_calls_per_turn: 50 },
+        protocol: { max_rounds: 0, concurrency: 100, tiers: { positions: "zzz" } },
+      }),
+    );
+    const config = loadConfigForTests();
+    expect(config.roster.map((s) => s.id)).toEqual(["george", "george-2", "cathy-two"]);
+    expect(config.roster[1]?.model).toBe("auto");
+    expect(config.roster[2]?.reasoning).toBeUndefined();
+    expect(config.moderator).toEqual({ provider: "google", model: "auto" });
+    expect(config.tools.shell.enabled).toBe(true);
+    expect(config.tools.shell.timeout_secs).toBe(300);
+    expect(config.tools.max_calls_per_turn).toBe(8);
+    expect(config.protocol.max_rounds).toBe(1);
+    expect(config.protocol.concurrency).toBe(8);
+    expect(config.protocol.tiers.positions).toBe("high");
+  });
+
+  it("falls back to the default roster when the stored one is empty", () => {
+    localStorage.setItem("socratic-council-config", JSON.stringify({ roster: [] }));
+    expect(loadConfigForTests().roster).toHaveLength(8);
   });
 });
