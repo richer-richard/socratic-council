@@ -12,6 +12,15 @@ use crate::types::{
 };
 use regex::Regex;
 use std::collections::HashMap;
+use std::time::Duration;
+
+/// Upper bound on a single moderator completion. The moderator runs at the
+/// utility tier (fast — a healthy call returns in a few seconds), so a request
+/// still pending after this has stalled. Without it, a wedged moderator provider
+/// would block the *visible* debate flow for up to the 300s HTTP client timeout
+/// — most damagingly the opening framing, which gates the very first agent turn
+/// (a stalled opening = an empty chamber with no moderator and no participants).
+const MODERATOR_TIMEOUT: Duration = Duration::from_secs(25);
 
 pub const MODERATOR_SYSTEM_PROMPT: &str = "You are the Moderator in a group chat with George, Cathy, Grace, Douglas, Kate, Quinn, Mary, and Zara.\n\n\
 Your job: keep the discussion focused, fair, rigorous, and productive. Be direct and demanding — call out weak reasoning, vague claims, and circular arguments.\n\n\
@@ -132,9 +141,12 @@ pub async fn generate(
     let mut out = String::new();
     let usage = {
         let mut on_chunk = |c: &CompletionChunk| out.push_str(&c.content);
-        stream_completion(http, pick.provider, &pick.base_url, &pick.key, &req, &mut on_chunk)
-            .await
-            .ok()?
+        let fut =
+            stream_completion(http, pick.provider, &pick.base_url, &pick.key, &req, &mut on_chunk);
+        // `timeout` → None on stall; the inner `.ok()?` → None on a request error.
+        // Either way the caller falls back (opening → plain framing line,
+        // synthesis/resolution → skipped, conclusion → its own retry).
+        tokio::time::timeout(MODERATOR_TIMEOUT, fut).await.ok()?.ok()?
     };
     let out = out.trim().to_string();
     (!out.is_empty()).then_some((out, usage))
@@ -240,5 +252,36 @@ mod tests {
     #[test]
     fn returns_none_without_a_score() {
         assert!(parse_conclusion("Unresolved: we never agreed.").is_none());
+    }
+
+    // Regression: a moderator provider that accepts the TCP connection but never
+    // sends a response must not hang past MODERATOR_TIMEOUT. Before the bound,
+    // the opening framing rode the 300s HTTP client timeout, so one stalled
+    // provider left the debate chamber empty — no moderator, no participants —
+    // for minutes. `start_paused` advances the virtual clock the moment the
+    // runtime goes idle, so the 25s timeout fires here without a real wait.
+    #[tokio::test(start_paused = true)]
+    async fn generate_times_out_on_a_stalled_provider() {
+        use tokio::net::TcpListener;
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        // Accept and hold sockets open, silent, for the life of the test.
+        tokio::spawn(async move {
+            let mut held = Vec::new();
+            while let Ok((sock, _)) = listener.accept().await {
+                held.push(sock);
+            }
+        });
+
+        let pick = ModeratorPick {
+            provider: Provider::OpenAI,
+            model: "gpt-test".into(),
+            key: "sk-test".into(),
+            base_url: format!("http://{addr}"),
+        };
+        let http = crate::http_client(None);
+        let out = generate(&http, &pick, "anything", &[], ModeratorKind::Opening).await;
+        // Stalled provider → None (the caller falls back), not an indefinite hang.
+        assert!(out.is_none());
     }
 }

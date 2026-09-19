@@ -1,6 +1,6 @@
 [package]
 name = "socratic-council"
-version = "1.0.2"
+version = "1.0.3"
 edition = "2021"
 rust-version = "1.82"
 description = "A terminal multi-agent debate workstation — eight AI agents (each with a silent advisor) argue any topic in a ratatui TUI, with live conflict tracking, a cost ledger, and oracle web/file search."
@@ -60,7 +60,9 @@ getrandom = "0.2"
 rusqlite = { version = "0.32", features = ["bundled"], optional = true }
 
 [dev-dependencies]
-tokio = { version = "1", features = ["rt", "macros"] }
+# `test-util` (paused time) + `net` (a stalling listener) let the moderator
+# timeout regression test assert the bound fires without a real 25s wait.
+tokio = { version = "1", features = ["rt", "macros", "test-util", "net"] }
 
 [profile.release]
 lto = "thin"

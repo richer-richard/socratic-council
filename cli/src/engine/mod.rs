@@ -377,7 +377,12 @@ impl Engine {
             self.agents.iter().map(|a| (a.id.clone(), a.name.clone())).collect();
 
         // Opening: the moderator frames the topic (falls back to a plain line).
+        // `generate` is internally bounded (MODERATOR_TIMEOUT) so a stalled
+        // moderator provider can't strand the first agent turn behind a 300s
+        // request; surface a status so the brief framing wait reads as progress,
+        // not a hang.
         let opening = if let Some(m) = &moderator {
+            let _ = tx.send(DebateEvent::Phase("The moderator is framing the topic…".into()));
             match moderator::generate(&self.http, m, &self.topic, &[], moderator::ModeratorKind::Opening)
                 .await
             {
@@ -393,6 +398,7 @@ impl Engine {
         let _ = tx.send(DebateEvent::Moderator(
             opening.unwrap_or_else(|| format!("The council convenes on: {}", self.topic)),
         ));
+        let _ = tx.send(DebateEvent::Phase("Discussion".into()));
 
         let mut transcript: Vec<Turn> = Vec::new();
         let mut last_spoke: HashMap<String, i64> = HashMap::new();
