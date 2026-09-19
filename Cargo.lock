@@ -1552,24 +1552,35 @@ name = "socratic-council"
 version = "1.1.0"
 dependencies = [
  "anyhow",
- "base64",
- "chacha20poly1305",
  "clap",
  "crossterm",
  "directories",
- "futures-util",
- "getrandom 0.2.17",
  "ratatui",
- "regex",
  "reqwest",
  "rusqlite",
  "serde",
  "serde_json",
+ "socratic-council-engine",
  "textwrap",
- "thiserror 2.0.20",
  "tokio",
  "toml",
  "unicode-width 0.2.0",
+]
+
+[[package]]
+name = "socratic-council-engine"
+version = "0.1.0"
+dependencies = [
+ "base64",
+ "chacha20poly1305",
+ "futures-util",
+ "getrandom 0.2.17",
+ "regex",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.20",
+ "tokio",
 ]
 
 [[package]]

@@ -833,3 +833,20 @@ mod imp {
         }
     }
 }
+
+/// Open the session store: the app's data dir + DEK when the bridge found
+/// them, else the CLI's own dir + DEK (created on first use).
+pub fn open_store(bridge: &DesktopBridge) -> Option<crate::store::SessionStore> {
+    use crate::config::Config;
+    use crate::store::{SessionStore, StoreLocation};
+    if let (Some(dir), Some(dek)) = (bridge.app_data_dir(), bridge.dek()) {
+        return Some(SessionStore::at(
+            dir.join("sessions"),
+            dek,
+            StoreLocation::SharedWithApp,
+        ));
+    }
+    let dir = Config::config_dir().ok()?.join("sessions");
+    let dek = crate::crypto::load_or_create_dek(&Config::cli_dek_path().ok()?).ok()?;
+    Some(SessionStore::at(dir, dek, StoreLocation::CliOwn))
+}

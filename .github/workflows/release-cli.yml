@@ -35,24 +35,18 @@ jobs:
           toolchain: stable
           components: clippy
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
-        with:
-          workspaces: cli -> target
-      - name: Test (default features)
-        working-directory: cli
-        run: cargo test --locked
-      - name: Test (no default features)
-        working-directory: cli
-        run: cargo test --locked --no-default-features
+      - name: Test (engine + CLI, default features)
+        run: cargo test --locked --workspace
+      - name: Test (CLI, no default features)
+        run: cargo test --locked -p socratic-council --no-default-features
       - name: Clippy
-        working-directory: cli
         run: |
-          cargo clippy --all-targets --locked -- -D warnings
-          cargo clippy --all-targets --locked --no-default-features -- -D warnings
-      - name: Tag matches Cargo.toml version
-        working-directory: cli
+          cargo clippy --workspace --all-targets --locked -- -D warnings
+          cargo clippy -p socratic-council --all-targets --locked --no-default-features -- -D warnings
+      - name: Tag matches cli/Cargo.toml version
         run: |
           TAG_VERSION="${GITHUB_REF_NAME#cli-v}"
-          CRATE_VERSION=$(grep -m1 '^version' Cargo.toml | sed 's/.*"\(.*\)".*/\1/')
+          CRATE_VERSION=$(grep -m1 '^version' cli/Cargo.toml | sed 's/.*"\(.*\)".*/\1/')
           if [ "$TAG_VERSION" != "$CRATE_VERSION" ]; then
             echo "::error::tag $TAG_VERSION != Cargo.toml $CRATE_VERSION"
             exit 1
@@ -84,20 +78,16 @@ jobs:
           targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
-          workspaces: cli -> target
           key: ${{ matrix.target }}
       - name: Build
-        working-directory: cli
-        run: cargo build --release --locked --target ${{ matrix.target }}
+        run: cargo build --release --locked -p socratic-council --target ${{ matrix.target }}
       - name: Package (unix)
         if: runner.os != 'Windows'
-        working-directory: cli
         run: |
           BIN=target/${{ matrix.target }}/release/socratic-council
           tar -C "$(dirname "$BIN")" -czf "socratic-council-${GITHUB_REF_NAME#cli-v}-${{ matrix.target }}.tar.gz" socratic-council
       - name: Package (windows)
         if: runner.os == 'Windows'
-        working-directory: cli
         shell: pwsh
         run: |
           $version = $env:GITHUB_REF_NAME -replace '^cli-v',''
@@ -106,8 +96,8 @@ jobs:
         with:
           name: cli-${{ matrix.target }}
           path: |
-            cli/socratic-council-*.tar.gz
-            cli/socratic-council-*.zip
+            socratic-council-*.tar.gz
+            socratic-council-*.zip
           if-no-files-found: error
 
   release:
@@ -150,21 +140,28 @@ jobs:
       - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
         with:
           toolchain: stable
-      - name: Publish (skips if the version is already live)
-        working-directory: cli
+      - name: Publish the engine, then the CLI (each skips if its version is already live)
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         run: |
-          VERSION="${GITHUB_REF_NAME#cli-v}"
-          # crates.io rejects UA-less requests, so always send one — without it
-          # this guard never matches and the publish step fails redundantly.
-          if curl -fsSL -A "socratic-council-release-ci" \
-              "https://crates.io/api/v1/crates/socratic-council/$VERSION" | grep -q '"num"'; then
-            echo "socratic-council $VERSION is already on crates.io — skipping publish."
-            exit 0
-          fi
           if [ -z "$CARGO_REGISTRY_TOKEN" ]; then
             echo "::warning::CARGO_REGISTRY_TOKEN not set — skipping crates.io publish."
             exit 0
           fi
-          cargo publish --locked
+          # crates.io rejects UA-less requests, so always send one — without it
+          # the guards never match and the publish steps fail redundantly.
+          live() { curl -fsSL -A "socratic-council-release-ci" "https://crates.io/api/v1/crates/$1/$2" | grep -q '"num"'; }
+          ENGINE_VERSION=$(grep -m1 '^version' engine/Cargo.toml | sed 's/.*"\(.*\)".*/\1/')
+          if live socratic-council-engine "$ENGINE_VERSION"; then
+            echo "socratic-council-engine $ENGINE_VERSION is already on crates.io — skipping."
+          else
+            cargo publish --locked -p socratic-council-engine
+            # The index needs a moment before the dependent crate can resolve it.
+            sleep 45
+          fi
+          VERSION="${GITHUB_REF_NAME#cli-v}"
+          if live socratic-council "$VERSION"; then
+            echo "socratic-council $VERSION is already on crates.io — skipping publish."
+            exit 0
+          fi
+          cargo publish --locked -p socratic-council

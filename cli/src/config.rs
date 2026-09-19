@@ -670,16 +670,7 @@ pub fn display_name_for(id: &str) -> String {
 
 /// Default chat/base URL per provider (the value `base_url(...)` falls back to).
 pub fn default_base_url(provider: Provider) -> &'static str {
-    match provider {
-        Provider::OpenAI => "https://api.openai.com",
-        Provider::Anthropic => "https://api.anthropic.com",
-        Provider::Google => "https://generativelanguage.googleapis.com",
-        Provider::DeepSeek => "https://api.deepseek.com",
-        Provider::Kimi => "https://api.moonshot.cn",
-        Provider::Qwen => "https://dashscope.aliyuncs.com/compatible-mode/v1",
-        Provider::MiniMax => "https://api.minimaxi.com/anthropic",
-        Provider::Zhipu => "https://open.bigmodel.cn/api/paas/v4",
-    }
+    provider.default_base_url()
 }
 
 #[cfg(unix)]

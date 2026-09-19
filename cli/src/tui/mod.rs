@@ -592,7 +592,7 @@ pub(crate) fn settings_row_count() -> usize {
 
 impl App {
     fn new(ctx: AppContext) -> Self {
-        let store = SessionStore::open(ctx.config.bridge());
+        let store = crate::bridge::open_store(ctx.config.bridge());
         let bridge_rows = ctx
             .config
             .bridge()
@@ -908,7 +908,7 @@ impl App {
         )
         .with_attachments(self.ctx.attachments.clone())
         .with_forced_deliverable(self.ctx.forced)
-        .with_store(SessionStore::open(config.bridge()))
+        .with_store(crate::bridge::open_store(config.bridge()))
         .with_prior_notes(prior_notes);
         let (tx, rx) = unbounded_channel();
         let (engine_tx, mut engine_rx) = unbounded_channel::<deliberation::DebateEvent>();

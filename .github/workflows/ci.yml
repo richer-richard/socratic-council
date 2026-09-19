@@ -127,7 +127,7 @@ jobs:
         run: pnpm tauri build --bundles app
 
   cli-test:
-    name: CLI Test (${{ matrix.os }})
+    name: Engine + CLI Test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -139,20 +139,15 @@ jobs:
         with:
           toolchain: stable
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-        with:
-          workspaces: cli -> target
-      - name: Test (default features — desktop bridge)
-        working-directory: cli
-        run: cargo test --locked
-      - name: Test (pure Rust — no default features)
-        working-directory: cli
-        run: cargo test --locked --no-default-features
+      - name: Test (engine + CLI, default features — desktop bridge)
+        run: cargo test --locked --workspace
+      - name: Test (CLI, pure Rust — no default features)
+        run: cargo test --locked -p socratic-council --no-default-features
       - name: Build release binary
-        working-directory: cli
-        run: cargo build --release --locked
+        run: cargo build --release --locked -p socratic-council
 
   cli-lint:
-    name: CLI Clippy
+    name: Engine + CLI Clippy
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -161,14 +156,12 @@ jobs:
           toolchain: stable
           components: clippy
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-        with:
-          workspaces: cli -> target
-      - name: Clippy (default features)
-        working-directory: cli
-        run: cargo clippy --all-targets --locked -- -D warnings
-      - name: Clippy (no default features)
-        working-directory: cli
-        run: cargo clippy --all-targets --locked --no-default-features -- -D warnings
+      - name: Clippy (engine + CLI, default features)
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - name: Clippy (CLI, no default features)
+        run: cargo clippy -p socratic-council --all-targets --locked --no-default-features -- -D warnings
+      - name: Format
+        run: cargo fmt --all --check
 
   ci-pass:
     name: CI Pass

@@ -61,7 +61,7 @@ jobs:
         run: cargo audit --deny warnings
 
   cargo-audit-cli:
-    name: cargo audit (CLI)
+    name: cargo audit (engine + CLI workspace)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -70,6 +70,6 @@ jobs:
           toolchain: stable
       - name: Install cargo-audit
         run: cargo install cargo-audit --locked
-      - name: Run cargo audit on the CLI crate
-        working-directory: cli
+      - name: Run cargo audit on the Rust workspace lockfile
+        # Reads ./Cargo.lock (engine + CLI) with the policy in ./.cargo/audit.toml.
         run: cargo audit --deny warnings

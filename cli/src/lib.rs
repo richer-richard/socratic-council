@@ -1,39 +1,15 @@
-//! `socratic-council` — a terminal multi-agent debate workstation.
+//! `socratic-council` — the terminal client of the Socratic Council engine.
 //!
-//! Eight AI agents, one per provider (OpenAI, Anthropic, Google, DeepSeek,
-//! Kimi/Moonshot, Qwen, MiniMax, Z.AI), debate any topic in a ratatui TUI.
-//! Models are chosen by the same Auto resolver + live `/models` scanning as the
-//! desktop app — no hardcoded ids to hand-bump.
+//! The engine (`socratic_council_engine`) is re-exported module by module so
+//! the client's own modules and its integration surface keep the historical
+//! paths (`socratic_council::deliberation`, `::catalog`, ...).
 
-pub mod attach;
+pub use socratic_council_engine::{
+    attach, catalog, cost, crypto, deliberation, error, http_client, providers, search, store,
+    text, tools, types,
+};
+
 pub mod bridge;
-pub mod catalog;
 pub mod config;
-pub mod cost;
-pub mod crypto;
-pub mod deliberation;
 pub mod engine;
-pub mod error;
-pub mod providers;
-pub mod search;
-pub mod store;
-pub mod text;
-pub mod tools;
 pub mod tui;
-pub mod types;
-
-/// Build an HTTP client, optionally routed through a proxy URL. A connect +
-/// overall request timeout means a stalled provider eventually errors (the turn
-/// fails gracefully) instead of hanging the whole debate forever.
-pub fn http_client(proxy: Option<&str>) -> reqwest::Client {
-    let mut builder = reqwest::Client::builder()
-        .user_agent("socratic-council-cli")
-        .connect_timeout(std::time::Duration::from_secs(30))
-        .timeout(std::time::Duration::from_secs(300));
-    if let Some(p) = proxy {
-        if let Ok(px) = reqwest::Proxy::all(p) {
-            builder = builder.proxy(px);
-        }
-    }
-    builder.build().unwrap_or_default()
-}

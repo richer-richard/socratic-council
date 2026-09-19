@@ -71,6 +71,22 @@ impl Provider {
         }
     }
 
+    /// The provider's default API base URL (Chinese providers on their
+    /// Chinese endpoints).
+    pub fn default_base_url(self) -> &'static str {
+        let provider = self;
+        match provider {
+            Provider::OpenAI => "https://api.openai.com",
+            Provider::Anthropic => "https://api.anthropic.com",
+            Provider::Google => "https://generativelanguage.googleapis.com",
+            Provider::DeepSeek => "https://api.deepseek.com",
+            Provider::Kimi => "https://api.moonshot.cn",
+            Provider::Qwen => "https://dashscope.aliyuncs.com/compatible-mode/v1",
+            Provider::MiniMax => "https://api.minimaxi.com/anthropic",
+            Provider::Zhipu => "https://open.bigmodel.cn/api/paas/v4",
+        }
+    }
+
     pub fn from_slug(s: &str) -> Option<Provider> {
         Provider::ALL.into_iter().find(|p| p.slug() == s)
     }

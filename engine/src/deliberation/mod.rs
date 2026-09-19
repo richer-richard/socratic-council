@@ -323,7 +323,7 @@ impl EngineConfig {
         self.base_urls
             .get(&provider)
             .cloned()
-            .unwrap_or_else(|| crate::config::default_base_url(provider).to_string())
+            .unwrap_or_else(|| provider.default_base_url().to_string())
     }
 }
 

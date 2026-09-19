@@ -14,8 +14,6 @@
 //! either side. Last writer wins by `updatedAt`; each surface only ever
 //! overwrites a session it is itself running.
 
-use crate::bridge::DesktopBridge;
-use crate::config::Config;
 use crate::crypto;
 use crate::types::Usage;
 use serde_json::{json, Value};
@@ -93,25 +91,6 @@ pub fn now_ms() -> u64 {
 }
 
 impl SessionStore {
-    /// Open the store: the app's data dir + DEK when the bridge found them,
-    /// else the CLI's own dir + DEK (created on first use).
-    pub fn open(bridge: &DesktopBridge) -> Option<Self> {
-        if let (Some(dir), Some(dek)) = (bridge.app_data_dir(), bridge.dek()) {
-            return Some(Self {
-                dir: dir.join("sessions"),
-                dek,
-                location: StoreLocation::SharedWithApp,
-            });
-        }
-        let dir = Config::config_dir().ok()?.join("sessions");
-        let dek = crypto::load_or_create_dek(&Config::cli_dek_path().ok()?).ok()?;
-        Some(Self {
-            dir,
-            dek,
-            location: StoreLocation::CliOwn,
-        })
-    }
-
     /// A store at an explicit location (tests, or a custom `--sessions-dir`).
     pub fn at(dir: PathBuf, dek: [u8; crypto::DEK_LEN], location: StoreLocation) -> Self {
         Self { dir, dek, location }
@@ -211,7 +190,10 @@ pub fn build_session_json(
                 "moderator" => ("system", "Moderator"),
                 "tool" => ("tool", "Tool"),
                 "user" => ("user", "You"),
-                id if crate::tui::theme::AGENTS.iter().any(|a| a.id == id) => {
+                id if crate::types::DEFAULT_SEATS
+                    .iter()
+                    .any(|(sid, _, _)| *sid == id) =>
+                {
                     (id, m.display_name.as_str())
                 }
                 _ => ("system", m.display_name.as_str()),
@@ -269,10 +251,10 @@ pub fn messages_from_json(session: &Value) -> Vec<StoredMessage> {
                 .as_str()
                 .map(|s| s.to_string())
                 .unwrap_or_else(|| {
-                    crate::tui::theme::AGENTS
+                    crate::types::DEFAULT_SEATS
                         .iter()
-                        .find(|a| a.id == agent_id)
-                        .map(|a| a.name.to_string())
+                        .find(|(sid, _, _)| *sid == agent_id)
+                        .map(|(_, name, _)| name.to_string())
                         .unwrap_or_else(|| "System".to_string())
                 });
             Some(StoredMessage {

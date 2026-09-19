@@ -8,7 +8,7 @@ use socratic_council::deliberation::{
 };
 use socratic_council::http_client;
 use socratic_council::providers::scan::scan_models;
-use socratic_council::store::{self, SessionStore};
+use socratic_council::store;
 use socratic_council::text::sanitize_terminal as clean;
 use socratic_council::tools::{Approval, ToolPolicy};
 use socratic_council::tui::{self, AppContext};
@@ -236,7 +236,7 @@ struct RunArgs {
 
 fn cmd_sessions() -> anyhow::Result<()> {
     let config = Config::load()?;
-    let Some(store) = SessionStore::open(config.bridge()) else {
+    let Some(store) = socratic_council::bridge::open_store(config.bridge()) else {
         anyhow::bail!("no session store available (no writable config dir)");
     };
     let rows = store.list();
@@ -345,7 +345,7 @@ async fn cmd_run(args: RunArgs) -> anyhow::Result<()> {
     // becomes the planner's notes for a fresh run on the same topic.
     let resume = match &args.resume {
         Some(id) => {
-            let store = SessionStore::open(config.bridge())
+            let store = socratic_council::bridge::open_store(config.bridge())
                 .ok_or_else(|| anyhow::anyhow!("no session store available"))?;
             let json = store.load(id).ok_or_else(|| {
                 anyhow::anyhow!("session {id} not found in {}", store.dir().display())
@@ -540,7 +540,7 @@ async fn run_plain(
     });
 
     let session_id = store::new_session_id();
-    let store = SessionStore::open(config.bridge());
+    let store = socratic_council::bridge::open_store(config.bridge());
     let engine_config = config.engine_config(&session_id);
     let names: BTreeMap<String, String> = roster
         .seats

@@ -6,13 +6,15 @@
 //! writes a record.
 
 use serde_json::{json, Value};
-use socratic_council::cost::{BudgetAction, BudgetPolicy};
-use socratic_council::deliberation::{
+use socratic_council_engine::cost::{BudgetAction, BudgetPolicy};
+use socratic_council_engine::deliberation::{
     DebateEvent, Deliberation, EngineConfig, EngineInput, Recommend, RoundKind,
 };
-use socratic_council::store::{SessionStore, StoreLocation};
-use socratic_council::tools::ToolPolicy;
-use socratic_council::types::{ModelChoice, ModelRef, Provider, ReasoningTier, Roster, Seat};
+use socratic_council_engine::store::{SessionStore, StoreLocation};
+use socratic_council_engine::tools::ToolPolicy;
+use socratic_council_engine::types::{
+    ModelChoice, ModelRef, Provider, ReasoningTier, Roster, Seat,
+};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};

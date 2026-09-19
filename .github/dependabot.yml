@@ -21,9 +21,10 @@ updates:
       js-minor-patch:
         update-types: ["minor", "patch"]
 
-  # Rust — the two independent lockfiles.
+  # Rust — the two independent lockfiles: the engine + CLI workspace at the
+  # root, and the desktop app's Tauri backend.
   - package-ecosystem: "cargo"
-    directory: "/cli"
+    directory: "/"
     schedule:
       interval: "weekly"
     groups:

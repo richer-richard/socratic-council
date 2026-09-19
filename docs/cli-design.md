@@ -27,6 +27,14 @@
 
 ## Crate layout
 
+**v3:** a root Cargo workspace with two members: `engine/` (package
+`socratic-council-engine`: types, catalog, providers, tools, deliberation,
+cost, store, crypto, attachments, search) and `cli/` (clap entry point,
+config, the desktop bridge and the TUI), one `Cargo.lock` at the root and
+the audit policy in `.cargo/audit.toml`. The desktop app's Tauri backend is
+excluded from the workspace and depends on the engine by path. The layout
+below is the original June 2026 design.
+
 Location: top-level `cli/` (standalone crate; the pnpm workspace ignores
 dirs without a `package.json`, and cargo ignores the JS monorepo).
 
