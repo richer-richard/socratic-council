@@ -15,11 +15,12 @@ pub mod theme;
 use crate::attach::Attachment;
 use crate::catalog::{resolve_model, DiscoveredModel};
 use crate::config::{Config, KeySource};
-use crate::engine::{default_agents, DebateEvent, Engine, Turn};
+use crate::deliberation::{self, Deliberation, Deliverable, EngineInput};
+use crate::engine::{adapt, DebateEvent, Turn};
 use crate::store::{self, SessionStore, StoredMessage};
 use crate::types::{
-    Agent, CanvasSection, CostSnapshot, DeepResearchReport, ModeratorConclusion, PairScore,
-    PeerEvalRound, Provider, Usage, VoteChoice,
+    CanvasSection, CostSnapshot, DeepResearchReport, ModeratorConclusion, PairScore, PeerEvalRound,
+    Provider, Roster, Usage, VoteChoice,
 };
 use crossterm::event::{
     self, DisableBracketedPaste, EnableBracketedPaste, Event, KeyCode, KeyEvent, KeyEventKind,
@@ -40,7 +41,7 @@ use std::io;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
+use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tokio::task::JoinHandle;
 
 /// Everything a debate needs to be spawned on demand from the Home view.
@@ -54,8 +55,13 @@ pub struct AppContext {
     /// Keys already resolved during a `--scan` pre-pass, so launching a debate
     /// in the same run reuses them.
     pub prefetched_keys: HashMap<Provider, String>,
-    /// Files attached via `run --file …` (searchable by the oracle).
+    /// Files attached via `run --file …` (searchable by the seats' tools).
     pub attachments: Vec<Attachment>,
+    /// The roster the run command resolved (presets / --seats); `None` means
+    /// the config's roster cut to the standard preset.
+    pub roster: Option<Roster>,
+    /// A deliverable forced with --deliverable.
+    pub forced: Option<Deliverable>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -194,6 +200,7 @@ pub struct SessionRow {
 struct EngineHandle {
     rx: UnboundedReceiver<DebateEvent>,
     cancel: Arc<AtomicBool>,
+    input: UnboundedSender<EngineInput>,
     handle: JoinHandle<()>,
 }
 
@@ -226,8 +233,8 @@ impl OptionRow {
 
     pub fn label(self) -> &'static str {
         match self {
-            OptionRow::MaxTurns => "Discussion cap",
-            OptionRow::ObserverInterval => "Advisors",
+            OptionRow::MaxTurns => "Rounds",
+            OptionRow::ObserverInterval => "Tools",
             OptionRow::BudgetSession => "Budget / session",
             OptionRow::BudgetAction => "Budget action",
             OptionRow::Proxy => "Proxy",
@@ -787,14 +794,23 @@ impl App {
         // Never orphan a previously-running engine — it would keep streaming
         // completions (and spending quota) in the background.
         self.abort_engine();
-        let config = self.ctx.config.clone();
+        let mut config = self.ctx.config.clone();
+        // The TUI cannot answer questions or approve tools yet: plan without
+        // asking and run allowed tools on their own.
+        config.protocol.interactive = false;
+        config.tools.approval = crate::tools::Approval::Auto;
         let allowed = self.ctx.providers.clone();
-        let mut agents: Vec<Agent> = default_agents(config.council_tier)
-            .into_iter()
-            .filter(|a| config.is_configured(a.provider) && allowed.contains(&a.provider))
+        let base_roster = match &self.ctx.roster {
+            Some(r) => r.clone(),
+            None => config.roster(&allowed).take(4),
+        };
+        let seats: Vec<crate::types::Seat> = base_roster
+            .seats
+            .iter()
+            .filter(|s| config.is_configured(s.provider) && allowed.contains(&s.provider))
+            .cloned()
             .collect();
-        agents.sort_by(|a, b| a.name.cmp(&b.name));
-        if agents.is_empty() {
+        if seats.is_empty() {
             // Keep the topic (e.g. `run "topic"` on a keyless first run) so the
             // user can add a key and convene without retyping it.
             self.composer = topic;
@@ -811,65 +827,106 @@ impl App {
             return;
         }
 
-        // Resolve each provider's key once, then cache it for the session.
+        // Resolve each provider's key once, then cache it for the session. The
+        // moderator may sit on a provider with no seat, so every keyed
+        // provider is resolved.
         let mut keys = HashMap::new();
-        for agent in &agents {
-            if let Some(k) = self.key_cache.get(&agent.provider) {
-                keys.insert(agent.provider, k.clone());
-            } else if let Some(k) = config.resolve_api_key(agent.provider) {
-                self.key_cache.insert(agent.provider, k.clone());
-                keys.insert(agent.provider, k);
+        for provider in Provider::ALL {
+            if !config.is_configured(provider) {
+                continue;
+            }
+            if let Some(k) = self.key_cache.get(&provider) {
+                keys.insert(provider, k.clone());
+            } else if let Some(k) = config.resolve_api_key(provider) {
+                self.key_cache.insert(provider, k.clone());
+                keys.insert(provider, k);
             }
         }
-        agents.retain(|a| keys.contains_key(&a.provider));
-        if agents.is_empty() {
+        let seats: Vec<crate::types::Seat> = seats
+            .into_iter()
+            .filter(|s| keys.contains_key(&s.provider))
+            .collect();
+        if seats.is_empty() {
             self.toast("Couldn't read a stored key — add one here with ^P.");
             return;
         }
 
         let available = self.ctx.available.clone();
-        let roster = agents
+        let roster = seats
             .iter()
-            .map(|a| {
+            .map(|s| {
                 let empty = Vec::new();
-                let avail = available.get(&a.provider).unwrap_or(&empty);
-                let model = resolve_model(
-                    a.provider,
-                    a.tier,
-                    avail,
-                    config.selection(a.provider, a.tier).as_deref(),
-                );
+                let avail = available.get(&s.provider).unwrap_or(&empty);
+                let model = match s.model.clone() {
+                    crate::types::ModelChoice::Id(id) => id.clone(),
+                    crate::types::ModelChoice::Auto(tier) => resolve_model(
+                        s.provider,
+                        tier,
+                        avail,
+                        config.selection(s.provider, tier).as_deref(),
+                    ),
+                };
                 RosterEntry {
-                    id: a.id.clone(),
-                    name: a.name.clone(),
-                    provider: a.provider,
+                    id: s.id.clone(),
+                    name: s.name.clone(),
+                    provider: s.provider,
                     model,
-                    color: theme::provider_color(a.provider),
+                    color: theme::provider_color(s.provider),
                 }
             })
             .collect();
+        let names: crate::engine::Names = seats
+            .iter()
+            .map(|s| (s.id.clone(), s.name.clone()))
+            .collect();
 
-        let max_turns = match config.max_turns {
-            0 => 1000,
-            n => n,
-        };
-        let display_cap = if config.max_turns == 0 { 0 } else { max_turns };
+        let display_cap = 0;
         let http = self.ctx.http.clone();
-        let engine = Engine::new(
+        let session_id = match &resume {
+            Some(r) => r.session_id.clone(),
+            None => store::new_session_id(),
+        };
+        let prior_notes = (!prior.is_empty()).then(|| {
+            prior
+                .iter()
+                .rev()
+                .take(6)
+                .map(|t| format!("{}: {}", t.name, t.content))
+                .collect::<Vec<_>>()
+                .into_iter()
+                .rev()
+                .collect::<Vec<_>>()
+                .join("\n")
+        });
+        let engine = Deliberation::new(
             http,
-            config,
+            config.engine_config(&session_id),
             topic.clone(),
-            agents,
-            available,
+            crate::types::Roster { seats },
             keys,
-            max_turns,
+            available,
         )
         .with_attachments(self.ctx.attachments.clone())
-        .with_prior_transcript(prior);
+        .with_forced_deliverable(self.ctx.forced)
+        .with_store(SessionStore::open(config.bridge()))
+        .with_prior_notes(prior_notes);
         let (tx, rx) = unbounded_channel();
+        let (engine_tx, mut engine_rx) = unbounded_channel::<deliberation::DebateEvent>();
+        let (input, input_rx) = unbounded_channel::<EngineInput>();
         let cancel = Arc::new(AtomicBool::new(false));
-        let engine_cancel = cancel.clone();
-        let handle = tokio::spawn(async move { engine.run(tx, engine_cancel).await });
+        let handle = tokio::spawn(async move {
+            let run = tokio::spawn(async move {
+                engine.run(engine_tx, input_rx).await;
+            });
+            while let Some(ev) = engine_rx.recv().await {
+                for old in adapt(ev, &names) {
+                    if tx.send(old).is_err() {
+                        break;
+                    }
+                }
+            }
+            let _ = run.await;
+        });
 
         let (session_id, created_at_ms, turns, turn_count) = match resume {
             Some(r) => (r.session_id, r.created_at_ms, r.turns, r.turn_count),
@@ -901,7 +958,12 @@ impl App {
             scroll: 0,
             done: false,
             read_only: false,
-            engine: Some(EngineHandle { rx, cancel, handle }),
+            engine: Some(EngineHandle {
+                rx,
+                cancel,
+                input,
+                handle,
+            }),
         });
         self.composer.clear();
         self.view = View::Chat;
@@ -913,6 +975,7 @@ impl App {
         if let Some(d) = &self.debate {
             if let Some(e) = &d.engine {
                 e.cancel.store(true, Ordering::Relaxed);
+                let _ = e.input.send(EngineInput::Cancel);
                 e.handle.abort();
             }
         }
@@ -1267,12 +1330,14 @@ impl App {
     fn option_current_value(&self, row: OptionRow) -> String {
         let config = &self.ctx.config;
         match row {
-            OptionRow::MaxTurns => config.max_turns.to_string(),
+            OptionRow::MaxTurns => config.protocol.max_rounds.to_string(),
             OptionRow::ObserverInterval => {
-                if config.observers_enabled {
-                    config.observer_interval.to_string()
+                if config.tools.shell.enabled {
+                    "all".into()
+                } else if config.tools.any_enabled() {
+                    "safe".into()
                 } else {
-                    "0".into()
+                    "none".into()
                 }
             }
             OptionRow::BudgetSession => {
@@ -1294,23 +1359,17 @@ impl App {
     fn save_option(&mut self, row: OptionRow, value: &str) {
         let config = &mut self.ctx.config;
         match row {
-            OptionRow::MaxTurns => match value.parse::<u32>() {
-                Ok(n) if n <= 10_000 => config.max_turns = n,
+            OptionRow::MaxTurns => match value.parse::<u8>() {
+                Ok(n) if (1..=5).contains(&n) => config.protocol.max_rounds = n,
                 _ => {
-                    self.toast("Discussion cap must be a number of turns (0 = no cap).");
+                    self.toast("Cross-examination rounds: 1 to 5.");
                     return;
                 }
             },
-            OptionRow::ObserverInterval => match value.parse::<u32>() {
-                Ok(0) => {
-                    config.observers_enabled = false;
-                }
-                Ok(n) if n <= 50 => {
-                    config.observers_enabled = true;
-                    config.observer_interval = n;
-                }
-                _ => {
-                    self.toast("Advisors: every N turns (0 = off, max 50).");
+            OptionRow::ObserverInterval => match crate::tools::ToolPolicy::from_flag(value) {
+                Some(policy) => config.tools = policy,
+                None => {
+                    self.toast("Tools: none, safe or all (all adds the sandboxed shell).");
                     return;
                 }
             },
@@ -1469,6 +1528,7 @@ pub async fn run(ctx: AppContext, initial_topic: Option<String>) -> anyhow::Resu
     if let Some(d) = &app.debate {
         if let Some(e) = &d.engine {
             e.cancel.store(true, Ordering::Relaxed);
+            let _ = e.input.send(EngineInput::Cancel);
             e.handle.abort();
         }
     }
@@ -1631,6 +1691,8 @@ mod tests {
             providers: Provider::ALL.to_vec(),
             prefetched_keys: HashMap::new(),
             attachments: Vec::new(),
+            roster: None,
+            forced: None,
         };
         App::new(ctx)
     }
@@ -1766,26 +1828,29 @@ mod tests {
     fn settings_option_rows_edit_validate_and_reset() {
         let mut app = test_app();
         app.view = View::Settings;
-        // Move to the Discussion-cap row (first option row after 8 providers).
+        // Move to the Rounds row (first option row after 8 providers).
         app.settings_sel = theme::AGENTS.len();
         // The draft prefills the current value.
         app.option_draft = Some(OptionDraft {
             row: OptionRow::MaxTurns,
-            buffer: "24".into(),
+            buffer: "2".into(),
         });
         if let Some(d) = app.option_draft.take() {
             // Simulate save without touching the real config dir: validate only.
-            assert!(d.buffer.parse::<u32>().is_ok());
-            app.ctx.config.max_turns = d.buffer.parse().unwrap();
+            assert!(d.buffer.parse::<u8>().is_ok());
+            app.ctx.config.protocol.max_rounds = d.buffer.parse().unwrap();
         }
-        assert_eq!(app.ctx.config.max_turns, 24);
+        assert_eq!(app.ctx.config.protocol.max_rounds, 2);
+        assert_eq!(app.option_current_value(OptionRow::MaxTurns), "2");
 
-        // Observer 0 disables the circle.
-        app.ctx.config.observers_enabled = true;
-        if "0".parse::<u32>().unwrap() == 0 {
-            app.ctx.config.observers_enabled = false;
-        }
-        assert!(!app.ctx.config.observers_enabled);
+        // The tools row cycles the policy levels.
+        app.ctx.config.tools = crate::tools::ToolPolicy::none();
+        assert_eq!(
+            app.option_current_value(OptionRow::ObserverInterval),
+            "none"
+        );
+        app.ctx.config.tools = crate::tools::ToolPolicy::all();
+        assert_eq!(app.option_current_value(OptionRow::ObserverInterval), "all");
 
         // Proxy display redaction strips userinfo.
         assert_eq!(

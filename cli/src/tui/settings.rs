@@ -192,15 +192,14 @@ fn render_options(f: &mut Frame, area: Rect, app: &App) {
         }
 
         let value = match row {
-            OptionRow::MaxTurns => match config.max_turns {
-                0 => "no cap".to_string(),
-                n => format!("{n} turns"),
-            },
+            OptionRow::MaxTurns => format!("{} round(s)", config.protocol.max_rounds),
             OptionRow::ObserverInterval => {
-                if !config.observers_enabled || config.observer_interval == 0 {
-                    "off".to_string()
+                if config.tools.shell.enabled {
+                    "all (sandboxed shell)".to_string()
+                } else if config.tools.any_enabled() {
+                    "safe".to_string()
                 } else {
-                    format!("every {} turns", config.observer_interval)
+                    "none".to_string()
                 }
             }
             OptionRow::BudgetSession => {

@@ -1,22 +1,26 @@
 //! `socratic-council` CLI entry point.
 
 use clap::{Parser, Subcommand};
-use socratic_council::catalog::{catalog_models, DiscoveredModel, ModelSource};
-use socratic_council::config::Config;
-use socratic_council::engine::{default_agents, DebateEvent, Engine};
+use socratic_council::catalog::{catalog_models, model_row, DiscoveredModel, ModelSource};
+use socratic_council::config::{parse_seats_flag, Config};
+use socratic_council::deliberation::{
+    record, DebateEvent, Deliberation, Deliverable, EngineInput, Recommend,
+};
 use socratic_council::http_client;
 use socratic_council::providers::scan::scan_models;
-use socratic_council::store::{self, SessionStore, StoredMessage};
+use socratic_council::store::{self, SessionStore};
+use socratic_council::text::sanitize_terminal as clean;
+use socratic_council::tools::{Approval, ToolPolicy};
 use socratic_council::tui::{self, AppContext};
-use socratic_council::types::{Agent, Provider, ReasoningTier, Reflection};
-use std::collections::HashMap;
+use socratic_council::types::{Provider, ReasoningTier, Roster};
+use std::collections::{BTreeMap, HashMap};
 use std::io::Write;
 
 #[derive(Parser)]
 #[command(
     name = "socratic-council",
     version,
-    about = "A terminal multi-agent debate workstation — eight AI agents argue any topic."
+    about = "A terminal council of AI models that deliberates a question in structured rounds and leaves a decision record."
 )]
 struct Cli {
     #[command(subcommand)]
@@ -24,58 +28,69 @@ struct Cli {
 }
 
 #[derive(Subcommand)]
+#[allow(clippy::large_enum_variant)]
 enum Command {
-    /// Start a debate on a topic (default action).
+    /// Convene the council on a topic (omit the topic to open the Home view).
     Run {
-        /// The debate topic (omit to open the Home view, or to be prompted with --no-tui).
+        /// The topic, question or task (omit to open the Home view, or to be prompted with --no-tui).
         topic: Vec<String>,
+        /// Council preset: quick (3 seats) | standard (4) | full (8). Default standard.
+        #[arg(long)]
+        preset: Option<String>,
+        /// Explicit seats, comma-separated `provider:model` (model = auto | auto-fast | an id),
+        /// e.g. `openai:gpt-6-astra,anthropic:auto,openai:gpt-5.6-luna`. Overrides the preset.
+        #[arg(long)]
+        seats: Option<String>,
         /// Restrict to these providers (comma-separated slugs).
         #[arg(long)]
         providers: Option<String>,
-        /// Reasoning tier: low | medium | high.
+        /// Force the deliverable: decision | analysis | document | review (default: the moderator decides).
+        #[arg(long)]
+        deliverable: Option<String>,
+        /// Cross-examination rounds allowed (1..5; the moderator may use fewer).
+        #[arg(long)]
+        rounds: Option<u8>,
+        /// Reasoning tier for every round: low | medium | high (default: per round).
         #[arg(long)]
         tier: Option<ReasoningTier>,
-        /// Turn cap (0 = until you quit).
+        /// Tools the seats may use: none | safe | all (all = safe + sandboxed shell).
         #[arg(long)]
-        max_turns: Option<u32>,
-        /// Draft→revise reflection per turn: off | light | deep.
+        tools: Option<String>,
+        /// Allow the sandboxed shell tool (same as --tools all).
         #[arg(long)]
-        reflect: Option<Reflection>,
-        /// Synthesize a deep-research report at the close (one extra pass).
+        allow_shell: bool,
+        /// Ask before every tool call (plain mode answers on stdin).
         #[arg(long)]
-        deep_research: bool,
-        /// Skip the closing peer-evaluation scorecard (saves one call per agent).
+        ask_tools: bool,
+        /// Let the moderator ask one clarifying question first (plain mode answers on stdin).
         #[arg(long)]
-        no_peer_eval: bool,
-        /// Attach a plain-text file (repeatable) — searchable via oracle.file_search.
+        interactive: bool,
+        /// Attach a plain-text file (repeatable); seats can search and read it.
         #[arg(long = "file", value_name = "PATH")]
         files: Vec<std::path::PathBuf>,
-        /// Disable the outer advisor circle (paired agents passing private notes).
-        #[arg(long)]
-        no_observers: bool,
-        /// Advisors whisper every N turns (0 = off; default 2).
-        #[arg(long)]
-        observer_interval: Option<u32>,
         /// USD budget cap for this session (0 = unlimited).
         #[arg(long)]
         budget: Option<f64>,
         /// What happens at the budget cap: warn | stop.
         #[arg(long)]
         budget_action: Option<String>,
-        /// Disable the oracle tools (web/file search, claim verification).
+        /// Workspace directory for tool files and commands (default: per session under the config dir).
         #[arg(long)]
-        no_search: bool,
+        workspace: Option<std::path::PathBuf>,
         /// Proxy URL for this run (http://, https://, socks5://…).
         #[arg(long)]
         proxy: Option<String>,
         /// Plain streaming output instead of the TUI.
         #[arg(long)]
         no_tui: bool,
+        /// Emit every engine event as one JSON line (implies --no-tui).
+        #[arg(long)]
+        json: bool,
         /// Scan each provider's live models before starting.
         #[arg(long)]
         scan: bool,
-        /// Continue a stored session (see `sessions`): its transcript becomes
-        /// history and new turns append to the same session.
+        /// Reconvene on a stored session: its record becomes the planner's notes
+        /// and a new session is written.
         #[arg(long, value_name = "SESSION_ID")]
         resume: Option<String>,
     },
@@ -102,11 +117,14 @@ enum Command {
         /// Reasoning tier to probe with (default: the council tier).
         #[arg(long)]
         tier: Option<ReasoningTier>,
-        /// Pick the model from the provider's live /models list instead of the catalog.
+        /// Scan the live /models endpoint first.
         #[arg(long)]
         scan: bool,
+        /// Also make one native tool-calling request per provider.
+        #[arg(long)]
+        tools: bool,
     },
-    /// Manage configuration and keys.
+    /// Show or change configuration.
     Config {
         #[command(subcommand)]
         action: ConfigAction,
@@ -117,9 +135,9 @@ enum Command {
 enum ConfigAction {
     /// Print the config file path.
     Path,
-    /// Store an API key for a provider (read from stdin).
+    /// Store an API key (prompted; never echoed).
     SetKey {
-        /// Provider slug (openai, anthropic, …).
+        /// Provider slug: openai | anthropic | google | deepseek | kimi | qwen | minimax | zhipu.
         provider: String,
     },
 }
@@ -131,39 +149,45 @@ async fn main() {
         None => cmd_run(RunArgs::default()).await,
         Some(Command::Run {
             topic,
+            preset,
+            seats,
             providers,
+            deliverable,
+            rounds,
             tier,
-            max_turns,
-            reflect,
-            deep_research,
-            no_peer_eval,
+            tools,
+            allow_shell,
+            ask_tools,
+            interactive,
             files,
-            no_observers,
-            observer_interval,
             budget,
             budget_action,
-            no_search,
+            workspace,
             proxy,
             no_tui,
+            json,
             scan,
             resume,
         }) => {
             cmd_run(RunArgs {
                 topic: topic.join(" "),
+                preset,
+                seats,
                 providers,
+                deliverable,
+                rounds,
                 tier,
-                max_turns,
-                reflect,
-                deep_research,
-                no_peer_eval,
+                tools,
+                allow_shell,
+                ask_tools,
+                interactive,
                 files,
-                no_observers,
-                observer_interval,
                 budget,
                 budget_action,
-                no_search,
+                workspace,
                 proxy,
-                no_tui,
+                no_tui: no_tui || json,
+                json,
                 scan,
                 resume,
             })
@@ -176,7 +200,8 @@ async fn main() {
             provider,
             tier,
             scan,
-        }) => cmd_probe(provider, tier, scan).await,
+            tools,
+        }) => cmd_probe(provider, tier, scan, tools).await,
         Some(Command::Config { action }) => cmd_config(action),
     };
     if let Err(e) = result {
@@ -188,20 +213,23 @@ async fn main() {
 #[derive(Default)]
 struct RunArgs {
     topic: String,
+    preset: Option<String>,
+    seats: Option<String>,
     providers: Option<String>,
+    deliverable: Option<String>,
+    rounds: Option<u8>,
     tier: Option<ReasoningTier>,
-    max_turns: Option<u32>,
-    reflect: Option<Reflection>,
-    deep_research: bool,
-    no_peer_eval: bool,
+    tools: Option<String>,
+    allow_shell: bool,
+    ask_tools: bool,
+    interactive: bool,
     files: Vec<std::path::PathBuf>,
-    no_observers: bool,
-    observer_interval: Option<u32>,
     budget: Option<f64>,
     budget_action: Option<String>,
-    no_search: bool,
+    workspace: Option<std::path::PathBuf>,
     proxy: Option<String>,
     no_tui: bool,
+    json: bool,
     scan: bool,
     resume: Option<String>,
 }
@@ -228,7 +256,7 @@ fn cmd_sessions() -> anyhow::Result<()> {
             r.status,
             r.current_turn,
             r.origin,
-            socratic_council::engine::sanitize_terminal(&r.title)
+            clean(&r.title)
         );
     }
     Ok(())
@@ -242,28 +270,43 @@ fn parse_provider_filter(spec: &Option<String>) -> Option<Vec<Provider>> {
     })
 }
 
-async fn cmd_run(args: RunArgs) -> anyhow::Result<()> {
-    let mut config = Config::load()?;
-    // CLI flags override the inherited / default config.
+/// Preset sizes: quick 3, standard 4, full 8.
+fn preset_size(name: Option<&str>) -> anyhow::Result<usize> {
+    Ok(
+        match name.map(|n| n.trim().to_ascii_lowercase()).as_deref() {
+            None | Some("standard") => 4,
+            Some("quick") => 3,
+            Some("full") => 8,
+            Some(other) => anyhow::bail!("unknown preset {other}: use quick, standard or full"),
+        },
+    )
+}
+
+/// Apply the run flags to the loaded config.
+fn apply_run_flags(config: &mut Config, args: &RunArgs) -> anyhow::Result<()> {
     if let Some(tier) = args.tier {
         config.council_tier = tier;
+        let t = &mut config.protocol.tiers;
+        t.positions = tier;
+        t.cross = tier;
+        t.revision = tier;
+        t.record = tier;
     }
-    if let Some(n) = args.max_turns {
-        config.max_turns = n;
+    if let Some(rounds) = args.rounds {
+        anyhow::ensure!((1..=5).contains(&rounds), "--rounds must be 1..5");
+        config.protocol.max_rounds = rounds;
     }
-    if let Some(r) = args.reflect {
-        config.reflection = r;
+    if let Some(level) = &args.tools {
+        config.tools = ToolPolicy::from_flag(level)
+            .ok_or_else(|| anyhow::anyhow!("--tools must be none, safe or all"))?;
     }
-    config.deep_research = args.deep_research;
-    config.peer_eval = !args.no_peer_eval;
-    config.search_enabled = !args.no_search;
-    if args.no_observers {
-        config.observers_enabled = false;
+    if args.allow_shell {
+        config.tools.shell.enabled = true;
     }
-    if let Some(interval) = args.observer_interval {
-        config.observers_enabled = interval > 0;
-        config.observer_interval = interval;
+    if args.ask_tools {
+        config.tools.approval = Approval::Ask;
     }
+    config.protocol.interactive = args.interactive;
     if let Some(budget) = args.budget {
         anyhow::ensure!(budget.is_finite() && budget >= 0.0, "--budget must be ≥ 0");
         config.budget_per_session_usd = budget;
@@ -278,13 +321,28 @@ async fn cmd_run(args: RunArgs) -> anyhow::Result<()> {
     if let Some(proxy) = &args.proxy {
         config.proxy = Some(proxy.clone());
     }
+    if let Some(ws) = &args.workspace {
+        config.workspace = Some(ws.clone());
+    }
+    Ok(())
+}
 
-    // Attachments (plain text only; searched via oracle.file_search).
+async fn cmd_run(args: RunArgs) -> anyhow::Result<()> {
+    let mut config = Config::load()?;
+    apply_run_flags(&mut config, &args)?;
+    let forced = match &args.deliverable {
+        Some(d) => Some(Deliverable::parse(d).ok_or_else(|| {
+            anyhow::anyhow!("--deliverable must be decision, analysis, document or review")
+        })?),
+        None => None,
+    };
+
+    // Attachments (plain text only; seats search and read them with tools).
     let attachments =
         socratic_council::attach::load_attachments(&args.files).map_err(anyhow::Error::msg)?;
 
-    // `--resume <id>`: the stored transcript becomes history (plain mode only —
-    // the TUI resumes from its history sidebar with Enter).
+    // `--resume <id>`: the stored session's record (or transcript tail)
+    // becomes the planner's notes for a fresh run on the same topic.
     let resume = match &args.resume {
         Some(id) => {
             let store = SessionStore::open(config.bridge())
@@ -292,15 +350,15 @@ async fn cmd_run(args: RunArgs) -> anyhow::Result<()> {
             let json = store.load(id).ok_or_else(|| {
                 anyhow::anyhow!("session {id} not found in {}", store.dir().display())
             })?;
-            Some((id.clone(), json))
+            Some(json)
         }
         None => None,
     };
 
     // The *allowed* set: the `--providers` filter, or all eight. We deliberately
-    // do NOT pre-filter by which keys are configured — a terminal-only/VPS user
+    // do NOT pre-filter by which keys are configured — a terminal-only user
     // opens the TUI with zero keys and adds one in Settings, and it must become
-    // usable immediately. Actual key-gating happens at debate-launch time.
+    // usable immediately. Actual key-gating happens at launch time.
     let filter = parse_provider_filter(&args.providers);
     let allowed: Vec<Provider> = Provider::ALL
         .into_iter()
@@ -317,13 +375,31 @@ async fn cmd_run(args: RunArgs) -> anyhow::Result<()> {
         );
     }
 
+    // The roster: explicit seats, or the configured/default roster cut to the preset.
+    let roster = match &args.seats {
+        Some(spec) => {
+            let seats = parse_seats_flag(spec)?;
+            Roster { seats }.with_keys(|p| allowed.contains(&p))
+        }
+        None => {
+            let full = config.roster(&allowed);
+            let n = preset_size(args.preset.as_deref())?;
+            if config.seats.is_empty() {
+                full.take(n)
+            } else {
+                full
+            }
+        }
+    };
+    if roster.seats.is_empty() {
+        anyhow::bail!("no seats left after --providers / --seats filtering");
+    }
+
     let http = http_client(config.proxy.as_deref());
 
-    // Build the available-models map for every allowed provider. Catalog is
-    // offline + free, so we can populate even unconfigured providers (their
-    // roster row + resolved model render before any key exists). Only `--scan`
-    // the providers that actually have a key, capturing each resolved key so
-    // launching a debate reuses it.
+    // The available-models map for every allowed provider. Catalog is offline
+    // and free; only `--scan` the providers that have a key, keeping each
+    // resolved key so the run reuses it.
     let mut available: HashMap<Provider, Vec<DiscoveredModel>> = HashMap::new();
     let mut prefetched_keys: HashMap<Provider, String> = HashMap::new();
     for provider in &allowed {
@@ -343,8 +419,6 @@ async fn cmd_run(args: RunArgs) -> anyhow::Result<()> {
     }
 
     if args.no_tui {
-        // Plain mode has no interactive way to add a key, so it still requires
-        // at least one configured provider up front.
         let configured: Vec<Provider> = allowed
             .iter()
             .copied()
@@ -357,14 +431,15 @@ async fn cmd_run(args: RunArgs) -> anyhow::Result<()> {
                  var — or drop --no-tui and add a key in Settings (press ^P)."
             );
         }
-        return run_plain_debate(
+        return run_plain(
             config,
             http,
             available,
             prefetched_keys,
             attachments,
             &args,
-            &configured,
+            roster,
+            forced,
             resume,
         )
         .await;
@@ -385,30 +460,36 @@ async fn cmd_run(args: RunArgs) -> anyhow::Result<()> {
         providers: allowed,
         prefetched_keys,
         attachments,
+        roster: Some(roster),
+        forced,
     };
     tui::run(ctx, initial_topic).await
 }
 
-/// Plain (non-TUI) streaming debate for piping / scripting.
+/// Plain (non-TUI) run for piping and scripting: phases, seat contributions,
+/// tool calls, the board and the record as Markdown; or JSON lines.
 #[allow(clippy::too_many_arguments)]
-async fn run_plain_debate(
+async fn run_plain(
     config: Config,
     http: reqwest::Client,
     available: HashMap<Provider, Vec<DiscoveredModel>>,
     mut keys: HashMap<Provider, String>,
     attachments: Vec<socratic_council::attach::Attachment>,
     args: &RunArgs,
-    providers: &[Provider],
-    resume: Option<(String, serde_json::Value)>,
+    roster: Roster,
+    forced: Option<Deliverable>,
+    resume: Option<serde_json::Value>,
 ) -> anyhow::Result<()> {
+    use tokio::sync::mpsc::unbounded_channel;
+
     let mut topic = args.topic.clone();
-    if let Some((_, json)) = &resume {
+    if let Some(json) = &resume {
         if topic.trim().is_empty() {
             topic = json["topic"].as_str().unwrap_or("").to_string();
         }
     }
     if topic.trim().is_empty() {
-        print!("Debate topic> ");
+        print!("Topic> ");
         std::io::stdout().flush()?;
         let mut line = String::new();
         std::io::stdin().read_line(&mut line)?;
@@ -418,328 +499,250 @@ async fn run_plain_debate(
         anyhow::bail!("no topic given");
     }
 
-    let mut agents: Vec<Agent> = default_agents(config.council_tier)
-        .into_iter()
-        .filter(|a| providers.contains(&a.provider))
-        .collect();
-    agents.sort_by(|a, b| a.name.cmp(&b.name));
-
-    // Resolve any key not already prefetched (from env / the CLI's encrypted
-    // store / the app's vault), then drop agents whose key couldn't be resolved.
-    for agent in &agents {
-        if keys.contains_key(&agent.provider) {
+    for seat in &roster.seats {
+        if keys.contains_key(&seat.provider) {
             continue;
         }
-        if let Some(key) = config.resolve_api_key(agent.provider) {
-            keys.insert(agent.provider, key);
+        if let Some(key) = config.resolve_api_key(seat.provider) {
+            keys.insert(seat.provider, key);
         }
     }
-    agents.retain(|a| keys.contains_key(&a.provider));
-    if agents.is_empty() {
-        anyhow::bail!("could not read an API key for any selected provider");
+    // The moderator may live on a provider with no seat.
+    for provider in Provider::ALL {
+        if let std::collections::hash_map::Entry::Vacant(slot) = keys.entry(provider) {
+            if let Some(key) = config.resolve_api_key(provider) {
+                slot.insert(key);
+            }
+        }
+    }
+    let roster = roster.with_keys(|p| keys.contains_key(&p));
+    if roster.seats.is_empty() {
+        anyhow::bail!("could not read an API key for any selected seat");
     }
 
-    let max_turns = match config.max_turns {
-        0 => 1000,
-        n => n,
-    };
-    let display_cap = if config.max_turns == 0 { 0 } else { max_turns };
+    let prior_notes = resume.as_ref().and_then(|json| {
+        json["record"]
+            .as_object()
+            .and_then(|_| {
+                serde_json::from_value::<record::DecisionRecord>(json["record"].clone()).ok()
+            })
+            .map(|r| record::to_markdown(&r, &BTreeMap::new(), None))
+            .or_else(|| {
+                let msgs = store::messages_from_json(json);
+                let tail: Vec<String> = msgs
+                    .iter()
+                    .rev()
+                    .take(6)
+                    .map(|m| format!("{}: {}", m.display_name, m.content))
+                    .collect();
+                (!tail.is_empty()).then(|| tail.into_iter().rev().collect::<Vec<_>>().join("\n"))
+            })
+    });
+
+    let session_id = store::new_session_id();
     let store = SessionStore::open(config.bridge());
-    let (session_id, created_at_ms, prior_msgs) = match &resume {
-        Some((id, json)) => (
-            id.clone(),
-            json["createdAt"].as_u64().unwrap_or_else(store::now_ms),
-            store::messages_from_json(json),
-        ),
-        None => (store::new_session_id(), store::now_ms(), Vec::new()),
-    };
-    let prior: Vec<socratic_council::engine::Turn> = prior_msgs
+    let engine_config = config.engine_config(&session_id);
+    let names: BTreeMap<String, String> = roster
+        .seats
         .iter()
-        .filter(|m| m.agent_id != "error")
-        .map(|m| socratic_council::engine::Turn {
-            agent_id: m.agent_id.clone(),
-            name: m.display_name.clone(),
-            content: m.content.clone(),
-        })
+        .map(|s| (s.id.clone(), s.name.clone()))
         .collect();
-    let engine = Engine::new(
-        http,
-        config,
-        topic.clone(),
-        agents,
-        available,
-        keys,
-        max_turns,
-    )
-    .with_attachments(attachments)
-    .with_prior_transcript(prior);
-    // Turns already in the stored session keep counting up on resume.
-    let prior_turns = prior_msgs
-        .iter()
-        .filter(|m| {
-            socratic_council::tui::theme::AGENTS
-                .iter()
-                .any(|a| a.id == m.agent_id)
-        })
-        .count() as u32;
-    let record = PlainRecord {
-        store,
-        session_id,
-        created_at_ms,
-        topic,
-        messages: prior_msgs,
-        prior_turns,
-    };
-    run_plain(engine, display_cap, record).await;
-    Ok(())
-}
-
-/// What plain mode persists to the shared session store.
-struct PlainRecord {
-    store: Option<SessionStore>,
-    session_id: String,
-    created_at_ms: u64,
-    topic: String,
-    messages: Vec<StoredMessage>,
-    prior_turns: u32,
-}
-
-impl PlainRecord {
-    fn push(
-        &mut self,
-        agent_id: &str,
-        name: &str,
-        content: String,
-        thinking: String,
-        model: String,
-    ) {
-        if content.trim().is_empty() {
-            return;
-        }
-        self.messages.push(StoredMessage {
-            agent_id: agent_id.into(),
-            display_name: name.into(),
-            content,
-            thinking,
-            model,
-            at_ms: store::now_ms(),
-        });
-    }
-
-    fn save(&self, done: bool, turn_count: u32, usage: socratic_council::types::Usage) {
-        let Some(store) = &self.store else { return };
-        let json = store::build_session_json(
-            &self.session_id,
-            &self.topic,
-            self.created_at_ms,
-            &self.messages,
-            if done { "completed" } else { "paused" },
-            self.prior_turns + turn_count,
-            usage,
-        );
-        if let Err(e) = store.save(&json) {
-            eprintln!("[session] not saved: {e}");
-        }
-    }
-}
-
-async fn run_plain(engine: Engine, max_turns: u32, mut record: PlainRecord) {
-    use socratic_council::engine::sanitize_terminal as clean;
-    use std::sync::atomic::{AtomicBool, Ordering};
-    use std::sync::Arc;
-    use tokio::sync::mpsc::unbounded_channel;
+    let engine = Deliberation::new(http, engine_config, topic.clone(), roster, keys, available)
+        .with_attachments(attachments)
+        .with_forced_deliverable(forced)
+        .with_store(store)
+        .with_prior_notes(prior_notes);
 
     let (tx, mut rx) = unbounded_channel();
-    let cancel = Arc::new(AtomicBool::new(false));
-    let engine_cancel = cancel.clone();
-    let handle = tokio::spawn(async move { engine.run(tx, engine_cancel).await });
+    let (itx, irx) = unbounded_channel::<EngineInput>();
+    let handle = tokio::spawn(async move { engine.run(tx, irx).await });
+    let json_mode = args.json;
+    let stdin_is_tty = std::io::IsTerminal::is_terminal(&std::io::stdin());
+    let ask = |prompt: &str| -> Option<String> {
+        if !stdin_is_tty {
+            return None;
+        }
+        print!("{prompt}");
+        std::io::stdout().flush().ok()?;
+        let mut line = String::new();
+        std::io::stdin().read_line(&mut line).ok()?;
+        Some(line.trim().to_string())
+    };
 
-    let mut current = String::new();
-    let mut current_thinking = String::new();
-    let mut current_speaker: (String, String, String) = Default::default();
-    let mut usage_total = socratic_council::types::Usage::default();
-    let mut done = false;
-    let mut turn_no: u32 = 0;
-    let mut last_tension: f32 = 0.0;
-    let mut final_cost: Option<socratic_council::types::CostSnapshot> = None;
-    println!("session {}", record.session_id);
-    loop {
-        tokio::select! {
-            _ = tokio::signal::ctrl_c() => {
-                cancel.store(true, Ordering::Relaxed);
-                eprintln!("\n(stopping…)");
-                break;
+    if !json_mode {
+        println!("Session {session_id}");
+        println!("Topic: {}", clean(&topic));
+    }
+    while let Some(ev) = rx.recv().await {
+        if json_mode {
+            if let Ok(line) = serde_json::to_string(&ev) {
+                println!("{line}");
             }
-            maybe = rx.recv() => {
-                let Some(ev) = maybe else { break };
-                match ev {
-                    DebateEvent::Moderator(text) => {
-                        println!("\n— {}\n", clean(&text));
-                        record.push("moderator", "Moderator", text, String::new(), String::new());
+        }
+        match ev {
+            DebateEvent::UserQuestion { id, question } => {
+                let answer = ask(&format!(
+                    "\nThe moderator asks: {}\nYour answer> ",
+                    clean(&question)
+                ));
+                match answer {
+                    Some(text) if !text.is_empty() => {
+                        let _ = itx.send(EngineInput::UserAnswer { id, text });
                     }
-                    DebateEvent::Conclusion(c) => {
-                        println!("\n── Council Verdict ──");
-                        println!("{} {}    Score {}/10", c.status.glyph(), c.status.label(), c.score);
-                        println!("{}", clean(&c.summary));
-                        if !c.reason.trim().is_empty() {
-                            println!("Reason: {}", clean(&c.reason));
+                    _ => {
+                        if !json_mode {
+                            println!("(no answer given; planning without it)");
                         }
-                        if let Some(next) = &c.next {
-                            println!("Next:   {}", clean(next));
-                        }
-                        println!();
-                        record.push(
-                            "moderator",
-                            "Moderator",
-                            format!("Verdict: {} · Score {}/10\n{}\n{}", c.status.label(), c.score, c.summary, c.reason),
-                            String::new(),
-                            String::new(),
-                        );
+                        let _ = itx.send(EngineInput::UserAnswer {
+                            id,
+                            text: String::new(),
+                        });
                     }
-                    DebateEvent::TurnStarted { agent_id, name, model, .. } => {
-                        turn_no += 1;
-                        let marker = if max_turns > 0 {
-                            format!("[{turn_no}/{max_turns}] ")
-                        } else {
-                            format!("[{turn_no}] ")
-                        };
-                        print!("\n{marker}{name} ({model}):\n");
-                        let _ = std::io::stdout().flush();
-                        current.clear();
-                        current_thinking.clear();
-                        current_speaker = (agent_id, name, model);
-                    }
-                    // Accumulate the turn; print the directive-stripped message at
-                    // the end so piped output stays clean (no @canvas/@end lines).
-                    DebateEvent::Token(t) => current.push_str(&t),
-                    DebateEvent::Thinking(t) => current_thinking.push_str(&t),
-                    DebateEvent::TurnEnded { usage, .. } => {
-                        usage_total.input += usage.input;
-                        usage_total.output += usage.output;
-                        usage_total.reasoning += usage.reasoning;
-                        let (stripped, _) = socratic_council::engine::strip_directives(&current);
-                        for line in clean(&stripped).lines() {
-                            println!("  {line}");
-                        }
-                        println!();
-                        let (agent_id, name, model) = current_speaker.clone();
-                        record.push(&agent_id, &name, stripped, std::mem::take(&mut current_thinking), model);
-                        record.save(false, turn_no, usage_total);
-                    }
-                    DebateEvent::AdvisorNote(n) => {
-                        println!("  🔒 ({} → {}): {}", n.observer_name, n.partner_name, clean(&n.text));
-                    }
-                    DebateEvent::Tool(t) => {
-                        println!("\n[tool] {} — “{}” (asked by {})", t.name, clean(&t.query), t.agent_name);
-                        for line in clean(&t.output).lines() {
-                            println!("  {line}");
-                        }
-                        println!();
-                        record.push("tool", "Tool", format!("Tool result ({}): {}", t.name, t.output), String::new(), String::new());
-                    }
-                    DebateEvent::Conflict(pairs) => {
-                        // Only narrate meaningful shifts of the top tension.
-                        let top = pairs
-                            .iter()
-                            .max_by(|a, b| a.score.partial_cmp(&b.score).unwrap_or(std::cmp::Ordering::Equal));
-                        if let Some(p) = top {
-                            if p.score >= 0.40 && (p.score - last_tension).abs() >= 0.10 {
-                                last_tension = p.score;
-                                println!("  ⚡ tension {} ↔ {} {:.2}", p.a_name, p.b_name, p.score);
-                            }
-                        }
-                    }
-                    DebateEvent::Cost(snap) => {
-                        if let Some(note) = &snap.note {
-                            eprintln!("  [budget] {}", clean(note));
-                        }
-                        final_cost = Some(snap);
-                    }
-                    DebateEvent::EndVoteStarted { proposer, threshold, total } => {
-                        println!("\n── End Vote · moved by {proposer} (needs {threshold}/{total} YES) ──");
-                    }
-                    DebateEvent::Vote { name, choice, reason, .. } => {
-                        println!("  {name}: {} — {}", choice.label(), clean(&reason));
-                    }
-                    DebateEvent::EndVoteResult { passed, yes, no, abstain } => {
-                        println!(
-                            "  Result: {} — YES {yes} · NO {no} · ABSTAIN {abstain}\n",
-                            if passed { "PASSED" } else { "FAILED" }
-                        );
-                    }
-                    DebateEvent::PeerEval(round) => {
-                        println!("\n── Peer Review Scorecard · {} critiques ──", round.critiques.len());
-                        println!("   #  Agent       rig evi nov civ top   avg");
-                        for s in &round.summaries {
-                            println!(
-                                "  #{} {:<10} {:>3} {:>3} {:>3} {:>3} {:>3}   {:>3}",
-                                s.rank, s.name, s.avg.rigor, s.avg.evidence, s.avg.novelty,
-                                s.avg.civility, s.avg.on_topic, s.overall
-                            );
-                        }
-                        println!();
-                    }
-                    DebateEvent::DeepResearch(r) => {
-                        println!("\n══ Deep Research Report — {} ({}) ══", clean(&r.title), r.confidence.label());
-                        println!("{}\n", clean(&r.abstract_text));
-                        for sec in &r.sections {
-                            println!("• {} [{}]", clean(&sec.heading), sec.confidence.label());
-                            println!("  {}\n", clean(&sec.body));
-                        }
-                    }
-                    DebateEvent::Error(e) => eprintln!("\n[error] {}", clean(&e)),
-                    DebateEvent::Done => {
-                        done = true;
-                        break;
-                    }
-                    _ => {}
                 }
             }
-        }
-    }
-    record.save(done, turn_no, usage_total);
-    if record.store.is_some() {
-        eprintln!(
-            "[session] saved {} ({})",
-            record.session_id,
-            if done {
-                "completed"
-            } else {
-                "paused — resume with --resume"
+            DebateEvent::ToolApproval { id, seat_id, call } => {
+                let name = names.get(&seat_id).cloned().unwrap_or(seat_id);
+                let args_text = clean(&call.arguments.to_string());
+                let allow = matches!(
+                    ask(&format!(
+                        "\n{name} wants to run {}({args_text}). Allow? [y/N] ",
+                        call.name
+                    ))
+                    .as_deref(),
+                    Some("y") | Some("Y") | Some("yes")
+                );
+                if !json_mode && !allow {
+                    println!("(declined)");
+                }
+                let _ = itx.send(EngineInput::ToolDecision { id, allow });
             }
-        );
-    }
-
-    // Closing cost ledger.
-    if let Some(snap) = final_cost {
-        println!("\n── Cost Ledger ──");
-        for row in &snap.rows {
-            println!(
-                "  {:<10} {:>9} in {:>9} out  {}${:.4}",
-                row.name,
-                row.input,
-                row.output + row.reasoning,
-                if row.priced { "" } else { "≥" },
-                row.usd
-            );
-        }
-        for (lane, usd) in &snap.lane_usd {
-            println!("  {:<10} ${usd:.4}", lane.label());
-        }
-        println!(
-            "  total      {}${:.4}{}",
-            if snap.all_priced { "" } else { "≥" },
-            snap.total_usd,
-            if snap.daily_cap > 0.0 || snap.session_cap > 0.0 {
-                format!("  (today ${:.2})", snap.daily_usd)
-            } else {
-                String::new()
+            ev if json_mode => {
+                if matches!(ev, DebateEvent::Done { .. }) {
+                    break;
+                }
             }
-        );
+            DebateEvent::Phase { name } => println!("\n── {} ──", clean(&name)),
+            DebateEvent::Plan { plan, corrections } => {
+                if !corrections.is_empty() {
+                    println!("[plan adjusted] {}", clean(&corrections.join("; ")));
+                }
+                let _ = plan;
+            }
+            DebateEvent::Estimate { estimate } => {
+                let unpriced = if estimate.unpriced_seats.is_empty() {
+                    String::new()
+                } else {
+                    format!(" (unpriced: {})", estimate.unpriced_seats.join(", "))
+                };
+                println!(
+                    "Estimate: ≈ ${:.2}–${:.2} over {} calls{unpriced}",
+                    estimate.usd_low, estimate.usd_high, estimate.calls
+                );
+            }
+            DebateEvent::SeatStarted {
+                name, model, round, ..
+            } => {
+                println!(
+                    "… {} ({}) is working on {}",
+                    clean(&name),
+                    clean(&model),
+                    round.label().to_lowercase()
+                );
+            }
+            DebateEvent::Token { .. } | DebateEvent::Thinking { .. } => {}
+            DebateEvent::ToolCall {
+                seat_id,
+                call,
+                output,
+                error,
+            } => {
+                let name = names.get(&seat_id).cloned().unwrap_or(seat_id);
+                let shown: String = clean(&output).chars().take(200).collect();
+                match error {
+                    Some(e) => println!(
+                        "  ⚙ {name} {}({}) → ERROR {}",
+                        call.name,
+                        clean(&call.arguments.to_string()),
+                        clean(&e)
+                    ),
+                    None => println!(
+                        "  ⚙ {name} {}({}) → {shown}",
+                        call.name,
+                        clean(&call.arguments.to_string())
+                    ),
+                }
+            }
+            DebateEvent::SeatFinished {
+                name,
+                round,
+                usage,
+                content,
+                ..
+            } => {
+                println!(
+                    "\n[{}] {} ({} in / {} out / {} reasoning)",
+                    round.label(),
+                    clean(&name),
+                    usage.input,
+                    usage.output,
+                    usage.reasoning
+                );
+                println!("{}", clean(&content));
+            }
+            DebateEvent::Board { board } => {
+                println!("\n{}", clean(&board.to_prompt_text(&names)));
+            }
+            DebateEvent::Convergence { convergence } => {
+                println!(
+                    "\nConvergence: {} ({} open; moved: {}) — {}",
+                    match convergence.recommend {
+                        Recommend::Close => "close",
+                        Recommend::AnotherRound => "another round",
+                        Recommend::Revise => "revise",
+                    },
+                    convergence.open_disagreements,
+                    if convergence.moved.is_empty() {
+                        "nobody".to_string()
+                    } else {
+                        convergence.moved.join(", ")
+                    },
+                    clean(&convergence.why)
+                );
+            }
+            DebateEvent::Moderator { text } => println!("\n[Moderator] {}", clean(&text)),
+            DebateEvent::Record { record: r } => {
+                println!("\n{}", clean(&record::to_markdown(&r, &names, None)));
+            }
+            DebateEvent::Document { markdown } => {
+                println!("\n── Document ──\n{}", clean(&markdown));
+            }
+            DebateEvent::Cost { snapshot } => {
+                if let Some(note) = &snapshot.note {
+                    println!("[budget] {}", clean(note));
+                }
+            }
+            DebateEvent::Error { message } => eprintln!("[error] {}", clean(&message)),
+            DebateEvent::Done { session_id } => {
+                println!("\nSaved as session {session_id}");
+                break;
+            }
+        }
     }
-
-    handle.abort();
-    let _ = handle.await;
+    let doc = handle.await?;
+    if let Some(snap) = doc["costs"].as_object() {
+        if !json_mode {
+            let total = snap
+                .get("total_usd")
+                .and_then(|v| v.as_f64())
+                .unwrap_or(0.0);
+            let priced = snap
+                .get("all_priced")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(true);
+            println!("Cost: {}${total:.4}", if priced { "" } else { "≥ " });
+        }
+    }
+    Ok(())
 }
 
 async fn cmd_models(provider: Option<String>, scan: bool) -> anyhow::Result<()> {
@@ -806,11 +809,11 @@ async fn cmd_probe(
     provider: Option<String>,
     tier: Option<ReasoningTier>,
     scan: bool,
+    tools: bool,
 ) -> anyhow::Result<()> {
     use socratic_council::catalog::resolve_model;
-    use socratic_council::engine::sanitize_terminal as clean;
     use socratic_council::providers::stream_completion;
-    use socratic_council::types::{ChatMessage, CompletionChunk, CompletionRequest};
+    use socratic_council::types::{ChatMessage, CompletionChunk, CompletionRequest, StopReason};
 
     let config = Config::load()?;
     let http = http_client(config.proxy.as_deref());
@@ -896,6 +899,88 @@ async fn cmd_probe(
                     secs,
                     msg
                 );
+            }
+        }
+    }
+    if tools {
+        println!(
+            "\ntool calling: one request per provider offering read_file; expects a tool call back"
+        );
+        for provider in Provider::ALL {
+            let Some(key) = config.resolve_api_key(provider) else {
+                continue;
+            };
+            let base = config.base_url(provider);
+            let models = catalog_models(provider);
+            let model = resolve_model(
+                provider,
+                ReasoningTier::Low,
+                &models,
+                config
+                    .selection(provider, ReasoningTier::Low)
+                    .as_deref()
+                    .or(Some("auto")),
+            );
+            if !model_row(provider, &model).contract.tools {
+                println!(
+                    "{:<10} {:<28} no tool support on this model",
+                    provider.slug(),
+                    model
+                );
+                continue;
+            }
+            let specs = socratic_council::tools::specs_for(&ToolPolicy::safe(), false);
+            let req = CompletionRequest {
+                model: model.clone(),
+                system: Some("You are a connectivity probe for tool calling.".into()),
+                messages: vec![ChatMessage::user(
+                    "Call the read_file tool with path \"notes.txt\" now. Do not answer in prose.",
+                )],
+                max_tokens: 1024,
+                temperature: 1.0,
+                tier: ReasoningTier::Low,
+                tools: specs,
+                cache_key: None,
+            };
+            let started = std::time::Instant::now();
+            let mut on_chunk = |_c: &CompletionChunk| {};
+            match stream_completion(&http, provider, &base, &key, &req, &mut on_chunk).await {
+                Ok(out) => {
+                    let secs = started.elapsed().as_secs_f32();
+                    match out.tool_calls.first() {
+                        Some(call) if out.stop == StopReason::ToolUse => println!(
+                            "{:<10} {:<28} {:>6.1}s  called {}({}) ✓",
+                            provider.slug(),
+                            model,
+                            secs,
+                            call.name,
+                            clean(&call.arguments.to_string())
+                        ),
+                        Some(call) => println!(
+                            "{:<10} {:<28} {:>6.1}s  call {} but stop={:?}",
+                            provider.slug(),
+                            model,
+                            secs,
+                            call.name,
+                            out.stop
+                        ),
+                        None => {
+                            failures += 1;
+                            let shown: String = clean(out.text.trim()).chars().take(60).collect();
+                            println!(
+                                "{:<10} {:<28} {:>6.1}s  NO TOOL CALL: {shown:?}",
+                                provider.slug(),
+                                model,
+                                secs
+                            );
+                        }
+                    }
+                }
+                Err(e) => {
+                    failures += 1;
+                    let msg: String = clean(&e.to_string()).chars().take(160).collect();
+                    println!("{:<10} {:<28} ERROR {}", provider.slug(), model, msg);
+                }
             }
         }
     }

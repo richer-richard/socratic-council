@@ -51,7 +51,8 @@ pub fn estimate_usd(usage: Usage, pricing: Pricing) -> f64 {
     let cached_rate = pricing.cached_input.unwrap_or(input_rate);
     let write_rate = pricing.cache_write.unwrap_or(input_rate);
     let cached = usage.cached_input.min(usage.input);
-    let uncached = usage.input - cached;
+    let written = usage.cache_write.min(usage.input - cached);
+    let uncached = usage.input - cached - written;
     let per_m = 1_000_000.0;
     (uncached as f64 / per_m) * input_rate
         + (cached as f64 / per_m) * cached_rate
@@ -380,7 +381,7 @@ mod tests {
         };
         let usd = estimate_usd(cached, price_for("gpt-6-astra").unwrap());
         assert!(
-            (usd - (6.0 + 0.4 + 1.25 + 25.0 + 10.0)).abs() < 1e-9,
+            (usd - (5.0 + 0.4 + 1.25 + 25.0 + 10.0)).abs() < 1e-9,
             "{usd}"
         );
     }

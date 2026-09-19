@@ -338,12 +338,12 @@ pub async fn web_search(http: &reqwest::Client, query: &str) -> Vec<SearchResult
     let encoded: String = url_encode(query);
     let attempts: [SearchAttempt; 3] = [
         (
-            format!("https://html.duckduckgo.com/html/?q={encoded}"),
+            format!("https://html.duckduckgo.com/html/?q={encoded}&kl=us-en"),
             "text/html,application/xhtml+xml",
             parse_ddg_html,
         ),
         (
-            format!("https://www.bing.com/search?format=rss&q={encoded}"),
+            format!("https://www.bing.com/search?format=rss&q={encoded}&mkt=en-US&setlang=en"),
             "application/rss+xml, application/xml, text/xml",
             parse_bing_rss,
         ),

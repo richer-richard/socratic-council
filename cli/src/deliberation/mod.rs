@@ -967,13 +967,7 @@ impl Deliberation {
                 });
                 this.push_message(&mut state, seat, &content, &out.thinking);
                 for t in &out.tool_uses {
-                    if t.error.is_none() && !t.output.trim().is_empty() {
-                        let claim = format!(
-                            "{}({}) → {}",
-                            t.call.name,
-                            compact_args(&t.call.arguments),
-                            truncate(&t.output, 240)
-                        );
+                    if let Some(claim) = tool_evidence(t) {
                         state.board.merge_evidence(vec![Evidence {
                             claim,
                             source: t.call.name.clone(),
@@ -1668,6 +1662,39 @@ impl Deliberation {
         doc["stoppedEarly"] = json!(state.stopped_early);
         doc["workspace"] = json!(self.config.workspace.display().to_string());
         doc
+    }
+}
+
+/// The one-line evidence a tool call leaves on the board, or `None` when the
+/// raw output is not a claim (search listings, errors, empty results). The
+/// seat's own `evidence` field carries what it took from a search.
+fn tool_evidence(t: &ToolUseRecord) -> Option<String> {
+    if t.error.is_some() || t.output.trim().is_empty() || t.output.starts_with("No results") {
+        return None;
+    }
+    let first_line = t
+        .output
+        .lines()
+        .find(|l| !l.trim().is_empty())
+        .unwrap_or("")
+        .trim();
+    let args = compact_args(&t.call.arguments);
+    match t.call.name.as_str() {
+        tools::WEB_SEARCH | tools::SEARCH_ATTACHMENTS => None,
+        tools::VERIFY_CLAIM => Some(format!(
+            "verify_claim({args}) → {}",
+            truncate(first_line, 120)
+        )),
+        tools::RUN_COMMAND => Some(format!(
+            "run_command({args}) → {}",
+            truncate(first_line, 120)
+        )),
+        tools::READ_FILE | tools::READ_ATTACHMENT => Some(format!(
+            "{}({args}) read {} chars",
+            t.call.name,
+            t.output.chars().count()
+        )),
+        other => Some(format!("{other}({args}) → {}", truncate(first_line, 120))),
     }
 }
 

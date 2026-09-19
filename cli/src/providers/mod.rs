@@ -461,10 +461,18 @@ fn prepare(
                 body["systemInstruction"] = json!({ "parts": [{ "text": system }] });
             }
             if tools_on {
+                // Gemini takes an OpenAPI subset: `additionalProperties` is
+                // rejected with a 400, so it is stripped from every level.
                 let decls: Vec<Value> = req
                     .tools
                     .iter()
-                    .map(|t| json!({ "name": t.name, "description": t.description, "parameters": t.parameters }))
+                    .map(|t| {
+                        json!({
+                            "name": t.name,
+                            "description": t.description,
+                            "parameters": gemini_schema(&t.parameters),
+                        })
+                    })
                     .collect();
                 body["tools"] = json!([{ "functionDeclarations": decls }]);
             }
@@ -562,6 +570,20 @@ fn prepare(
                 body,
             }
         }
+    }
+}
+
+/// A JSON schema with the keys Gemini's OpenAPI subset rejects removed.
+fn gemini_schema(v: &Value) -> Value {
+    match v {
+        Value::Object(o) => Value::Object(
+            o.iter()
+                .filter(|(k, _)| k.as_str() != "additionalProperties")
+                .map(|(k, val)| (k.clone(), gemini_schema(val)))
+                .collect(),
+        ),
+        Value::Array(a) => Value::Array(a.iter().map(gemini_schema).collect()),
+        other => other.clone(),
     }
 }
 
@@ -777,10 +799,13 @@ fn parse_event(
                     _ => {}
                 }
             } else if t == "message_start" {
+                // Anthropic's `input_tokens` excludes the cached parts of the
+                // prompt; `Usage::input` is the whole prompt, with the cache
+                // read and write counts as subsets of it (the OpenAI shape).
                 let u = &value["message"]["usage"];
-                usage.input = num(&u["input_tokens"]);
                 usage.cached_input = num(&u["cache_read_input_tokens"]);
                 usage.cache_write = num(&u["cache_creation_input_tokens"]);
+                usage.input = num(&u["input_tokens"]) + usage.cached_input + usage.cache_write;
             }
         }
         ApiFamily::Gemini => {
@@ -1174,7 +1199,7 @@ mod tests {
                 usage.cache_write,
                 usage.output
             ),
-            (500, 300, 50, 42)
+            (850, 300, 50, 42)
         );
     }
 
