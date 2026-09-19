@@ -620,6 +620,80 @@ impl Config {
     }
 }
 
+/// The council presets: how many keyed seats convene.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Preset {
+    /// Three seats.
+    Quick,
+    /// Four seats.
+    #[default]
+    Standard,
+    /// Every keyed seat.
+    Full,
+}
+
+impl Preset {
+    pub const ALL: [Preset; 3] = [Preset::Quick, Preset::Standard, Preset::Full];
+
+    pub fn parse(s: &str) -> Option<Preset> {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "quick" => Some(Preset::Quick),
+            "standard" => Some(Preset::Standard),
+            "full" => Some(Preset::Full),
+            _ => None,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Preset::Quick => "Quick",
+            Preset::Standard => "Standard",
+            Preset::Full => "Full",
+        }
+    }
+
+    /// Seats convened (`None` = everyone).
+    pub fn size(self) -> Option<usize> {
+        match self {
+            Preset::Quick => Some(3),
+            Preset::Standard => Some(4),
+            Preset::Full => None,
+        }
+    }
+
+    pub fn next(self) -> Preset {
+        let i = Preset::ALL.iter().position(|p| *p == self).unwrap_or(0);
+        Preset::ALL[(i + 1) % Preset::ALL.len()]
+    }
+
+    pub fn prev(self) -> Preset {
+        let i = Preset::ALL.iter().position(|p| *p == self).unwrap_or(0);
+        Preset::ALL[(i + Preset::ALL.len() - 1) % Preset::ALL.len()]
+    }
+}
+
+/// The seats a run convenes: the explicit `--seats` roster, else the
+/// configured roster; either way only seats whose provider is allowed and
+/// keyed, in roster order, and (without an explicit roster) cut to the preset.
+pub fn select_roster(
+    config: &Config,
+    allowed: &[Provider],
+    explicit: Option<&Roster>,
+    preset: Preset,
+) -> Roster {
+    let keyed = |p: Provider| allowed.contains(&p) && config.is_configured(p);
+    match explicit {
+        Some(r) => r.clone().with_keys(keyed),
+        None => {
+            let roster = config.roster(allowed).with_keys(keyed);
+            match preset.size() {
+                Some(n) => roster.take(n),
+                None => roster,
+            }
+        }
+    }
+}
+
 /// `--seats openai:gpt-6-astra,anthropic:auto,openai:gpt-5.6-luna`: one seat
 /// per entry, ids `<provider>-<n>`, names from the eight characters (a second
 /// seat on the same provider gets a numbered name).

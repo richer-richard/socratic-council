@@ -1,13 +1,14 @@
-//! The Socratic Council TUI — a terminal port of the desktop workstation.
+//! The Socratic Council TUI — the terminal client of the deliberation engine.
 //!
-//! Three surfaces mirror the app: a **Home** landing with the animated council
-//! mark + a topic composer, a collapsible **history** sidebar (the desktop
-//! app's saved sessions), and the **Chat** debate chamber. A Settings/Models
-//! overlay rounds it out. Everything shares the app's keys + config via the
-//! desktop bridge, so the council convenes with one keypress.
+//! Three surfaces: a **Home** landing with the council mark, a topic composer
+//! and the council preset; a collapsible **sessions** sidebar (the store the
+//! desktop app shares); and the **Session** screen, which renders the engine's
+//! event stream — rounds, the board, the convergence judgement and the
+//! decision record — and answers the moderator's question and tool approvals.
+//! A Settings screen edits keys, the roster and the policies.
 
-mod chat;
 mod home;
+mod session;
 mod settings;
 mod sidebar;
 pub mod theme;
@@ -15,14 +16,10 @@ pub mod view;
 
 use crate::attach::Attachment;
 use crate::catalog::{resolve_model, DiscoveredModel};
-use crate::config::{Config, KeySource};
-use crate::deliberation::{self, Deliberation, Deliverable, EngineInput};
-use crate::engine::{adapt, DebateEvent, Turn};
-use crate::store::{self, SessionStore, StoredMessage};
-use crate::types::{
-    CanvasSection, CostSnapshot, DeepResearchReport, ModeratorConclusion, PairScore, PeerEvalRound,
-    Provider, Roster, Usage, VoteChoice,
-};
+use crate::config::{select_roster, Config, KeySource, Preset};
+use crate::deliberation::{DebateEvent, Deliberation, Deliverable, EngineInput};
+use crate::store::{self, SessionStore};
+use crate::types::{ModelChoice, Provider, Roster};
 use crossterm::event::{
     self, DisableBracketedPaste, EnableBracketedPaste, Event, KeyCode, KeyEvent, KeyEventKind,
     KeyModifiers,
@@ -37,157 +34,124 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 use ratatui::{Frame, Terminal};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::io;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tokio::task::JoinHandle;
+use view::SessionView;
 
-/// Everything a debate needs to be spawned on demand from the Home view.
+/// Everything a run needs to be convened from the Home view.
 pub struct AppContext {
     pub http: reqwest::Client,
     pub config: Config,
     pub available: HashMap<Provider, Vec<DiscoveredModel>>,
-    /// Providers a debate may use — configured ∩ `--providers` filter. The
-    /// Home view's roster and any spawned debate are restricted to this set.
+    /// Providers a run may use — the `--providers` filter, or all eight. The
+    /// roster and any convened council are restricted to this set; key gating
+    /// happens at launch time so a keyless first run can add a key and go.
     pub providers: Vec<Provider>,
-    /// Keys already resolved during a `--scan` pre-pass, so launching a debate
-    /// in the same run reuses them.
+    /// Keys already resolved during a `--scan` pre-pass, reused at launch.
     pub prefetched_keys: HashMap<Provider, String>,
-    /// Files attached via `run --file …` (searchable by the seats' tools).
+    /// Files attached via `run --file …` (the seats search and read them).
     pub attachments: Vec<Attachment>,
-    /// The roster the run command resolved (presets / --seats); `None` means
-    /// the config's roster cut to the standard preset.
-    pub roster: Option<Roster>,
-    /// A deliverable forced with --deliverable.
+    /// Explicit seats from `--seats`; overrides the preset.
+    pub roster_override: Option<Roster>,
+    /// The council preset from `--preset` (Home can change it).
+    pub preset: Preset,
+    /// A deliverable forced with `--deliverable` (Home can change it).
     pub forced: Option<Deliverable>,
+    /// A stored session to open and reconvene at start (`--resume`).
+    pub resume: Option<String>,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum View {
     Home,
-    Chat,
+    Session,
     Settings,
 }
 
-/// One agent in a debate roster, with its resolved model + accent color.
-pub struct RosterEntry {
+/// How the composer convenes the council: the preset and the deliverable.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct LaunchOptions {
+    pub preset: Preset,
+    /// `None` lets the moderator decide.
+    pub deliverable: Option<Deliverable>,
+}
+
+/// The deliverable choices in the order the composer cycles them.
+pub const DELIVERABLE_CHOICES: [Option<Deliverable>; 5] = [
+    None,
+    Some(Deliverable::Decision),
+    Some(Deliverable::Analysis),
+    Some(Deliverable::Document),
+    Some(Deliverable::Review),
+];
+
+pub fn deliverable_label(d: Option<Deliverable>) -> &'static str {
+    match d {
+        None => "auto",
+        Some(d) => d.label(),
+    }
+}
+
+fn next_deliverable(current: Option<Deliverable>) -> Option<Deliverable> {
+    let i = DELIVERABLE_CHOICES
+        .iter()
+        .position(|d| *d == current)
+        .unwrap_or(0);
+    DELIVERABLE_CHOICES[(i + 1) % DELIVERABLE_CHOICES.len()]
+}
+
+/// One seat of a convened (or stored) council, with its resolved model.
+#[derive(Clone, Debug)]
+pub struct SeatCard {
     pub id: String,
     pub name: String,
-    pub provider: Provider,
+    pub provider: Option<Provider>,
     pub model: String,
     pub color: Color,
 }
 
-/// What kind of entry a transcript row is — a spoken agent turn, a system
-/// note, a private advisor whisper, or an oracle tool result.
-#[derive(Clone, Copy, PartialEq, Eq, Default)]
-pub enum TurnKind {
-    #[default]
-    Agent,
-    Note,
-    Whisper,
-    Tool,
-}
-
-/// A rendered transcript turn (or a moderator/system note). Carries its own
-/// reasoning trace so thinking can be shown collapsibly per message.
-pub struct TurnView {
-    pub agent_id: String,
-    pub name: String,
-    pub model: String,
-    pub content: String,
-    pub thinking: String,
-    pub thinking_ms: u64,
-    /// Snapshot of this agent's private canvas as of this turn (if updated).
-    pub canvas: Vec<CanvasSection>,
-    pub kind: TurnKind,
-    /// Unix milliseconds when the turn landed (persisted to the session store).
-    pub at_ms: u64,
-}
-
-impl TurnView {
-    fn of_kind(kind: TurnKind, agent_id: &str, name: &str, content: String) -> Self {
-        Self {
-            agent_id: agent_id.to_string(),
-            name: name.to_string(),
-            model: String::new(),
-            content,
-            thinking: String::new(),
-            thinking_ms: 0,
-            canvas: Vec::new(),
-            kind,
-            at_ms: store::now_ms(),
-        }
-    }
-
-    /// A stored message re-hydrated for the chamber (thinking + model kept).
-    fn from_stored(m: &StoredMessage) -> Self {
-        let council = theme::AGENTS.iter().any(|a| a.id == m.agent_id);
-        let kind = match m.agent_id.as_str() {
-            "tool" => TurnKind::Tool,
-            _ if council => TurnKind::Agent,
-            _ => TurnKind::Note,
-        };
-        let mut t = Self::of_kind(kind, &m.agent_id, &m.display_name, m.content.clone());
-        t.thinking = m.thinking.clone();
-        t.model = m.model.clone();
-        if m.at_ms > 0 {
-            t.at_ms = m.at_ms;
-        }
-        t
-    }
-
-    /// The store-shaped message for this turn (`None` for private whispers).
-    fn to_stored(&self) -> Option<StoredMessage> {
-        if self.kind == TurnKind::Whisper {
-            return None;
-        }
-        Some(StoredMessage {
-            agent_id: self.agent_id.clone(),
-            display_name: self.name.clone(),
-            content: self.content.clone(),
-            thinking: self.thinking.clone(),
-            model: self.model.clone(),
-            at_ms: self.at_ms,
-        })
-    }
-
-    fn note(agent_id: &str, name: &str, content: String) -> Self {
-        Self::of_kind(TurnKind::Note, agent_id, name, content)
-    }
-}
-
-/// Which panel occupies the right-hand column of the chamber.
+/// The right-hand pane of the Session screen.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum SidePane {
+pub enum SideTab {
     #[default]
-    Roster,
-    Tensions,
-    Costs,
+    Plan,
+    Board,
+    Convergence,
+    Cost,
+    Seats,
 }
 
-/// A single end-vote round, accumulated from the vote events.
-pub struct VoteBoard {
-    pub proposer: String,
-    pub threshold: u32,
-    pub total: u32,
-    pub votes: Vec<(String, VoteChoice, String)>,
-    pub result: Option<VoteResult>,
+impl SideTab {
+    pub const ALL: [SideTab; 5] = [
+        SideTab::Plan,
+        SideTab::Board,
+        SideTab::Convergence,
+        SideTab::Cost,
+        SideTab::Seats,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            SideTab::Plan => "Plan",
+            SideTab::Board => "Board",
+            SideTab::Convergence => "Converge",
+            SideTab::Cost => "Cost",
+            SideTab::Seats => "Seats",
+        }
+    }
+
+    fn step(self, delta: isize) -> SideTab {
+        let i = SideTab::ALL.iter().position(|t| *t == self).unwrap_or(0) as isize;
+        let n = SideTab::ALL.len() as isize;
+        SideTab::ALL[((i + delta).rem_euclid(n)) as usize]
+    }
 }
 
-/// The tally of a finished end-vote.
-pub struct VoteResult {
-    pub passed: bool,
-    pub yes: u32,
-    pub no: u32,
-    pub abstain: u32,
-}
-
-/// One row in the history sidebar — a saved desktop session.
-#[derive(Clone)]
+/// One row in the sessions sidebar.
+#[derive(Clone, Debug)]
 pub struct SessionRow {
     pub id: String,
     pub title: String,
@@ -196,17 +160,72 @@ pub struct SessionRow {
     pub archived: bool,
     /// `"cli"` / `"app"` — which surface last wrote the session.
     pub origin: String,
+    pub version: u8,
+    pub deliverable: Option<String>,
+    pub answer: String,
+    pub total_usd: f64,
+    pub stopped_early: Option<String>,
 }
 
 struct EngineHandle {
     rx: UnboundedReceiver<DebateEvent>,
-    cancel: Arc<AtomicBool>,
     input: UnboundedSender<EngineInput>,
     handle: JoinHandle<()>,
 }
 
-/// In-progress API-key entry in the Settings panel. The buffer holds the secret
-/// while it's typed/pasted; it is rendered masked and dropped once saved or
+/// A live or stored deliberation on the Session screen.
+pub struct SessionScreen {
+    pub topic: String,
+    pub session_id: String,
+    pub seats: Vec<SeatCard>,
+    pub view: SessionView,
+    pub side: SideTab,
+    pub show_thinking: bool,
+    pub follow: bool,
+    pub scroll: u16,
+    /// The answer being typed for the moderator's question.
+    pub answer: String,
+    /// A stored session (no engine behind it).
+    pub read_only: bool,
+    engine: Option<EngineHandle>,
+    /// Frame until which a second `Esc` stops a live council.
+    confirm_stop_until: u64,
+}
+
+impl SessionScreen {
+    pub fn is_live(&self) -> bool {
+        self.engine.is_some() && !self.view.done
+    }
+
+    /// Seat id → display name, for the board and the record.
+    pub fn names(&self) -> BTreeMap<String, String> {
+        self.seats
+            .iter()
+            .map(|s| (s.id.clone(), s.name.clone()))
+            .collect()
+    }
+
+    pub fn seat(&self, id: &str) -> Option<&SeatCard> {
+        self.seats.iter().find(|s| s.id == id)
+    }
+
+    /// `running` / `completed` / `stopped` / `cancelled` / `failed` / `starting`.
+    pub fn status(&self) -> (&'static str, Color) {
+        if self.is_live() {
+            return ("running", theme::GOLD);
+        }
+        match self.view.stopped_early.as_deref() {
+            Some("cancelled") => ("cancelled", theme::MUTED),
+            Some("failed") => ("failed", theme::ROSE),
+            Some(_) => ("stopped", theme::ROSE),
+            None if self.view.done => ("completed", theme::EMERALD),
+            None => ("starting", theme::GOLD),
+        }
+    }
+}
+
+/// In-progress API-key entry in Settings. The buffer holds the secret while
+/// it is typed or pasted; it renders masked and is dropped once saved or
 /// cancelled (never logged, never shown in plaintext).
 pub struct KeyDraft {
     pub provider: Provider,
@@ -264,273 +283,8 @@ pub fn redact_proxy(url: &str) -> String {
     }
 }
 
-/// A live or historical debate being viewed in the Chat chamber.
-pub struct Debate {
-    pub topic: String,
-    pub roster: Vec<RosterEntry>,
-    pub turns: Vec<TurnView>,
-    pub streaming: Option<TurnView>,
-    pub active: Option<String>,
-    pub usage: Usage,
-    pub turn_count: u32,
-    /// The configured cap (0 = uncapped) — drives the header progress gauge.
-    pub max_turns: u32,
-    /// Latest pairwise tension scores (the conflict graph data).
-    pub conflicts: Vec<PairScore>,
-    /// Latest cost-ledger snapshot.
-    pub cost: Option<CostSnapshot>,
-    /// Which right-hand panel is showing (roster / tensions / costs).
-    pub pane: SidePane,
-    pub status: String,
-    /// End-vote rounds, in the order they occurred.
-    pub vote_boards: Vec<VoteBoard>,
-    /// The closing peer-evaluation scorecard, once produced.
-    pub peer_eval: Option<PeerEvalRound>,
-    /// The moderator's final scored verdict, once published.
-    pub conclusion: Option<ModeratorConclusion>,
-    /// The deep-research report, if one was requested + produced.
-    pub deep_research: Option<DeepResearchReport>,
-    pub show_thinking: bool,
-    pub follow: bool,
-    pub scroll: u16,
-    pub done: bool,
-    pub read_only: bool,
-    engine: Option<EngineHandle>,
-    /// Identity in the shared session store (kept across resume).
-    pub session_id: String,
-    pub created_at_ms: u64,
-    /// What the store last saw, so persistence only runs on change.
-    persisted_len: usize,
-    persisted_done: bool,
-}
-
-/// Scrub raw terminal control/escape bytes out of model-derived text before it
-/// enters the TUI buffer. The Token/Thinking stream and the `--no-tui` printer
-/// already do this; these helpers close the same gap for the moderator,
-/// conclusion, votes, canvas, peer-eval and deep-research surfaces so no
-/// provider/endpoint output can inject ANSI/OSC escapes into the terminal.
-fn scrub(s: &str) -> String {
-    crate::engine::sanitize_terminal(s)
-}
-
-fn scrub_conclusion(mut c: ModeratorConclusion) -> ModeratorConclusion {
-    c.summary = scrub(&c.summary);
-    c.reason = scrub(&c.reason);
-    c.next = c.next.as_deref().map(scrub);
-    c
-}
-
-fn scrub_canvas(sections: Vec<CanvasSection>) -> Vec<CanvasSection> {
-    sections
-        .into_iter()
-        .map(|s| CanvasSection {
-            label: scrub(&s.label),
-            text: scrub(&s.text),
-        })
-        .collect()
-}
-
-fn scrub_peer_eval(mut r: PeerEvalRound) -> PeerEvalRound {
-    for c in &mut r.critiques {
-        c.critique = scrub(&c.critique);
-    }
-    for s in &mut r.summaries {
-        s.standout = s.standout.as_deref().map(scrub);
-    }
-    r
-}
-
-fn scrub_research(mut r: DeepResearchReport) -> DeepResearchReport {
-    r.title = scrub(&r.title);
-    r.abstract_text = scrub(&r.abstract_text);
-    for s in &mut r.sections {
-        s.heading = scrub(&s.heading);
-        s.body = scrub(&s.body);
-    }
-    r
-}
-
-impl Debate {
-    fn apply(&mut self, ev: DebateEvent) {
-        match ev {
-            DebateEvent::Phase(p) => self.status = p,
-            DebateEvent::Moderator(text) => {
-                self.turns
-                    .push(TurnView::note("system", "Moderator", scrub(&text)))
-            }
-            DebateEvent::Conclusion(c) => {
-                self.conclusion = Some(scrub_conclusion(c));
-                self.active = None;
-            }
-            DebateEvent::TurnStarted {
-                agent_id,
-                name,
-                model,
-                ..
-            } => {
-                self.turn_count += 1;
-                self.active = Some(name.clone());
-                self.streaming = Some(TurnView {
-                    agent_id,
-                    name,
-                    model,
-                    content: String::new(),
-                    thinking: String::new(),
-                    thinking_ms: 0,
-                    canvas: Vec::new(),
-                    kind: TurnKind::Agent,
-                    at_ms: store::now_ms(),
-                });
-            }
-            DebateEvent::Token(t) => {
-                if let Some(s) = self.streaming.as_mut() {
-                    // Keep raw escape bytes out of the terminal buffer.
-                    s.content.push_str(&crate::engine::sanitize_terminal(&t));
-                }
-            }
-            DebateEvent::Thinking(t) => {
-                if let Some(s) = self.streaming.as_mut() {
-                    s.thinking.push_str(&crate::engine::sanitize_terminal(&t));
-                }
-            }
-            DebateEvent::TurnEnded { usage, thinking_ms } => {
-                self.usage.input += usage.input;
-                self.usage.output += usage.output;
-                self.usage.reasoning += usage.reasoning;
-                if let Some(mut s) = self.streaming.take() {
-                    s.thinking_ms = thinking_ms;
-                    // The live stream showed raw tokens; scrub any @-directives
-                    // (e.g. a trailing @end()) before the turn lands in the chamber.
-                    s.content = crate::engine::strip_directives(&s.content).0;
-                    // Keep a turn that produced reasoning even if its visible text
-                    // was all directives — but drop fully-empty turns.
-                    if !s.content.trim().is_empty() || !s.thinking.trim().is_empty() {
-                        self.turns.push(s);
-                    }
-                }
-                self.active = None;
-            }
-            DebateEvent::EndVoteStarted {
-                proposer,
-                threshold,
-                total,
-            } => {
-                self.vote_boards.push(VoteBoard {
-                    proposer,
-                    threshold,
-                    total,
-                    votes: Vec::new(),
-                    result: None,
-                });
-            }
-            DebateEvent::Vote {
-                name,
-                choice,
-                reason,
-                ..
-            } => {
-                if let Some(b) = self.vote_boards.last_mut() {
-                    b.votes.push((name, choice, scrub(&reason)));
-                }
-            }
-            DebateEvent::EndVoteResult {
-                passed,
-                yes,
-                no,
-                abstain,
-            } => {
-                if let Some(b) = self.vote_boards.last_mut() {
-                    b.result = Some(VoteResult {
-                        passed,
-                        yes,
-                        no,
-                        abstain,
-                    });
-                }
-            }
-            DebateEvent::Canvas {
-                agent_id, sections, ..
-            } => {
-                let sections = scrub_canvas(sections);
-                // Attach to this agent's live or most-recent turn.
-                if let Some(s) = self.streaming.as_mut().filter(|s| s.agent_id == agent_id) {
-                    s.canvas = sections;
-                } else if let Some(t) = self.turns.iter_mut().rev().find(|t| t.agent_id == agent_id)
-                {
-                    t.canvas = sections;
-                }
-            }
-            DebateEvent::PeerEval(round) => self.peer_eval = Some(scrub_peer_eval(round)),
-            DebateEvent::DeepResearch(r) => self.deep_research = Some(scrub_research(r)),
-            DebateEvent::AdvisorNote(n) => {
-                // A private whisper — rendered against the partner's color.
-                self.turns.push(TurnView::of_kind(
-                    TurnKind::Whisper,
-                    &n.partner_id,
-                    &format!("{} → {}", n.observer_name, n.partner_name),
-                    n.text,
-                ));
-            }
-            DebateEvent::Tool(t) => {
-                // `t.output` is already sanitized at the oracle boundary, but the
-                // tool name and the agent-supplied query are raw model text.
-                self.turns.push(TurnView::of_kind(
-                    TurnKind::Tool,
-                    "tool",
-                    &format!("{} · asked by {}", scrub(&t.name), t.agent_name),
-                    format!("“{}”\n{}", scrub(&t.query), t.output),
-                ));
-            }
-            DebateEvent::Conflict(pairs) => self.conflicts = pairs,
-            DebateEvent::Cost(snap) => self.cost = Some(snap),
-            DebateEvent::Error(e) => {
-                // The failed turn never sends TurnEnded; drop its in-progress
-                // bubble (the partial stream is incomplete) so it can't linger
-                // as a stuck "streaming…" line.
-                self.streaming = None;
-                self.active = None;
-                self.turns.push(TurnView::note("error", "⚠ Error", e));
-            }
-            DebateEvent::Done => {
-                self.done = true;
-                self.status = "Adjourned".into();
-                self.active = None;
-                self.streaming = None;
-            }
-        }
-    }
-
-    fn is_live(&self) -> bool {
-        self.engine.is_some() && !self.done
-    }
-}
-
-/// Everything needed to resume a stored session in place.
-struct ResumeInfo {
-    session_id: String,
-    created_at_ms: u64,
-    turns: Vec<TurnView>,
-    turn_count: u32,
-}
-
-impl TurnView {
-    fn clone_shallow(&self) -> TurnView {
-        TurnView {
-            agent_id: self.agent_id.clone(),
-            name: self.name.clone(),
-            model: self.model.clone(),
-            content: self.content.clone(),
-            thinking: self.thinking.clone(),
-            thinking_ms: self.thinking_ms,
-            canvas: self.canvas.clone(),
-            kind: self.kind,
-            at_ms: self.at_ms,
-        }
-    }
-}
-
 /// Sidebar rows: the shared store first (newest first), then any app-index
-/// session the store doesn't have yet. Ids are unique across both.
+/// session the store does not have. Ids are unique across both.
 fn merge_session_rows(
     store: Option<&SessionStore>,
     bridge_rows: Vec<SessionRow>,
@@ -546,6 +300,11 @@ fn merge_session_rows(
                     turns: s.current_turn,
                     archived: false,
                     origin: s.origin,
+                    version: s.version,
+                    deliverable: s.deliverable,
+                    answer: s.answer,
+                    total_usd: s.total_usd,
+                    stopped_early: s.stopped_early,
                 })
                 .collect()
         })
@@ -558,32 +317,46 @@ fn merge_session_rows(
     rows
 }
 
+fn bridge_row(s: &crate::bridge::DesktopSession) -> SessionRow {
+    SessionRow {
+        id: s.id.clone(),
+        title: s.title.clone(),
+        status: s.status.clone(),
+        turns: s.current_turn,
+        archived: s.archived,
+        origin: "app".into(),
+        version: 1,
+        deliverable: None,
+        answer: String::new(),
+        total_usd: 0.0,
+        stopped_early: None,
+    }
+}
+
 pub struct App {
     ctx: AppContext,
     view: View,
-    /// The view to return to when Settings closes (so `^P`/`Esc` out of Settings
-    /// never strands a live debate by hard-jumping to Home).
+    /// The view to return to when Settings closes, so `^P`/`Esc` out of
+    /// Settings never strands a live session by jumping to Home.
     prev_view: View,
     frame: u64,
     sidebar_open: bool,
     composer: String,
+    launch: LaunchOptions,
     sessions: Vec<SessionRow>,
     sessions_loaded: bool,
     sidebar_sel: usize,
-    debate: Option<Debate>,
+    session: Option<SessionScreen>,
     toast: Option<String>,
     toast_expire: u64,
     key_cache: HashMap<Provider, String>,
-    /// Cursor over the Settings rows: the eight providers, then the option rows.
+    /// Cursor over the Settings rows: the eight providers, then the options.
     settings_sel: usize,
-    /// Active API-key entry, if the user is editing a key in Settings.
     key_draft: Option<KeyDraft>,
-    /// Active option-row edit (discussion cap, advisors, budget, proxy).
     option_draft: Option<OptionDraft>,
     /// The shared session store (the app's data dir when installed, else the
     /// CLI's own). `None` only when neither location is usable.
     store: Option<SessionStore>,
-    persist_warned: bool,
 }
 
 /// Total selectable rows in Settings: 8 providers + the option rows.
@@ -599,28 +372,24 @@ impl App {
             .bridge()
             .sessions()
             .iter()
-            .map(|s| SessionRow {
-                id: s.id.clone(),
-                title: s.title.clone(),
-                status: s.status.clone(),
-                turns: s.current_turn,
-                archived: s.archived,
-                origin: "app".into(),
-            })
+            .map(bridge_row)
             .collect::<Vec<_>>();
         let sessions = merge_session_rows(store.as_ref(), bridge_rows);
         Self {
             store,
-            persist_warned: false,
             view: View::Home,
             prev_view: View::Home,
             frame: 0,
             sidebar_open: false,
             composer: String::new(),
+            launch: LaunchOptions {
+                preset: ctx.preset,
+                deliverable: ctx.forced,
+            },
             sessions_loaded: !sessions.is_empty(),
             sessions,
             sidebar_sel: 0,
-            debate: None,
+            session: None,
             toast: None,
             toast_expire: 0,
             key_cache: ctx.prefetched_keys.clone(),
@@ -640,10 +409,18 @@ impl App {
         self.ctx.config.configured_providers().len()
     }
 
-    /// Lazily load the desktop app's saved sessions the first time the history
-    /// sidebar opens. Sessions are decrypted from the app's file vault at bridge
-    /// load, so this is usually already populated — the re-read just covers an
-    /// index that wasn't decrypted on the first pass.
+    /// The seats the current launch options convene: keyed seats of the
+    /// allowed providers, in roster order, cut to the preset.
+    fn convened_seats(&self) -> Roster {
+        select_roster(
+            &self.ctx.config,
+            &self.ctx.providers,
+            self.ctx.roster_override.as_ref(),
+            self.launch.preset,
+        )
+    }
+
+    /// Lazily load the sessions list the first time the sidebar opens.
     fn ensure_sessions(&mut self) {
         if self.sessions_loaded {
             return;
@@ -654,123 +431,24 @@ impl App {
                 .config
                 .bridge()
                 .read_sessions()
-                .into_iter()
-                .map(|s| SessionRow {
-                    id: s.id,
-                    title: s.title,
-                    status: s.status,
-                    turns: s.current_turn,
-                    archived: s.archived,
-                    origin: "app".into(),
-                })
+                .iter()
+                .map(bridge_row)
                 .collect()
         } else {
             self.sessions
                 .iter()
-                .filter(|r| r.origin == "app")
+                .filter(|r| r.origin == "app" && r.version == 1)
                 .cloned()
                 .collect()
         };
         self.sessions = merge_session_rows(self.store.as_ref(), bridge_rows);
     }
 
-    /// Re-read the store (a debate just ended, or the app wrote something).
+    /// Re-read the store (a run just ended, or the app wrote something).
     fn refresh_sessions(&mut self) {
         self.sessions_loaded = false;
         self.ensure_sessions();
-    }
-
-    /// Write the live debate's transcript to the shared store when it changed
-    /// (a new turn landed, or the debate finished). Best-effort: a failure is
-    /// surfaced once as a toast and never interrupts the debate.
-    fn persist_debate(&mut self) {
-        let Some(store) = self.store.as_ref() else {
-            return;
-        };
-        let Some(d) = self.debate.as_mut() else {
-            return;
-        };
-        if d.read_only || (d.turns.len() == d.persisted_len && d.done == d.persisted_done) {
-            return;
-        }
-        let mut messages: Vec<StoredMessage> =
-            d.turns.iter().filter_map(TurnView::to_stored).collect();
-        if let (true, Some(c)) = (d.done, d.conclusion.as_ref()) {
-            messages.push(StoredMessage {
-                agent_id: "moderator".into(),
-                display_name: "Moderator".into(),
-                content: format!(
-                    "Verdict: {} · Score {}/10\n{}\n{}",
-                    c.status.label(),
-                    c.score,
-                    c.summary,
-                    c.reason
-                ),
-                thinking: String::new(),
-                model: String::new(),
-                at_ms: store::now_ms(),
-            });
-        }
-        let status = if d.done { "completed" } else { "paused" };
-        let json = store::build_session_json(
-            &d.session_id,
-            &d.topic,
-            d.created_at_ms,
-            &messages,
-            status,
-            d.turn_count,
-            d.usage,
-        );
-        match store.save(&json) {
-            Ok(()) => {
-                d.persisted_len = d.turns.len();
-                d.persisted_done = d.done;
-                if d.done {
-                    self.refresh_sessions();
-                }
-            }
-            Err(e) if !self.persist_warned => {
-                self.persist_warned = true;
-                self.toast(format!("Couldn't save the session: {e}"));
-            }
-            Err(_) => {}
-        }
-    }
-
-    /// Continue the open read-only session: the stored transcript becomes
-    /// history and the council resumes on the same topic + session id.
-    fn continue_session(&mut self) {
-        let Some(d) = self.debate.as_ref() else {
-            return;
-        };
-        if !d.read_only {
-            return;
-        }
-        let prior: Vec<Turn> = d
-            .turns
-            .iter()
-            .filter(|t| t.kind != TurnKind::Whisper && t.agent_id != "error")
-            .map(|t| Turn {
-                agent_id: t.agent_id.clone(),
-                name: t.name.clone(),
-                content: t.content.clone(),
-            })
-            .collect();
-        let resume = ResumeInfo {
-            session_id: d.session_id.clone(),
-            created_at_ms: d.created_at_ms,
-            turns: d
-                .turns
-                .iter()
-                .map(|t| TurnView {
-                    canvas: Vec::new(),
-                    ..t.clone_shallow()
-                })
-                .collect(),
-            turn_count: d.turn_count,
-        };
-        let topic = d.topic.clone();
-        self.launch_debate(topic, prior, Some(resume));
+        self.sidebar_sel = self.sidebar_sel.min(self.sessions.len().saturating_sub(1));
     }
 
     fn toggle_sidebar(&mut self) {
@@ -781,45 +459,24 @@ impl App {
         }
     }
 
-    /// Resolve keys (caching them for the session) and spawn the debate engine
-    /// on a background task.
-    fn start_debate(&mut self, topic: String) {
-        self.launch_debate(topic, Vec::new(), None);
-    }
-
-    fn launch_debate(&mut self, topic: String, prior: Vec<Turn>, resume: Option<ResumeInfo>) {
+    /// Convene the council on `topic`. `prior_notes` carries a reconvened
+    /// session's record (or transcript tail) to the planner.
+    fn launch(&mut self, topic: String, prior_notes: Option<String>) {
         let topic = topic.trim().to_string();
         if topic.is_empty() {
             return;
         }
-        // Never orphan a previously-running engine — it would keep streaming
-        // completions (and spending quota) in the background.
+        // Never orphan a running engine — it would keep spending quota.
         self.abort_engine();
-        let mut config = self.ctx.config.clone();
-        // The TUI cannot answer questions or approve tools yet: plan without
-        // asking and run allowed tools on their own.
-        config.protocol.interactive = false;
-        config.tools.approval = crate::tools::Approval::Auto;
-        let allowed = self.ctx.providers.clone();
-        let base_roster = match &self.ctx.roster {
-            Some(r) => r.clone(),
-            None => config.roster(&allowed).take(4),
-        };
-        let seats: Vec<crate::types::Seat> = base_roster
-            .seats
-            .iter()
-            .filter(|s| config.is_configured(s.provider) && allowed.contains(&s.provider))
-            .cloned()
-            .collect();
-        if seats.is_empty() {
-            // Keep the topic (e.g. `run "topic"` on a keyless first run) so the
-            // user can add a key and convene without retyping it.
+        let config = self.ctx.config.clone();
+        let roster = self.convened_seats();
+        if roster.seats.is_empty() {
+            // Keep the topic so the user can add a key and convene without
+            // retyping it.
             self.composer = topic;
-            // Distinguish "no keys at all" from "keys exist but --providers
-            // excludes them" so the hint is actionable.
             let keyed_but_filtered = Provider::ALL
                 .into_iter()
-                .any(|p| config.is_configured(p) && !allowed.contains(&p));
+                .any(|p| config.is_configured(p) && !self.ctx.providers.contains(&p));
             if keyed_but_filtered {
                 self.toast("Your keyed providers are excluded by --providers this run.");
             } else {
@@ -828,9 +485,8 @@ impl App {
             return;
         }
 
-        // Resolve each provider's key once, then cache it for the session. The
-        // moderator may sit on a provider with no seat, so every keyed
-        // provider is resolved.
+        // Resolve each keyed provider's key once and cache it for the
+        // session; the moderator may sit on a provider with no seat.
         let mut keys = HashMap::new();
         for provider in Provider::ALL {
             if !config.is_configured(provider) {
@@ -843,218 +499,237 @@ impl App {
                 keys.insert(provider, k);
             }
         }
-        let seats: Vec<crate::types::Seat> = seats
-            .into_iter()
-            .filter(|s| keys.contains_key(&s.provider))
-            .collect();
-        if seats.is_empty() {
+        let roster = roster.with_keys(|p| keys.contains_key(&p));
+        if roster.seats.is_empty() {
             self.toast("Couldn't read a stored key — add one here with ^P.");
             return;
         }
 
         let available = self.ctx.available.clone();
-        let roster = seats
+        let seats: Vec<SeatCard> = roster
+            .seats
             .iter()
             .map(|s| {
                 let empty = Vec::new();
                 let avail = available.get(&s.provider).unwrap_or(&empty);
-                let model = match s.model.clone() {
-                    crate::types::ModelChoice::Id(id) => id.clone(),
-                    crate::types::ModelChoice::Auto(tier) => resolve_model(
+                let model = match &s.model {
+                    ModelChoice::Id(id) => id.clone(),
+                    ModelChoice::Auto(tier) => resolve_model(
                         s.provider,
-                        tier,
+                        *tier,
                         avail,
-                        config.selection(s.provider, tier).as_deref(),
+                        config.selection(s.provider, *tier).as_deref(),
                     ),
                 };
-                RosterEntry {
+                SeatCard {
                     id: s.id.clone(),
                     name: s.name.clone(),
-                    provider: s.provider,
+                    provider: Some(s.provider),
                     model,
                     color: theme::provider_color(s.provider),
                 }
             })
             .collect();
-        let names: crate::engine::Names = seats
-            .iter()
-            .map(|s| (s.id.clone(), s.name.clone()))
-            .collect();
 
-        let display_cap = 0;
-        let http = self.ctx.http.clone();
-        let session_id = match &resume {
-            Some(r) => r.session_id.clone(),
-            None => store::new_session_id(),
-        };
-        let prior_notes = (!prior.is_empty()).then(|| {
-            prior
-                .iter()
-                .rev()
-                .take(6)
-                .map(|t| format!("{}: {}", t.name, t.content))
-                .collect::<Vec<_>>()
-                .into_iter()
-                .rev()
-                .collect::<Vec<_>>()
-                .join("\n")
-        });
+        let session_id = store::new_session_id();
         let engine = Deliberation::new(
-            http,
+            self.ctx.http.clone(),
             config.engine_config(&session_id),
             topic.clone(),
-            crate::types::Roster { seats },
+            roster,
             keys,
             available,
         )
         .with_attachments(self.ctx.attachments.clone())
-        .with_forced_deliverable(self.ctx.forced)
+        .with_forced_deliverable(self.launch.deliverable)
         .with_store(crate::bridge::open_store(config.bridge()))
         .with_prior_notes(prior_notes);
         let (tx, rx) = unbounded_channel();
-        let (engine_tx, mut engine_rx) = unbounded_channel::<deliberation::DebateEvent>();
         let (input, input_rx) = unbounded_channel::<EngineInput>();
-        let cancel = Arc::new(AtomicBool::new(false));
         let handle = tokio::spawn(async move {
-            let run = tokio::spawn(async move {
-                engine.run(engine_tx, input_rx).await;
-            });
-            while let Some(ev) = engine_rx.recv().await {
-                for old in adapt(ev, &names) {
-                    if tx.send(old).is_err() {
-                        break;
-                    }
-                }
-            }
-            let _ = run.await;
+            let _ = engine.run(tx, input_rx).await;
         });
 
-        let (session_id, created_at_ms, turns, turn_count) = match resume {
-            Some(r) => (r.session_id, r.created_at_ms, r.turns, r.turn_count),
-            None => (store::new_session_id(), store::now_ms(), Vec::new(), 0),
-        };
-        self.debate = Some(Debate {
+        self.session = Some(SessionScreen {
             topic,
-            roster,
-            persisted_len: turns.len(),
-            persisted_done: false,
             session_id,
-            created_at_ms,
-            turns,
-            streaming: None,
-            active: None,
-            usage: Usage::default(),
-            turn_count,
-            max_turns: display_cap,
-            conflicts: Vec::new(),
-            cost: None,
-            pane: SidePane::Roster,
-            status: "Convening…".into(),
-            vote_boards: Vec::new(),
-            peer_eval: None,
-            conclusion: None,
-            deep_research: None,
+            seats,
+            view: SessionView::default(),
+            side: SideTab::Plan,
             show_thinking: false,
             follow: true,
             scroll: 0,
-            done: false,
+            answer: String::new(),
             read_only: false,
-            engine: Some(EngineHandle {
-                rx,
-                cancel,
-                input,
-                handle,
-            }),
+            engine: Some(EngineHandle { rx, input, handle }),
+            confirm_stop_until: 0,
         });
         self.composer.clear();
-        self.view = View::Chat;
+        self.view = View::Session;
     }
 
-    /// Cancel + abort the current debate's engine task if one is live. Safe to
-    /// call when there is no debate or it's a read-only saved session.
-    fn abort_engine(&self) {
-        if let Some(d) = &self.debate {
-            if let Some(e) = &d.engine {
-                e.cancel.store(true, Ordering::Relaxed);
+    /// Cancel and abort the current engine task if one is live.
+    fn abort_engine(&mut self) {
+        if let Some(s) = self.session.as_mut() {
+            if let Some(e) = &s.engine {
                 let _ = e.input.send(EngineInput::Cancel);
                 e.handle.abort();
+                s.view.mark_cancelled();
             }
         }
     }
 
-    /// Stop a running debate (if any) and return to Home.
-    fn stop_debate(&mut self) {
+    /// Stop a running council (if any) and return to Home.
+    fn stop_session(&mut self) {
         self.abort_engine();
-        if let Some(d) = self.debate.as_mut() {
-            if !d.read_only {
-                d.done = true; // a stopped debate is stored as "completed so far"
-            }
-        }
-        self.persist_debate();
-        self.debate = None;
+        self.session = None;
         self.view = View::Home;
+        self.refresh_sessions();
     }
 
-    /// Open the highlighted saved session read-only (decrypts its transcript).
+    /// Reconvene the open session: its record (or transcript tail) becomes
+    /// the planner's notes and a new session is written.
+    fn reconvene(&mut self) {
+        let Some(s) = self.session.as_ref() else {
+            return;
+        };
+        if s.is_live() {
+            return;
+        }
+        let names = s.names();
+        let prior = s
+            .view
+            .record_markdown(&names)
+            .or_else(|| s.view.transcript_tail(6));
+        let topic = s.topic.clone();
+        self.launch(topic, prior);
+    }
+
+    /// Write the open session's record and document (or its transcript) to
+    /// a Markdown file in the Downloads folder (else the config dir).
+    fn export(&mut self) {
+        let Some(s) = self.session.as_ref() else {
+            return;
+        };
+        let names = s.names();
+        let body = s
+            .view
+            .record_markdown(&names)
+            .or_else(|| s.view.document.clone())
+            .or_else(|| {
+                let lines: Vec<String> = s
+                    .view
+                    .legacy
+                    .iter()
+                    .map(|m| format!("**{}**: {}", m.display_name, m.content))
+                    .collect();
+                (!lines.is_empty()).then(|| format!("# {}\n\n{}\n", s.topic, lines.join("\n\n")))
+            });
+        let Some(body) = body else {
+            self.toast("Nothing to export yet — the record arrives at the end.");
+            return;
+        };
+        let dir = directories::UserDirs::new()
+            .and_then(|u| u.download_dir().map(|p| p.to_path_buf()))
+            .or_else(|| Config::config_dir().ok())
+            .unwrap_or_else(std::env::temp_dir);
+        let path = dir.join(format!("socratic-council-{}.md", s.session_id));
+        match std::fs::write(&path, body) {
+            Ok(()) => self.toast(format!("Exported to {}", path.display())),
+            Err(e) => self.toast(format!("Couldn't export: {e}")),
+        }
+    }
+
+    /// Open the highlighted stored session read-only.
     fn open_selected_session(&mut self) {
         let Some(row) = self.sessions.get(self.sidebar_sel).cloned() else {
             return;
         };
-        // The shared store first (both surfaces write it); the app's
-        // localStorage index is the fallback for sessions the app has not
-        // exported yet.
-        let stored = self.store.as_ref().and_then(|s| s.load(&row.id));
-        let (messages, topic, created_at_ms): (Vec<StoredMessage>, String, u64) = match &stored {
-            Some(v) => (
-                store::messages_from_json(v),
-                v["topic"].as_str().unwrap_or(&row.title).to_string(),
-                v["createdAt"].as_u64().unwrap_or_else(store::now_ms),
+        self.open_session(&row.id, Some(&row.title));
+    }
+
+    /// Open a stored session by id. Returns false when it could not be read.
+    fn open_session(&mut self, id: &str, title: Option<&str>) -> bool {
+        let stored = self.store.as_ref().and_then(|s| s.load(id));
+        let (view, topic, roster): (SessionView, String, Option<Roster>) = match &stored {
+            Some(doc) => (
+                SessionView::from_stored(doc),
+                doc["topic"].as_str().or(title).unwrap_or("").to_string(),
+                serde_json::from_value(doc["roster"].clone()).ok(),
             ),
-            None => (
-                self.ctx
+            None => {
+                // The app's localStorage index is the fallback for sessions
+                // the app never exported to the shared store.
+                let messages = self
+                    .ctx
                     .config
                     .bridge()
-                    .load_session_transcript(&row.id)
-                    .unwrap_or_default()
-                    .into_iter()
-                    .map(|m| StoredMessage {
-                        agent_id: m.agent_id,
-                        display_name: m.name,
-                        content: m.content,
-                        thinking: String::new(),
-                        model: String::new(),
-                        at_ms: 0,
-                    })
-                    .collect(),
-                row.title.clone(),
-                store::now_ms(),
-            ),
+                    .load_session_transcript(id)
+                    .unwrap_or_default();
+                let doc = serde_json::json!({
+                    "messages": messages.iter().map(|m| serde_json::json!({
+                        "agentId": m.agent_id, "displayName": m.name, "content": m.content,
+                    })).collect::<Vec<_>>()
+                });
+                (
+                    SessionView::from_stored(&doc),
+                    title.unwrap_or("").to_string(),
+                    None,
+                )
+            }
         };
-        if messages.is_empty() {
+        if view.rounds.is_empty() && view.legacy.is_empty() && view.record.is_none() {
             self.toast("Couldn't read that session (locked, empty, or needs the app's key).");
-            return;
+            return false;
         }
-        // Stop any live debate before replacing it with the saved transcript.
         self.abort_engine();
 
-        // Derive a roster from the distinct speakers in the transcript.
-        let mut roster: Vec<RosterEntry> = Vec::new();
-        for m in &messages {
+        // Seat cards: the stored roster, else the distinct speakers.
+        let mut seats: Vec<SeatCard> = roster
+            .map(|r| {
+                r.seats
+                    .into_iter()
+                    .map(|s| SeatCard {
+                        id: s.id,
+                        name: s.name,
+                        provider: Some(s.provider),
+                        model: s.model.label(),
+                        color: theme::provider_color(s.provider),
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        for t in view.rounds.iter().flat_map(|r| r.entries.iter()) {
+            if let Some(card) = seats.iter_mut().find(|c| c.id == t.seat_id) {
+                if !t.model.is_empty() {
+                    card.model = t.model.clone();
+                }
+            } else {
+                seats.push(SeatCard {
+                    id: t.seat_id.clone(),
+                    name: t.name.clone(),
+                    provider: t.provider,
+                    model: t.model.clone(),
+                    color: t
+                        .provider
+                        .map(theme::provider_color)
+                        .unwrap_or_else(|| theme::speaker_color(&t.seat_id)),
+                });
+            }
+        }
+        for m in &view.legacy {
             if matches!(
                 m.agent_id.as_str(),
                 "user" | "system" | "tool" | "error" | "moderator"
-            ) {
-                continue;
-            }
-            if roster.iter().any(|r| r.id == m.agent_id) {
+            ) || seats.iter().any(|c| c.id == m.agent_id)
+            {
                 continue;
             }
             let provider = theme::AGENTS
                 .iter()
                 .find(|a| a.id == m.agent_id)
-                .map(|a| a.provider)
-                .unwrap_or(Provider::OpenAI);
-            roster.push(RosterEntry {
+                .map(|a| a.provider);
+            seats.push(SeatCard {
                 id: m.agent_id.clone(),
                 name: m.display_name.clone(),
                 provider,
@@ -1063,37 +738,22 @@ impl App {
             });
         }
 
-        let turns: Vec<TurnView> = messages.iter().map(TurnView::from_stored).collect();
-
-        self.debate = Some(Debate {
+        self.session = Some(SessionScreen {
             topic,
-            roster,
-            session_id: row.id.clone(),
-            created_at_ms,
-            persisted_len: turns.len(),
-            persisted_done: true,
-            turns,
-            streaming: None,
-            active: None,
-            usage: Usage::default(),
-            turn_count: row.turns,
-            max_turns: 0,
-            conflicts: Vec::new(),
-            cost: None,
-            pane: SidePane::Roster,
-            status: "Saved session · Enter to continue it".into(),
-            vote_boards: Vec::new(),
-            peer_eval: None,
-            conclusion: None,
-            deep_research: None,
+            session_id: id.to_string(),
+            seats,
+            view,
+            side: SideTab::Plan,
             show_thinking: false,
             follow: false,
             scroll: 0,
-            done: true,
+            answer: String::new(),
             read_only: true,
             engine: None,
+            confirm_stop_until: 0,
         });
-        self.view = View::Chat;
+        self.view = View::Session;
+        true
     }
 
     /// Returns `true` to quit the app.
@@ -1102,8 +762,8 @@ impl App {
         if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
             return true;
         }
-        // Ctrl-P toggles Settings from anywhere — and returns to wherever you
-        // were (e.g. a live Chat), not unconditionally Home.
+        // Ctrl-P toggles Settings from anywhere and returns to wherever you
+        // were (a live Session included), not unconditionally Home.
         if key.code == KeyCode::Char('p') && key.modifiers.contains(KeyModifiers::CONTROL) {
             if self.view == View::Settings {
                 self.view = self.prev_view;
@@ -1115,21 +775,22 @@ impl App {
         }
         match self.view {
             View::Home => self.handle_home_key(key),
-            View::Chat => self.handle_chat_key(key),
+            View::Session => self.handle_session_key(key),
             View::Settings => self.handle_settings_key(key),
         }
     }
 
     fn handle_home_key(&mut self, key: KeyEvent) -> bool {
+        let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
         match key.code {
             KeyCode::Esc => return true,
             KeyCode::Tab => self.toggle_sidebar(),
             KeyCode::Enter => {
-                // A non-empty composer launches; otherwise open the highlighted
-                // saved session from the sidebar.
+                // A non-empty composer convenes; otherwise open the
+                // highlighted stored session from the sidebar.
                 if !self.composer.trim().is_empty() {
                     let topic = self.composer.clone();
-                    self.start_debate(topic);
+                    self.launch(topic, None);
                 } else if self.sidebar_open && !self.sessions.is_empty() {
                     self.open_selected_session();
                 }
@@ -1141,80 +802,120 @@ impl App {
                 let max = self.sessions.len().saturating_sub(1);
                 self.sidebar_sel = (self.sidebar_sel + 1).min(max);
             }
+            KeyCode::Left => self.launch.preset = self.launch.preset.prev(),
+            KeyCode::Right => self.launch.preset = self.launch.preset.next(),
+            KeyCode::Char('d') if ctrl => {
+                self.launch.deliverable = next_deliverable(self.launch.deliverable);
+            }
             KeyCode::Backspace => {
                 self.composer.pop();
             }
-            // Only insert real printable input — a Ctrl+<letter> chord (anything
-            // not caught by the global ^C/^P handlers) must not land its bare
-            // letter in the composer.
-            KeyCode::Char(c) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
-                self.composer.push(c);
-            }
+            // Only insert printable input — a Ctrl+<letter> chord must not
+            // land its bare letter in the composer.
+            KeyCode::Char(c) if !ctrl => self.composer.push(c),
             _ => {}
         }
         false
     }
 
-    fn handle_chat_key(&mut self, key: KeyEvent) -> bool {
-        // Keys that touch `self` (not the debate) are handled first so we don't
-        // hold a borrow of `self.debate` across them.
-        match key.code {
-            KeyCode::Esc | KeyCode::Char('q') => {
-                self.stop_debate();
-                return false;
-            }
-            KeyCode::Tab => {
-                self.toggle_sidebar();
-                return false;
-            }
-            _ => {}
-        }
-
-        if key.code == KeyCode::Enter && self.debate.as_ref().is_some_and(|d| d.read_only) {
-            self.continue_session();
-            return false;
-        }
-        let Some(d) = self.debate.as_mut() else {
+    fn handle_session_key(&mut self, key: KeyEvent) -> bool {
+        let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+        let frame = self.frame;
+        let Some(s) = self.session.as_mut() else {
             self.view = View::Home;
             return false;
         };
-        let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+
+        // The moderator's question owns the keyboard while it is pending.
+        if let Some(q) = s.view.pending_question.clone() {
+            match key.code {
+                KeyCode::Enter | KeyCode::Esc => {
+                    let text = if key.code == KeyCode::Enter {
+                        std::mem::take(&mut s.answer).trim().to_string()
+                    } else {
+                        s.answer.clear();
+                        String::new()
+                    };
+                    if let Some(e) = &s.engine {
+                        let _ = e.input.send(EngineInput::UserAnswer { id: q.id, text });
+                    }
+                    s.view.pending_question = None;
+                }
+                KeyCode::Backspace => {
+                    s.answer.pop();
+                }
+                KeyCode::Char('u') if ctrl => s.answer.clear(),
+                KeyCode::Char(c) if !ctrl => s.answer.push(c),
+                _ => {}
+            }
+            return false;
+        }
+        // Then a tool approval.
+        if let Some(a) = s.view.pending_approval.clone() {
+            let decision = match key.code {
+                KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => Some(true),
+                KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => Some(false),
+                _ => None,
+            };
+            if let Some(allow) = decision {
+                if let Some(e) = &s.engine {
+                    let _ = e.input.send(EngineInput::ToolDecision { id: a.id, allow });
+                }
+                s.view.pending_approval = None;
+                return false;
+            }
+        }
+
         match key.code {
-            KeyCode::Char('t') if !ctrl => d.show_thinking = !d.show_thinking,
-            KeyCode::Char('c') if !ctrl => {
-                d.pane = if d.pane == SidePane::Tensions {
-                    SidePane::Roster
+            KeyCode::Esc | KeyCode::Char('q') if !ctrl => {
+                if s.is_live() {
+                    if frame < s.confirm_stop_until {
+                        self.stop_session();
+                    } else {
+                        s.confirm_stop_until = frame + 30;
+                        self.toast("Press Esc again to stop the council.");
+                    }
                 } else {
-                    SidePane::Tensions
-                };
+                    self.session = None;
+                    self.view = View::Home;
+                    self.refresh_sessions();
+                }
             }
-            KeyCode::Char('$') if !ctrl => {
-                d.pane = if d.pane == SidePane::Costs {
-                    SidePane::Roster
-                } else {
-                    SidePane::Costs
-                };
-            }
+            KeyCode::Tab => self.toggle_sidebar(),
+            KeyCode::Char('t') if !ctrl => s.show_thinking = !s.show_thinking,
+            KeyCode::Char('p') if !ctrl => s.side = SideTab::Plan,
+            KeyCode::Char('b') if !ctrl => s.side = SideTab::Board,
+            KeyCode::Char('v') if !ctrl => s.side = SideTab::Convergence,
+            KeyCode::Char('$') if !ctrl => s.side = SideTab::Cost,
+            KeyCode::Char('s') if !ctrl => s.side = SideTab::Seats,
+            KeyCode::Left => s.side = s.side.step(-1),
+            KeyCode::Right => s.side = s.side.step(1),
             KeyCode::Up => {
-                d.follow = false;
-                d.scroll = d.scroll.saturating_sub(1);
+                s.follow = false;
+                s.scroll = s.scroll.saturating_sub(1);
             }
-            KeyCode::Down => d.scroll = d.scroll.saturating_add(1),
+            KeyCode::Down => s.scroll = s.scroll.saturating_add(1),
             KeyCode::PageUp => {
-                d.follow = false;
-                d.scroll = d.scroll.saturating_sub(10);
+                s.follow = false;
+                s.scroll = s.scroll.saturating_sub(10);
             }
-            KeyCode::PageDown => d.scroll = d.scroll.saturating_add(10),
-            KeyCode::Char('g') if !ctrl => d.follow = true,
+            KeyCode::PageDown => s.scroll = s.scroll.saturating_add(10),
+            KeyCode::Home => {
+                s.follow = false;
+                s.scroll = 0;
+            }
+            KeyCode::End | KeyCode::Char('g') => s.follow = true,
+            KeyCode::Char('r') if !ctrl => self.reconvene(),
+            KeyCode::Char('e') if !ctrl => self.export(),
+            KeyCode::Enter if s.read_only => self.reconvene(),
             _ => {}
         }
         false
     }
 
     fn handle_settings_key(&mut self, key: KeyEvent) -> bool {
-        // Editing a provider's key: capture printable input (masked on screen),
-        // Enter saves, Esc cancels, ^U clears the buffer. Each arm scopes its own
-        // borrow of `key_draft` so save/toast can re-borrow `self`.
+        // Editing a provider's key: capture printable input (masked on
+        // screen), Enter saves, Esc cancels, ^U clears the buffer.
         if self.key_draft.is_some() {
             match key.code {
                 KeyCode::Esc => self.key_draft = None,
@@ -1248,7 +949,7 @@ impl App {
             return false;
         }
 
-        // Editing an option row (cap / advisors / budget / proxy).
+        // Editing an option row.
         if self.option_draft.is_some() {
             match key.code {
                 KeyCode::Esc => self.option_draft = None,
@@ -1277,7 +978,6 @@ impl App {
             return false;
         }
 
-        // Normal Settings navigation over providers + option rows.
         match key.code {
             KeyCode::Esc => self.view = self.prev_view,
             KeyCode::Up => self.settings_sel = self.settings_sel.saturating_sub(1),
@@ -1355,8 +1055,8 @@ impl App {
         }
     }
 
-    /// Validate + persist one option row. Invalid input toasts and keeps the
-    /// previous value.
+    /// Validate and persist one option row. Invalid input toasts and keeps
+    /// the previous value.
     fn save_option(&mut self, row: OptionRow, value: &str) {
         let config = &mut self.ctx.config;
         match row {
@@ -1419,8 +1119,8 @@ impl App {
     /// Reset one option row to its default and persist.
     fn reset_option(&mut self, row: OptionRow) {
         let value = match row {
-            OptionRow::MaxTurns => "40".to_string(),
-            OptionRow::ObserverInterval => "2".to_string(),
+            OptionRow::MaxTurns => "3".to_string(),
+            OptionRow::ObserverInterval => "safe".to_string(),
             OptionRow::BudgetSession => "0".to_string(),
             OptionRow::BudgetAction => "warn".to_string(),
             OptionRow::Proxy => String::new(),
@@ -1428,13 +1128,10 @@ impl App {
         self.save_option(row, &value);
     }
 
-    /// Persist a key typed in Settings to the encrypted `keys.enc` store, then
-    /// prime the cache so the next debate uses it immediately. The plaintext is
-    /// moved into the config/cache and never logged.
+    /// Persist a key typed in Settings to the encrypted `keys.enc` store,
+    /// then prime the cache so the next run uses it immediately.
     fn save_key(&mut self, provider: Provider, key: String) {
         self.ctx.config.set_key(provider, key.clone());
-        // Only keys.enc changes — keys never live in config.toml, so there's no
-        // need to write (and thereby create) config.toml here.
         if let Err(e) = self.ctx.config.save_keys() {
             self.toast(format!("Couldn't save key: {e}"));
             return;
@@ -1443,8 +1140,8 @@ impl App {
         self.toast(format!("Saved {} key.", provider.display_name()));
     }
 
-    /// Remove a locally-stored key. A key shared from the desktop app or sourced
-    /// from an env var isn't this CLI's to delete — say so instead.
+    /// Remove a locally-stored key. A key shared from the desktop app or
+    /// sourced from an env var is not this CLI's to delete.
     fn clear_key(&mut self, provider: Provider) {
         match self.ctx.config.key_source(provider) {
             KeySource::Local => {
@@ -1463,9 +1160,9 @@ impl App {
         }
     }
 
-    /// Route pasted text to whatever input is focused. Control chars (incl. the
-    /// trailing newline a bracketed paste carries) are stripped so a pasted key
-    /// or topic stays a single clean line.
+    /// Route pasted text to whatever input is focused. Control chars (incl.
+    /// the trailing newline a bracketed paste carries) are stripped so a
+    /// pasted key, topic or answer stays a single clean line.
     fn handle_paste(&mut self, text: String) {
         let clean: String = text.chars().filter(|c| !c.is_control()).collect();
         if clean.is_empty() {
@@ -1480,15 +1177,68 @@ impl App {
                 }
             }
             View::Home => self.composer.push_str(&clean),
-            View::Chat => {}
+            View::Session => {
+                if let Some(s) = self
+                    .session
+                    .as_mut()
+                    .filter(|s| s.view.pending_question.is_some())
+                {
+                    s.answer.push_str(&clean);
+                }
+            }
         }
+    }
+
+    /// Drain the live engine's events into the view. Returns true when
+    /// anything arrived (or the engine went away).
+    fn pump_engine(&mut self) -> bool {
+        use tokio::sync::mpsc::error::TryRecvError;
+        let mut pending = Vec::new();
+        let mut disconnected = false;
+        let Some(s) = self.session.as_mut() else {
+            return false;
+        };
+        if let Some(e) = s.engine.as_mut() {
+            loop {
+                match e.rx.try_recv() {
+                    Ok(ev) => pending.push(ev),
+                    Err(TryRecvError::Empty) => break,
+                    Err(TryRecvError::Disconnected) => {
+                        disconnected = true;
+                        break;
+                    }
+                }
+            }
+        }
+        let had_events = !pending.is_empty() || disconnected;
+        let mut finished = false;
+        for ev in pending {
+            if matches!(ev, DebateEvent::Done { .. }) {
+                finished = true;
+            }
+            s.view.apply(ev);
+        }
+        // The engine task ended (a panic, or an abort) without `Done`: never
+        // leave the screen waiting for an event that will not come.
+        if disconnected && !s.view.done {
+            s.view
+                .errors
+                .push("The engine stopped before finishing.".into());
+            s.view.stopped_early.get_or_insert_with(|| "failed".into());
+            s.view.done = true;
+            s.view.active.clear();
+            finished = true;
+        }
+        if finished {
+            s.engine = None;
+            self.refresh_sessions();
+        }
+        had_events
     }
 }
 
-/// Restores the terminal (raw mode, bracketed paste, alternate screen, cursor)
-/// on `Drop` — so it runs on a normal exit *and* if `run_loop` panics and
-/// unwinds. Without this, a panic would leave the shell unusable (no echo,
-/// bracketed-paste markers around pasted text) until `reset`.
+/// Restores the terminal (raw mode, bracketed paste, alternate screen,
+/// cursor) on `Drop` — on a normal exit and if `run_loop` panics.
 struct TerminalGuard;
 
 impl Drop for TerminalGuard {
@@ -1504,36 +1254,43 @@ impl Drop for TerminalGuard {
 }
 
 /// Enter the alternate screen and run the TUI to completion. `initial_topic`
-/// (from `run <topic>`) jumps straight into a debate.
+/// (from `run <topic>`) convenes straight away; `ctx.resume` reconvenes a
+/// stored session.
 pub async fn run(ctx: AppContext, initial_topic: Option<String>) -> anyhow::Result<()> {
     enable_raw_mode()?;
-    // From here on, any early return *or panic* restores the terminal via Drop.
+    // From here on, any early return or panic restores the terminal via Drop.
     let _guard = TerminalGuard;
     let mut stdout = io::stdout();
-    // Bracketed paste lets a pasted API key arrive as one `Event::Paste` instead
-    // of a burst of key events (and keeps a trailing newline from auto-submitting).
+    // Bracketed paste lets a pasted API key arrive as one `Event::Paste`
+    // instead of a burst of key events.
     execute!(stdout, EnterAlternateScreen, EnableBracketedPaste)?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
     let mut app = App::new(ctx);
-    if let Some(topic) = initial_topic {
+    if let Some(id) = app.ctx.resume.clone() {
+        if app.open_session(&id, None) {
+            if let Some(topic) = initial_topic.as_deref().filter(|t| !t.trim().is_empty()) {
+                if let Some(s) = app.session.as_mut() {
+                    s.topic = topic.to_string();
+                }
+            }
+            app.reconvene();
+        } else {
+            app.toast(format!(
+                "Session {id} could not be read; convene a fresh one."
+            ));
+        }
+    } else if let Some(topic) = initial_topic {
         if !topic.trim().is_empty() {
-            app.start_debate(topic);
+            app.launch(topic, None);
         }
     }
 
     let result = run_loop(&mut terminal, &mut app).await;
 
-    // Tear the engine down before the guard leaves raw mode so quitting never blocks.
-    if let Some(d) = &app.debate {
-        if let Some(e) = &d.engine {
-            e.cancel.store(true, Ordering::Relaxed);
-            let _ = e.input.send(EngineInput::Cancel);
-            e.handle.abort();
-        }
-    }
-    // Terminal teardown (incl. on panic) is handled by `_guard`'s Drop.
+    // Tear the engine down before the guard leaves raw mode.
+    app.abort_engine();
     result
 }
 
@@ -1541,69 +1298,24 @@ async fn run_loop(
     terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
     app: &mut App,
 ) -> anyhow::Result<()> {
-    // Track whether the rendered state changed since the last draw, so we can
-    // skip repainting an unchanging screen (idle-CPU saver, see below).
+    // Redraw only when something changed, or while an animation is live.
     let mut dirty = true;
     loop {
-        // Drain any pending debate events. If the channel disconnects (the engine
-        // task ended — including an unexpected panic), mark the debate done so the
-        // UI never hangs waiting for a `Done` that won't come.
-        let mut pending = Vec::new();
-        let mut disconnected = false;
-        if let Some(d) = app.debate.as_mut() {
-            if let Some(e) = d.engine.as_mut() {
-                use tokio::sync::mpsc::error::TryRecvError;
-                loop {
-                    match e.rx.try_recv() {
-                        Ok(ev) => pending.push(ev),
-                        Err(TryRecvError::Empty) => break,
-                        Err(TryRecvError::Disconnected) => {
-                            disconnected = true;
-                            break;
-                        }
-                    }
-                }
-            }
+        if app.pump_engine() {
+            dirty = true;
         }
-        let had_events = !pending.is_empty() || disconnected;
-        if let Some(d) = app.debate.as_mut() {
-            for ev in pending {
-                d.apply(ev);
-            }
-        }
-        if had_events {
-            app.persist_debate();
-        }
-        if let Some(d) = app.debate.as_mut() {
-            if disconnected && !d.done {
-                d.done = true;
-                d.active = None;
-                d.streaming = None;
-                d.status = "Adjourned".into();
-            }
-        }
-
         if app.toast.is_some() && app.frame >= app.toast_expire {
             app.toast = None;
             dirty = true;
         }
-        if had_events {
-            dirty = true;
-        }
-
-        // Redraw only when something changed, or while an animation is live: the
-        // Home council-mark logo, or an in-progress debate (streaming spinner /
-        // progress gauge). When idle — e.g. reviewing a finished debate — skip the
-        // draw rather than repaint an unchanging screen ~14×/second.
-        let animating = app.view == View::Home || app.debate.as_ref().is_some_and(|d| !d.done);
+        let animating = app.view == View::Home || app.session.as_ref().is_some_and(|s| s.is_live());
         if dirty || animating {
             terminal.draw(|f| render(f, app))?;
         }
         dirty = false;
 
         // Block up to one frame for animation cadence, then drain everything
-        // queued this tick — so a char-by-char paste (terminals without
-        // bracketed-paste support) still registers instantly.
+        // queued this tick so a char-by-char paste still registers instantly.
         if event::poll(Duration::from_millis(70))? {
             loop {
                 let mut quit = false;
@@ -1632,8 +1344,8 @@ async fn run_loop(
 
 fn render(f: &mut Frame, app: &mut App) {
     let area = f.area();
-    let main_area = if app.sidebar_open {
-        let cols = Layout::horizontal([Constraint::Length(30), Constraint::Min(0)]).split(area);
+    let main_area = if app.sidebar_open && area.width >= 60 {
+        let cols = Layout::horizontal([Constraint::Length(32), Constraint::Min(0)]).split(area);
         sidebar::render(f, cols[0], app);
         cols[1]
     } else {
@@ -1642,7 +1354,7 @@ fn render(f: &mut Frame, app: &mut App) {
 
     match app.view {
         View::Home => home::render(f, main_area, app),
-        View::Chat => chat::render(f, main_area, app),
+        View::Session => session::render(f, main_area, app),
         View::Settings => settings::render(f, main_area, app),
     }
 
@@ -1682,7 +1394,13 @@ fn render_toast(f: &mut Frame, area: Rect, app: &App) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::deliberation::{
+        Board, Convergence, DecisionRecord, Disagreement, Dissent, Estimate, Evidence,
+        OptionConsidered, Participant, Plan, Recommend, RoundKind, SeatRole,
+    };
+    use crate::types::{CostSnapshot, ToolCall, Usage};
     use ratatui::backend::TestBackend;
+    use serde_json::json;
 
     fn test_app() -> App {
         let ctx = AppContext {
@@ -1692,281 +1410,515 @@ mod tests {
             providers: Provider::ALL.to_vec(),
             prefetched_keys: HashMap::new(),
             attachments: Vec::new(),
-            roster: None,
+            roster_override: None,
+            preset: Preset::Standard,
             forced: None,
+            resume: None,
         };
         App::new(ctx)
     }
 
-    fn sample_debate() -> Debate {
-        Debate {
-            topic: "Should we colonize Mars?".into(),
-            roster: vec![RosterEntry {
-                id: "george".into(),
-                name: "George".into(),
-                provider: Provider::OpenAI,
-                model: "gpt-x".into(),
-                color: theme::provider_color(Provider::OpenAI),
-            }],
-            turns: vec![
-                TurnView {
-                    agent_id: "george".into(),
-                    name: "George".into(),
-                    model: "gpt-x".into(),
-                    content: "First line.\nSecond line.".into(),
-                    thinking: "weighing the trade-offs".into(),
-                    thinking_ms: 1234,
-                    canvas: vec![CanvasSection {
-                        label: "Key Points".into(),
-                        text: "- cost vs benefit\n- who decides".into(),
-                    }],
-                    kind: TurnKind::Agent,
-                    at_ms: 0,
-                },
-                TurnView::of_kind(
-                    TurnKind::Whisper,
-                    "george",
-                    "Greta → George",
-                    "Push Cathy on the cost estimate.".into(),
-                ),
-                TurnView::of_kind(
-                    TurnKind::Tool,
-                    "tool",
-                    "oracle.web_search · asked by George",
-                    "“mars colony cost”\n1. Example - https://e.com\nsnippet".into(),
-                ),
-            ],
-            streaming: Some(TurnView {
-                agent_id: "cathy".into(),
-                name: "Cathy".into(),
-                model: "claude-x".into(),
-                content: "streaming…".into(),
-                thinking: String::new(),
-                thinking_ms: 0,
-                canvas: Vec::new(),
-                kind: TurnKind::Agent,
-                at_ms: 0,
-            }),
-            active: Some("Cathy".into()),
-            usage: Usage::default(),
-            turn_count: 2,
-            max_turns: 40,
-            conflicts: vec![PairScore {
-                a_id: "george".into(),
-                a_name: "George".into(),
-                b_id: "cathy".into(),
-                b_name: "Cathy".into(),
-                score: 0.62,
-            }],
-            cost: Some({
-                let mut ledger = crate::engine::cost::CostLedger::new();
-                ledger.record(
-                    "george",
-                    "George",
-                    crate::types::CostLane::Council,
-                    "gpt-5.5",
-                    Usage {
-                        input: 120_000,
-                        output: 30_000,
-                        reasoning: 0,
-                        ..Default::default()
-                    },
-                );
-                let mut snap = ledger.snapshot();
-                snap.session_cap = 5.0;
-                snap.note = Some("80% of session budget used.".into());
-                snap
-            }),
-            pane: SidePane::Roster,
-            status: "Discussion".into(),
-            vote_boards: Vec::new(),
-            peer_eval: None,
-            conclusion: Some(ModeratorConclusion {
-                status: crate::types::ConclusionStatus::Majority,
-                summary: "Leaning yes with reservations.".into(),
-                score: 6,
-                reason: "Decent reasoning, thin evidence.".into(),
-                next: Some("Run a small test.".into()),
-            }),
-            deep_research: None,
-            show_thinking: true,
-            follow: true,
-            scroll: 0,
-            done: false,
-            read_only: false,
-            engine: None,
-            session_id: "sc-test".into(),
-            created_at_ms: 0,
-            persisted_len: 0,
-            persisted_done: false,
+    fn card(id: &str, name: &str, provider: Provider) -> SeatCard {
+        SeatCard {
+            id: id.into(),
+            name: name.into(),
+            provider: Some(provider),
+            model: format!("{}-model", provider.slug()),
+            color: theme::provider_color(provider),
         }
     }
 
-    fn render_at(app: &mut App, w: u16, h: u16) {
+    /// A session mid cross-examination with a record already in (so every
+    /// card renders at once), one seat still streaming, and a tool use.
+    pub(super) fn sample_screen() -> SessionScreen {
+        let mut view = SessionView::default();
+        for p in ["Framing", "Prep", "Positions", "Cross-examination 1"] {
+            view.apply(DebateEvent::Phase { name: p.into() });
+        }
+        view.apply(DebateEvent::Plan {
+            plan: Plan {
+                deliverable: Deliverable::Decision,
+                question: "Should we colonize Mars?".into(),
+                options: vec!["Yes".into(), "Later".into()],
+                settles: "a go/no-go".into(),
+                participants: vec![
+                    Participant {
+                        seat: "george".into(),
+                        role: SeatRole::Principal,
+                        reason: "frontier".into(),
+                    },
+                    Participant {
+                        seat: "cathy".into(),
+                        role: SeatRole::Support,
+                        reason: "fast chores".into(),
+                    },
+                ],
+                lenses: [("george".to_string(), "cost".to_string())]
+                    .into_iter()
+                    .collect(),
+                subtasks: vec![],
+                rounds: 2,
+                ask_user: None,
+            },
+            corrections: vec!["rounds capped to 2".into()],
+        });
+        view.apply(DebateEvent::Estimate {
+            estimate: Estimate {
+                calls: 9,
+                usd_low: 0.2,
+                usd_high: 0.6,
+                unpriced_seats: vec!["mary".into()],
+            },
+        });
+        for (id, name) in [("george", "George"), ("cathy", "Cathy")] {
+            view.apply(DebateEvent::SeatStarted {
+                seat_id: id.into(),
+                name: name.into(),
+                provider: Provider::OpenAI,
+                model: "gpt-x".into(),
+                round: RoundKind::Positions,
+            });
+            view.apply(DebateEvent::SeatFinished {
+                seat_id: id.into(),
+                name: name.into(),
+                round: RoundKind::Positions,
+                usage: Usage {
+                    input: 1200,
+                    output: 300,
+                    reasoning: 100,
+                    ..Default::default()
+                },
+                content: format!("{name} takes a position.\n- point one\n- point two"),
+                structured: json!({}),
+            });
+        }
+        view.apply(DebateEvent::SeatStarted {
+            seat_id: "george".into(),
+            name: "George".into(),
+            provider: Provider::OpenAI,
+            model: "gpt-x".into(),
+            round: RoundKind::Cross(1),
+        });
+        view.apply(DebateEvent::Thinking {
+            seat_id: "george".into(),
+            text: "weighing the objection".into(),
+        });
+        view.apply(DebateEvent::ToolCall {
+            seat_id: "george".into(),
+            call: ToolCall {
+                id: "c1".into(),
+                name: "web_search".into(),
+                arguments: json!({"query": "mars colony cost"}),
+                signature: None,
+            },
+            output: "1. Example — https://e.com".into(),
+            error: None,
+        });
+        view.apply(DebateEvent::Token {
+            seat_id: "george".into(),
+            text: "streaming a rebuttal…".into(),
+        });
+        view.apply(DebateEvent::Board {
+            board: Board {
+                settled: vec!["it is expensive".into()],
+                disagreements: vec![Disagreement {
+                    between: vec!["george".into(), "cathy".into()],
+                    about: "timing".into(),
+                }],
+                evidence: vec![Evidence {
+                    claim: "costs 1T".into(),
+                    source: "https://e.com".into(),
+                    by: "george".into(),
+                }],
+                open_questions: vec!["who pays".into()],
+                positions: [("george".to_string(), "yes".to_string())]
+                    .into_iter()
+                    .collect(),
+            },
+        });
+        view.apply(DebateEvent::Convergence {
+            convergence: Convergence {
+                moved: vec!["cathy".into()],
+                open_disagreements: 1,
+                recommend: Recommend::AnotherRound,
+                why: "timing is open".into(),
+            },
+        });
+        view.apply(DebateEvent::Moderator {
+            text: "Keep to the question.".into(),
+        });
+        view.apply(DebateEvent::Record {
+            record: DecisionRecord {
+                deliverable: Deliverable::Decision,
+                question: "Should we colonize Mars?".into(),
+                answer: "Later, after a cheaper launch cadence.".into(),
+                confidence: 0.72,
+                options_considered: vec![OptionConsidered {
+                    option: "Yes now".into(),
+                    why_not: "too costly".into(),
+                }],
+                dissent: vec![Dissent {
+                    seat: "george".into(),
+                    position: "go now".into(),
+                    why_not_carried: "cost".into(),
+                }],
+                assumptions: vec!["launch costs fall".into()],
+                evidence: vec![Evidence {
+                    claim: "costs 1T".into(),
+                    source: "https://e.com".into(),
+                    by: "george".into(),
+                }],
+                open_questions: vec!["who pays".into()],
+                next_actions: vec!["price a cadence".into()],
+                what_changed: "Cathy moved.".into(),
+                votes: [("cathy".to_string(), "Later".to_string())]
+                    .into_iter()
+                    .collect(),
+                cost: None,
+            },
+        });
+        view.apply(DebateEvent::Cost {
+            snapshot: CostSnapshot {
+                total_usd: 0.4321,
+                all_priced: false,
+                session_cap: 5.0,
+                note: Some("80% of the session budget used.".into()),
+                ..Default::default()
+            },
+        });
+        view.apply(DebateEvent::Error {
+            message: "Kate came back empty.".into(),
+        });
+        SessionScreen {
+            topic: "Should we colonize Mars?".into(),
+            session_id: "sc-test".into(),
+            seats: vec![
+                card("george", "George", Provider::OpenAI),
+                card("cathy", "Cathy", Provider::Anthropic),
+            ],
+            view,
+            side: SideTab::Plan,
+            show_thinking: true,
+            follow: true,
+            scroll: 0,
+            answer: String::new(),
+            read_only: false,
+            engine: None,
+            confirm_stop_until: 0,
+        }
+    }
+
+    fn render_at(app: &mut App, w: u16, h: u16) -> String {
         let mut terminal = Terminal::new(TestBackend::new(w, h)).unwrap();
         terminal.draw(|f| render(f, app)).unwrap();
+        terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|c| c.symbol())
+            .collect()
+    }
+
+    fn press(app: &mut App, code: KeyCode) {
+        app.handle_key(KeyEvent::new(code, KeyModifiers::NONE));
     }
 
     #[test]
-    fn renders_every_view_without_panic() {
+    fn renders_every_view_and_side_tab_without_panic() {
         let mut app = test_app();
         for view in [View::Home, View::Settings] {
             app.view = view;
             render_at(&mut app, 120, 40);
         }
-        app.view = View::Chat;
-        app.debate = Some(sample_debate());
-        render_at(&mut app, 120, 40);
-        // Every side pane renders, at full and tiny sizes.
-        for pane in [SidePane::Roster, SidePane::Tensions, SidePane::Costs] {
-            app.debate.as_mut().unwrap().pane = pane;
-            render_at(&mut app, 120, 40);
+        app.view = View::Session;
+        app.session = Some(sample_screen());
+        let text = render_at(&mut app, 140, 50);
+        assert!(text.contains("Decision record"));
+        assert!(text.contains("Later, after a cheaper launch cadence."));
+        assert!(text.contains("web_search"));
+        assert!(text.contains("Kate came back empty."));
+        for tab in SideTab::ALL {
+            app.session.as_mut().unwrap().side = tab;
+            let text = render_at(&mut app, 140, 50);
+            assert!(text.contains(tab.label()), "{tab:?} tab renders its label");
+            render_at(&mut app, 60, 20);
             render_at(&mut app, 9, 4);
         }
+        // The thinking toggle hides and shows the trace.
+        app.session.as_mut().unwrap().show_thinking = false;
+        assert!(!render_at(&mut app, 140, 50).contains("weighing the objection"));
+        app.session.as_mut().unwrap().show_thinking = true;
+        assert!(render_at(&mut app, 140, 50).contains("weighing the objection"));
     }
 
     #[test]
-    fn settings_option_rows_edit_validate_and_reset() {
+    fn overlays_render_and_take_the_keyboard() {
         let mut app = test_app();
-        app.view = View::Settings;
-        // Move to the Rounds row (first option row after 8 providers).
-        app.settings_sel = theme::AGENTS.len();
-        // The draft prefills the current value.
-        app.option_draft = Some(OptionDraft {
-            row: OptionRow::MaxTurns,
-            buffer: "2".into(),
+        app.view = View::Session;
+        let mut screen = sample_screen();
+        let (tx, mut input_rx) = unbounded_channel::<EngineInput>();
+        let (_ev_tx, ev_rx) = unbounded_channel::<DebateEvent>();
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        screen.engine = Some(EngineHandle {
+            rx: ev_rx,
+            input: tx,
+            handle: rt.spawn(async {}),
         });
-        if let Some(d) = app.option_draft.take() {
-            // Simulate save without touching the real config dir: validate only.
-            assert!(d.buffer.parse::<u8>().is_ok());
-            app.ctx.config.protocol.max_rounds = d.buffer.parse().unwrap();
-        }
-        assert_eq!(app.ctx.config.protocol.max_rounds, 2);
-        assert_eq!(app.option_current_value(OptionRow::MaxTurns), "2");
-
-        // The tools row cycles the policy levels.
-        app.ctx.config.tools = crate::tools::ToolPolicy::none();
-        assert_eq!(
-            app.option_current_value(OptionRow::ObserverInterval),
-            "none"
-        );
-        app.ctx.config.tools = crate::tools::ToolPolicy::all();
-        assert_eq!(app.option_current_value(OptionRow::ObserverInterval), "all");
-
-        // Proxy display redaction strips userinfo.
-        assert_eq!(
-            redact_proxy("socks5://user:hunter2@proxy.example:1080"),
-            "socks5://•••@proxy.example:1080"
-        );
-        assert_eq!(
-            redact_proxy("http://proxy.example:8080"),
-            "http://proxy.example:8080"
-        );
-
-        // Settings rows span providers + options.
-        assert_eq!(settings_row_count(), 13);
-        // Render the option-edit state at several sizes.
-        app.option_draft = Some(OptionDraft {
-            row: OptionRow::Proxy,
-            buffer: "socks5://u:p@h:1".into(),
+        screen.view.apply(DebateEvent::UserQuestion {
+            id: "q1".into(),
+            question: "Which budget?".into(),
         });
-        for (w, h) in [(120, 40), (30, 10), (1, 1)] {
-            render_at(&mut app, w, h);
+        screen.view.apply(DebateEvent::ToolApproval {
+            id: "a1".into(),
+            seat_id: "george".into(),
+            call: ToolCall {
+                id: "c2".into(),
+                name: "run_command".into(),
+                arguments: json!({"command": "ls"}),
+                signature: None,
+            },
+        });
+        app.session = Some(screen);
+        let text = render_at(&mut app, 120, 40);
+        assert!(text.contains("Which budget?"));
+        assert!(!text.contains("run_command"), "the question comes first");
+
+        // Typing goes to the answer; `t` must not toggle thinking meanwhile.
+        for c in "10k".chars() {
+            press(&mut app, KeyCode::Char(c));
         }
+        press(&mut app, KeyCode::Char('t'));
+        assert_eq!(app.session.as_ref().unwrap().answer, "10kt");
+        assert!(app.session.as_ref().unwrap().show_thinking);
+        press(&mut app, KeyCode::Backspace);
+        press(&mut app, KeyCode::Enter);
+        assert_eq!(
+            input_rx.try_recv().unwrap(),
+            EngineInput::UserAnswer {
+                id: "q1".into(),
+                text: "10k".into()
+            }
+        );
+        assert!(app
+            .session
+            .as_ref()
+            .unwrap()
+            .view
+            .pending_question
+            .is_none());
+
+        // Now the approval shows; `n` denies it.
+        let text = render_at(&mut app, 120, 40);
+        assert!(text.contains("run_command"));
+        press(&mut app, KeyCode::Char('n'));
+        assert_eq!(
+            input_rx.try_recv().unwrap(),
+            EngineInput::ToolDecision {
+                id: "a1".into(),
+                allow: false
+            }
+        );
+        assert!(app
+            .session
+            .as_ref()
+            .unwrap()
+            .view
+            .pending_approval
+            .is_none());
+
+        // Esc while live asks for a second press; the second one stops.
+        press(&mut app, KeyCode::Esc);
+        assert_eq!(app.view, View::Session);
+        assert!(app.toast.as_deref().unwrap().contains("again"));
+        press(&mut app, KeyCode::Esc);
+        assert_eq!(app.view, View::Home);
+        assert!(app.session.is_none());
+        assert_eq!(input_rx.try_recv().unwrap(), EngineInput::Cancel);
     }
 
     #[test]
-    fn chat_keys_toggle_side_panes() {
+    fn session_keys_switch_tabs_and_scroll() {
         let mut app = test_app();
-        app.view = View::Chat;
-        app.debate = Some(sample_debate());
-        let press = |app: &mut App, c: char| {
-            app.handle_key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE));
-        };
-        press(&mut app, 'c');
-        assert_eq!(app.debate.as_ref().unwrap().pane, SidePane::Tensions);
-        press(&mut app, '$');
-        assert_eq!(app.debate.as_ref().unwrap().pane, SidePane::Costs);
-        press(&mut app, '$');
-        assert_eq!(app.debate.as_ref().unwrap().pane, SidePane::Roster);
+        app.view = View::Session;
+        app.session = Some(sample_screen());
+        let tab = |app: &App| app.session.as_ref().unwrap().side;
+        press(&mut app, KeyCode::Char('b'));
+        assert_eq!(tab(&app), SideTab::Board);
+        press(&mut app, KeyCode::Right);
+        assert_eq!(tab(&app), SideTab::Convergence);
+        press(&mut app, KeyCode::Left);
+        press(&mut app, KeyCode::Left);
+        assert_eq!(tab(&app), SideTab::Plan);
+        press(&mut app, KeyCode::Left);
+        assert_eq!(tab(&app), SideTab::Seats);
+        press(&mut app, KeyCode::Char('$'));
+        assert_eq!(tab(&app), SideTab::Cost);
+        press(&mut app, KeyCode::Up);
+        assert!(!app.session.as_ref().unwrap().follow);
+        press(&mut app, KeyCode::Char('g'));
+        assert!(app.session.as_ref().unwrap().follow);
+        press(&mut app, KeyCode::Char('t'));
+        assert!(!app.session.as_ref().unwrap().show_thinking);
+        // A finished session leaves on one Esc.
+        press(&mut app, KeyCode::Esc);
+        assert_eq!(app.view, View::Home);
     }
 
     #[test]
-    fn debate_applies_new_events() {
-        let mut d = sample_debate();
-        d.apply(DebateEvent::AdvisorNote(crate::types::AdvisorNote {
-            observer_id: "clara".into(),
-            observer_name: "Clara".into(),
-            partner_id: "cathy".into(),
-            partner_name: "Cathy".into(),
-            text: "Quote the rollout data.".into(),
-        }));
-        assert!(matches!(d.turns.last().unwrap().kind, TurnKind::Whisper));
-        assert_eq!(d.turns.last().unwrap().name, "Clara → Cathy");
-
-        d.apply(DebateEvent::Tool(crate::types::ToolUse {
-            name: "oracle.verify".into(),
-            query: "claim".into(),
-            output: "Verdict: uncertain (confidence 0.31)".into(),
-            agent_name: "George".into(),
-        }));
-        assert!(matches!(d.turns.last().unwrap().kind, TurnKind::Tool));
-
-        d.apply(DebateEvent::Conflict(vec![]));
-        assert!(d.conflicts.is_empty());
-        d.apply(DebateEvent::Cost(CostSnapshot::default()));
-        assert!(d.cost.as_ref().unwrap().rows.is_empty());
-
-        // Streamed tokens are sanitized before they reach the buffer.
-        d.streaming = Some(TurnView::of_kind(
-            TurnKind::Agent,
-            "george",
-            "George",
-            String::new(),
-        ));
-        d.apply(DebateEvent::Token("safe\x1b[2Jtext".into()));
-        assert_eq!(d.streaming.as_ref().unwrap().content, "safe[2Jtext");
+    fn home_keys_cycle_preset_and_deliverable() {
+        let mut app = test_app();
+        assert_eq!(app.launch.preset, Preset::Standard);
+        press(&mut app, KeyCode::Right);
+        assert_eq!(app.launch.preset, Preset::Full);
+        press(&mut app, KeyCode::Right);
+        assert_eq!(app.launch.preset, Preset::Quick);
+        press(&mut app, KeyCode::Left);
+        assert_eq!(app.launch.preset, Preset::Full);
+        app.handle_key(KeyEvent::new(KeyCode::Char('d'), KeyModifiers::CONTROL));
+        assert_eq!(app.launch.deliverable, Some(Deliverable::Decision));
+        for _ in 0..4 {
+            app.handle_key(KeyEvent::new(KeyCode::Char('d'), KeyModifiers::CONTROL));
+        }
+        assert_eq!(app.launch.deliverable, None);
+        // A plain `d` is typed into the composer.
+        press(&mut app, KeyCode::Char('d'));
+        assert_eq!(app.composer, "d");
     }
 
     #[test]
-    fn renders_with_sidebar_open() {
+    fn stored_sessions_open_from_the_sidebar() {
         let mut app = test_app();
         app.sessions = vec![
             SessionRow {
                 id: "a".into(),
-                title: "A debate".into(),
+                title: "A deliberation".into(),
                 status: "completed".into(),
-                turns: 12,
+                turns: 6,
                 archived: false,
-                origin: "app".into(),
+                origin: "cli".into(),
+                version: 2,
+                deliverable: Some("decision".into()),
+                answer: "Later.".into(),
+                total_usd: 0.42,
+                stopped_early: None,
             },
             SessionRow {
                 id: "b".into(),
-                title: "Archived one".into(),
+                title: "An old chat".into(),
                 status: "paused".into(),
                 turns: 3,
                 archived: true,
-                origin: "cli".into(),
+                origin: "app".into(),
+                version: 1,
+                deliverable: None,
+                answer: String::new(),
+                total_usd: 0.0,
+                stopped_early: Some("budget".into()),
             },
         ];
         app.sidebar_open = true;
         app.toast = Some("hello".into());
-        render_at(&mut app, 100, 30);
+        let text = render_at(&mut app, 110, 30);
+        assert!(text.contains("A deliberation"));
+        assert!(text.contains("Later."));
+        // No store in the test app: opening toasts instead of panicking.
+        press(&mut app, KeyCode::Down);
+        press(&mut app, KeyCode::Enter);
+        assert_eq!(app.view, View::Home);
+        assert!(app.toast.as_deref().unwrap().contains("Couldn't read"));
+    }
+
+    #[test]
+    fn a_stored_v2_session_renders_read_only_and_reconvenes_with_notes() {
+        let mut app = test_app();
+        let mut doc = json!({
+            "id": "sc-x", "topic": "Stored topic", "version": 2,
+            "roster": {"seats": [{"id": "cathy", "name": "Cathy", "provider": "anthropic", "model": "auto"}]},
+            "rounds": [{"kind": "positions", "entries": [{"seat": "cathy", "name": "Cathy", "model": "claude-x",
+                       "content": "stored point", "structured": {}, "tool_uses": [],
+                       "usage": {"input": 1, "output": 1, "reasoning": 0, "cached_input": 0, "cache_write": 0}}]}],
+            "record": null, "board": {}, "costs": {}, "messages": []
+        });
+        let view = SessionView::from_stored(&doc);
+        assert_eq!(view.rounds[0].entries[0].text, "stored point");
+        doc["record"] = json!({"deliverable": "analysis", "question": "Q", "answer": "A", "confidence": 0.5,
+            "options_considered": [], "dissent": [], "assumptions": [], "evidence": [], "open_questions": [],
+            "next_actions": [], "what_changed": "", "votes": {}, "cost": null});
+        let view = SessionView::from_stored(&doc);
+        app.session = Some(SessionScreen {
+            topic: "Stored topic".into(),
+            session_id: "sc-x".into(),
+            seats: vec![card("cathy", "Cathy", Provider::Anthropic)],
+            view,
+            side: SideTab::Plan,
+            show_thinking: false,
+            follow: false,
+            scroll: 0,
+            answer: String::new(),
+            read_only: true,
+            engine: None,
+            confirm_stop_until: 0,
+        });
+        app.view = View::Session;
+        let text = render_at(&mut app, 120, 40);
+        assert!(text.contains("stored point"));
+        assert!(text.contains("saved"));
+        let s = app.session.as_ref().unwrap();
+        assert_eq!(s.status().0, "completed");
+        let notes = s
+            .view
+            .record_markdown(&s.names())
+            .or_else(|| s.view.transcript_tail(6))
+            .unwrap();
+        assert!(notes.starts_with("# Q"));
+        // Reconvening without keys keeps the topic in the composer.
+        press(&mut app, KeyCode::Char('r'));
+        assert_eq!(app.composer, "Stored topic");
+        assert!(app.toast.as_deref().unwrap().contains("No API keys"));
+    }
+
+    #[test]
+    fn engine_disconnect_marks_the_session_failed() {
+        let mut app = test_app();
+        let mut screen = sample_screen();
+        let (tx, _input_rx) = unbounded_channel::<EngineInput>();
+        let (ev_tx, ev_rx) = unbounded_channel::<DebateEvent>();
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        screen.engine = Some(EngineHandle {
+            rx: ev_rx,
+            input: tx,
+            handle: rt.spawn(async {}),
+        });
+        app.session = Some(screen);
+        app.view = View::Session;
+        ev_tx
+            .send(DebateEvent::Moderator {
+                text: "last word".into(),
+            })
+            .unwrap();
+        drop(ev_tx);
+        assert!(app.pump_engine());
+        let s = app.session.as_ref().unwrap();
+        assert!(s.view.done);
+        assert_eq!(s.view.stopped_early.as_deref(), Some("failed"));
+        assert!(s.view.moderator_notes.contains(&"last word".to_string()));
+        assert!(!s.is_live());
+        assert_eq!(s.status().0, "failed");
     }
 
     #[test]
     fn renders_at_tiny_sizes_without_panic() {
         let mut app = test_app();
         app.sidebar_open = true;
-        app.debate = Some(sample_debate());
-        // Also exercise the Settings key-editor overlay at every size.
+        app.session = Some(sample_screen());
         app.key_draft = Some(KeyDraft {
             provider: theme::AGENTS[0].provider,
             buffer: "sk-xxxxxxxx".into(),
         });
-        for view in [View::Home, View::Chat, View::Settings] {
+        for view in [View::Home, View::Session, View::Settings] {
             app.view = view;
-            for (w, h) in [(1, 1), (4, 3), (10, 6), (20, 8)] {
+            for (w, h) in [(1, 1), (4, 3), (10, 6), (20, 8), (59, 12)] {
                 render_at(&mut app, w, h);
             }
         }
@@ -1982,17 +1934,7 @@ mod tests {
             provider,
             buffer: "sk-secret-value-123".into(),
         });
-
-        let mut terminal = Terminal::new(TestBackend::new(120, 40)).unwrap();
-        terminal.draw(|f| render(f, &mut app)).unwrap();
-        let rendered: String = terminal
-            .backend()
-            .buffer()
-            .content()
-            .iter()
-            .map(|c| c.symbol())
-            .collect();
-
+        let rendered = render_at(&mut app, 120, 40);
         assert!(
             !rendered.contains("sk-secret-value-123"),
             "plaintext key must never render"
@@ -2001,11 +1943,15 @@ mod tests {
             rendered.contains('•'),
             "the key buffer should render as masked bullets"
         );
+        assert_eq!(
+            redact_proxy("socks5://user:hunter2@proxy.example:1080"),
+            "socks5://•••@proxy.example:1080"
+        );
+        assert_eq!(settings_row_count(), 13);
     }
 
     #[test]
     fn paste_routes_to_the_focused_input_and_strips_control_chars() {
-        // Into a Settings key draft.
         let mut app = test_app();
         app.view = View::Settings;
         app.key_draft = Some(KeyDraft {
@@ -2015,10 +1961,24 @@ mod tests {
         app.handle_paste("sk-abc\n".into());
         assert_eq!(app.key_draft.as_ref().unwrap().buffer, "sk-abc");
 
-        // Into the Home composer.
         let mut app = test_app();
         app.view = View::Home;
         app.handle_paste("hello\nworld".into());
         assert_eq!(app.composer, "helloworld");
+
+        // Into a pending answer on the Session screen, and nowhere otherwise.
+        let mut app = test_app();
+        app.view = View::Session;
+        let mut screen = sample_screen();
+        screen.view.apply(DebateEvent::UserQuestion {
+            id: "q".into(),
+            question: "?".into(),
+        });
+        app.session = Some(screen);
+        app.handle_paste("an answer\n".into());
+        assert_eq!(app.session.as_ref().unwrap().answer, "an answer");
+        app.session.as_mut().unwrap().view.pending_question = None;
+        app.handle_paste("more".into());
+        assert_eq!(app.session.as_ref().unwrap().answer, "an answer");
     }
 }

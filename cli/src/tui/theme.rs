@@ -14,6 +14,12 @@ pub const MUTED: Color = Color::Rgb(0x94, 0xA3, 0xB8);
 pub const DIM: Color = Color::Rgb(0x5B, 0x61, 0x72);
 /// Faint line color for the council-mark web.
 pub const WEB: Color = Color::Rgb(0x3A, 0x40, 0x4E);
+/// Emerald for settled / completed (`#34D399`).
+pub const EMERALD: Color = Color::Rgb(0x34, 0xD3, 0x99);
+/// Rose for dissent, errors and stops (`#FB7185`).
+pub const ROSE: Color = Color::Rgb(0xFB, 0x71, 0x85);
+/// Cyan for tool chips (`#22D3EE`).
+pub const CYAN: Color = Color::Rgb(0x22, 0xD3, 0xEE);
 
 /// One inner-ring council agent, paired to a provider and its accent color.
 pub struct AgentInfo {

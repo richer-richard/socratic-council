@@ -2,7 +2,7 @@
 
 use clap::{Parser, Subcommand};
 use socratic_council::catalog::{catalog_models, model_row, DiscoveredModel, ModelSource};
-use socratic_council::config::{parse_seats_flag, Config};
+use socratic_council::config::{parse_seats_flag, select_roster, Config, Preset};
 use socratic_council::deliberation::{
     record, DebateEvent, Deliberation, Deliverable, EngineInput, Recommend,
 };
@@ -270,16 +270,12 @@ fn parse_provider_filter(spec: &Option<String>) -> Option<Vec<Provider>> {
     })
 }
 
-/// Preset sizes: quick 3, standard 4, full 8.
-fn preset_size(name: Option<&str>) -> anyhow::Result<usize> {
-    Ok(
-        match name.map(|n| n.trim().to_ascii_lowercase()).as_deref() {
-            None | Some("standard") => 4,
-            Some("quick") => 3,
-            Some("full") => 8,
-            Some(other) => anyhow::bail!("unknown preset {other}: use quick, standard or full"),
-        },
-    )
+fn parse_preset(name: Option<&str>) -> anyhow::Result<Preset> {
+    match name {
+        None => Ok(Preset::Standard),
+        Some(n) => Preset::parse(n)
+            .ok_or_else(|| anyhow::anyhow!("unknown preset {n}: use quick, standard or full")),
+    }
 }
 
 /// Apply the run flags to the loaded config.
@@ -375,25 +371,20 @@ async fn cmd_run(args: RunArgs) -> anyhow::Result<()> {
         );
     }
 
-    // The roster: explicit seats, or the configured/default roster cut to the preset.
-    let roster = match &args.seats {
+    // Explicit seats (`--seats`) override the preset; either way only
+    // allowed providers count, and key gating happens at launch.
+    let preset = parse_preset(args.preset.as_deref())?;
+    let roster_override = match &args.seats {
         Some(spec) => {
             let seats = parse_seats_flag(spec)?;
-            Roster { seats }.with_keys(|p| allowed.contains(&p))
-        }
-        None => {
-            let full = config.roster(&allowed);
-            let n = preset_size(args.preset.as_deref())?;
-            if config.seats.is_empty() {
-                full.take(n)
-            } else {
-                full
+            let roster = Roster { seats }.with_keys(|p| allowed.contains(&p));
+            if roster.seats.is_empty() {
+                anyhow::bail!("no seats left after --providers / --seats filtering");
             }
+            Some(roster)
         }
+        None => None,
     };
-    if roster.seats.is_empty() {
-        anyhow::bail!("no seats left after --providers / --seats filtering");
-    }
 
     let http = http_client(config.proxy.as_deref());
 
@@ -431,6 +422,10 @@ async fn cmd_run(args: RunArgs) -> anyhow::Result<()> {
                  var — or drop --no-tui and add a key in Settings (press ^P)."
             );
         }
+        let roster = select_roster(&config, &allowed, roster_override.as_ref(), preset);
+        if roster.seats.is_empty() {
+            anyhow::bail!("no keyed seat among the selected providers");
+        }
         return run_plain(
             config,
             http,
@@ -443,9 +438,6 @@ async fn cmd_run(args: RunArgs) -> anyhow::Result<()> {
             resume,
         )
         .await;
-    }
-    if resume.is_some() {
-        anyhow::bail!("--resume is a plain-mode option (add --no-tui); in the TUI, press Tab, pick the session and press Enter");
     }
 
     let initial_topic = if args.topic.trim().is_empty() {
@@ -460,8 +452,10 @@ async fn cmd_run(args: RunArgs) -> anyhow::Result<()> {
         providers: allowed,
         prefetched_keys,
         attachments,
-        roster: Some(roster),
+        roster_override,
+        preset,
         forced,
+        resume: args.resume.clone(),
     };
     tui::run(ctx, initial_topic).await
 }
