@@ -41,6 +41,27 @@ export function modelOptionLabel(model: DiscoveredModel, row?: EngineCatalogRow)
   return parts.join(" · ");
 }
 
+/**
+ * What an Auto level resolves to for the preview. Inside the desktop app the
+ * engine's verified catalog decides (its class column is the source of
+ * truth); the Vite shell falls back to the shared resolver's ranking.
+ */
+export function autoPreview(
+  provider: Provider,
+  tier: ReasoningTier,
+  available: DiscoveredModel[],
+  selection: string | undefined,
+  rows: EngineCatalogRow[] | undefined,
+): string {
+  if (selection && selection !== AUTO_MODEL) return selection;
+  if (rows && rows.length > 0) {
+    const wanted = tier === "high" ? "flagship" : tier === "medium" ? "balanced" : "fast";
+    const match = rows.find((row) => row.class === wanted) ?? rows[0];
+    if (match) return match.id;
+  }
+  return resolveModel(provider, tier, available, selection);
+}
+
 export interface ModelPickerProps {
   provider: Provider;
   value: string;
@@ -69,7 +90,7 @@ export function ModelPicker({
   const options = [
     ...AUTO_CHOICES.map((auto) => ({
       value: auto.value,
-      label: `${auto.label} → ${resolveModel(provider, auto.tier, available, selection?.[auto.tier])}`,
+      label: `${auto.label} → ${autoPreview(provider, auto.tier, available, selection?.[auto.tier], rows)}`,
     })),
     ...available.map((model) => ({
       value: model.id,

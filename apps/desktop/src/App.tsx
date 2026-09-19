@@ -4,7 +4,6 @@ import { AmbientStars } from "./components/AmbientStars";
 import { CommandPalette, useCommandPaletteShortcut } from "./components/CommandPalette";
 import { DiagnosticsPanel } from "./components/DiagnosticsPanel";
 import { ErrorBoundary } from "./components/ErrorBoundary";
-import { Chat } from "./pages/Chat";
 import { Home } from "./pages/Home";
 import { ProjectDetail } from "./pages/ProjectDetail";
 import { Session } from "./pages/Session";
@@ -36,7 +35,6 @@ import {
   listSessionSummaries,
   loadDiscussionSession,
   restoreDiscussionSession,
-  saveDiscussionSession,
   stabilizeStoredSessions,
   touchDiscussionSession,
   type DiscussionSession,
@@ -361,16 +359,6 @@ export default function App() {
     [refreshAll],
   );
 
-  const handlePersistSession = useCallback(
-    (session: DiscussionSession) => {
-      const persisted = saveDiscussionSession(session);
-      setAppError(null);
-      refreshAll();
-      return persisted;
-    },
-    [refreshAll],
-  );
-
   const handleDeleteSession = useCallback(
     async (sessionId: string) => {
       const deleted = await deleteDiscussionSessionWithAttachments(sessionId);
@@ -614,30 +602,19 @@ export default function App() {
           />
         )}
         {state.currentPage === "settings" && <Settings onNavigate={navigate} />}
-        {state.currentPage === "chat" &&
-          activeSession &&
-          (liveView || activeSession.engine ? (
-            <ErrorBoundary label="session">
-              <Session
-                key={activeSession.id}
-                session={activeSession}
-                live={liveView}
-                onNavigate={navigate}
-                onCancel={(id) => void cancelEngineRun(id)}
-                onAnswer={answerEngineQuestion}
-                onDecide={decideEngineTool}
-              />
-            </ErrorBoundary>
-          ) : (
-            <ErrorBoundary label="chat">
-              <Chat
-                key={activeSession.id}
-                session={activeSession}
-                onNavigate={navigate}
-                onPersistSession={handlePersistSession}
-              />
-            </ErrorBoundary>
-          ))}
+        {state.currentPage === "chat" && activeSession && (
+          <ErrorBoundary label="session">
+            <Session
+              key={activeSession.id}
+              session={activeSession}
+              live={liveView}
+              onNavigate={navigate}
+              onCancel={(id) => void cancelEngineRun(id)}
+              onAnswer={answerEngineQuestion}
+              onDecide={decideEngineTool}
+            />
+          </ErrorBoundary>
+        )}
         {state.currentPage === "project" && activeProject && (
           <ProjectDetail
             project={activeProject}

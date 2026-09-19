@@ -19,8 +19,10 @@ import { useEffect, useMemo, useState } from "react";
 
 import type { Page } from "../App";
 import { ChamberSurface } from "../components/ChamberSurface";
+import { ConversationExport } from "../components/ConversationExport";
 import { CouncilMark } from "../components/CouncilMark";
 import { Markdown } from "../components/Markdown";
+import type { ConversationExportMessage } from "../services/conversationExport";
 import type { DiscussionSession } from "../services/sessions";
 import { recordToMarkdown } from "../session/recordMarkdown";
 import {
@@ -421,6 +423,73 @@ function RecordCard({ record }: { record: EngineDecisionRecord }) {
   );
 }
 
+/**
+ * What an export contains: the record (or document) first, then every turn
+ * in round order; a legacy chat session exports its flat transcript.
+ */
+export function exportMessagesFor(
+  session: DiscussionSession,
+  view: SessionView | null,
+): ConversationExportMessage[] {
+  const base = session.createdAt;
+  const out: ConversationExportMessage[] = [];
+  if (view?.record) {
+    out.push({
+      id: `${session.id}-record`,
+      agentId: "system",
+      speaker: "Decision record",
+      timestamp: session.updatedAt,
+      content: recordToMarkdown(view.record),
+    });
+  }
+  if (view?.document) {
+    out.push({
+      id: `${session.id}-document`,
+      agentId: "system",
+      speaker: "Document",
+      timestamp: session.updatedAt,
+      content: view.document,
+    });
+  }
+  if (view) {
+    let n = 0;
+    for (const round of view.rounds) {
+      for (const turn of round.entries) {
+        n += 1;
+        out.push({
+          id: `${session.id}-${round.key}-${turn.seatId}-${n}`,
+          agentId: turn.seatId,
+          speaker: `${turn.name} · ${round.label}`,
+          model: turn.model || undefined,
+          timestamp: base + n,
+          content: turn.text,
+          thinking: turn.thinking || undefined,
+          tokens: turn.usage
+            ? {
+                input: turn.usage.input,
+                output: turn.usage.output,
+                reasoning: turn.usage.reasoning,
+              }
+            : undefined,
+        });
+      }
+    }
+    return out;
+  }
+  for (const m of session.messages) {
+    out.push({
+      id: m.id,
+      agentId: m.agentId,
+      speaker: m.displayName ?? m.agentId,
+      model: (m as { metadata?: { model?: string } }).metadata?.model,
+      timestamp: m.timestamp,
+      content: m.content,
+      thinking: (m as { thinking?: string }).thinking,
+    });
+  }
+  return out;
+}
+
 function LegacyTranscript({ session }: { session: DiscussionSession }) {
   return (
     <section className="session-round">
@@ -447,6 +516,7 @@ export function Session({ session, live, onNavigate, onCancel, onAnswer, onDecid
     [live, session.engine],
   );
   const [answer, setAnswer] = useState("");
+  const [showExport, setShowExport] = useState(false);
   const running = Boolean(live && !live.done);
   const status = running
     ? "running"
@@ -501,6 +571,9 @@ export function Session({ session, live, onNavigate, onCancel, onAnswer, onDecid
               <CopyButton text={recordToMarkdown(view.record)} label="Copy record" />
             )}
             {view?.document && <CopyButton text={view.document} label="Copy document" />}
+            <button type="button" className="button-ghost" onClick={() => setShowExport(true)}>
+              Export
+            </button>
           </div>
         </div>
       </div>
@@ -553,6 +626,20 @@ export function Session({ session, live, onNavigate, onCancel, onAnswer, onDecid
           </aside>
         )}
       </div>
+
+      <ChamberSurface
+        open={showExport}
+        onClose={() => setShowExport(false)}
+        ariaLabel="Export this session"
+        kicker="Export"
+        maxWidth={560}
+      >
+        <ConversationExport
+          topic={session.topic}
+          messages={exportMessagesFor(session, view)}
+          onClose={() => setShowExport(false)}
+        />
+      </ChamberSurface>
 
       <ChamberSurface
         open={Boolean(view?.pendingQuestion)}

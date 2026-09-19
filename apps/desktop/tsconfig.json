@@ -16,8 +16,6 @@
     "paths": {
       "@socratic-council/shared": ["packages/shared/src/index.ts"],
       "@socratic-council/shared/*": ["packages/shared/src/*"],
-      "@socratic-council/sdk": ["packages/sdk/src/index.ts"],
-      "@socratic-council/sdk/*": ["packages/sdk/src/*"],
       "@socratic-council/core": ["packages/core/src/index.ts"],
       "@socratic-council/core/*": ["packages/core/src/*"]
     },

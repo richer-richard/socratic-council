@@ -6,7 +6,7 @@
   "private": true,
   "scripts": {
     "dev": "pnpm prepare:ocr && vite",
-    "build": "pnpm prepare:ocr && pnpm -C ../../packages/shared build && pnpm -C ../../packages/sdk build && pnpm -C ../../packages/core build && tsc && vite build",
+    "build": "pnpm prepare:ocr && pnpm -C ../../packages/shared build && pnpm -C ../../packages/core build && tsc && vite build",
     "preview": "vite preview",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
@@ -24,7 +24,6 @@
     "@fontsource/manrope": "^5.3.0",
     "@noble/ciphers": "^2.4.0",
     "@socratic-council/core": "workspace:*",
-    "@socratic-council/sdk": "workspace:*",
     "@socratic-council/shared": "workspace:*",
     "@tauri-apps/api": "^2.11.1",
     "@tauri-apps/plugin-dialog": "^2.7.3",

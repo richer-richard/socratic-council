@@ -11,7 +11,6 @@ import {
 import { useMemo, useState } from "react";
 
 import desktopPkg from "../../package.json";
-import { testProviderConnection } from "../services/api";
 import { clearAllAttachmentBlobs } from "../services/attachments";
 import { scanProviderModels, getCachedScan, type ScanResult } from "../services/modelScan";
 import {
@@ -388,11 +387,13 @@ export function ConfigModal({
     setTestError(null);
 
     try {
-      const success = await testProviderConnection(
-        provider,
-        { apiKey: key, baseUrl },
-        config.proxy,
-      );
+      // The test is a live /models scan with this key: it proves the key and
+      // the endpoint, and refreshes the provider's model list in one call.
+      const result = await scanProviderModels(provider, { apiKey: key, baseUrl }, proxy);
+      if (!result.ok) throw new Error(result.error ?? "Connection test failed");
+      const success = result.models.length > 0;
+      setModelsVersion((v) => v + 1);
+      onModelsScanned();
 
       if (success) {
         setTestResults((prev) => ({ ...prev, [provider]: "success" }));
