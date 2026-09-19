@@ -82,3 +82,22 @@ describe("engine settings from the config store", () => {
     expect(proxyUrl({ type: "http", host: "proxy", port: 8080 })).toBe("http://proxy:8080");
   });
 });
+
+describe("presets", () => {
+  it("cut the keyed roster to the preset size in roster order", async () => {
+    const { presetSeats } = await import("./engine");
+    const keys = { openai: "a", google: "b", kimi: "c", zhipu: "d", minimax: " " };
+    expect(presetSeats(DEFAULT_ENGINE_SEATS, keys, "quick").map((s) => s.id)).toEqual([
+      "george",
+      "grace",
+      "kate",
+    ]);
+    expect(presetSeats(DEFAULT_ENGINE_SEATS, keys, "standard").map((s) => s.id)).toEqual([
+      "george",
+      "grace",
+      "kate",
+      "zara",
+    ]);
+    expect(presetSeats(DEFAULT_ENGINE_SEATS, keys, "full")).toHaveLength(4);
+  });
+});

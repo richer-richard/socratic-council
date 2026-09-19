@@ -14,6 +14,7 @@ import {
   revokeComposerAttachmentPreview,
   type ComposerAttachment,
 } from "../services/attachments";
+import { DEFAULT_LAUNCH, type SessionLaunchOptions } from "../services/engine";
 import type { ProjectSummary } from "../services/projects";
 import type { SessionSummary, SessionStatus } from "../services/sessions";
 import { useConfig, getShuffledTopics, LOCKED_MODELS, type Provider } from "../stores/config";
@@ -27,6 +28,7 @@ interface HomeProps {
     topic: string,
     attachments: ComposerAttachment[],
     projectId?: string | null,
+    launch?: SessionLaunchOptions,
   ) => void | Promise<void>;
   onDeleteSession: (sessionId: string) => void | Promise<void>;
   onOpenSession: (sessionId: string) => void;
@@ -746,6 +748,7 @@ export function Home({
   const [expandedProjects, setExpandedProjects] = useState<Set<string>>(() => new Set([INBOX_KEY]));
   const [showArchived, setShowArchived] = useState(false);
   const [focusedProjectId, setFocusedProjectId] = useState<string | null>(null);
+  const [launch, setLaunch] = useState<SessionLaunchOptions>(DEFAULT_LAUNCH);
   const [showNewProject, setShowNewProject] = useState(false);
   const [newProjectName, setNewProjectName] = useState("");
   const [newProjectDescription, setNewProjectDescription] = useState("");
@@ -991,7 +994,7 @@ export function Home({
 
     setIsOpeningSession(true);
     try {
-      await onCreateSession(topic.trim(), composerAttachments, focusedProjectId);
+      await onCreateSession(topic.trim(), composerAttachments, focusedProjectId, launch);
       clearComposerAttachments();
       setAttachmentError(null);
     } catch (error) {
@@ -1672,6 +1675,47 @@ export function Home({
                   </span>
                   <ArrowIcon size={18} />
                 </button>
+              </div>
+              <div className="composer-options" role="group" aria-label="Launch options">
+                <span className="composer-options-label">Council</span>
+                {(
+                  [
+                    ["quick", "Quick · 3"],
+                    ["standard", "Standard · 4"],
+                    ["full", "Full"],
+                  ] as const
+                ).map(([value, label]) => (
+                  <button
+                    key={value}
+                    type="button"
+                    className={`composer-chip ${launch.preset === value ? "is-active" : ""}`}
+                    aria-pressed={launch.preset === value}
+                    onClick={() => setLaunch((prev) => ({ ...prev, preset: value }))}
+                  >
+                    {label}
+                  </button>
+                ))}
+                <span className="composer-options-gap" />
+                <span className="composer-options-label">Deliverable</span>
+                {(
+                  [
+                    ["auto", "Auto"],
+                    ["decision", "Decision"],
+                    ["analysis", "Analysis"],
+                    ["document", "Document"],
+                    ["review", "Review"],
+                  ] as const
+                ).map(([value, label]) => (
+                  <button
+                    key={value}
+                    type="button"
+                    className={`composer-chip ${launch.deliverable === value ? "is-active" : ""}`}
+                    aria-pressed={launch.deliverable === value}
+                    onClick={() => setLaunch((prev) => ({ ...prev, deliverable: value }))}
+                  >
+                    {label}
+                  </button>
+                ))}
               </div>
               <div className="workstation-input-help" style={{ fontFamily: "var(--font-mono)" }}>
                 Upload images, PDFs, DOCX, code, text, and other files. Large non-image files are

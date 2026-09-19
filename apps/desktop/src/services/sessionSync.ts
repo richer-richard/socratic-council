@@ -91,6 +91,56 @@ export async function exportSessionNow(session: DiscussionSession): Promise<bool
   }
 }
 
+/** Read and open one shared session file, or null when absent. */
+export async function readSharedSession(id: string): Promise<Record<string, unknown> | null> {
+  if (!isTauri() || !isVaultReady()) return null;
+  const envelope = await invoke<string | null>("session_sync_read", { id });
+  if (!envelope) return null;
+  const parsed: unknown = JSON.parse(decryptString(envelope));
+  return parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>) : null;
+}
+
+/**
+ * Fields the app owns. A shared file (the engine's, or the terminal's) never
+ * overrides them: the project a session belongs to, its attachments, its
+ * title, its creation time, its archive state and its branch lineage.
+ */
+export function mergeSharedIntoLocal(
+  shared: Record<string, unknown>,
+  local: DiscussionSession | null,
+): Record<string, unknown> {
+  if (!local) return shared;
+  const sharedOpened = typeof shared.lastOpenedAt === "number" ? shared.lastOpenedAt : 0;
+  return {
+    ...shared,
+    projectId: local.projectId,
+    attachments: local.attachments,
+    title: local.title,
+    createdAt: local.createdAt,
+    archivedAt: local.archivedAt,
+    lastOpenedAt: Math.max(local.lastOpenedAt, sharedOpened),
+    ...(local.parentSessionId ? { parentSessionId: local.parentSessionId } : {}),
+    ...(local.parentMessageId ? { parentMessageId: local.parentMessageId } : {}),
+  };
+}
+
+/**
+ * Pull the engine's file for a session that just finished (or is running)
+ * into the app's store, keeping the app-owned fields. Returns the stored
+ * session, or the local one when the file is not there.
+ */
+export async function importEngineSession(id: string): Promise<DiscussionSession | null> {
+  const local = loadDiscussionSession(id);
+  let shared: Record<string, unknown> | null = null;
+  try {
+    shared = await readSharedSession(id);
+  } catch (error) {
+    console.warn("[sessionSync] engine session read failed:", id, error);
+  }
+  if (!shared) return local;
+  return importDiscussionSession(mergeSharedIntoLocal(shared, local)) ?? local;
+}
+
 export async function deleteSharedSession(id: string): Promise<void> {
   if (!isTauri()) return;
   try {
@@ -124,11 +174,15 @@ export async function importSharedSessions(): Promise<{ imported: number; export
     try {
       const envelope = await invoke<string | null>("session_sync_read", { id: entry.id });
       if (!envelope) continue;
-      const parsed = JSON.parse(decryptString(envelope)) as { updatedAt?: number };
+      const parsed = JSON.parse(decryptString(envelope)) as Record<string, unknown> & {
+        updatedAt?: number;
+      };
       const ours = local.get(entry.id);
-      // Only take it when it is newer than what we hold (or new to us).
+      // Only take it when it is newer than what we hold (or new to us), and
+      // never let it override what the app owns (project, attachments…).
       if (!ours || (parsed.updatedAt ?? 0) > ours.updatedAt) {
-        if (importDiscussionSession(parsed)) result.imported += 1;
+        const merged = mergeSharedIntoLocal(parsed, ours ? loadDiscussionSession(entry.id) : null);
+        if (importDiscussionSession(merged)) result.imported += 1;
       }
       markSeen(entry.id, entry.modified_ms);
     } catch (error) {

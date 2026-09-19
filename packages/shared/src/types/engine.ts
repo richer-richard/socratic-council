@@ -206,6 +206,49 @@ export type EngineEvent =
   | { event: "error"; message: string }
   | { event: "done"; session_id: string };
 
+/** One tool use a seat made during a turn, as persisted in the session file. */
+export interface EngineToolUse {
+  call: EngineToolCall;
+  output: string;
+  error: string | null;
+}
+
+/** One seat's turn in a round, as persisted in the session file. */
+export interface EngineRoundEntry {
+  seat: string;
+  name: string;
+  model: string;
+  content: string;
+  structured: unknown;
+  tool_uses: EngineToolUse[];
+  usage: EngineUsage;
+}
+
+export interface EngineRoundLog {
+  kind: EngineRoundKind;
+  entries: EngineRoundEntry[];
+}
+
+/**
+ * The deliberation's own data in a v2 session file (the engine writes these
+ * as top-level keys next to the flat `messages`; the app keeps them under
+ * `session.engine`).
+ */
+export interface EngineSessionData {
+  plan: EnginePlan | null;
+  corrections: string[];
+  estimate: EngineEstimate | null;
+  board: EngineBoard | null;
+  rounds: EngineRoundLog[];
+  convergences: EngineConvergence[];
+  record: EngineDecisionRecord | null;
+  document: string | null;
+  costs: EngineCostSnapshot | null;
+  stoppedEarly: string | null;
+  /** The roster the run was started with (for names and provider colours). */
+  seats: EngineSeat[];
+}
+
 export type EngineInput =
   | { input: "tool_decision"; id: string; allow: boolean }
   | { input: "user_answer"; id: string; text: string }

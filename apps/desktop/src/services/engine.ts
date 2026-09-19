@@ -236,3 +236,34 @@ export function engineSettingsFromConfig(
     proxy: proxyUrl(config.proxy, proxyPassword),
   };
 }
+
+export type SessionPreset = "quick" | "standard" | "full";
+
+/** How the composer launches a run: council size and the forced deliverable. */
+export interface SessionLaunchOptions {
+  preset: SessionPreset;
+  deliverable: EngineDeliverable | "auto";
+}
+
+export const DEFAULT_LAUNCH: SessionLaunchOptions = { preset: "standard", deliverable: "auto" };
+
+/** Preset sizes match the CLI: quick 3 seats, standard 4, full everyone. */
+export const PRESET_SIZES: Record<SessionPreset, number> = {
+  quick: 3,
+  standard: 4,
+  full: Number.POSITIVE_INFINITY,
+};
+
+/**
+ * The seats a preset convenes: keyed seats in roster order, cut to the
+ * preset's size. Keyless seats never count toward it.
+ */
+export function presetSeats(
+  seats: EngineSeat[],
+  keys: Partial<Record<EngineProvider, string>>,
+  preset: SessionPreset,
+): EngineSeat[] {
+  const keyed = seats.filter((seat) => Boolean(keys[seat.provider]?.trim()));
+  const size = PRESET_SIZES[preset];
+  return Number.isFinite(size) ? keyed.slice(0, size) : keyed;
+}

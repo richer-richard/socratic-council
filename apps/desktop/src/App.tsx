@@ -7,8 +7,16 @@ import { ErrorBoundary } from "./components/ErrorBoundary";
 import { Chat } from "./pages/Chat";
 import { Home } from "./pages/Home";
 import { ProjectDetail } from "./pages/ProjectDetail";
+import { Session } from "./pages/Session";
 import { Settings } from "./pages/Settings";
-import type { ComposerAttachment } from "./services/attachments";
+import { loadSessionAttachmentDocuments, type ComposerAttachment } from "./services/attachments";
+import {
+  DEFAULT_LAUNCH,
+  engineSettingsFromConfig,
+  presetSeats,
+  readProviderKeys,
+  type SessionLaunchOptions,
+} from "./services/engine";
 import {
   archiveProject,
   createProject,
@@ -20,6 +28,7 @@ import {
   touchProject,
   type Project,
 } from "./services/projects";
+import { secretsGet } from "./services/secrets";
 import {
   archiveDiscussionSession,
   createDiscussionSession,
@@ -32,15 +41,33 @@ import {
   touchDiscussionSession,
   type DiscussionSession,
 } from "./services/sessions";
-import { importSharedSessions } from "./services/sessionSync";
+import { importEngineSession, importSharedSessions } from "./services/sessionSync";
 import {
   getDecryptFailureCount,
   getQuarantinePath,
   getVaultStatus,
   initVault,
 } from "./services/vault";
-import { useConfig } from "./stores/config";
+import {
+  answerEngineQuestion,
+  cancelEngineRun,
+  decideEngineTool,
+  forgetEngineRun,
+  startEngineRun,
+  useEngineRun,
+} from "./session/useEngineRuns";
+import { PROVIDER_INFO, getStoreConfig, useConfig, type Provider } from "./stores/config";
 import { registerCommand, resetCommandsForTests } from "./utils/commandPalette";
+
+const ALL_PROVIDERS = Object.keys(PROVIDER_INFO) as Provider[];
+
+function readProxyPassword(): string | undefined {
+  try {
+    return secretsGet("proxy:password") ?? undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 export type Page = "home" | "settings" | "chat" | "project";
 
@@ -93,7 +120,7 @@ export default function App() {
       return false;
     }
   });
-  const { config, getMaxTurns: getMaxTurnsLive } = useConfig();
+  const { config } = useConfig();
 
   useEffect(() => {
     let cancelled = false;
@@ -194,11 +221,67 @@ export default function App() {
   const [activeSession, setActiveSession] = useState<DiscussionSession | null>(null);
   const [activeProject, setActiveProject] = useState<Project | null>(null);
   const [appError, setAppError] = useState<string | null>(null);
+  const liveView = useEngineRun(state.currentSessionId);
 
   const refreshAll = useCallback(() => {
     setSessions(listSessionSummaries());
     setProjects(listProjectSummaries());
   }, []);
+
+  /**
+   * When a run ends, the engine's session file (transcript, plan, board,
+   * record, costs) becomes the stored session; the app-owned fields (project,
+   * attachments, title) are kept. The live view is dropped once the stored
+   * copy carries the same data.
+   */
+  const finishRun = useCallback(
+    async (sessionId: string) => {
+      const imported = await importEngineSession(sessionId);
+      refreshAll();
+      if (imported?.engine) {
+        setActiveSession((current) => (current?.id === sessionId ? imported : current));
+        forgetEngineRun(sessionId);
+      }
+    },
+    [refreshAll],
+  );
+
+  /** Hand a freshly created session to the engine. */
+  const launchEngine = useCallback(
+    async (session: DiscussionSession, launch: SessionLaunchOptions) => {
+      const settings = engineSettingsFromConfig(getStoreConfig(), readProxyPassword());
+      const keys = readProviderKeys(ALL_PROVIDERS);
+      const seats = presetSeats(settings.seats, keys, launch.preset);
+      let attachments: { name: string; text: string }[] = [];
+      try {
+        const documents = await loadSessionAttachmentDocuments(session.attachments);
+        attachments = documents
+          .map((doc) => ({
+            name: doc.attachment.name,
+            text: doc.entries.map((entry) => entry.text).join("\n\n"),
+          }))
+          .filter((doc) => doc.text.trim().length > 0);
+      } catch (error) {
+        console.warn("[App] attachment text unavailable:", error);
+      }
+      try {
+        await startEngineRun(
+          {
+            topic: session.topic,
+            settings: { ...settings, seats },
+            keys,
+            attachments,
+            forced: launch.deliverable === "auto" ? undefined : launch.deliverable,
+            sessionId: session.id,
+          },
+          { onFinished: (id) => void finishRun(id) },
+        );
+      } catch (error) {
+        setAppError(error instanceof Error ? error.message : String(error));
+      }
+    },
+    [finishRun],
+  );
 
   const navigate = useCallback(
     (page: Page, sessionId?: string) => {
@@ -234,11 +317,10 @@ export default function App() {
       topic: string,
       attachments: ComposerAttachment[] = [],
       projectId: string | null = null,
+      launch: SessionLaunchOptions = DEFAULT_LAUNCH,
     ) => {
       try {
-        const liveCap = getMaxTurnsLive();
-        const capSnapshot = liveCap === Infinity ? null : liveCap;
-        const session = await createDiscussionSession(topic, attachments, projectId, capSnapshot);
+        const session = await createDiscussionSession(topic, attachments, projectId, null);
         setAppError(null);
         setActiveSession(session);
         if (projectId) {
@@ -250,6 +332,7 @@ export default function App() {
           currentSessionId: session.id,
           currentProjectId: projectId ?? prev.currentProjectId,
         }));
+        void launchEngine(session, launch);
       } catch (error) {
         console.error("Failed to create session:", error);
         setAppError(
@@ -259,7 +342,7 @@ export default function App() {
         );
       }
     },
-    [refreshAll, getMaxTurnsLive],
+    [refreshAll, launchEngine],
   );
 
   const handleOpenSession = useCallback(
@@ -531,16 +614,30 @@ export default function App() {
           />
         )}
         {state.currentPage === "settings" && <Settings onNavigate={navigate} />}
-        {state.currentPage === "chat" && activeSession && (
-          <ErrorBoundary label="chat">
-            <Chat
-              key={activeSession.id}
-              session={activeSession}
-              onNavigate={navigate}
-              onPersistSession={handlePersistSession}
-            />
-          </ErrorBoundary>
-        )}
+        {state.currentPage === "chat" &&
+          activeSession &&
+          (liveView || activeSession.engine ? (
+            <ErrorBoundary label="session">
+              <Session
+                key={activeSession.id}
+                session={activeSession}
+                live={liveView}
+                onNavigate={navigate}
+                onCancel={(id) => void cancelEngineRun(id)}
+                onAnswer={answerEngineQuestion}
+                onDecide={decideEngineTool}
+              />
+            </ErrorBoundary>
+          ) : (
+            <ErrorBoundary label="chat">
+              <Chat
+                key={activeSession.id}
+                session={activeSession}
+                onNavigate={navigate}
+                onPersistSession={handlePersistSession}
+              />
+            </ErrorBoundary>
+          ))}
         {state.currentPage === "project" && activeProject && (
           <ProjectDetail
             project={activeProject}
