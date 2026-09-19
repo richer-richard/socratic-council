@@ -86,17 +86,101 @@ pub struct Convergence {
     pub why: String,
 }
 
+/// How much a critique issue matters: a blocker must be fixed before the
+/// document ships, a major issue should be, a minor one is polish.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Severity {
+    Blocker,
+    #[default]
+    Major,
+    Minor,
+}
+
+impl Severity {
+    /// Lenient: `blocker`/`blocking`/`critical` → Blocker, `minor`/`nit`/`low`
+    /// → Minor, anything else Major.
+    pub fn parse(s: &str) -> Severity {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "blocker" | "blocking" | "critical" | "high" => Severity::Blocker,
+            "minor" | "nit" | "low" | "trivial" => Severity::Minor,
+            _ => Severity::Major,
+        }
+    }
+    pub fn label(self) -> &'static str {
+        match self {
+            Severity::Blocker => "blocker",
+            Severity::Major => "major",
+            Severity::Minor => "minor",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct CritiqueIssue {
     pub location: String,
     pub problem: String,
     pub fix: String,
+    #[serde(default)]
+    pub severity: Severity,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct Critique {
     pub issues: Vec<CritiqueIssue>,
     pub endorse: bool,
+}
+
+/// Whether the critiques call for a revision pass: any `revise` verdict, or
+/// any blocker or major issue. Endorsements with only minor issues ship.
+pub fn revision_needed(critiques: &[(String, Critique)]) -> bool {
+    critiques.iter().any(|(_, c)| {
+        !c.endorse
+            || c.issues
+                .iter()
+                .any(|i| matches!(i.severity, Severity::Blocker | Severity::Major))
+    })
+}
+
+/// One line for the moderator's note after the critique round.
+pub fn critique_summary(critiques: &[(String, Critique)]) -> String {
+    let count = |sev: Severity| {
+        critiques
+            .iter()
+            .flat_map(|(_, c)| c.issues.iter())
+            .filter(|i| i.severity == sev)
+            .count()
+    };
+    let issues: usize = critiques.iter().map(|(_, c)| c.issues.len()).sum();
+    let endorsed: Vec<&str> = critiques
+        .iter()
+        .filter(|(_, c)| c.endorse)
+        .map(|(n, _)| n.as_str())
+        .collect();
+    let endorsement = if endorsed.is_empty() {
+        "nobody endorsed the draft".to_string()
+    } else if endorsed.len() == critiques.len() {
+        "every reviewer endorsed the draft".to_string()
+    } else {
+        format!("endorsed by {}", endorsed.join(", "))
+    };
+    let verdict = if revision_needed(critiques) {
+        "revising"
+    } else {
+        "shipping as drafted"
+    };
+    format!(
+        "Critique: {issues} issue{} ({} blocker{}, {} major, {} minor); {endorsement}; {verdict}.",
+        if issues == 1 { "" } else { "s" },
+        count(Severity::Blocker),
+        if count(Severity::Blocker) == 1 {
+            ""
+        } else {
+            "s"
+        },
+        count(Severity::Major),
+        count(Severity::Minor),
+    )
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -1277,6 +1361,7 @@ impl Deliberation {
                             entries: Vec::new(),
                         };
                         let mut critiques = String::new();
+                        let mut parsed: Vec<(String, Critique)> = Vec::new();
                         for (seat, result) in principals.iter().zip(results) {
                             let Some(out) = result else { continue };
                             let c = parse::parse_critique(&out.text).unwrap_or(Critique {
@@ -1285,6 +1370,7 @@ impl Deliberation {
                             });
                             let content = render_critique(&c);
                             critiques.push_str(&format!("[{}]\n{content}\n\n", seat.name));
+                            parsed.push((seat.name.clone(), c.clone()));
                             send(DebateEvent::SeatFinished {
                                 seat_id: seat.id.clone(),
                                 name: seat.name.clone(),
@@ -1306,7 +1392,12 @@ impl Deliberation {
                         }
                         state.rounds.push(log);
                         settle(&ledger, &mut state, &hub);
-                        if !critiques.trim().is_empty() && !hub.is_stopped() {
+                        if !parsed.is_empty() {
+                            let note = critique_summary(&parsed);
+                            send(DebateEvent::Moderator { text: note.clone() });
+                            this.push_system_message(&mut state, "Moderator", &note);
+                        }
+                        if revision_needed(&parsed) && !hub.is_stopped() {
                             let user = prompts::document_revise_user(&draft, &critiques);
                             if let Some(revised) = self
                                 .moderator_call(
@@ -1810,7 +1901,13 @@ pub fn render_revision(r: &Revision) -> String {
 pub fn render_critique(c: &Critique) -> String {
     let mut out = String::new();
     for i in &c.issues {
-        out.push_str(&format!("- {}: {} → {}\n", i.location, i.problem, i.fix));
+        out.push_str(&format!(
+            "- [{}] {}: {} → {}\n",
+            i.severity.label(),
+            i.location,
+            i.problem,
+            i.fix
+        ));
     }
     out.push_str(if c.endorse {
         "Verdict: endorse"
@@ -1828,4 +1925,67 @@ pub fn class_of(provider: Provider, model: &str) -> ModelClass {
 /// Pricing lookup for surfaces (estimate previews).
 pub fn pricing_of(provider: Provider, model: &str) -> Pricing {
     model_row(provider, model).pricing
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn issue(sev: Severity) -> CritiqueIssue {
+        CritiqueIssue {
+            location: "intro".into(),
+            problem: "vague".into(),
+            fix: "be specific".into(),
+            severity: sev,
+        }
+    }
+
+    #[test]
+    fn critiques_decide_the_revision_and_summarise() {
+        let all_minor = vec![
+            (
+                "Ada".to_string(),
+                Critique {
+                    issues: vec![issue(Severity::Minor)],
+                    endorse: true,
+                },
+            ),
+            (
+                "Bob".to_string(),
+                Critique {
+                    issues: vec![],
+                    endorse: true,
+                },
+            ),
+        ];
+        assert!(!revision_needed(&all_minor));
+        let s = critique_summary(&all_minor);
+        assert_eq!(
+            s,
+            "Critique: 1 issue (0 blockers, 0 major, 1 minor); every reviewer endorsed the draft; shipping as drafted."
+        );
+        let one_blocker = vec![(
+            "Ada".to_string(),
+            Critique {
+                issues: vec![issue(Severity::Blocker), issue(Severity::Major)],
+                endorse: true,
+            },
+        )];
+        assert!(revision_needed(&one_blocker));
+        assert!(critique_summary(&one_blocker).contains("1 blocker, 1 major, 0 minor"));
+        let revise_verdict = vec![(
+            "Ada".to_string(),
+            Critique {
+                issues: vec![],
+                endorse: false,
+            },
+        )];
+        assert!(revision_needed(&revise_verdict));
+        assert!(critique_summary(&revise_verdict).contains("nobody endorsed"));
+        assert_eq!(Severity::parse("BLOCKING"), Severity::Blocker);
+        assert_eq!(Severity::parse("nit"), Severity::Minor);
+        assert_eq!(Severity::parse("whatever"), Severity::Major);
+        assert!(render_critique(&one_blocker[0].1)
+            .starts_with("- [blocker] intro: vague → be specific"));
+    }
 }

@@ -128,11 +128,33 @@ pub fn to_markdown(
         ));
     }
     if let Some(doc) = document {
-        out.push_str("\n---\n\n");
-        out.push_str(doc.trim());
+        out.push_str("\n## Document\n\n");
+        out.push_str(&demote_headings(doc.trim()));
         out.push('\n');
     }
     out
+}
+
+/// Push every Markdown heading one level down (outside fenced code) so a
+/// document embedded under the record leaves the file with a single H1.
+pub fn demote_headings(markdown: &str) -> String {
+    let mut in_fence = false;
+    markdown
+        .lines()
+        .map(|line| {
+            if line.trim_start().starts_with("```") {
+                in_fence = !in_fence;
+            }
+            if !in_fence && line.starts_with('#') {
+                let hashes = line.chars().take_while(|c| *c == '#').count();
+                if hashes < 6 && line[hashes..].starts_with(' ') {
+                    return format!("#{line}");
+                }
+            }
+            line.to_string()
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 #[cfg(test)]
@@ -178,5 +200,41 @@ mod tests {
         assert!(!md.contains("## Open questions"));
         assert!(md.contains("**Confidence:** 80%"));
         assert!(md.ends_with("# Doc\nbody\n"));
+    }
+
+    #[test]
+    fn document_is_demoted_under_the_record() {
+        let record = DecisionRecord {
+            deliverable: Deliverable::Document,
+            question: "Write the plan".into(),
+            answer: "Here.".into(),
+            confidence: 0.9,
+            options_considered: vec![],
+            dissent: vec![],
+            assumptions: vec![],
+            evidence: vec![],
+            open_questions: vec![],
+            next_actions: vec![],
+            what_changed: String::new(),
+            votes: BTreeMap::new(),
+            cost: None,
+        };
+        let doc = "# Rollout plan\n\nIntro.\n\n## Phase 1\n\n```sh\n# not a heading\necho hi\n```\n\n###### deep\n#nospace";
+        let md = to_markdown(&record, &BTreeMap::new(), Some(doc));
+        // One real H1 (the record's title); the other `# ` line is inside the
+        // code fence and must stay as it was.
+        let h1: Vec<&str> = md.lines().filter(|l| l.starts_with("# ")).collect();
+        assert_eq!(h1, ["# Write the plan", "# not a heading"], "{md}");
+        assert!(md.contains("\n## Document\n\n## Rollout plan\n"));
+        assert!(md.contains("\n### Phase 1\n"));
+        assert!(
+            md.contains("\n# not a heading\n"),
+            "fenced code is untouched"
+        );
+        assert!(md.contains("\n###### deep\n"), "H6 stays H6");
+        assert!(
+            md.contains("\n#nospace"),
+            "a bare # without a space is not a heading"
+        );
     }
 }

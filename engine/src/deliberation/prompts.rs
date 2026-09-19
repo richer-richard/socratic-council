@@ -296,21 +296,21 @@ pub fn document_user(plan: &Plan, board: &str, revisions: &str, attachments: &st
     };
     format!(
         "DOCUMENT. Write the work product the user asked for, in Markdown, from the council's final positions and the board.\n\nRequest: {}\n\n{attach}{board}\n\nFinal positions:\n{revisions}\n\n\
-Write it as the deliverable itself (a plan, a spec, a memo, whatever the request calls for), not as a summary of the debate: headings, concrete content, decisions stated as decisions, open points marked as open. Do not mention the council or the seats. Return the Markdown only.",
+Write it as the deliverable itself (a plan, a spec, a memo, whatever the request calls for), not as a summary of the debate. Shape: a title line (`# …`), then one paragraph that states the decision or the answer outright, then the sections the request calls for with concrete content (numbers, names, steps), decisions stated as decisions, open points marked as open. End with three lists: `## Decisions` (one line each), `## Open points` (what is still undecided and what would settle it) and `## Next steps` as a checklist (`- [ ] …`, each with an owner or a trigger). Do not mention the council or the seats. Return the Markdown only.",
         plan.question
     )
 }
 
 pub fn critique_user(document: &str) -> String {
     format!(
-        "CRITIQUE this draft. Find what is wrong, missing, vague or unsupported; ignore style. At most 5 issues, each with where it is, the problem, and the fix. Verdict `endorse` if it is fit to ship with the fixes, `revise` if it needs another pass.\n\nDraft:\n{document}\n\n\
-Return exactly: {{\"issues\":[{{\"where\":\"...\",\"problem\":\"...\",\"fix\":\"...\"}}],\"verdict\":\"endorse|revise\"}}"
+        "CRITIQUE this draft. Find what is wrong, missing, vague or unsupported; ignore style. At most 5 issues, each with where it is, the problem, the fix, and a severity: `blocker` (wrong or missing in a way that makes the document unusable), `major` (should be fixed before it ships), `minor` (polish). Verdict `endorse` if it is fit to ship once the fixes are in, `revise` if it needs another pass.\n\nDraft:\n{document}\n\n\
+Return exactly: {{\"issues\":[{{\"where\":\"...\",\"problem\":\"...\",\"fix\":\"...\",\"severity\":\"blocker|major|minor\"}}],\"verdict\":\"endorse|revise\"}}"
     )
 }
 
 pub fn document_revise_user(document: &str, critiques: &str) -> String {
     format!(
-        "REVISE_DOCUMENT. Apply the critiques below to the draft and return the full revised Markdown only. Fix every issue you agree with; where you disagree, leave the text and add nothing about the disagreement.\n\nDraft:\n{document}\n\nCritiques:\n{critiques}"
+        "REVISE_DOCUMENT. Apply the critiques below to the draft and return the full revised Markdown only. Fix every blocker and every major issue you agree with, and the minor ones where the fix is cheap; where you disagree, leave the text and add nothing about the disagreement. Keep the title, the opening decision paragraph and the section structure; keep the closing `## Decisions`, `## Open points` and `## Next steps` lists current. End with a short `## Revision notes` section listing what changed and which critiques you declined, in one line each.\n\nDraft:\n{document}\n\nCritiques:\n{critiques}"
     )
 }
 
@@ -359,5 +359,7 @@ mod tests {
         assert!(convergence_user("p", "a", "b", 2).starts_with("CONVERGENCE."));
         assert!(board_user("q", &Board::default(), "r").starts_with("BOARD."));
         assert!(critique_user("d").starts_with("CRITIQUE"));
+        assert!(critique_user("d").contains("\"severity\":\"blocker|major|minor\""));
+        assert!(document_revise_user("d", "c").contains("## Revision notes"));
     }
 }

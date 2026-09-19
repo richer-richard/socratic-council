@@ -6,7 +6,9 @@
 use super::board::{Board, Disagreement, Evidence};
 use super::plan::{Deliverable, Participant, Plan, SeatRole, Subtask};
 use super::record::{DecisionRecord, Dissent, OptionConsidered};
-use super::{Attack, Convergence, Critique, CritiqueIssue, Position, Recommend, Revision};
+use super::{
+    Attack, Convergence, Critique, CritiqueIssue, Position, Recommend, Revision, Severity,
+};
 use serde::Deserialize;
 use serde_json::Value;
 use std::collections::BTreeMap;
@@ -359,6 +361,7 @@ pub fn parse_critique(raw: &str) -> Option<Critique> {
                         location: s(i, "where"),
                         problem,
                         fix: s(i, "fix"),
+                        severity: Severity::parse(&s(i, "severity")),
                     })
                 })
                 .collect()
@@ -460,7 +463,10 @@ mod tests {
             parse_record(r#"{"confidence":1}"#).is_none(),
             "a record needs an answer"
         );
-        let cr = parse_critique(r#"{"issues":[{"where":"intro","problem":"vague","fix":"be specific"}],"verdict":"revise"}"#).unwrap();
+        let cr = parse_critique(r#"{"issues":[{"where":"intro","problem":"vague","fix":"be specific"},{"where":"§2","problem":"wrong","fix":"redo","severity":"blocker"},{"where":"§3","problem":"typo","fix":"fix","severity":"nit"}],"verdict":"revise"}"#).unwrap();
+        assert_eq!(cr.issues[0].severity, Severity::Major);
+        assert_eq!(cr.issues[1].severity, Severity::Blocker);
+        assert_eq!(cr.issues[2].severity, Severity::Minor);
         assert!(!cr.endorse);
         assert_eq!(cr.issues[0].location, "intro");
     }
