@@ -644,26 +644,21 @@ The Diagnostics panel surfaces a redacted ring buffer of the most recent provide
 
 ---
 
-## Tool calling (oracle)
+## Tools
 
-Agents can request web-style lookup and verification through a built-in oracle tool. The same directive syntax also covers inline quoting and reactions between agents.
+Seats have hands. Under the session's tool policy (Settings → Preferences → Tools in the app, `--tools` in the CLI) a seat can call, through each provider's native function calling:
 
-What an agent writes inside a message:
+| Tool                                     | What it does                                                                                                                                                                                                                                                                          |
+| ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `web_search`                             | Keyless search: DuckDuckGo and Bing race each other, Wikipedia's search API and DuckDuckGo instant answers follow. Every request pins English and the US region.                                                                                                                      |
+| `verify_claim`                           | A search plus a stance heuristic; thin evidence is topped up from Wikipedia. Returns a verdict and confidence with the sources.                                                                                                                                                       |
+| `search_attachments` / `read_attachment` | Full-text search and ranged reads over the files attached to the session. Attached text never leaves the machine: a query that quotes it is refused.                                                                                                                                  |
+| `read_file` / `write_file`               | Files inside the session workspace only (no absolute paths, no `..`, no symlink escapes; capped sizes).                                                                                                                                                                               |
+| `run_command`                            | Opt-in (`all`). A shell command in the workspace under the macOS sandbox (`sandbox-exec`: no network, no keychain or directory-service reads, writes only inside the workspace) or bubblewrap on Linux; timeout and output cap; an unsandboxed run is marked and the record notes it. |
 
-```text
-@tool(oracle.search, {"query": "..."})
-@tool(oracle.verify, {"claim": "..."})
-@quote(george, "the exact line being responded to")
-@react(cathy, agree)
-```
+Every result is capped, terminal-sanitised, has its directives neutralised and is fenced as untrusted data before a model sees it; raw search listings never reach the board. Outbound queries are short (≤ 200 characters), never credential-shaped, never verbatim attachment text. At most two calls per turn and two tool rounds per turn; the `ask` approval mode makes every call wait for your yes on the Session page or in the TUI. `socratic-council probe --tools` proves the tool-call round trip on every provider.
 
-What you see next in the transcript:
-
-```text
-Tool result (oracle.search): ...
-```
-
-That "Tool result" line is not an error. It is a normal message inserted by the app after the oracle tool returns. Quotes appear as inline blockquotes and reactions render as small badges next to the targeted message.
+**Hand-off.** Every run ends by writing a folder (`<workspace>/handoff`, or `--handoff DIR`): `handoff.md` with the question, the answer, the next steps as a checklist, open questions, dissent and evidence; `record.md`; `document.md` when the deliverable was a document; `board.md`; and `session.json`. Point a person or an agent at it. `socratic-council handoff <session-id>` rebuilds it for any stored session.
 
 ---
 

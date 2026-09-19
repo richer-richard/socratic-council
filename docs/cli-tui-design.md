@@ -151,6 +151,10 @@ twin of the desktop's `session/reducer.ts`).
   clears, paste works); when a seat asks to run a tool under an ask-first
   policy, an approval prompt shows the seat, the tool and its arguments
   (`y` allow, `n` deny). A question outranks an approval.
+- **Hand-off:** once the engine writes the hand-off folder (the brief with
+  the next steps as a checklist, the record, the document, the board and
+  the session file), a section under the record names the folder and its
+  files.
 - **Keys:** `Esc` stops a live council (twice, to avoid a stray keypress
   ending a paid run) or returns Home; `r` reconvenes a finished session — its
   record (or the transcript tail) becomes the planner's notes and a new
@@ -168,13 +172,13 @@ One scrolling screen; the cursor row stays in view. Every change validates,
 applies to the in-memory config and saves at once (`config.toml`; keys to
 `keys.enc`, 0600).
 
-| Section | Rows | Keys |
-| --- | --- | --- |
-| Keys | one per provider: key source (local / env / shared / —) and the seats it serves | `Enter` paste a key (masked bullets, never plaintext), `d` remove a local key |
-| Council | one per seat: `provider:model`, the resolved model with its class and prices, a reasoning override; `+ add a seat` | `Enter` edit `provider:model`, `n` rename, `r` cycle reasoning, `a` add, `d` remove, `R` reset to the eight named seats |
-| Moderator & utility | the slot's `provider:model`, resolved model, class, prices | `Enter` edit, `d` back to the default |
-| Tools & protocol | tool level (none / safe / all), approval (auto / ask), cross-examination cap (1–6), clarifying question (on / off) | `Enter` cycle or edit, `d` reset |
-| Budget & network | session cap, daily cap, cap action (warn / stop), proxy (masked while typed, userinfo redacted on screen) | `Enter` edit or toggle, `d` reset |
+| Section             | Rows                                                                                                               | Keys                                                                                                                    |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------- |
+| Keys                | one per provider: key source (local / env / shared / —) and the seats it serves                                    | `Enter` paste a key (masked bullets, never plaintext), `d` remove a local key                                           |
+| Council             | one per seat: `provider:model`, the resolved model with its class and prices, a reasoning override; `+ add a seat` | `Enter` edit `provider:model`, `n` rename, `r` cycle reasoning, `a` add, `d` remove, `R` reset to the eight named seats |
+| Moderator & utility | the slot's `provider:model`, resolved model, class, prices                                                         | `Enter` edit, `d` back to the default                                                                                   |
+| Tools & protocol    | tool level (none / safe / all), approval (auto / ask), cross-examination cap (1–6), clarifying question (on / off) | `Enter` cycle or edit, `d` reset                                                                                        |
+| Budget & network    | session cap, daily cap, cap action (warn / stop), proxy (masked while typed, userinfo redacted on screen)          | `Enter` edit or toggle, `d` reset                                                                                       |
 
 A seat's or slot's model is `auto`, `auto-balanced`, `auto-fast` or an id; an
 id must exist in the provider's catalog or its last live scan, otherwise the

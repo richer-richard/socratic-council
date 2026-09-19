@@ -56,6 +56,7 @@ export MINIMAX_API_KEY=…     ZHIPU_API_KEY=…
 ```bash
 socratic-council config set-key openai
 socratic-council providers          # see which keys are configured
+socratic-council search "flaky tests prevalence"   # what the seats' web_search returns here
 ```
 
 …or add them **inside the TUI**: press `^P` for Settings, `↑`/`↓` to a provider,
@@ -105,6 +106,7 @@ socratic-council run "…" --interactive        # force the moderator's clarifyi
 socratic-council run "…" --file notes.md --file data.csv  # attach files the seats can search and read
 socratic-council run "…" --budget 2.50 --budget-action stop  # USD cap per session
 socratic-council run "…" --workspace ./scratch  # where tools read, write and run
+socratic-council run "…" --handoff ./brief      # where the hand-off folder goes (default <workspace>/handoff)
 socratic-council run "…" --proxy socks5://127.0.0.1:1080
 socratic-council run "…" --no-tui             # plain output: rounds, tool calls, board, record
 socratic-council run "…" --json               # one JSON line per engine event (implies --no-tui)
@@ -114,6 +116,7 @@ socratic-council models --scan                # list live models per provider
 socratic-council probe                        # one tiny live call per provider (keys + contracts)
 socratic-council probe --tools                # plus one native tool-calling request per provider
 socratic-council sessions                     # list stored sessions
+socratic-council handoff <id> --to ./brief    # rebuild a stored session's hand-off folder
 socratic-council run --resume <id>            # reconvene: the old record becomes the planner's notes
 ```
 
@@ -217,13 +220,27 @@ still leaves a record. Seats are told to cut the preamble: one claim per
 paragraph with its reason, name the assumption they reject, and take the
 least obvious defensible position rather than restate the framing.
 
-**Tools.** With `--tools safe` (the default) seats can `web_search`,
-`verify_claim`, `search_attachments`, `read_attachment`, and `read_file` /
-`write_file` inside the session workspace. `--tools all` adds `run_command`:
-a shell command under the macOS sandbox (no network, writes only inside the
-workspace), with a timeout and an output cap. Results are capped, scrubbed
-of directives and fenced as untrusted data. At most two calls per turn and
-two tool rounds per turn; `--ask-tools` makes every call wait for your yes.
+**Tools.** With `--tools safe` (the default) seats can `web_search`
+(DuckDuckGo and Bing racing, then Wikipedia and DuckDuckGo instant answers,
+every request pinned to English and the US region), `verify_claim` (a search
+plus a stance heuristic, topped up from Wikipedia when evidence is thin),
+`search_attachments`, `read_attachment`, and `read_file` / `write_file`
+inside the session workspace. `--tools all` adds `run_command`: a shell
+command under the macOS sandbox (no network, no keychain or directory-service
+reads, writes only inside the workspace; `git` and `python3` work) or under
+bubblewrap on Linux, with a timeout and an output cap; elsewhere it refuses
+unless `[tools.shell] unsandboxed = true`, and then the record says so.
+Results are capped, scrubbed of directives and fenced as untrusted data. At
+most two calls per turn and two tool rounds per turn; `--ask-tools` makes
+every call wait for your yes. `probe --tools` proves the tool-call round trip
+on every provider.
+
+**Hand-off.** Every run ends by writing a folder — `<workspace>/handoff` by
+default, `--handoff DIR` to choose — with `handoff.md` (the question, the
+answer, the next steps as a checklist, open questions, dissent, evidence, the
+workspace listing), `record.md`, `document.md` when there is one, `board.md`
+and `session.json`. `socratic-council handoff <session-id> [--to DIR]`
+rebuilds it for any stored session.
 
 **Cost.** Every call is metered with the provider's published prices,
 including prompt-cache hits and writes. Unpriced models count tokens and

@@ -338,6 +338,8 @@ const WIKIPEDIA_USER_AGENT: &str =
 /// One search backend: the request and a pure body parser.
 pub struct SearchAttempt {
     pub name: &'static str,
+    /// The query as sent, for the relevance gate on the results.
+    pub query: String,
     pub url: String,
     pub accept: &'static str,
     /// A cookie pinning the region and language where the engine reads one.
@@ -353,6 +355,7 @@ pub fn search_attempts(query: &str) -> Vec<SearchAttempt> {
     vec![
         SearchAttempt {
             name: "duckduckgo",
+            query: query.trim().to_string(),
             url: format!("https://html.duckduckgo.com/html/?q={encoded}&kl=us-en&kad=en_US"),
             accept: "text/html,application/xhtml+xml",
             cookie: Some("kl=us-en; kad=en_US"),
@@ -361,6 +364,7 @@ pub fn search_attempts(query: &str) -> Vec<SearchAttempt> {
         },
         SearchAttempt {
             name: "bing",
+            query: query.trim().to_string(),
             // `ensearch=1` is the China edition's "international" switch: Bing
             // redirects callers there by IP and ignores `mkt` and `cc` alone.
             url: format!(
@@ -373,6 +377,7 @@ pub fn search_attempts(query: &str) -> Vec<SearchAttempt> {
         },
         SearchAttempt {
             name: "wikipedia",
+            query: query.trim().to_string(),
             url: format!(
                 "https://en.wikipedia.org/w/api.php?action=query&list=search&format=json&utf8=1&srlimit={MAX_RESULTS}&srsearch={encoded}"
             ),
@@ -383,6 +388,7 @@ pub fn search_attempts(query: &str) -> Vec<SearchAttempt> {
         },
         SearchAttempt {
             name: "duckduckgo-instant",
+            query: query.trim().to_string(),
             url: format!(
                 "https://api.duckduckgo.com/?q={encoded}&format=json&no_redirect=1&no_html=1&kl=us-en"
             ),
@@ -454,7 +460,45 @@ pub fn merge_hits(
     normalize(primary.into_iter().chain(extra).collect())
 }
 
-/// One attempt with its own timeout; empty on any failure.
+/// Query terms worth matching: lower-cased words of three or more ASCII
+/// characters, or two or more when the word is not ASCII (CJK words are
+/// short; a CJK query with no spaces is one term).
+fn query_terms(query: &str) -> Vec<String> {
+    query
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|t| {
+            let n = t.chars().count();
+            if t.is_ascii() {
+                n >= 3
+            } else {
+                n >= 2
+            }
+        })
+        .map(|t| t.to_lowercase())
+        .collect()
+}
+
+/// Keep only hits that share a term with the query in their title, snippet
+/// or URL. The keyless engines sometimes answer an unmatched query with
+/// unrelated (often localised) filler instead of nothing; a hit that mentions
+/// none of the query's words is never evidence, and dropping it lets the
+/// chain fall through to the next backend. A query with no usable term
+/// keeps everything.
+pub fn filter_relevant(query: &str, hits: Vec<SearchResultItem>) -> Vec<SearchResultItem> {
+    let terms = query_terms(query);
+    if terms.is_empty() {
+        return hits;
+    }
+    hits.into_iter()
+        .filter(|h| {
+            let hay = format!("{} {} {}", h.title, h.snippet, h.url).to_lowercase();
+            terms.iter().any(|t| hay.contains(t.as_str()))
+        })
+        .collect()
+}
+
+/// One attempt with its own timeout; empty on any failure. Hits that do not
+/// mention the query are dropped.
 async fn fetch(http: &reqwest::Client, attempt: &SearchAttempt) -> Vec<SearchResultItem> {
     let fut = async {
         let mut req = http
@@ -474,7 +518,7 @@ async fn fetch(http: &reqwest::Client, attempt: &SearchAttempt) -> Vec<SearchRes
         resp.text().await.ok()
     };
     match tokio::time::timeout(ATTEMPT_TIMEOUT, fut).await {
-        Ok(Some(body)) => (attempt.parse)(&body),
+        Ok(Some(body)) => filter_relevant(&attempt.query, (attempt.parse)(&body)),
         _ => Vec::new(),
     }
 }
@@ -669,6 +713,42 @@ mod tests {
             wikipedia_page_url("Café au lait"),
             "https://en.wikipedia.org/wiki/Caf%C3%A9_au_lait"
         );
+    }
+
+    #[test]
+    fn relevance_gate_drops_filler_and_keeps_matches() {
+        let mk = |t: &str, snip: &str, url: &str| SearchResultItem {
+            title: t.into(),
+            url: url.into(),
+            snippet: snip.into(),
+        };
+        let hits = vec![
+            mk("广州市私家侦探", "婚外情调查", "https://example.cn/x"),
+            mk(
+                "Flaky Tests at Google",
+                "About 1.5% of runs are flaky",
+                "https://testing.googleblog.com/",
+            ),
+            mk(
+                "Unrelated",
+                "nothing here",
+                "https://example.com/ci-builds-guide",
+            ),
+        ];
+        let kept = filter_relevant("flaky test prevalence CI builds", hits);
+        assert_eq!(kept.len(), 2);
+        assert_eq!(kept[0].title, "Flaky Tests at Google");
+        assert_eq!(
+            kept[1].url, "https://example.com/ci-builds-guide",
+            "a URL match counts"
+        );
+        // Short or empty queries keep everything rather than guess.
+        assert_eq!(
+            filter_relevant("ab", vec![mk("x", "y", "https://z")]).len(),
+            1
+        );
+        assert_eq!(query_terms("Rust-lang 1.82 论文"), ["rust", "lang", "论文"]);
+        assert_eq!(search_attempts("a b")[1].query, "a b");
     }
 
     #[test]

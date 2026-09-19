@@ -119,6 +119,11 @@ enum Command {
     },
     /// Show which providers have an API key configured.
     Providers,
+    /// Run one web search the way the seats' `web_search` tool does and print the hits.
+    Search {
+        /// The query (a few keywords).
+        query: Vec<String>,
+    },
     /// Send one tiny request to every configured provider (or --provider) and
     /// report model, latency, content, thinking size and usage — a live check
     /// that keys, endpoints and each model's thinking/output contract work.
@@ -211,6 +216,7 @@ async fn main() {
         Some(Command::Handoff { session_id, to }) => cmd_handoff(&session_id, to),
         Some(Command::Models { provider, scan }) => cmd_models(provider, scan).await,
         Some(Command::Providers) => cmd_providers(),
+        Some(Command::Search { query }) => cmd_search(&query.join(" ")).await,
         Some(Command::Probe {
             provider,
             tier,
@@ -826,6 +832,27 @@ async fn cmd_models(provider: Option<String>, scan: bool) -> anyhow::Result<()> 
             println!("  [{tag}] {}", m.id);
         }
     }
+    Ok(())
+}
+
+/// `socratic-council search <query>`: what a seat gets back from the search chain.
+async fn cmd_search(query: &str) -> anyhow::Result<()> {
+    let config = Config::load()?;
+    let http = http_client(config.proxy.as_deref());
+    let query = socratic_council::tools::web::guard_outbound_query(query, &[])
+        .map_err(anyhow::Error::msg)?;
+    let started = std::time::Instant::now();
+    let hits = socratic_council::search::web_search(&http, &query).await;
+    println!(
+        "{} hit(s) in {:.1}s for {:?}",
+        hits.len(),
+        started.elapsed().as_secs_f32(),
+        query
+    );
+    println!(
+        "{}",
+        clean(&socratic_council::search::format_results(&hits))
+    );
     Ok(())
 }
 
