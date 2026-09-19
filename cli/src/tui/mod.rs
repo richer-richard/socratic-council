@@ -232,47 +232,6 @@ pub struct KeyDraft {
     pub buffer: String,
 }
 
-/// The editable option rows under the provider list in Settings.
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub enum OptionRow {
-    MaxTurns,
-    ObserverInterval,
-    BudgetSession,
-    BudgetAction,
-    Proxy,
-}
-
-impl OptionRow {
-    pub const ALL: [OptionRow; 5] = [
-        OptionRow::MaxTurns,
-        OptionRow::ObserverInterval,
-        OptionRow::BudgetSession,
-        OptionRow::BudgetAction,
-        OptionRow::Proxy,
-    ];
-
-    pub fn label(self) -> &'static str {
-        match self {
-            OptionRow::MaxTurns => "Rounds",
-            OptionRow::ObserverInterval => "Tools",
-            OptionRow::BudgetSession => "Budget / session",
-            OptionRow::BudgetAction => "Budget action",
-            OptionRow::Proxy => "Proxy",
-        }
-    }
-
-    /// Whether the edit buffer should render masked (it may carry credentials).
-    pub fn masked(self) -> bool {
-        matches!(self, OptionRow::Proxy)
-    }
-}
-
-/// In-progress edit of an option row (numbers typed plain; proxy masked).
-pub struct OptionDraft {
-    pub row: OptionRow,
-    pub buffer: String,
-}
-
 /// A proxy URL shown in the UI: userinfo (user:password@) is redacted.
 pub fn redact_proxy(url: &str) -> String {
     match (url.find("://"), url.find('@')) {
@@ -353,15 +312,12 @@ pub struct App {
     /// Cursor over the Settings rows: the eight providers, then the options.
     settings_sel: usize,
     key_draft: Option<KeyDraft>,
-    option_draft: Option<OptionDraft>,
+    settings_draft: Option<settings::SettingsDraft>,
+    /// Write config changes to disk (off in tests).
+    persist: bool,
     /// The shared session store (the app's data dir when installed, else the
     /// CLI's own). `None` only when neither location is usable.
     store: Option<SessionStore>,
-}
-
-/// Total selectable rows in Settings: 8 providers + the option rows.
-pub(crate) fn settings_row_count() -> usize {
-    theme::AGENTS.len() + OptionRow::ALL.len()
 }
 
 impl App {
@@ -395,7 +351,8 @@ impl App {
             key_cache: ctx.prefetched_keys.clone(),
             settings_sel: 0,
             key_draft: None,
-            option_draft: None,
+            settings_draft: None,
+            persist: true,
             ctx,
         }
     }
@@ -776,7 +733,7 @@ impl App {
         match self.view {
             View::Home => self.handle_home_key(key),
             View::Session => self.handle_session_key(key),
-            View::Settings => self.handle_settings_key(key),
+            View::Settings => settings::handle_key(self, key),
         }
     }
 
@@ -913,221 +870,6 @@ impl App {
         false
     }
 
-    fn handle_settings_key(&mut self, key: KeyEvent) -> bool {
-        // Editing a provider's key: capture printable input (masked on
-        // screen), Enter saves, Esc cancels, ^U clears the buffer.
-        if self.key_draft.is_some() {
-            match key.code {
-                KeyCode::Esc => self.key_draft = None,
-                KeyCode::Enter => {
-                    if let Some(draft) = self.key_draft.take() {
-                        let value = draft.buffer.trim().to_string();
-                        if value.is_empty() {
-                            self.toast("No key entered — paste a key or press Esc.");
-                        } else {
-                            self.save_key(draft.provider, value);
-                        }
-                    }
-                }
-                KeyCode::Backspace => {
-                    if let Some(d) = self.key_draft.as_mut() {
-                        d.buffer.pop();
-                    }
-                }
-                KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                    if let Some(d) = self.key_draft.as_mut() {
-                        d.buffer.clear();
-                    }
-                }
-                KeyCode::Char(c) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
-                    if let Some(d) = self.key_draft.as_mut() {
-                        d.buffer.push(c);
-                    }
-                }
-                _ => {}
-            }
-            return false;
-        }
-
-        // Editing an option row.
-        if self.option_draft.is_some() {
-            match key.code {
-                KeyCode::Esc => self.option_draft = None,
-                KeyCode::Enter => {
-                    if let Some(draft) = self.option_draft.take() {
-                        self.save_option(draft.row, draft.buffer.trim());
-                    }
-                }
-                KeyCode::Backspace => {
-                    if let Some(d) = self.option_draft.as_mut() {
-                        d.buffer.pop();
-                    }
-                }
-                KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                    if let Some(d) = self.option_draft.as_mut() {
-                        d.buffer.clear();
-                    }
-                }
-                KeyCode::Char(c) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
-                    if let Some(d) = self.option_draft.as_mut() {
-                        d.buffer.push(c);
-                    }
-                }
-                _ => {}
-            }
-            return false;
-        }
-
-        match key.code {
-            KeyCode::Esc => self.view = self.prev_view,
-            KeyCode::Up => self.settings_sel = self.settings_sel.saturating_sub(1),
-            KeyCode::Down => {
-                self.settings_sel = (self.settings_sel + 1).min(settings_row_count() - 1);
-            }
-            KeyCode::Enter | KeyCode::Char('e') => {
-                if self.settings_sel < theme::AGENTS.len() {
-                    let provider = theme::AGENTS[self.settings_sel].provider;
-                    self.key_draft = Some(KeyDraft {
-                        provider,
-                        buffer: String::new(),
-                    });
-                } else {
-                    let row = OptionRow::ALL[self.settings_sel - theme::AGENTS.len()];
-                    match row {
-                        // Budget action is a two-state toggle — no buffer needed.
-                        OptionRow::BudgetAction => {
-                            let next = if self.ctx.config.budget_action == "stop" {
-                                "warn"
-                            } else {
-                                "stop"
-                            };
-                            self.save_option(OptionRow::BudgetAction, next);
-                        }
-                        _ => {
-                            let current = self.option_current_value(row);
-                            self.option_draft = Some(OptionDraft {
-                                row,
-                                buffer: current,
-                            });
-                        }
-                    }
-                }
-            }
-            KeyCode::Char('d') => {
-                if self.settings_sel < theme::AGENTS.len() {
-                    let provider = theme::AGENTS[self.settings_sel].provider;
-                    self.clear_key(provider);
-                } else {
-                    let row = OptionRow::ALL[self.settings_sel - theme::AGENTS.len()];
-                    self.reset_option(row);
-                }
-            }
-            _ => {}
-        }
-        false
-    }
-
-    /// The current value of an option row, as the edit buffer's starting text.
-    fn option_current_value(&self, row: OptionRow) -> String {
-        let config = &self.ctx.config;
-        match row {
-            OptionRow::MaxTurns => config.protocol.max_rounds.to_string(),
-            OptionRow::ObserverInterval => {
-                if config.tools.shell.enabled {
-                    "all".into()
-                } else if config.tools.any_enabled() {
-                    "safe".into()
-                } else {
-                    "none".into()
-                }
-            }
-            OptionRow::BudgetSession => {
-                if config.budget_per_session_usd > 0.0 {
-                    format!("{}", config.budget_per_session_usd)
-                } else {
-                    "0".into()
-                }
-            }
-            OptionRow::BudgetAction => config.budget_action.clone(),
-            // Never prefill a proxy URL into a visible buffer — it may carry
-            // credentials. Start fresh.
-            OptionRow::Proxy => String::new(),
-        }
-    }
-
-    /// Validate and persist one option row. Invalid input toasts and keeps
-    /// the previous value.
-    fn save_option(&mut self, row: OptionRow, value: &str) {
-        let config = &mut self.ctx.config;
-        match row {
-            OptionRow::MaxTurns => match value.parse::<u8>() {
-                Ok(n) if (1..=5).contains(&n) => config.protocol.max_rounds = n,
-                _ => {
-                    self.toast("Cross-examination rounds: 1 to 5.");
-                    return;
-                }
-            },
-            OptionRow::ObserverInterval => match crate::tools::ToolPolicy::from_flag(value) {
-                Some(policy) => config.tools = policy,
-                None => {
-                    self.toast("Tools: none, safe or all (all adds the sandboxed shell).");
-                    return;
-                }
-            },
-            OptionRow::BudgetSession => match value.parse::<f64>() {
-                Ok(usd) if usd.is_finite() && (0.0..=100_000.0).contains(&usd) => {
-                    config.budget_per_session_usd = usd;
-                }
-                _ => {
-                    self.toast("Budget must be a USD amount (0 = unlimited).");
-                    return;
-                }
-            },
-            OptionRow::BudgetAction => {
-                config.budget_action = if value.eq_ignore_ascii_case("stop") {
-                    "stop"
-                } else {
-                    "warn"
-                }
-                .to_string();
-            }
-            OptionRow::Proxy => {
-                let trimmed = value.trim();
-                if trimmed.is_empty() {
-                    config.proxy = None;
-                } else if trimmed.contains("://") {
-                    config.proxy = Some(trimmed.to_string());
-                } else {
-                    self.toast("Proxy needs a full URL (http://, https://, socks5://…).");
-                    return;
-                }
-            }
-        }
-        match self.ctx.config.save() {
-            Ok(()) => {
-                let note = if row == OptionRow::Proxy {
-                    "Saved. Proxy applies to the next run of the CLI.".to_string()
-                } else {
-                    format!("Saved {}.", row.label())
-                };
-                self.toast(note);
-            }
-            Err(e) => self.toast(format!("Couldn't save settings: {e}")),
-        }
-    }
-
-    /// Reset one option row to its default and persist.
-    fn reset_option(&mut self, row: OptionRow) {
-        let value = match row {
-            OptionRow::MaxTurns => "3".to_string(),
-            OptionRow::ObserverInterval => "safe".to_string(),
-            OptionRow::BudgetSession => "0".to_string(),
-            OptionRow::BudgetAction => "warn".to_string(),
-            OptionRow::Proxy => String::new(),
-        };
-        self.save_option(row, &value);
-    }
-
     /// Persist a key typed in Settings to the encrypted `keys.enc` store,
     /// then prime the cache so the next run uses it immediately.
     fn save_key(&mut self, provider: Provider, key: String) {
@@ -1172,7 +914,7 @@ impl App {
             View::Settings => {
                 if let Some(d) = self.key_draft.as_mut() {
                     d.buffer.push_str(&clean);
-                } else if let Some(d) = self.option_draft.as_mut() {
+                } else if let Some(d) = self.settings_draft.as_mut() {
                     d.buffer.push_str(&clean);
                 }
             }
@@ -1415,7 +1157,9 @@ mod tests {
             forced: None,
             resume: None,
         };
-        App::new(ctx)
+        let mut app = App::new(ctx);
+        app.persist = false;
+        app
     }
 
     fn card(id: &str, name: &str, provider: Provider) -> SeatCard {
@@ -1955,7 +1699,127 @@ mod tests {
             redact_proxy("socks5://user:hunter2@proxy.example:1080"),
             "socks5://•••@proxy.example:1080"
         );
-        assert_eq!(settings_row_count(), 13);
+    }
+
+    #[test]
+    fn settings_keys_edit_toggle_add_and_reset_without_touching_disk() {
+        use settings::{DraftKind, SettingsDraft, SettingsRow};
+        let mut app = test_app();
+        app.view = View::Settings;
+        let rows = settings::settings_rows(&app.ctx.config);
+        let goto = |app: &mut App, row: SettingsRow| {
+            app.settings_sel = rows.iter().position(|r| *r == row).unwrap();
+        };
+        // Tools cycle safe → all → none → safe; approval toggles.
+        goto(&mut app, SettingsRow::ToolsLevel);
+        press(&mut app, KeyCode::Enter);
+        assert!(app.ctx.config.tools.shell.enabled);
+        press(&mut app, KeyCode::Enter);
+        assert!(!app.ctx.config.tools.any_enabled());
+        press(&mut app, KeyCode::Char('d'));
+        assert!(app.ctx.config.tools.any_enabled() && !app.ctx.config.tools.shell.enabled);
+        goto(&mut app, SettingsRow::ToolsApproval);
+        press(&mut app, KeyCode::Enter);
+        assert_eq!(app.ctx.config.tools.approval, crate::tools::Approval::Ask);
+        // Rounds: an invalid value toasts and keeps the old one.
+        goto(&mut app, SettingsRow::Rounds);
+        press(&mut app, KeyCode::Enter);
+        assert_eq!(app.settings_draft.as_ref().unwrap().buffer, "3");
+        app.handle_key(KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL));
+        press(&mut app, KeyCode::Char('9'));
+        press(&mut app, KeyCode::Enter);
+        assert_eq!(app.ctx.config.protocol.max_rounds, 3);
+        assert!(app.toast.as_deref().unwrap().contains("1 to 6"));
+        press(&mut app, KeyCode::Enter);
+        app.handle_key(KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL));
+        press(&mut app, KeyCode::Char('2'));
+        press(&mut app, KeyCode::Enter);
+        assert_eq!(app.ctx.config.protocol.max_rounds, 2);
+        // A seat: edit its spec (a bad id is refused), rename, cycle
+        // reasoning, add one, remove one, reset the roster.
+        goto(&mut app, SettingsRow::Seat(1));
+        press(&mut app, KeyCode::Enter);
+        assert_eq!(
+            app.settings_draft.as_ref().unwrap().buffer,
+            "anthropic:auto"
+        );
+        app.settings_draft = Some(SettingsDraft {
+            row: SettingsRow::Seat(1),
+            kind: DraftKind::Spec,
+            buffer: "anthropic:claude-99-hypothetical".into(),
+        });
+        press(&mut app, KeyCode::Enter);
+        assert!(app.toast.as_deref().unwrap().contains("has no model"));
+        assert!(app.ctx.config.seats.is_empty(), "nothing was written");
+        app.settings_draft = Some(SettingsDraft {
+            row: SettingsRow::Seat(1),
+            kind: DraftKind::Spec,
+            buffer: "google:auto-fast".into(),
+        });
+        press(&mut app, KeyCode::Enter);
+        assert_eq!(app.ctx.config.seats[1].provider, "google");
+        assert_eq!(app.ctx.config.seats[1].model, "auto-fast");
+        assert_eq!(app.ctx.config.seats[1].name, "Cathy");
+        press(&mut app, KeyCode::Char('n'));
+        app.handle_paste("Critic".into());
+        press(&mut app, KeyCode::Enter);
+        assert_eq!(app.ctx.config.seats[1].name, "CathyCritic");
+        press(&mut app, KeyCode::Char('r'));
+        assert_eq!(
+            app.ctx.config.seats[1].reasoning,
+            Some(crate::types::ReasoningTier::Low)
+        );
+        press(&mut app, KeyCode::Char('a'));
+        assert_eq!(app.ctx.config.seats.len(), 9);
+        // Seat 1 moved to Google, so Anthropic is the first provider
+        // without a seat.
+        let added = app.ctx.config.seats.last().unwrap().clone();
+        assert_eq!(added.provider, "anthropic");
+        assert_eq!(
+            (added.id.as_str(), added.name.as_str()),
+            ("anthropic", "Cathy")
+        );
+        assert_eq!(app.settings_row(), SettingsRow::Seat(8));
+        press(&mut app, KeyCode::Char('d'));
+        assert_eq!(app.ctx.config.seats.len(), 8);
+        press(&mut app, KeyCode::Char('R'));
+        assert!(app.ctx.config.seats.is_empty());
+        // Slots and budget.
+        goto(&mut app, SettingsRow::Moderator);
+        press(&mut app, KeyCode::Enter);
+        assert_eq!(app.settings_draft.as_ref().unwrap().buffer, "google:auto");
+        app.handle_key(KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL));
+        app.handle_paste("anthropic:auto".into());
+        press(&mut app, KeyCode::Enter);
+        assert_eq!(
+            app.ctx.config.moderator.as_ref().unwrap().provider,
+            "anthropic"
+        );
+        press(&mut app, KeyCode::Char('d'));
+        assert!(app.ctx.config.moderator.is_none());
+        goto(&mut app, SettingsRow::BudgetDay);
+        press(&mut app, KeyCode::Enter);
+        app.handle_key(KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL));
+        app.handle_paste("12.5".into());
+        press(&mut app, KeyCode::Enter);
+        assert_eq!(app.ctx.config.budget_per_day_usd, 12.5);
+        goto(&mut app, SettingsRow::Proxy);
+        press(&mut app, KeyCode::Enter);
+        app.handle_paste("socks5://u:p@h:1080".into());
+        let text = render_at(&mut app, 120, 50);
+        assert!(!text.contains("u:p@h"), "the proxy draft renders masked");
+        press(&mut app, KeyCode::Enter);
+        assert_eq!(app.ctx.config.proxy.as_deref(), Some("socks5://u:p@h:1080"));
+        let text = render_at(&mut app, 120, 50);
+        assert!(text.contains("socks5://•••@h:1080"));
+        assert!(!text.contains("u:p@h"));
+        // Every row renders at a short height with the cursor kept in view.
+        for i in 0..rows.len() {
+            app.settings_sel = i;
+            render_at(&mut app, 100, 12);
+        }
+        press(&mut app, KeyCode::Esc);
+        assert_eq!(app.view, View::Home);
     }
 
     #[test]

@@ -47,7 +47,7 @@ enum Command {
         /// Force the deliverable: decision | analysis | document | review (default: the moderator decides).
         #[arg(long)]
         deliverable: Option<String>,
-        /// Cross-examination rounds allowed (1..5; the moderator may use fewer).
+        /// Cross-examination rounds allowed (1..6; the moderator may use fewer).
         #[arg(long)]
         rounds: Option<u8>,
         /// Reasoning tier for every round: low | medium | high (default: per round).
@@ -289,7 +289,7 @@ fn apply_run_flags(config: &mut Config, args: &RunArgs) -> anyhow::Result<()> {
         t.record = tier;
     }
     if let Some(rounds) = args.rounds {
-        anyhow::ensure!((1..=5).contains(&rounds), "--rounds must be 1..5");
+        anyhow::ensure!((1..=6).contains(&rounds), "--rounds must be 1..6");
         config.protocol.max_rounds = rounds;
     }
     if let Some(level) = &args.tools {

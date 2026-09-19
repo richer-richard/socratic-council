@@ -96,6 +96,18 @@ pub struct SeatConfig {
     pub reasoning: Option<ReasoningTier>,
 }
 
+impl SeatConfig {
+    pub fn from_seat(seat: &Seat) -> SeatConfig {
+        SeatConfig {
+            id: seat.id.clone(),
+            name: seat.name.clone(),
+            provider: seat.provider.slug().to_string(),
+            model: seat.model.label(),
+            reasoning: seat.reasoning,
+        }
+    }
+}
+
 /// A `[moderator]` / `[utility]` entry.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct SlotConfig {
@@ -545,6 +557,20 @@ impl Config {
             }
         }
         roster
+    }
+
+    /// The configured seats, or the default eight materialised so an editor
+    /// can change one of them.
+    pub fn seats_or_default(&self) -> Vec<SeatConfig> {
+        if self.seats.is_empty() {
+            Roster::default_eight()
+                .seats
+                .iter()
+                .map(SeatConfig::from_seat)
+                .collect()
+        } else {
+            self.seats.clone()
+        }
     }
 
     /// The moderator slot: the configured one, else Google on Auto (the
