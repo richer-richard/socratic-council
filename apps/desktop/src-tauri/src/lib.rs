@@ -4,6 +4,7 @@
 //! Handles HTTP requests with proxy support for AI API calls.
 
 mod allowlist;
+mod engine_host;
 mod http;
 mod redact;
 mod session_sync;
@@ -18,6 +19,7 @@ pub fn run() {
     #[allow(unused_mut)]
     let mut builder = tauri::Builder::default()
         .manage(http::RequestRegistry::default())
+        .manage(engine_host::EngineRegistry::default())
         .plugin(tauri_plugin_store::Builder::new().build())
         // No tauri-plugin-http: the webview has NO direct network path. Every
         // outbound call is brokered by http.rs behind the allowlist.
@@ -57,6 +59,11 @@ pub fn run() {
             session_sync::session_sync_read,
             session_sync::session_sync_write,
             session_sync::session_sync_delete,
+            engine_host::engine_start,
+            engine_host::engine_input,
+            engine_host::engine_cancel,
+            engine_host::engine_catalog,
+            engine_host::engine_scan,
         ])
         .setup(|_app| {
             #[cfg(debug_assertions)]

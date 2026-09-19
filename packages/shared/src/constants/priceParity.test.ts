@@ -6,7 +6,7 @@ import { DEFAULT_AGENTS, MODEL_REGISTRY } from "./index.js";
 
 /**
  * Drift guard for the two price tables. The engine's catalog
- * (`cli/src/catalog/rows.rs`) is the source of truth, verified against the
+ * (`engine/src/catalog/rows.rs`) is the source of truth, verified against the
  * provider docs; this registry mirrors it for the desktop app until the app
  * reads the engine's catalog directly. A price edited on one side but not the
  * other silently mis-bills, so this test reads the Rust source and asserts
@@ -16,7 +16,7 @@ import { DEFAULT_AGENTS, MODEL_REGISTRY } from "./index.js";
 const CNY_PER_USD = 7.1;
 
 function parseRustPrices(): Map<string, { input: number; output: number; cached?: number }> {
-  const url = new URL("../../../../cli/src/catalog/rows.rs", import.meta.url);
+  const url = new URL("../../../../engine/src/catalog/rows.rs", import.meta.url);
   const src = readFileSync(url, "utf8");
   const prices = new Map<string, { input: number; output: number; cached?: number }>();
   // `row("id", ..., Pricing::<ctor>(args), CONTRACT)`; cargo fmt may spread the

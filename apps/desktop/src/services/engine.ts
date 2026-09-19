@@ -1,0 +1,181 @@
+/**
+ * The desktop side of the engine: starts a run in the Tauri backend, feeds
+ * it answers and approvals, cancels it, and subscribes to its events. Keys
+ * are read from the encrypted secret store per run and never persisted
+ * anywhere else. Outside Tauri (the Vite dev server) everything is a no-op
+ * that reports the engine as unavailable.
+ */
+
+import type {
+  EngineCatalogRow,
+  EngineDeliverable,
+  EngineEnvelope,
+  EngineEvent,
+  EngineInput,
+  EngineProtocolPolicy,
+  EngineProvider,
+  EngineReasoningTier,
+  EngineSeat,
+  EngineSlot,
+  EngineToolPolicy,
+} from "@socratic-council/shared";
+
+import { apiKeyAccount, secretsGet } from "./secrets";
+
+export const ENGINE_EVENT_CHANNEL = "engine://event";
+
+export interface EngineSettings {
+  seats: EngineSeat[];
+  moderator: EngineSlot;
+  utility: EngineSlot;
+  tools: EngineToolPolicy;
+  protocol: EngineProtocolPolicy;
+  budget: { perSessionUsd: number; perDayUsd: number; action: "warn" | "stop" };
+  /** Per-provider base URL overrides. */
+  baseUrls: Partial<Record<EngineProvider, string>>;
+  /** Per provider and tier: "auto" or a model id. */
+  selection: { provider: EngineProvider; tier: EngineReasoningTier; model: string }[];
+  /** A proxy URL (`socks5://user:pass@host:port`), or none. */
+  proxy?: string;
+}
+
+export interface StartSessionOptions {
+  topic: string;
+  settings: EngineSettings;
+  /** Providers that have a key; keys are read at start time. */
+  keys: Partial<Record<EngineProvider, string>>;
+  attachments?: { name: string; text: string }[];
+  forced?: EngineDeliverable;
+  priorNotes?: string;
+  sessionId?: string;
+}
+
+/** The exact `engine_start` request body (see `engine_host.rs::StartRequest`). */
+export interface StartRequest {
+  topic: string;
+  seats: EngineSeat[];
+  keys: Partial<Record<EngineProvider, string>>;
+  baseUrls: Partial<Record<EngineProvider, string>>;
+  selection: { provider: EngineProvider; tier: EngineReasoningTier; model: string }[];
+  moderator: EngineSlot;
+  utility: EngineSlot;
+  tools: EngineToolPolicy;
+  protocol: EngineProtocolPolicy;
+  budget: { perSessionUsd: number; perDayUsd: number; action: string };
+  attachments: { name: string; text: string }[];
+  forced: EngineDeliverable | null;
+  priorNotes: string | null;
+  sessionId: string | null;
+  proxy: string | null;
+}
+
+export function isEngineAvailable(): boolean {
+  return (
+    typeof window !== "undefined" && ("__TAURI__" in window || "__TAURI_INTERNALS__" in window)
+  );
+}
+
+async function invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
+  const { invoke: tauriInvoke } = await import("@tauri-apps/api/core");
+  return tauriInvoke<T>(cmd, args);
+}
+
+/**
+ * Build the request: only seats whose provider has a key are sent, and only
+ * those providers' keys travel with the request.
+ */
+export function buildStartRequest(opts: StartSessionOptions): StartRequest {
+  const keyed = new Set(
+    (Object.entries(opts.keys) as [EngineProvider, string | undefined][])
+      .filter(([, key]) => Boolean(key && key.trim()))
+      .map(([provider]) => provider),
+  );
+  const seats = opts.settings.seats.filter((s) => keyed.has(s.provider));
+  const keys: Partial<Record<EngineProvider, string>> = {};
+  for (const provider of keyed) {
+    const key = opts.keys[provider];
+    if (key) keys[provider] = key;
+  }
+  return {
+    topic: opts.topic.trim(),
+    seats,
+    keys,
+    baseUrls: opts.settings.baseUrls,
+    selection: opts.settings.selection,
+    moderator: opts.settings.moderator,
+    utility: opts.settings.utility,
+    tools: opts.settings.tools,
+    protocol: opts.settings.protocol,
+    budget: opts.settings.budget,
+    attachments: opts.attachments ?? [],
+    forced: opts.forced ?? null,
+    priorNotes: opts.priorNotes ?? null,
+    sessionId: opts.sessionId ?? null,
+    proxy: opts.settings.proxy ?? null,
+  };
+}
+
+/** Read every configured provider key from the secret store. */
+export function readProviderKeys(
+  providers: EngineProvider[],
+): Partial<Record<EngineProvider, string>> {
+  const out: Partial<Record<EngineProvider, string>> = {};
+  for (const provider of providers) {
+    const key = secretsGet(apiKeyAccount(provider));
+    if (key && key.trim()) out[provider] = key;
+  }
+  return out;
+}
+
+/** Start a run; resolves to the session id. Throws outside Tauri. */
+export async function startSession(opts: StartSessionOptions): Promise<string> {
+  if (!isEngineAvailable()) {
+    throw new Error("The engine runs inside the desktop app; this page has no engine.");
+  }
+  const request = buildStartRequest(opts);
+  if (request.seats.length === 0) {
+    throw new Error("No seat has an API key. Add one in Settings.");
+  }
+  return invoke<string>("engine_start", { request });
+}
+
+export async function sendInput(sessionId: string, input: EngineInput): Promise<void> {
+  await invoke<void>("engine_input", { sessionId, input });
+}
+
+export async function cancelSession(sessionId: string): Promise<void> {
+  await invoke<void>("engine_cancel", { sessionId });
+}
+
+/** Subscribe to a session's events; resolves to an unsubscribe function. */
+export async function subscribe(
+  sessionId: string,
+  handler: (event: EngineEvent) => void,
+): Promise<() => void> {
+  if (!isEngineAvailable()) return () => {};
+  const { listen } = await import("@tauri-apps/api/event");
+  const unlisten = await listen<EngineEnvelope>(ENGINE_EVENT_CHANNEL, (e) => {
+    if (e.payload?.session_id === sessionId) handler(e.payload.event);
+  });
+  return unlisten;
+}
+
+export async function catalog(provider: EngineProvider): Promise<EngineCatalogRow[]> {
+  if (!isEngineAvailable()) return [];
+  return invoke<EngineCatalogRow[]>("engine_catalog", { provider });
+}
+
+export async function scan(
+  provider: EngineProvider,
+  baseUrl: string,
+  apiKey: string,
+  proxy?: string,
+): Promise<EngineCatalogRow[]> {
+  if (!isEngineAvailable()) return [];
+  return invoke<EngineCatalogRow[]>("engine_scan", {
+    provider,
+    baseUrl,
+    apiKey,
+    proxy: proxy ?? null,
+  });
+}

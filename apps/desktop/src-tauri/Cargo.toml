@@ -13,6 +13,7 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
+socratic-council-engine = { path = "../../../engine" }
 tauri = { version = "2", features = [] }
 tauri-plugin-store = "2"
 tauri-plugin-dialog = "2"
