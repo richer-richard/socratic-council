@@ -946,7 +946,7 @@ async fn cmd_probe(
     }
     if tools {
         println!(
-            "\ntool calling: one request per provider offering read_file; expects a tool call back"
+            "\ntool calling: one request per provider offering read_file; expects a tool call back, then a final answer built on the tool result"
         );
         for provider in Provider::ALL {
             let Some(key) = config.resolve_api_key(provider) else {
@@ -972,56 +972,119 @@ async fn cmd_probe(
                 continue;
             }
             let specs = socratic_council::tools::specs_for(&ToolPolicy::safe(), false);
+            let system = "You are a connectivity probe for tool calling.";
+            let ask = ChatMessage::user(
+                "Read the file \"notes.txt\" with the read_file tool, then reply with the single word the file contains. Do not guess.",
+            );
             let req = CompletionRequest {
                 model: model.clone(),
-                system: Some("You are a connectivity probe for tool calling.".into()),
-                messages: vec![ChatMessage::user(
-                    "Call the read_file tool with path \"notes.txt\" now. Do not answer in prose.",
-                )],
+                system: Some(system.into()),
+                messages: vec![ask.clone()],
                 max_tokens: 1024,
                 temperature: 1.0,
                 tier: ReasoningTier::Low,
-                tools: specs,
+                tools: specs.clone(),
                 cache_key: None,
             };
             let started = std::time::Instant::now();
             let mut on_chunk = |_c: &CompletionChunk| {};
-            match stream_completion(&http, provider, &base, &key, &req, &mut on_chunk).await {
-                Ok(out) => {
+            let first =
+                match stream_completion(&http, provider, &base, &key, &req, &mut on_chunk).await {
+                    Ok(out) => out,
+                    Err(e) => {
+                        failures += 1;
+                        let msg: String = clean(&e.to_string()).chars().take(160).collect();
+                        println!("{:<10} {:<28} ERROR {}", provider.slug(), model, msg);
+                        continue;
+                    }
+                };
+            let call = match first.tool_calls.first() {
+                Some(call) if first.stop == StopReason::ToolUse => call.clone(),
+                Some(call) => {
+                    failures += 1;
+                    println!(
+                        "{:<10} {:<28} {:>6.1}s  call {} but stop={:?}",
+                        provider.slug(),
+                        model,
+                        started.elapsed().as_secs_f32(),
+                        call.name,
+                        first.stop
+                    );
+                    continue;
+                }
+                None => {
+                    failures += 1;
+                    let shown: String = clean(first.text.trim()).chars().take(60).collect();
+                    println!(
+                        "{:<10} {:<28} {:>6.1}s  NO TOOL CALL: {shown:?}",
+                        provider.slug(),
+                        model,
+                        started.elapsed().as_secs_f32()
+                    );
+                    continue;
+                }
+            };
+            // The round trip: hand the model its own call plus the tool result
+            // in the client style's native shape and expect it to use it.
+            let follow = CompletionRequest {
+                messages: vec![
+                    ask,
+                    ChatMessage::assistant_with_calls(first.text.clone(), vec![call.clone()]),
+                    ChatMessage::tool(
+                        call.id.clone(),
+                        call.name.clone(),
+                        "notes.txt:\nTANGERINE\n",
+                    ),
+                ],
+                ..CompletionRequest {
+                    model: model.clone(),
+                    system: Some(system.into()),
+                    messages: Vec::new(),
+                    max_tokens: 1024,
+                    temperature: 1.0,
+                    tier: ReasoningTier::Low,
+                    tools: specs,
+                    cache_key: None,
+                }
+            };
+            let mut on_chunk = |_c: &CompletionChunk| {};
+            match stream_completion(&http, provider, &base, &key, &follow, &mut on_chunk).await {
+                Ok(second) => {
                     let secs = started.elapsed().as_secs_f32();
-                    match out.tool_calls.first() {
-                        Some(call) if out.stop == StopReason::ToolUse => println!(
-                            "{:<10} {:<28} {:>6.1}s  called {}({}) ✓",
+                    let answer = clean(second.text.trim());
+                    if answer.to_ascii_lowercase().contains("tangerine") {
+                        println!(
+                            "{:<10} {:<28} {:>6.1}s  call {}({}) ✓ · result ✓",
                             provider.slug(),
                             model,
                             secs,
                             call.name,
                             clean(&call.arguments.to_string())
-                        ),
-                        Some(call) => println!(
-                            "{:<10} {:<28} {:>6.1}s  call {} but stop={:?}",
+                        );
+                    } else {
+                        failures += 1;
+                        let shown: String = answer.chars().take(60).collect();
+                        println!(
+                            "{:<10} {:<28} {:>6.1}s  call {} ✓ · result NOT USED: {shown:?} (stop={:?}, {} more calls)",
                             provider.slug(),
                             model,
                             secs,
                             call.name,
-                            out.stop
-                        ),
-                        None => {
-                            failures += 1;
-                            let shown: String = clean(out.text.trim()).chars().take(60).collect();
-                            println!(
-                                "{:<10} {:<28} {:>6.1}s  NO TOOL CALL: {shown:?}",
-                                provider.slug(),
-                                model,
-                                secs
-                            );
-                        }
+                            second.stop,
+                            second.tool_calls.len()
+                        );
                     }
                 }
                 Err(e) => {
                     failures += 1;
                     let msg: String = clean(&e.to_string()).chars().take(160).collect();
-                    println!("{:<10} {:<28} ERROR {}", provider.slug(), model, msg);
+                    println!(
+                        "{:<10} {:<28} call {} ✓ · result ERROR {}",
+                        provider.slug(),
+                        model,
+                        call.name,
+                        msg
+                    );
                 }
             }
         }
