@@ -134,11 +134,7 @@ pub enum DebateEvent {
 /// Strip terminal control characters from model-derived text, keeping `\n` and
 /// `\t`. Blocks ANSI/OSC escape injection (cursor games, title/clipboard
 /// writes) in both the plain `--no-tui` output and the TUI buffer.
-pub fn sanitize_terminal(text: &str) -> String {
-    text.chars()
-        .filter(|c| !c.is_control() || *c == '\n' || *c == '\t')
-        .collect()
-}
+pub use crate::text::sanitize_terminal;
 
 /// The council's spoken-style system prompt — ported faithfully from the desktop
 /// app's `BASE_SYSTEM_PROMPT` + `GROUP_CHAT_GUIDELINES`. The anti-hallucination

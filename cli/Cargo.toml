@@ -32,7 +32,7 @@ default = ["desktop-bridge"]
 desktop-bridge = ["dep:rusqlite"]
 
 [dependencies]
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "io-std", "io-util", "signal"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "io-std", "io-util", "signal", "process"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls", "socks"] }
 futures-util = "0.3"
 ratatui = "0.29"

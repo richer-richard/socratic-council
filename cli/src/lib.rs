@@ -15,6 +15,8 @@ pub mod error;
 pub mod providers;
 pub mod search;
 pub mod store;
+pub mod text;
+pub mod tools;
 pub mod tui;
 pub mod types;
 
