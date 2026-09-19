@@ -983,6 +983,47 @@ interactive = false
     }
 
     #[test]
+    fn preset_seats_take_keyed_seats_in_roster_order() {
+        let mut config = Config::default();
+        for p in [
+            Provider::Google,
+            Provider::Kimi,
+            Provider::Zhipu,
+            Provider::OpenAI,
+        ] {
+            config.set_key(p, "k".into());
+        }
+        // Standard = the first four keyed seats in roster order; unkeyed
+        // seats (Cathy, Douglas, Quinn, Mary) never take a slot.
+        let r = select_roster(&config, &Provider::ALL, None, Preset::Standard);
+        let ids: Vec<&str> = r.seats.iter().map(|s| s.id.as_str()).collect();
+        assert_eq!(ids, ["george", "grace", "kate", "zara"]);
+        let r = select_roster(&config, &Provider::ALL, None, Preset::Quick);
+        assert_eq!(r.seats.len(), 3);
+        let r = select_roster(&config, &Provider::ALL, None, Preset::Full);
+        assert_eq!(r.seats.len(), 4);
+        // The --providers filter applies before the cut.
+        let r = select_roster(
+            &config,
+            &[Provider::Kimi, Provider::Zhipu],
+            None,
+            Preset::Quick,
+        );
+        let ids: Vec<&str> = r.seats.iter().map(|s| s.id.as_str()).collect();
+        assert_eq!(ids, ["kate", "zara"]);
+        // An explicit roster is never cut, only key-gated.
+        let explicit = parse_seats_flag("openai:auto,openai:gpt-x,google:auto-fast,anthropic:auto")
+            .map(|seats| Roster { seats })
+            .unwrap();
+        let r = select_roster(&config, &Provider::ALL, Some(&explicit), Preset::Quick);
+        let ids: Vec<&str> = r.seats.iter().map(|s| s.id.as_str()).collect();
+        assert_eq!(ids, ["openai", "openai-2", "google"]);
+        assert_eq!(Preset::Standard.next(), Preset::Full);
+        assert_eq!(Preset::Quick.prev(), Preset::Full);
+        assert_eq!(Preset::parse("QUICK"), Some(Preset::Quick));
+    }
+
+    #[test]
     fn default_roster_take_gives_the_first_seats_in_provider_order() {
         let config = Config::default();
         let quick = config.roster(&Provider::ALL).take(3);

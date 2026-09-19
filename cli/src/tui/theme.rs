@@ -103,13 +103,16 @@ pub fn speaker_color(agent_id: &str) -> Color {
         })
 }
 
-/// Eight node positions on the unit circle (radius `r`) for the council mark,
+/// `n` node positions on the unit circle (radius `r`) for the council mark,
 /// slowly rotated by `phase` radians. Returned as `(x, y)` in canvas space.
-pub fn ring_positions(r: f64, phase: f64) -> [(f64, f64); 8] {
-    let mut pts = [(0.0, 0.0); 8];
-    for (i, p) in pts.iter_mut().enumerate() {
-        let angle = -std::f64::consts::FRAC_PI_2 + (i as f64) * std::f64::consts::TAU / 8.0 + phase;
-        *p = (r * angle.cos(), r * angle.sin());
-    }
-    pts
+pub fn ring_positions(n: usize, r: f64, phase: f64) -> Vec<(f64, f64)> {
+    let n = n.max(1);
+    (0..n)
+        .map(|i| {
+            let angle = -std::f64::consts::FRAC_PI_2
+                + (i as f64) * std::f64::consts::TAU / n as f64
+                + phase;
+            (r * angle.cos(), r * angle.sin())
+        })
+        .collect()
 }

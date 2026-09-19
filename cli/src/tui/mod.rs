@@ -1784,6 +1784,14 @@ mod tests {
         // A plain `d` is typed into the composer.
         press(&mut app, KeyCode::Char('d'));
         assert_eq!(app.composer, "d");
+        // The chips and the roster strip render the choice.
+        app.launch.preset = Preset::Quick;
+        app.launch.deliverable = Some(Deliverable::Review);
+        let text = render_at(&mut app, 120, 40);
+        assert!(text.contains("Quick · 3"));
+        assert!(text.contains("review"));
+        assert!(text.contains("0 seats convene"));
+        assert!(text.contains("Roster · 0/8 keyed"));
     }
 
     #[test]
