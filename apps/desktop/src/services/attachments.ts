@@ -611,8 +611,24 @@ async function getOcrWorker(): Promise<OcrWorker> {
   if (!promise) {
     // Fix 2.14: clear the cached promise on failure so a transient bundle
     // load error doesn't permanently disable OCR until app restart.
+    // Everything the worker needs is staged under public/ by
+    // scripts/prepare-ocr-assets.mjs (worker + WASM core from node_modules,
+    // SHA-256-pinned language packs). tesseract.js's defaults would fetch all of
+    // it from cdn.jsdelivr.net at run time, which the strict CSP (connect-src
+    // 'self') blocks and which we don't want as a third-party call anyway.
+    // `workerBlobURL: false` starts the worker straight from the same-origin
+    // script (a blob: worker would need worker-src blob: in the CSP).
     promise = import("tesseract.js").then(
-      ({ createWorker }) => createWorker(TESSERACT_LANGS) as unknown as OcrWorker,
+      ({ createWorker, OEM }) =>
+        createWorker(TESSERACT_LANGS, OEM.LSTM_ONLY, {
+          workerPath: "/tesseract/worker.min.js",
+          // An explicit .wasm.js file skips tesseract's feature-detect picker
+          // (which would ask for the relaxed-SIMD variant we don't ship).
+          corePath: "/tesseract/tesseract-core-simd-lstm.wasm.js",
+          langPath: "/tessdata",
+          gzip: true,
+          workerBlobURL: false,
+        }) as unknown as OcrWorker,
     );
     ocrWorkerPromise = promise;
     const tracked = promise;

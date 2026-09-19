@@ -7,3 +7,5 @@ pnpm-lock.yaml
 **/.vite
 **/.next
 apps/desktop/src-tauri/target
+apps/desktop/public/tesseract/
+apps/desktop/public/tessdata/

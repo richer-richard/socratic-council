@@ -20,6 +20,30 @@
 
 const REDACTED = "[REDACTED]";
 
+/**
+ * Exact secret values the app currently holds (provider API keys, the proxy
+ * password), registered by the config store whenever they load or change.
+ * Pattern rules below only know a few key *shapes*; a provider error that
+ * echoes a key of any other shape (MiniMax JWTs, Zhipu `id.secret`, a custom
+ * gateway token) is caught here by value instead.
+ */
+const KNOWN_SECRETS = new Set<string>();
+
+export function registerKnownSecrets(values: Iterable<string | null | undefined>): void {
+  KNOWN_SECRETS.clear();
+  for (const value of values) {
+    if (typeof value === "string" && value.length >= 8) KNOWN_SECRETS.add(value);
+  }
+}
+
+function redactKnownSecrets(input: string): string {
+  let out = input;
+  for (const secret of KNOWN_SECRETS) {
+    if (out.includes(secret)) out = out.split(secret).join(REDACTED);
+  }
+  return out;
+}
+
 // Header lines — matches `Authorization: Bearer xyz` and `x-api-key: xyz`
 // styles, including common case variants. Captures the header name so it's
 // preserved verbatim in the output.
@@ -52,6 +76,10 @@ const URL_USERINFO = /([a-z][a-z0-9+\-.]*:\/\/)[^@\s/?#]+@/gi;
 // generic pattern requires ≥32 chars of base64-alphabet content to avoid
 // flagging everyday hashes or git short SHAs.
 const LOOSE_KEY_PATTERNS: RegExp[] = [
+  // JWT-shaped (MiniMax keys): eyJ… . … . …
+  /\b(eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,})\b/g,
+  // Zhipu / Z.AI: 32 hex chars, a dot, 16+ alphanumerics.
+  /\b([0-9a-f]{32}\.[A-Za-z0-9]{16,})\b/g,
   /\b(sk-ant-[A-Za-z0-9_-]{10,})\b/g,
   /\b(sk-proj-[A-Za-z0-9_-]{10,})\b/g,
   /\b(sk-[A-Za-z0-9_-]{10,})\b/g,
@@ -64,7 +92,7 @@ const LOOSE_KEY_PATTERNS: RegExp[] = [
 ];
 
 function redactString(input: string): string {
-  let out = input;
+  let out = redactKnownSecrets(input);
   for (const { re, repl } of HEADER_PATTERNS) out = out.replace(re, repl);
   out = out.replace(URL_USERINFO, `$1${REDACTED}@`);
   for (const re of LOOSE_KEY_PATTERNS) out = out.replace(re, REDACTED);

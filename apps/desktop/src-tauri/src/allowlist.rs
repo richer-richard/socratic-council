@@ -37,10 +37,13 @@ const PROVIDER_HOSTS: &[&str] = &[
     "api.minimaxi.com",
     "api.minimax.chat",
     "open.bigmodel.cn",
-    // Oracle / web search
+    // Oracle / web search — every tier services/tools.ts can hit. `www.bing.com`
+    // was missing, which silently killed the RSS fallback: every Bing attempt
+    // failed the allowlist before a byte was sent.
     "api.duckduckgo.com",
     "duckduckgo.com",
     "html.duckduckgo.com",
+    "www.bing.com",
 ];
 
 /// Loopback hosts — `http://` is permitted to these, everyone else is `https://` only.
@@ -154,6 +157,12 @@ mod tests {
     fn allowlisted_https_provider_is_accepted() {
         assert!(validate_outbound_url("https://api.openai.com/v1/chat").is_ok());
         assert!(validate_outbound_url("https://api.anthropic.com/v1/messages").is_ok());
+    }
+
+    #[test]
+    fn search_tiers_are_allowlisted() {
+        assert!(validate_outbound_url("https://html.duckduckgo.com/html/?q=x").is_ok());
+        assert!(validate_outbound_url("https://www.bing.com/search?format=rss&q=x").is_ok());
     }
 
     #[test]

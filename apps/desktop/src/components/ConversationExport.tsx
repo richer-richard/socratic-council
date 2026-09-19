@@ -16,13 +16,21 @@ function isTauri(): boolean {
   );
 }
 
-async function openPath(path: string) {
-  if (!isTauri()) return;
+/**
+ * Opens an export with the OS default app. The opener capability is scoped to
+ * `$DOWNLOAD/**` and `$DOCUMENT/SocraticCouncil/**` (the export folders), so a
+ * file the user saved elsewhere via the dialog can't be opened from here —
+ * report that instead of failing silently.
+ */
+async function openPath(path: string): Promise<boolean> {
+  if (!isTauri()) return false;
   try {
     const { openPath: tauriOpen } = await import("@tauri-apps/plugin-opener");
     await tauriOpen(path);
+    return true;
   } catch (err) {
-    console.error("Failed to open file:", err);
+    console.warn("Failed to open exported file (outside the allowed export folders?):", err);
+    return false;
   }
 }
 
@@ -170,7 +178,14 @@ export function ConversationExport({
               <button
                 type="button"
                 className="mt-1 button-secondary text-xs px-3 py-1"
-                onClick={() => openPath(lastResult.path!)}
+                onClick={async () => {
+                  const ok = await openPath(lastResult.path!);
+                  if (!ok) {
+                    setLastError(
+                      "Saved outside Downloads / Documents/SocraticCouncil, so it can't be opened from here — open it from Finder.",
+                    );
+                  }
+                }}
               >
                 Open
               </button>

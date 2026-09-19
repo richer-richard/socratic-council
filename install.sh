@@ -13,6 +13,12 @@
 #   4. Copies .app to /Applications
 #   5. Cleans local build caches from the cloned repo
 #   6. Opens the app
+#
+# Trust note: steps 1 bootstraps Homebrew and rustup by running their official
+# installer scripts fetched over HTTPS (`curl … | bash`). If you would rather
+# not execute remote scripts, install Homebrew (https://brew.sh) and Rust
+# (https://rustup.rs) yourself first — this script detects both and skips the
+# download when they are already present.
 # ──────────────────────────────────────────────────────────────
 set -euo pipefail
 
