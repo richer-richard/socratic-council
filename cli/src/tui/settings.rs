@@ -35,8 +35,16 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
 
 fn render_header(f: &mut Frame, area: Rect) {
     let title = Line::from(vec![
-        Span::styled("Settings", Style::default().fg(theme::GOLD).add_modifier(Modifier::BOLD)),
-        Span::styled("  ·  Keys, models & providers", Style::default().fg(theme::MUTED)),
+        Span::styled(
+            "Settings",
+            Style::default()
+                .fg(theme::GOLD)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(
+            "  ·  Keys, models & providers",
+            Style::default().fg(theme::MUTED),
+        ),
     ]);
     let sub = Line::from(Span::styled(
         "Add a key here on any machine — stored locally (0600). Desktop-app keys are shared automatically.",
@@ -58,12 +66,21 @@ fn render_providers(f: &mut Frame, area: Rect, app: &App) {
 
         // The provider being edited becomes a masked input line.
         if editing == Some(provider) {
-            let n = app.key_draft.as_ref().map(|d| d.buffer.chars().count()).unwrap_or(0);
+            let n = app
+                .key_draft
+                .as_ref()
+                .map(|d| d.buffer.chars().count())
+                .unwrap_or(0);
             let bullets = "•".repeat(n.min(40));
             lines.push(Line::from(vec![
                 Span::styled(format!(" {cursor} "), Style::default().fg(theme::GOLD)),
                 Span::styled("⌨ ", Style::default().fg(theme::GOLD)),
-                Span::styled(format!("{:<10}", provider.display_name()), Style::default().fg(theme::TEXT).add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    format!("{:<10}", provider.display_name()),
+                    Style::default()
+                        .fg(theme::TEXT)
+                        .add_modifier(Modifier::BOLD),
+                ),
                 Span::styled("paste key ▶ ", Style::default().fg(theme::MUTED)),
                 Span::styled(bullets, Style::default().fg(theme::GOLD)),
                 Span::styled(format!(" ({n})"), Style::default().fg(theme::DIM)),
@@ -73,14 +90,25 @@ fn render_providers(f: &mut Frame, area: Rect, app: &App) {
 
         let source = config.key_source(provider);
         let configured = config.is_configured(provider);
-        let (mark, mark_color) = if configured { ("✓", agent.color) } else { ("·", theme::DIM) };
+        let (mark, mark_color) = if configured {
+            ("✓", agent.color)
+        } else {
+            ("·", theme::DIM)
+        };
 
         let empty = Vec::new();
         let avail = app.ctx.available.get(&provider).unwrap_or(&empty);
-        let model = resolve_model(provider, council, avail, config.selection(provider, council).as_deref());
+        let model = resolve_model(
+            provider,
+            council,
+            avail,
+            config.selection(provider, council).as_deref(),
+        );
 
         let name_style = if selected {
-            Style::default().fg(theme::TEXT).add_modifier(Modifier::BOLD)
+            Style::default()
+                .fg(theme::TEXT)
+                .add_modifier(Modifier::BOLD)
         } else if configured {
             Style::default().fg(theme::TEXT)
         } else {
@@ -91,9 +119,19 @@ fn render_providers(f: &mut Frame, area: Rect, app: &App) {
             Span::styled(format!(" {cursor} "), Style::default().fg(theme::GOLD)),
             Span::styled(format!("{mark} "), Style::default().fg(mark_color)),
             Span::styled(format!("{:<10}", provider.display_name()), name_style),
-            Span::styled(format!("{:<8}", agent.name), Style::default().fg(agent.color)),
             Span::styled(
-                format!("{:<22}", if configured { model } else { "no key".to_string() }),
+                format!("{:<8}", agent.name),
+                Style::default().fg(agent.color),
+            ),
+            Span::styled(
+                format!(
+                    "{:<22}",
+                    if configured {
+                        model
+                    } else {
+                        "no key".to_string()
+                    }
+                ),
                 Style::default().fg(if configured { theme::MUTED } else { theme::DIM }),
             ),
             Span::styled(source.label(), Style::default().fg(source_color(source))),
@@ -143,7 +181,9 @@ fn render_options(f: &mut Frame, area: Rect, app: &App) {
                 Span::styled("⌨ ", Style::default().fg(theme::GOLD)),
                 Span::styled(
                     format!("{:<17}", row.label()),
-                    Style::default().fg(theme::TEXT).add_modifier(Modifier::BOLD),
+                    Style::default()
+                        .fg(theme::TEXT)
+                        .add_modifier(Modifier::BOLD),
                 ),
                 Span::styled("▶ ", Style::default().fg(theme::MUTED)),
                 Span::styled(shown, Style::default().fg(theme::GOLD)),
@@ -177,7 +217,9 @@ fn render_options(f: &mut Frame, area: Rect, app: &App) {
             },
         };
         let name_style = if selected {
-            Style::default().fg(theme::TEXT).add_modifier(Modifier::BOLD)
+            Style::default()
+                .fg(theme::TEXT)
+                .add_modifier(Modifier::BOLD)
         } else {
             Style::default().fg(theme::TEXT)
         };
@@ -198,7 +240,11 @@ fn render_options(f: &mut Frame, area: Rect, app: &App) {
 fn render_council(f: &mut Frame, area: Rect, app: &App) {
     let config = &app.ctx.config;
     let lines = vec![
-        kv("Council tier", config.council_tier.label(), Color::Rgb(0x34, 0xD3, 0x99)),
+        kv(
+            "Council tier",
+            config.council_tier.label(),
+            Color::Rgb(0x34, 0xD3, 0x99),
+        ),
         kv("Utility tier", config.utility_tier.label(), theme::MUTED),
         Line::from(Span::styled(
             "  Models auto-resolve per provider; run `models --scan` to refresh from the API.",
@@ -215,7 +261,12 @@ fn render_council(f: &mut Frame, area: Rect, app: &App) {
 fn kv(label: &str, value: &str, value_color: Color) -> Line<'static> {
     Line::from(vec![
         Span::styled(format!("  {label:<16}"), Style::default().fg(theme::MUTED)),
-        Span::styled(value.to_string(), Style::default().fg(value_color).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            value.to_string(),
+            Style::default()
+                .fg(value_color)
+                .add_modifier(Modifier::BOLD),
+        ),
     ])
 }
 
@@ -227,7 +278,10 @@ fn render_footer(f: &mut Frame, area: Rect, app: &App) {
             key("Esc"),
             Span::styled(" cancel   ", Style::default().fg(theme::MUTED)),
             key("^U"),
-            Span::styled(" clear   ·   key is masked & stored 0600", Style::default().fg(theme::DIM)),
+            Span::styled(
+                " clear   ·   key is masked & stored 0600",
+                Style::default().fg(theme::DIM),
+            ),
         ])
     } else if app.option_draft.is_some() {
         Line::from(vec![
@@ -254,5 +308,10 @@ fn render_footer(f: &mut Frame, area: Rect, app: &App) {
 }
 
 fn key(label: &str) -> Span<'_> {
-    Span::styled(label, Style::default().fg(theme::GOLD).add_modifier(Modifier::BOLD))
+    Span::styled(
+        label,
+        Style::default()
+            .fg(theme::GOLD)
+            .add_modifier(Modifier::BOLD),
+    )
 }

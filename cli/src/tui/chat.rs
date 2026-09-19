@@ -27,8 +27,8 @@ pub fn render(f: &mut Frame, area: Rect, app: &mut App) {
 
     render_header(f, rows[0], debate);
 
-    let body = Layout::horizontal([Constraint::Percentage(72), Constraint::Percentage(28)])
-        .split(rows[1]);
+    let body =
+        Layout::horizontal([Constraint::Percentage(72), Constraint::Percentage(28)]).split(rows[1]);
     render_transcript(f, body[0], debate);
     match debate.pane {
         SidePane::Roster => render_roster(f, body[1], debate, frame),
@@ -44,9 +44,10 @@ pub(super) fn progress_gauge(turn: u32, max_turns: u32) -> String {
         return format!("turn {turn}");
     }
     const CELLS: u32 = 8;
-    let filled =
-        ((turn.min(max_turns) as u64 * CELLS as u64) / max_turns.max(1) as u64) as u32;
-    let bar: String = (0..CELLS).map(|i| if i < filled { '▰' } else { '▱' }).collect();
+    let filled = ((turn.min(max_turns) as u64 * CELLS as u64) / max_turns.max(1) as u64) as u32;
+    let bar: String = (0..CELLS)
+        .map(|i| if i < filled { '▰' } else { '▱' })
+        .collect();
     format!("turn {turn}/{max_turns} {bar}")
 }
 
@@ -63,27 +64,45 @@ fn round_label(turn: u32, max_turns: u32) -> String {
 fn render_header(f: &mut Frame, area: Rect, d: &Debate) {
     let chip = Span::styled(
         "  Socratic Council  ",
-        Style::default().fg(ratatui::style::Color::Black).bg(theme::GOLD).add_modifier(Modifier::BOLD),
+        Style::default()
+            .fg(ratatui::style::Color::Black)
+            .bg(theme::GOLD)
+            .add_modifier(Modifier::BOLD),
     );
     let topic = Span::styled(
-        format!("  {}", truncate(&d.topic, area.width.saturating_sub(24) as usize)),
+        format!(
+            "  {}",
+            truncate(&d.topic, area.width.saturating_sub(24) as usize)
+        ),
         Style::default().fg(theme::TEXT),
     );
     let mut meta_spans = vec![Span::styled(
-        format!("{} · {}", progress_gauge(d.turn_count, d.max_turns), round_label(d.turn_count, d.max_turns)),
+        format!(
+            "{} · {}",
+            progress_gauge(d.turn_count, d.max_turns),
+            round_label(d.turn_count, d.max_turns)
+        ),
         Style::default().fg(theme::MUTED),
     )];
     if let Some(cost) = &d.cost {
         let approx = if cost.all_priced { "" } else { "≥" };
         let style = if cost.note.is_some() {
-            Style::default().fg(theme::GOLD).add_modifier(Modifier::BOLD)
+            Style::default()
+                .fg(theme::GOLD)
+                .add_modifier(Modifier::BOLD)
         } else {
             Style::default().fg(theme::MUTED)
         };
-        meta_spans.push(Span::styled(format!(" · {approx}${:.4}", cost.total_usd), style));
+        meta_spans.push(Span::styled(
+            format!(" · {approx}${:.4}", cost.total_usd),
+            style,
+        ));
     }
     meta_spans.push(Span::styled(
-        format!(" · {} in / {} out tok · {}", d.usage.input, d.usage.output, d.status),
+        format!(
+            " · {} in / {} out tok · {}",
+            d.usage.input, d.usage.output, d.status
+        ),
         Style::default().fg(theme::MUTED),
     ));
     let para = Paragraph::new(vec![Line::from(vec![chip, topic]), Line::from(meta_spans)]).block(
@@ -137,7 +156,11 @@ fn render_transcript(f: &mut Frame, area: Rect, d: &mut Debate) {
         d.scroll
     };
 
-    let title = if d.read_only { " Transcript · read-only " } else { " Transcript " };
+    let title = if d.read_only {
+        " Transcript · read-only "
+    } else {
+        " Transcript "
+    };
     let para = Paragraph::new(lines)
         .wrap(Wrap { trim: false })
         .scroll((scroll, 0))
@@ -181,7 +204,9 @@ fn push_turn(lines: &mut Vec<Line<'static>>, t: &TurnView, show_thinking: bool, 
             for line in t.content.lines() {
                 lines.push(Line::from(Span::styled(
                     format!("  {line}"),
-                    Style::default().fg(theme::DIM).add_modifier(Modifier::ITALIC),
+                    Style::default()
+                        .fg(theme::DIM)
+                        .add_modifier(Modifier::ITALIC),
                 )));
             }
             lines.push(Line::from(""));
@@ -205,11 +230,20 @@ fn push_turn(lines: &mut Vec<Line<'static>>, t: &TurnView, show_thinking: bool, 
         TurnKind::Agent | TurnKind::Note => {}
     }
 
-    let name = if streaming { format!("{} ▌", t.name) } else { t.name.clone() };
-    let mut header =
-        vec![Span::styled(name, Style::default().fg(color).add_modifier(Modifier::BOLD))];
+    let name = if streaming {
+        format!("{} ▌", t.name)
+    } else {
+        t.name.clone()
+    };
+    let mut header = vec![Span::styled(
+        name,
+        Style::default().fg(color).add_modifier(Modifier::BOLD),
+    )];
     if !t.model.is_empty() {
-        header.push(Span::styled(format!("  {}", t.model), Style::default().fg(theme::DIM)));
+        header.push(Span::styled(
+            format!("  {}", t.model),
+            Style::default().fg(theme::DIM),
+        ));
     }
     lines.push(Line::from(header));
 
@@ -220,16 +254,24 @@ fn push_turn(lines: &mut Vec<Line<'static>>, t: &TurnView, show_thinking: bool, 
         let summary = if streaming && t.content.trim().is_empty() {
             "  ⌄ thinking…".to_string()
         } else if t.thinking_ms > 0 {
-            format!("  {caret} Thought for {:.1}s", t.thinking_ms as f64 / 1000.0)
+            format!(
+                "  {caret} Thought for {:.1}s",
+                t.thinking_ms as f64 / 1000.0
+            )
         } else {
             format!("  {caret} reasoning")
         };
-        lines.push(Line::from(Span::styled(summary, Style::default().fg(theme::MUTED))));
+        lines.push(Line::from(Span::styled(
+            summary,
+            Style::default().fg(theme::MUTED),
+        )));
         if show_thinking {
             for line in t.thinking.lines() {
                 lines.push(Line::from(Span::styled(
                     format!("    {line}"),
-                    Style::default().fg(theme::DIM).add_modifier(Modifier::ITALIC),
+                    Style::default()
+                        .fg(theme::DIM)
+                        .add_modifier(Modifier::ITALIC),
                 )));
             }
         }
@@ -255,7 +297,10 @@ fn push_turn(lines: &mut Vec<Line<'static>>, t: &TurnView, show_thinking: bool, 
         let caret = if show_thinking { "⌃" } else { "⌄" };
         let n = t.canvas.len();
         lines.push(Line::from(Span::styled(
-            format!("  {caret} ⌗ canvas · {n} section{}", if n == 1 { "" } else { "s" }),
+            format!(
+                "  {caret} ⌗ canvas · {n} section{}",
+                if n == 1 { "" } else { "s" }
+            ),
             Style::default().fg(color),
         )));
         if show_thinking {
@@ -286,22 +331,30 @@ fn push_conclusion(lines: &mut Vec<Line<'static>>, c: &ModeratorConclusion) {
     };
     lines.push(Line::from(Span::styled(
         "  ── Council Verdict ──────────────────────────────",
-        Style::default().fg(theme::GOLD).add_modifier(Modifier::BOLD),
+        Style::default()
+            .fg(theme::GOLD)
+            .add_modifier(Modifier::BOLD),
     )));
     lines.push(Line::from(vec![
         Span::styled(
             format!("  {} {}", c.status.glyph(), c.status.label()),
-            Style::default().fg(status_color).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(status_color)
+                .add_modifier(Modifier::BOLD),
         ),
         Span::styled(
             format!("    Score {}/10", c.score),
-            Style::default().fg(theme::GOLD).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(theme::GOLD)
+                .add_modifier(Modifier::BOLD),
         ),
     ]));
     for line in c.summary.lines() {
         lines.push(Line::from(Span::styled(
             format!("  {line}"),
-            Style::default().fg(theme::TEXT).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(theme::TEXT)
+                .add_modifier(Modifier::BOLD),
         )));
     }
     if !c.reason.trim().is_empty() {
@@ -320,18 +373,25 @@ fn push_vote_board(lines: &mut Vec<Line<'static>>, b: &VoteBoard) {
             "  ── End Vote · moved by {} ──  (needs {}/{} YES)",
             b.proposer, b.threshold, b.total
         ),
-        Style::default().fg(theme::GOLD).add_modifier(Modifier::BOLD),
+        Style::default()
+            .fg(theme::GOLD)
+            .add_modifier(Modifier::BOLD),
     )));
     for (name, choice, reason) in &b.votes {
         let mut spans = vec![
             Span::styled(format!("  {:<9}", name), Style::default().fg(theme::TEXT)),
             Span::styled(
                 format!("{:<8}", choice.label()),
-                Style::default().fg(vote_color(*choice)).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(vote_color(*choice))
+                    .add_modifier(Modifier::BOLD),
             ),
         ];
         if !reason.trim().is_empty() {
-            spans.push(Span::styled(truncate(reason, 56), Style::default().fg(theme::DIM)));
+            spans.push(Span::styled(
+                truncate(reason, 56),
+                Style::default().fg(theme::DIM),
+            ));
         }
         lines.push(Line::from(spans));
     }
@@ -343,7 +403,10 @@ fn push_vote_board(lines: &mut Vec<Line<'static>>, b: &VoteBoard) {
         };
         lines.push(Line::from(vec![
             Span::styled("  Result: ", Style::default().fg(theme::MUTED)),
-            Span::styled(label, Style::default().fg(color).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                label,
+                Style::default().fg(color).add_modifier(Modifier::BOLD),
+            ),
             Span::styled(
                 format!("  — YES {} · NO {} · ABSTAIN {}", r.yes, r.no, r.abstain),
                 Style::default().fg(theme::MUTED),
@@ -356,8 +419,13 @@ fn push_vote_board(lines: &mut Vec<Line<'static>>, b: &VoteBoard) {
 /// The closing peer-evaluation scorecard: a ranked heatmap + sharpest critiques.
 fn push_scorecard(lines: &mut Vec<Line<'static>>, round: &PeerEvalRound) {
     lines.push(Line::from(Span::styled(
-        format!("  ── Peer Review Scorecard · {} critiques ──", round.critiques.len()),
-        Style::default().fg(theme::GOLD).add_modifier(Modifier::BOLD),
+        format!(
+            "  ── Peer Review Scorecard · {} critiques ──",
+            round.critiques.len()
+        ),
+        Style::default()
+            .fg(theme::GOLD)
+            .add_modifier(Modifier::BOLD),
     )));
     lines.push(Line::from(Span::styled(
         "   #  Agent       rig  evi  nov  civ  top    avg",
@@ -368,15 +436,28 @@ fn push_scorecard(lines: &mut Vec<Line<'static>>, round: &PeerEvalRound) {
             Span::styled(format!("  #{} ", s.rank), Style::default().fg(theme::GOLD)),
             Span::styled(
                 format!("{:<9} ", s.name),
-                Style::default().fg(theme::speaker_color(&s.agent_id)).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(theme::speaker_color(&s.agent_id))
+                    .add_modifier(Modifier::BOLD),
             ),
         ];
-        for v in [s.avg.rigor, s.avg.evidence, s.avg.novelty, s.avg.civility, s.avg.on_topic] {
-            spans.push(Span::styled(format!("{v:>3}  "), Style::default().fg(score_color(v))));
+        for v in [
+            s.avg.rigor,
+            s.avg.evidence,
+            s.avg.novelty,
+            s.avg.civility,
+            s.avg.on_topic,
+        ] {
+            spans.push(Span::styled(
+                format!("{v:>3}  "),
+                Style::default().fg(score_color(v)),
+            ));
         }
         spans.push(Span::styled(
             format!("  {:>3}", s.overall),
-            Style::default().fg(score_color(s.overall)).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(score_color(s.overall))
+                .add_modifier(Modifier::BOLD),
         ));
         lines.push(Line::from(spans));
     }
@@ -401,13 +482,17 @@ fn push_scorecard(lines: &mut Vec<Line<'static>>, round: &PeerEvalRound) {
 fn push_research(lines: &mut Vec<Line<'static>>, r: &DeepResearchReport) {
     lines.push(Line::from(Span::styled(
         "  ══ Deep Research Report ══",
-        Style::default().fg(theme::GOLD).add_modifier(Modifier::BOLD),
+        Style::default()
+            .fg(theme::GOLD)
+            .add_modifier(Modifier::BOLD),
     )));
     if !r.title.is_empty() {
         lines.push(Line::from(vec![
             Span::styled(
                 format!("  {}", r.title),
-                Style::default().fg(theme::TEXT).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(theme::TEXT)
+                    .add_modifier(Modifier::BOLD),
             ),
             Span::styled(
                 format!("   [{}]", r.confidence.label()),
@@ -425,7 +510,9 @@ fn push_research(lines: &mut Vec<Line<'static>>, r: &DeepResearchReport) {
         lines.push(Line::from(vec![
             Span::styled(
                 format!("  ▸ {}", sec.heading),
-                Style::default().fg(theme::GOLD).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(theme::GOLD)
+                    .add_modifier(Modifier::BOLD),
             ),
             Span::styled(
                 format!("  [{}]", sec.confidence.label()),
@@ -470,7 +557,12 @@ fn vote_color(c: VoteChoice) -> Color {
 
 fn labelled(label: &str, value: &str) -> Line<'static> {
     Line::from(vec![
-        Span::styled(label.to_string(), Style::default().fg(theme::MUTED).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            label.to_string(),
+            Style::default()
+                .fg(theme::MUTED)
+                .add_modifier(Modifier::BOLD),
+        ),
         Span::styled(value.to_string(), Style::default().fg(theme::MUTED)),
     ])
 }
@@ -506,7 +598,10 @@ fn render_roster(f: &mut Frame, area: Rect, d: &Debate, frame: u64) {
                     Style::default().fg(theme::DIM),
                 ));
             } else {
-                spans.push(Span::styled(a.provider.slug(), Style::default().fg(theme::DIM)));
+                spans.push(Span::styled(
+                    a.provider.slug(),
+                    Style::default().fg(theme::DIM),
+                ));
             }
             ListItem::new(Line::from(spans))
         })
@@ -524,7 +619,11 @@ fn render_roster(f: &mut Frame, area: Rect, d: &Debate, frame: u64) {
 /// The Tensions pane — the conflict graph as a ranked pair list.
 fn render_tensions(f: &mut Frame, area: Rect, d: &Debate) {
     let mut pairs: Vec<&PairScore> = d.conflicts.iter().collect();
-    pairs.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+    pairs.sort_by(|a, b| {
+        b.score
+            .partial_cmp(&a.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
     let hot = pairs.iter().filter(|p| p.score >= 0.75).count();
 
     let mut lines: Vec<Line> = Vec::new();
@@ -555,8 +654,7 @@ fn render_tensions(f: &mut Frame, area: Rect, d: &Debate) {
         ]));
         let cells = 10usize;
         let filled = ((p.score * cells as f32).round() as usize).min(cells);
-        let bar: String =
-            "▮".repeat(filled) + &"▯".repeat(cells - filled);
+        let bar: String = "▮".repeat(filled) + &"▯".repeat(cells - filled);
         lines.push(Line::from(vec![
             Span::styled(format!("  {:.2} ", p.score), Style::default().fg(color)),
             Span::styled(bar, Style::default().fg(color)),
@@ -594,7 +692,11 @@ fn render_costs(f: &mut Frame, area: Rect, d: &Debate) {
                     ),
                 ]));
                 lines.push(Line::from(Span::styled(
-                    format!("   {} in · {} out", compact(row.input), compact(row.output + row.reasoning)),
+                    format!(
+                        "   {} in · {} out",
+                        compact(row.input),
+                        compact(row.output + row.reasoning)
+                    ),
                     Style::default().fg(theme::DIM),
                 )));
             }
@@ -609,10 +711,21 @@ fn render_costs(f: &mut Frame, area: Rect, d: &Debate) {
                 )));
             }
             lines.push(Line::from(vec![
-                Span::styled(" total      ", Style::default().fg(theme::TEXT).add_modifier(Modifier::BOLD)),
                 Span::styled(
-                    format!("{}${:.4}", if snap.all_priced { "" } else { "≥" }, snap.total_usd),
-                    Style::default().fg(theme::GOLD).add_modifier(Modifier::BOLD),
+                    " total      ",
+                    Style::default()
+                        .fg(theme::TEXT)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    format!(
+                        "{}${:.4}",
+                        if snap.all_priced { "" } else { "≥" },
+                        snap.total_usd
+                    ),
+                    Style::default()
+                        .fg(theme::GOLD)
+                        .add_modifier(Modifier::BOLD),
                 ),
             ]));
             if snap.session_cap > 0.0 {
@@ -623,7 +736,10 @@ fn render_costs(f: &mut Frame, area: Rect, d: &Debate) {
             }
             if snap.daily_cap > 0.0 {
                 lines.push(Line::from(Span::styled(
-                    format!(" today      ${:.2} of ${:.2}", snap.daily_usd, snap.daily_cap),
+                    format!(
+                        " today      ${:.2} of ${:.2}",
+                        snap.daily_usd, snap.daily_cap
+                    ),
                     Style::default().fg(theme::MUTED),
                 )));
             }
@@ -673,13 +789,21 @@ fn render_footer(f: &mut Frame, area: Rect, d: &Debate) {
         Span::styled(" follow", Style::default().fg(theme::MUTED)),
     ];
     if d.is_live() {
-        spans.push(Span::styled("  · debating…", Style::default().fg(theme::GOLD)));
+        spans.push(Span::styled(
+            "  · debating…",
+            Style::default().fg(theme::GOLD),
+        ));
     }
     f.render_widget(Paragraph::new(Line::from(spans)), area);
 }
 
 fn key(label: &str) -> Span<'_> {
-    Span::styled(label, Style::default().fg(theme::GOLD).add_modifier(Modifier::BOLD))
+    Span::styled(
+        label,
+        Style::default()
+            .fg(theme::GOLD)
+            .add_modifier(Modifier::BOLD),
+    )
 }
 
 fn truncate(s: &str, max: usize) -> String {

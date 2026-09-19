@@ -166,14 +166,14 @@ low reasoning, then the engine falls back to defaults and says so.
 
 Registry, all exposed through native function calling:
 
-| Tool | Args | Scope |
-| --- | --- | --- |
-| `read_attachment` | name, optional byte range | session attachments |
-| `search_attachments` | query | session attachments |
-| `web_search` | query | keyless DDG, Bing tier, allowlisted |
-| `verify_claim` | claim | web search plus stance heuristic |
-| `run_command` | command, timeout | sandboxed workspace, no network |
-| `read_file` / `write_file` | path, content | workspace only |
+| Tool                       | Args                      | Scope                               |
+| -------------------------- | ------------------------- | ----------------------------------- |
+| `read_attachment`          | name, optional byte range | session attachments                 |
+| `search_attachments`       | query                     | session attachments                 |
+| `web_search`               | query                     | keyless DDG, Bing tier, allowlisted |
+| `verify_claim`             | claim                     | web search plus stance heuristic    |
+| `run_command`              | command, timeout          | sandboxed workspace, no network     |
+| `read_file` / `write_file` | path, content             | workspace only                      |
 
 Policy per session: enabled tools, shell on or off, sandbox mode, timeout
 and output caps, workspace path, `max_tool_calls_per_turn` (default 2),
@@ -220,7 +220,7 @@ fenced as untrusted data. Elsewhere the tool refuses unless
 ## 8. Seats, models and Settings
 
 - `Seat { id, name, provider, model: Auto(tier) | Id(String), reasoning:
-  Option<ReasoningTier> }`. The default roster is the eight characters on
+Option<ReasoningTier> }`. The default roster is the eight characters on
   their provider's Auto flagship. Presets pick the first N by class.
 - CLI: `[[seats]]` in `config.toml`, `--seats openai:gpt-6-astra,anthropic:auto,...`,
   `models --scan` unchanged and now the source for the roster editor.

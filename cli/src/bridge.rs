@@ -107,7 +107,10 @@ impl DesktopBridge {
     /// The API key the desktop app stored for `provider`, decrypted from its
     /// file vault. No keychain, no prompt — resolved once at load.
     pub fn api_key(&self, provider: Provider) -> Option<&str> {
-        self.keys.get(provider.slug()).map(|s| s.as_str()).filter(|s| !s.trim().is_empty())
+        self.keys
+            .get(provider.slug())
+            .map(|s| s.as_str())
+            .filter(|s| !s.trim().is_empty())
     }
 
     /// Whether the app has a usable key for `provider` — i.e. one the bridge
@@ -280,12 +283,17 @@ mod imp {
                         "secret {} present enc1={} decrypt_ok={}",
                         provider.slug(),
                         enc,
-                        decrypted.as_ref().map(|s| !s.trim().is_empty()).unwrap_or(false)
+                        decrypted
+                            .as_ref()
+                            .map(|s| !s.trim().is_empty())
+                            .unwrap_or(false)
                     );
                     if let Some(plain) = decrypted {
                         let trimmed = plain.trim();
                         if !trimmed.is_empty() {
-                            bridge.keys.insert(provider.slug().to_string(), trimmed.to_string());
+                            bridge
+                                .keys
+                                .insert(provider.slug().to_string(), trimmed.to_string());
                         }
                     }
                 } else {
@@ -307,7 +315,9 @@ mod imp {
                 match decrypt_value(dek.as_ref(), &raw) {
                     Some(json) => {
                         bridge.sessions = parse_session_index(&json);
-                        bridge.sessions.sort_by_key(|s| std::cmp::Reverse(s.updated_at));
+                        bridge
+                            .sessions
+                            .sort_by_key(|s| std::cmp::Reverse(s.updated_at));
                     }
                     None => bridge.index_decrypt_failed = true,
                 }
@@ -360,13 +370,21 @@ mod imp {
                 if content.trim().is_empty() {
                     continue;
                 }
-                let agent_id = m.get("agentId").and_then(|x| x.as_str()).unwrap_or("system").to_string();
+                let agent_id = m
+                    .get("agentId")
+                    .and_then(|x| x.as_str())
+                    .unwrap_or("system")
+                    .to_string();
                 let name = m
                     .get("displayName")
                     .and_then(|x| x.as_str())
                     .map(|s| s.to_string())
                     .unwrap_or_else(|| agent_display_name(&agent_id).to_string());
-                out.push(TranscriptMessage { agent_id, name, content: content.to_string() });
+                out.push(TranscriptMessage {
+                    agent_id,
+                    name,
+                    content: content.to_string(),
+                });
             }
             Some(out)
         }
@@ -488,14 +506,16 @@ mod imp {
 
     fn table_present(conn: &Connection) -> bool {
         // Prepare (not query) so an empty ItemTable still counts as present.
-        conn.prepare("SELECT value FROM ItemTable WHERE key = ?1").is_ok()
+        conn.prepare("SELECT value FROM ItemTable WHERE key = ?1")
+            .is_ok()
     }
 
     /// Fetch one localStorage row, decoding WebKit's BLOB value (UTF-16LE or UTF-8).
     fn get_item(conn: &Connection, key: &str) -> Option<String> {
-        let mut stmt = conn.prepare("SELECT value FROM ItemTable WHERE key = ?1").ok()?;
-        let value: rusqlite::types::Value =
-            stmt.query_row([key], |row| row.get(0)).ok()?;
+        let mut stmt = conn
+            .prepare("SELECT value FROM ItemTable WHERE key = ?1")
+            .ok()?;
+        let value: rusqlite::types::Value = stmt.query_row([key], |row| row.get(0)).ok()?;
         match value {
             rusqlite::types::Value::Text(s) => Some(s),
             rusqlite::types::Value::Blob(b) => Some(decode_webkit_blob(&b)),
@@ -511,8 +531,10 @@ mod imp {
             && bytes.len() % 2 == 0
             && bytes.iter().skip(1).step_by(2).any(|&b| b == 0);
         if looks_utf16 {
-            let units: Vec<u16> =
-                bytes.chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect();
+            let units: Vec<u16> = bytes
+                .chunks_exact(2)
+                .map(|c| u16::from_le_bytes([c[0], c[1]]))
+                .collect();
             String::from_utf16_lossy(&units)
         } else {
             String::from_utf8_lossy(bytes).into_owned()
@@ -543,10 +565,18 @@ mod imp {
             Ok(v) => v,
             Err(_) => return,
         };
-        if let Some(t) = value.get("councilTier").and_then(|x| x.as_str()).and_then(parse_tier) {
+        if let Some(t) = value
+            .get("councilTier")
+            .and_then(|x| x.as_str())
+            .and_then(parse_tier)
+        {
             bridge.council_tier = Some(t);
         }
-        if let Some(t) = value.get("utilityTier").and_then(|x| x.as_str()).and_then(parse_tier) {
+        if let Some(t) = value
+            .get("utilityTier")
+            .and_then(|x| x.as_str())
+            .and_then(parse_tier)
+        {
             bridge.utility_tier = Some(t);
         }
         // Credentials: pick up any legacy plaintext key stored inline in older
@@ -566,11 +596,18 @@ mod imp {
             for (slug, tiers) in selection {
                 if let Some(obj) = tiers.as_object() {
                     let pick = |k: &str| {
-                        obj.get(k).and_then(|x| x.as_str()).unwrap_or("auto").to_string()
+                        obj.get(k)
+                            .and_then(|x| x.as_str())
+                            .unwrap_or("auto")
+                            .to_string()
                     };
                     bridge.model_selection.insert(
                         slug.clone(),
-                        TierSelection { low: pick("low"), medium: pick("medium"), high: pick("high") },
+                        TierSelection {
+                            low: pick("low"),
+                            medium: pick("medium"),
+                            high: pick("high"),
+                        },
                     );
                 }
             }
@@ -583,13 +620,19 @@ mod imp {
     /// Map the app's discussion-length preset to a turn cap. `0`/marathon →
     /// `None` (no cap), matching `getMaxTurns()`.
     fn derive_max_turns(prefs: &serde_json::Value) -> Option<u32> {
-        let length = prefs.get("defaultLength").and_then(|x| x.as_str()).unwrap_or("standard");
+        let length = prefs
+            .get("defaultLength")
+            .and_then(|x| x.as_str())
+            .unwrap_or("standard");
         let turns = match length {
             "quick" => 24,
             "standard" => 40,
             "extended" => 80,
             "marathon" => 0,
-            "custom" => prefs.get("customTurns").and_then(|x| x.as_u64()).unwrap_or(0) as u32,
+            "custom" => prefs
+                .get("customTurns")
+                .and_then(|x| x.as_u64())
+                .unwrap_or(0) as u32,
             _ => 40,
         };
         if turns == 0 {
@@ -622,10 +665,19 @@ mod imp {
                         .filter(|s| !s.is_empty())
                         .unwrap_or("Untitled session")
                         .to_string(),
-                    topic: e.get("topic").and_then(|x| x.as_str()).unwrap_or("").to_string(),
-                    status: e.get("status").and_then(|x| x.as_str()).unwrap_or("draft").to_string(),
+                    topic: e
+                        .get("topic")
+                        .and_then(|x| x.as_str())
+                        .unwrap_or("")
+                        .to_string(),
+                    status: e
+                        .get("status")
+                        .and_then(|x| x.as_str())
+                        .unwrap_or("draft")
+                        .to_string(),
                     current_turn: e.get("currentTurn").and_then(|x| x.as_u64()).unwrap_or(0) as u32,
-                    message_count: e.get("messageCount").and_then(|x| x.as_u64()).unwrap_or(0) as u32,
+                    message_count: e.get("messageCount").and_then(|x| x.as_u64()).unwrap_or(0)
+                        as u32,
                     updated_at: e.get("updatedAt").and_then(|x| x.as_i64()).unwrap_or(0),
                     archived: e.get("archivedAt").map(|x| !x.is_null()).unwrap_or(false),
                 })
@@ -661,7 +713,10 @@ mod imp {
         fn enc1_round_trips() {
             let dek = [3u8; 32];
             let env = enc1(&dek, "sk-secret-key-value");
-            assert_eq!(decrypt_value(Some(&dek), &env).as_deref(), Some("sk-secret-key-value"));
+            assert_eq!(
+                decrypt_value(Some(&dek), &env).as_deref(),
+                Some("sk-secret-key-value")
+            );
         }
 
         #[test]
@@ -673,7 +728,10 @@ mod imp {
         #[test]
         fn legacy_plaintext_passes_through() {
             // Non-enveloped value needs no DEK.
-            assert_eq!(decrypt_value(None, "sk-plaintext").as_deref(), Some("sk-plaintext"));
+            assert_eq!(
+                decrypt_value(None, "sk-plaintext").as_deref(),
+                Some("sk-plaintext")
+            );
         }
 
         #[test]
@@ -721,7 +779,10 @@ mod imp {
             parse_config(raw, &mut bridge);
             assert_eq!(bridge.council_tier, Some(ReasoningTier::Medium));
             assert_eq!(bridge.max_turns, Some(24));
-            assert_eq!(bridge.model_selection.get("openai").unwrap().medium, "gpt-x");
+            assert_eq!(
+                bridge.model_selection.get("openai").unwrap().medium,
+                "gpt-x"
+            );
         }
 
         #[test]
@@ -741,10 +802,16 @@ mod imp {
         #[test]
         fn unlock_only_offered_on_real_decrypt_failure() {
             let mut bridge = DesktopBridge::default();
-            assert!(!bridge.has_sessions_to_unlock(), "no index → nothing to unlock");
+            assert!(
+                !bridge.has_sessions_to_unlock(),
+                "no index → nothing to unlock"
+            );
 
             bridge.index_decrypt_failed = true;
-            assert!(bridge.has_sessions_to_unlock(), "locked index → offer unlock");
+            assert!(
+                bridge.has_sessions_to_unlock(),
+                "locked index → offer unlock"
+            );
 
             // A decrypted-but-empty index must NOT advertise an unlock.
             bridge.index_decrypt_failed = false;

@@ -40,7 +40,12 @@ pub fn guard_outbound_query(query: &str, attachments: &[Attachment]) -> Result<S
     let needle: Vec<char> = trimmed.to_lowercase().chars().collect();
     if !attachments.is_empty() && needle.len() >= ATTACHMENT_OVERLAP_CHARS {
         for a in attachments {
-            let hay = a.text.to_lowercase().split_whitespace().collect::<Vec<_>>().join(" ");
+            let hay = a
+                .text
+                .to_lowercase()
+                .split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" ");
             let mut i = 0;
             while i + ATTACHMENT_OVERLAP_CHARS <= needle.len() {
                 let window: String = needle[i..i + ATTACHMENT_OVERLAP_CHARS].iter().collect();
@@ -81,7 +86,8 @@ pub fn neutralize_directives(text: &str) -> String {
         Regex::new(r"(?i)@(tool|canvas|end|done|vote|quote|react|handoff)(\s*\()").unwrap()
     });
     let t = TAGS.get_or_init(|| {
-        Regex::new(r"(?i)</?(think|thinking|tool_call|tool_use|function_call|tool_result)>").unwrap()
+        Regex::new(r"(?i)</?(think|thinking|tool_call|tool_use|function_call|tool_result)>")
+            .unwrap()
     });
     let out = d.replace_all(text, "\u{FF20}$1$2");
     t.replace_all(&out, "").into_owned()
@@ -135,10 +141,16 @@ pub fn extract_tool_calls(text: &str) -> Vec<ToolCall> {
 /// Parse `name, {json-args}` (name optionally quoted).
 fn parse_tool_inner(inner: &str) -> Option<ToolCall> {
     let comma = inner.find(',')?;
-    let name = inner[..comma].trim().trim_matches(['"', '\'']).to_ascii_lowercase();
+    let name = inner[..comma]
+        .trim()
+        .trim_matches(['"', '\''])
+        .to_ascii_lowercase();
     if !matches!(
         name.as_str(),
-        "oracle.web_search" | "oracle.search" | "oracle.file_search" | "oracle.verify"
+        "oracle.web_search"
+            | "oracle.search"
+            | "oracle.file_search"
+            | "oracle.verify"
             | "oracle.cite"
     ) {
         return None;
@@ -243,7 +255,13 @@ fn normalize_text(text: &str) -> String {
     let lowered: String = text
         .to_lowercase()
         .chars()
-        .map(|c| if c.is_ascii_alphanumeric() || c.is_whitespace() { c } else { ' ' })
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c.is_whitespace() {
+                c
+            } else {
+                ' '
+            }
+        })
         .collect();
     lowered.split_whitespace().collect::<Vec<_>>().join(" ")
 }
@@ -276,9 +294,16 @@ fn score_evidence(claim: &str, result: &SearchResultItem) -> (f64, f64) {
     let matched = if terms.is_empty() {
         0
     } else {
-        terms.iter().filter(|t| haystack.contains(t.as_str())).count()
+        terms
+            .iter()
+            .filter(|t| haystack.contains(t.as_str()))
+            .count()
     };
-    let coverage = if terms.is_empty() { 0.0 } else { matched as f64 / terms.len() as f64 };
+    let coverage = if terms.is_empty() {
+        0.0
+    } else {
+        matched as f64 / terms.len() as f64
+    };
     let exact = haystack.contains(&normalized_claim);
     let base = if exact { 1.0 } else { coverage };
     let claim_negative = has_negation(&normalized_claim);
@@ -316,8 +341,11 @@ pub fn assess_verification(claim: &str, evidence: &[SearchResultItem]) -> (&'sta
     }
     let strongest = best_support.max(best_contradiction);
     if strongest < 0.55 || (best_support - best_contradiction).abs() < 0.15 {
-        let confidence =
-            if evidence.is_empty() { 0.1 } else { (0.25 + strongest * 0.4).min(0.7) };
+        let confidence = if evidence.is_empty() {
+            0.1
+        } else {
+            (0.25 + strongest * 0.4).min(0.7)
+        };
         return ("uncertain", confidence);
     }
     if best_support > best_contradiction {
@@ -349,23 +377,36 @@ mod tests {
     use super::*;
 
     fn att(name: &str, text: &str) -> Attachment {
-        Attachment { name: name.into(), text: text.into() }
+        Attachment {
+            name: name.into(),
+            text: text.into(),
+        }
     }
 
     #[test]
     fn guard_refuses_long_secret_and_attachment_quoting_queries() {
         let long = "x ".repeat(150);
-        assert!(guard_outbound_query(&long, &[]).unwrap_err().starts_with("QUERY_TOO_LONG"));
+        assert!(guard_outbound_query(&long, &[])
+            .unwrap_err()
+            .starts_with("QUERY_TOO_LONG"));
         let jwt = "find eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJtaW5pbWF4LXVzZXIifQ.abcdefghijklmnopqrstuvwxyz0123 pricing";
-        assert!(guard_outbound_query(jwt, &[]).unwrap_err().starts_with("QUERY_CONTAINS_SECRET"));
+        assert!(guard_outbound_query(jwt, &[])
+            .unwrap_err()
+            .starts_with("QUERY_CONTAINS_SECRET"));
         assert!(guard_outbound_query("what is sk-1234567890abcdefXYZ", &[]).is_err());
-        let doc = att("plan.txt", "The rollout begins in the northern region on the fourth of May and ends late June.");
+        let doc = att(
+            "plan.txt",
+            "The rollout begins in the northern region on the fourth of May and ends late June.",
+        );
         let quoting = "the rollout begins in the northern region on the fourth of may";
         assert!(guard_outbound_query(quoting, std::slice::from_ref(&doc))
             .unwrap_err()
             .starts_with("QUERY_CONTAINS_ATTACHMENT_TEXT"));
         // A short topic phrase about the same subject is fine.
-        assert_eq!(guard_outbound_query("  rollout  timeline northern region ", &[doc]).unwrap(), "rollout timeline northern region");
+        assert_eq!(
+            guard_outbound_query("  rollout  timeline northern region ", &[doc]).unwrap(),
+            "rollout timeline northern region"
+        );
     }
 
     #[test]
@@ -386,7 +427,11 @@ mod tests {
     }
 
     fn hit(title: &str, snippet: &str) -> SearchResultItem {
-        SearchResultItem { title: title.into(), url: "https://e.com".into(), snippet: snippet.into() }
+        SearchResultItem {
+            title: title.into(),
+            url: "https://e.com".into(),
+            snippet: snippet.into(),
+        }
     }
 
     #[test]
@@ -420,7 +465,10 @@ mod tests {
     fn verify_grades_supporting_evidence_true() {
         let claim = "The Rust compiler enforces memory safety";
         let evidence = vec![
-            hit("Rust compiler", "The Rust compiler enforces memory safety at compile time."),
+            hit(
+                "Rust compiler",
+                "The Rust compiler enforces memory safety at compile time.",
+            ),
             hit("Unrelated", "Gardening tips for spring."),
         ];
         let (verdict, confidence) = assess_verification(claim, &evidence);
@@ -442,8 +490,7 @@ mod tests {
 
     #[test]
     fn verify_is_uncertain_without_signal() {
-        let (verdict, confidence) =
-            assess_verification("Quarks are made of smaller things", &[]);
+        let (verdict, confidence) = assess_verification("Quarks are made of smaller things", &[]);
         assert_eq!(verdict, "uncertain");
         assert!((confidence - 0.1).abs() < 1e-9);
         let (verdict, _) = assess_verification(

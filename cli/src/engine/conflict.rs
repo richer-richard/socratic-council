@@ -112,8 +112,8 @@ const STOPWORDS: &[&str] = &[
     "this", "that", "these", "those", "there", "their", "about", "because", "would", "should",
     "could", "maybe", "really", "very", "just", "also", "with", "without", "into", "from", "have",
     "has", "had", "will", "then", "than", "when", "where", "what", "which", "who", "whom", "your",
-    "you're", "yours", "ours", "they", "them", "it's", "its", "i'm", "im", "dont", "can't",
-    "cant", "doesnt", "didnt", "isnt", "arent",
+    "you're", "yours", "ours", "they", "them", "it's", "its", "i'm", "im", "dont", "can't", "cant",
+    "doesnt", "didnt", "isnt", "arent",
 ];
 
 fn is_word_char(c: char) -> bool {
@@ -126,9 +126,19 @@ fn word_boundary_contains(lower: &str, needle: &str) -> bool {
     let mut start = 0;
     while let Some(pos) = lower[start..].find(needle) {
         let at = start + pos;
-        let before_ok = at == 0 || !lower[..at].chars().next_back().map(is_word_char).unwrap_or(false);
+        let before_ok = at == 0
+            || !lower[..at]
+                .chars()
+                .next_back()
+                .map(is_word_char)
+                .unwrap_or(false);
         let end = at + needle.len();
-        let after_ok = end >= lower.len() || !lower[end..].chars().next().map(is_word_char).unwrap_or(false);
+        let after_ok = end >= lower.len()
+            || !lower[end..]
+                .chars()
+                .next()
+                .map(is_word_char)
+                .unwrap_or(false);
         if before_ok && after_ok {
             return true;
         }
@@ -181,13 +191,16 @@ fn mentions_name(content: &str, name: &str) -> bool {
 /// `^\s*{Name}\s*[,:-]\s+` (case-insensitive).
 fn addresses_at_start(content: &str, name: &str) -> bool {
     let trimmed = content.trim_start();
-    let Some(head) = trimmed.get(..name.len()) else { return false };
+    let Some(head) = trimmed.get(..name.len()) else {
+        return false;
+    };
     if !head.eq_ignore_ascii_case(name) {
         return false;
     }
     let rest = trimmed[name.len()..].trim_start_matches(' ');
     let mut chars = rest.chars();
-    matches!(chars.next(), Some(',' | ':' | '-')) && matches!(chars.next(), Some(c) if c.is_whitespace())
+    matches!(chars.next(), Some(',' | ':' | '-'))
+        && matches!(chars.next(), Some(c) if c.is_whitespace())
 }
 
 fn token_set(content: &str) -> HashSet<String> {
@@ -222,7 +235,11 @@ fn token_similarity(a: &str, b: &str) -> TokenSimilarity {
         size_a: set_a.len(),
         size_b: set_b.len(),
         overlap,
-        jaccard: if union > 0 { overlap as f32 / union as f32 } else { 0.0 },
+        jaccard: if union > 0 {
+            overlap as f32 / union as f32
+        } else {
+            0.0
+        },
     }
 }
 
@@ -251,7 +268,10 @@ pub struct ConflictDetector {
 
 impl Default for ConflictDetector {
     fn default() -> Self {
-        Self { threshold: CONFLICT_THRESHOLD, window_size: WINDOW_SIZE }
+        Self {
+            threshold: CONFLICT_THRESHOLD,
+            window_size: WINDOW_SIZE,
+        }
     }
 }
 
@@ -283,10 +303,19 @@ impl ConflictDetector {
         (pairs, strongest)
     }
 
-    fn score_pair(&self, turns: &[Turn], a_id: &str, a_name: &str, b_id: &str, b_name: &str) -> f32 {
+    fn score_pair(
+        &self,
+        turns: &[Turn],
+        a_id: &str,
+        a_name: &str,
+        b_id: &str,
+        b_name: &str,
+    ) -> f32 {
         let recent: Vec<&Turn> = {
-            let all: Vec<&Turn> =
-                turns.iter().filter(|t| t.agent_id == a_id || t.agent_id == b_id).collect();
+            let all: Vec<&Turn> = turns
+                .iter()
+                .filter(|t| t.agent_id == a_id || t.agent_id == b_id)
+                .collect();
             let start = all.len().saturating_sub(self.window_size);
             all[start..].to_vec()
         };
@@ -331,8 +360,7 @@ impl ConflictDetector {
                             && sim.overlap >= 3
                             && sim.jaccard >= 0.12
                         {
-                            adjusted =
-                                (adjusted + if base > 0.0 { 10.0 } else { 14.0 }).min(100.0);
+                            adjusted = (adjusted + if base > 0.0 { 10.0 } else { 14.0 }).min(100.0);
                         }
                     }
                 }
@@ -364,7 +392,11 @@ impl ConflictDetector {
             weighted_sum += s * w;
             weight_total += w;
         }
-        let weighted_mean = if weight_total > 0.0 { weighted_sum / weight_total } else { 0.0 };
+        let weighted_mean = if weight_total > 0.0 {
+            weighted_sum / weight_total
+        } else {
+            0.0
+        };
 
         let mut base_score = weighted_mean * 0.7 + recent_peak * 0.3;
 
@@ -375,7 +407,10 @@ impl ConflictDetector {
         let cooldown_penalty = ((16.0 - tail_mean).max(0.0) * 0.6).min(10.0);
         base_score = (base_score - cooldown_penalty).max(0.0);
 
-        let alternations = recent.windows(2).filter(|w| w[0].agent_id != w[1].agent_id).count();
+        let alternations = recent
+            .windows(2)
+            .filter(|w| w[0].agent_id != w[1].agent_id)
+            .count();
         let alternation_bonus = ((alternations as f32) * 6.0).min(30.0);
 
         let mentions = recent
@@ -394,8 +429,11 @@ impl ConflictDetector {
         // Sustained tension: several turns with meaningful signals, gated on a
         // reasonably high peak.
         let signal_turns = adjusted_scores.iter().filter(|s| **s >= 15.0).count() as f32;
-        let sustained_bonus =
-            if recent_peak >= 28.0 { ((signal_turns - 1.0).max(0.0) * 4.0).min(20.0) } else { 0.0 };
+        let sustained_bonus = if recent_peak >= 28.0 {
+            ((signal_turns - 1.0).max(0.0) * 4.0).min(20.0)
+        } else {
+            0.0
+        };
 
         (base_score + engagement_bonus + directed_bonus + reciprocity_bonus + sustained_bonus)
             .min(100.0)
@@ -403,7 +441,10 @@ impl ConflictDetector {
 
     /// Hot pairs (raw score ≥ threshold), from normalized pair scores.
     pub fn hot_count(&self, pairs: &[PairScore]) -> usize {
-        pairs.iter().filter(|p| p.score * 100.0 >= self.threshold).count()
+        pairs
+            .iter()
+            .filter(|p| p.score * 100.0 >= self.threshold)
+            .count()
     }
 }
 
@@ -422,7 +463,13 @@ Quoted disagreement about THIRD parties is NOT a contradiction between these two
 Respond with exactly one JSON object on a single line, no prose, no code fences:\n\
 {\"verdict\":\"contradicts|entails|neutral\",\"confidence\":0.0-1.0}";
 
-pub fn nli_user_prompt(topic: &str, a_name: &str, a_msg: &str, b_name: &str, b_msg: &str) -> String {
+pub fn nli_user_prompt(
+    topic: &str,
+    a_name: &str,
+    a_msg: &str,
+    b_name: &str,
+    b_msg: &str,
+) -> String {
     format!(
         "Topic: {topic}\n\n{a_name} (first speaker): {}\n\n{b_name} (second speaker): {}\n\n\
 Decide: does the second message contradict, entail, or stay neutral toward the first?",
@@ -435,14 +482,25 @@ Decide: does the second message contradict, entail, or stay neutral toward the f
 /// Unknown/garbled responses adjust by 0 (the regex score stands).
 pub fn nli_adjustment(raw: &str) -> f32 {
     let trimmed = raw.trim();
-    let Some(open) = trimmed.find('{') else { return 0.0 };
-    let Some(close) = trimmed[open..].find('}') else { return 0.0 };
+    let Some(open) = trimmed.find('{') else {
+        return 0.0;
+    };
+    let Some(close) = trimmed[open..].find('}') else {
+        return 0.0;
+    };
     let Ok(v) = serde_json::from_str::<serde_json::Value>(&trimmed[open..open + close + 1]) else {
         return 0.0;
     };
-    let verdict = v.get("verdict").and_then(|x| x.as_str()).unwrap_or("").to_ascii_lowercase();
-    let confidence =
-        v.get("confidence").and_then(|x| x.as_f64()).unwrap_or(0.0).clamp(0.0, 1.0) as f32;
+    let verdict = v
+        .get("verdict")
+        .and_then(|x| x.as_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    let confidence = v
+        .get("confidence")
+        .and_then(|x| x.as_f64())
+        .unwrap_or(0.0)
+        .clamp(0.0, 1.0) as f32;
     if verdict.starts_with("contradict") {
         (confidence * 24.0).round()
     } else if verdict.starts_with("entail") || verdict == "agree" {
@@ -457,7 +515,11 @@ mod tests {
     use super::*;
 
     fn turn(agent_id: &str, content: &str) -> Turn {
-        Turn { agent_id: agent_id.into(), name: agent_id.to_uppercase(), content: content.into() }
+        Turn {
+            agent_id: agent_id.into(),
+            name: agent_id.to_uppercase(),
+            content: content.into(),
+        }
     }
 
     #[test]
@@ -481,8 +543,10 @@ mod tests {
     #[test]
     fn a_pair_needs_at_least_two_messages() {
         let det = ConflictDetector::default();
-        let agents =
-            vec![("a".to_string(), "Ann".to_string()), ("b".to_string(), "Bob".to_string())];
+        let agents = vec![
+            ("a".to_string(), "Ann".to_string()),
+            ("b".to_string(), "Bob".to_string()),
+        ];
         let turns = vec![turn("a", "I disagree completely, that's wrong.")];
         let (pairs, strongest) = det.evaluate_all(&turns, &agents);
         assert_eq!(pairs.len(), 1);
@@ -493,8 +557,10 @@ mod tests {
     #[test]
     fn sustained_directed_disagreement_beats_calm_chat() {
         let det = ConflictDetector::default();
-        let agents =
-            vec![("a".to_string(), "Ann".to_string()), ("b".to_string(), "Bob".to_string())];
+        let agents = vec![
+            ("a".to_string(), "Ann".to_string()),
+            ("b".to_string(), "Bob".to_string()),
+        ];
         let heated = vec![
             turn("a", "Bob, that's wrong — the evidence does not hold and I don't buy the framing you used at all."),
             turn("b", "Ann, I disagree completely: your evidence claim is false and your framing is flawed, not mine."),
@@ -502,9 +568,18 @@ mod tests {
             turn("b", "Ann, you're mistaken about the evidence and I reject your conclusion outright."),
         ];
         let calm = vec![
-            turn("a", "I think the framework has three useful parts we can build on together."),
-            turn("b", "Building on that, the second part also helps with the rollout planning."),
-            turn("a", "Agreed — and the third part gives us a measurable success criterion."),
+            turn(
+                "a",
+                "I think the framework has three useful parts we can build on together.",
+            ),
+            turn(
+                "b",
+                "Building on that, the second part also helps with the rollout planning.",
+            ),
+            turn(
+                "a",
+                "Agreed — and the third part gives us a measurable success criterion.",
+            ),
             turn("b", "That makes sense; let's draft the criteria next."),
         ];
         let (hot_pairs, hot_raw) = det.evaluate_all(&heated, &agents);
@@ -519,19 +594,42 @@ mod tests {
     #[test]
     fn cooldown_decays_an_old_spike() {
         let det = ConflictDetector::default();
-        let agents =
-            vec![("a".to_string(), "Ann".to_string()), ("b".to_string(), "Bob".to_string())];
+        let agents = vec![
+            ("a".to_string(), "Ann".to_string()),
+            ("b".to_string(), "Bob".to_string()),
+        ];
         let spike_then_calm = vec![
-            turn("a", "Bob, that's wrong — I disagree and the claim is false and unsupported."),
-            turn("b", "Ann, you're mistaken; I reject that reading entirely, it's flawed."),
-            turn("a", "Let's map the three options and the costs of each before we decide."),
-            turn("b", "Good point — option two also helps the rollout planning."),
-            turn("a", "Then we can agree on the success criteria for the pilot."),
+            turn(
+                "a",
+                "Bob, that's wrong — I disagree and the claim is false and unsupported.",
+            ),
+            turn(
+                "b",
+                "Ann, you're mistaken; I reject that reading entirely, it's flawed.",
+            ),
+            turn(
+                "a",
+                "Let's map the three options and the costs of each before we decide.",
+            ),
+            turn(
+                "b",
+                "Good point — option two also helps the rollout planning.",
+            ),
+            turn(
+                "a",
+                "Then we can agree on the success criteria for the pilot.",
+            ),
             turn("b", "That makes sense; drafting them now."),
         ];
         let still_hot = vec![
-            turn("a", "Bob, that's wrong — I disagree and the claim is false and unsupported."),
-            turn("b", "Ann, you're mistaken; I reject that reading entirely, it's flawed."),
+            turn(
+                "a",
+                "Bob, that's wrong — I disagree and the claim is false and unsupported.",
+            ),
+            turn(
+                "b",
+                "Ann, you're mistaken; I reject that reading entirely, it's flawed.",
+            ),
         ];
         let (_, cooled) = det.evaluate_all(&spike_then_calm, &agents);
         let (_, hot) = det.evaluate_all(&still_hot, &agents);
@@ -540,13 +638,28 @@ mod tests {
 
     #[test]
     fn nli_adjustment_parses_leniently() {
-        assert_eq!(nli_adjustment(r#"{"verdict":"contradicts","confidence":1.0}"#), 24.0);
-        assert_eq!(nli_adjustment(r#"{"verdict":"entails","confidence":0.5}"#), -10.0);
-        assert_eq!(nli_adjustment(r#"{"verdict":"neutral","confidence":0.9}"#), 0.0);
-        assert_eq!(nli_adjustment("```json\n{\"verdict\":\"contradict\",\"confidence\":0.5}\n```"), 12.0);
+        assert_eq!(
+            nli_adjustment(r#"{"verdict":"contradicts","confidence":1.0}"#),
+            24.0
+        );
+        assert_eq!(
+            nli_adjustment(r#"{"verdict":"entails","confidence":0.5}"#),
+            -10.0
+        );
+        assert_eq!(
+            nli_adjustment(r#"{"verdict":"neutral","confidence":0.9}"#),
+            0.0
+        );
+        assert_eq!(
+            nli_adjustment("```json\n{\"verdict\":\"contradict\",\"confidence\":0.5}\n```"),
+            12.0
+        );
         assert_eq!(nli_adjustment("no json here"), 0.0);
         // Out-of-range confidence clamps.
-        assert_eq!(nli_adjustment(r#"{"verdict":"contradicts","confidence":9}"#), 24.0);
+        assert_eq!(
+            nli_adjustment(r#"{"verdict":"contradicts","confidence":9}"#),
+            24.0
+        );
     }
 
     #[test]

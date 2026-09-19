@@ -26,7 +26,9 @@ use crossterm::event::{
     KeyModifiers,
 };
 use crossterm::execute;
-use crossterm::terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen};
+use crossterm::terminal::{
+    disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
+};
 use ratatui::backend::CrosstermBackend;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
@@ -313,7 +315,10 @@ fn scrub_conclusion(mut c: ModeratorConclusion) -> ModeratorConclusion {
 fn scrub_canvas(sections: Vec<CanvasSection>) -> Vec<CanvasSection> {
     sections
         .into_iter()
-        .map(|s| CanvasSection { label: scrub(&s.label), text: scrub(&s.text) })
+        .map(|s| CanvasSection {
+            label: scrub(&s.label),
+            text: scrub(&s.text),
+        })
         .collect()
 }
 
@@ -342,13 +347,19 @@ impl Debate {
         match ev {
             DebateEvent::Phase(p) => self.status = p,
             DebateEvent::Moderator(text) => {
-                self.turns.push(TurnView::note("system", "Moderator", scrub(&text)))
+                self.turns
+                    .push(TurnView::note("system", "Moderator", scrub(&text)))
             }
             DebateEvent::Conclusion(c) => {
                 self.conclusion = Some(scrub_conclusion(c));
                 self.active = None;
             }
-            DebateEvent::TurnStarted { agent_id, name, model, .. } => {
+            DebateEvent::TurnStarted {
+                agent_id,
+                name,
+                model,
+                ..
+            } => {
                 self.turn_count += 1;
                 self.active = Some(name.clone());
                 self.streaming = Some(TurnView {
@@ -361,7 +372,6 @@ impl Debate {
                     canvas: Vec::new(),
                     kind: TurnKind::Agent,
                     at_ms: store::now_ms(),
-
                 });
             }
             DebateEvent::Token(t) => {
@@ -392,7 +402,11 @@ impl Debate {
                 }
                 self.active = None;
             }
-            DebateEvent::EndVoteStarted { proposer, threshold, total } => {
+            DebateEvent::EndVoteStarted {
+                proposer,
+                threshold,
+                total,
+            } => {
                 self.vote_boards.push(VoteBoard {
                     proposer,
                     threshold,
@@ -401,17 +415,34 @@ impl Debate {
                     result: None,
                 });
             }
-            DebateEvent::Vote { name, choice, reason, .. } => {
+            DebateEvent::Vote {
+                name,
+                choice,
+                reason,
+                ..
+            } => {
                 if let Some(b) = self.vote_boards.last_mut() {
                     b.votes.push((name, choice, scrub(&reason)));
                 }
             }
-            DebateEvent::EndVoteResult { passed, yes, no, abstain } => {
+            DebateEvent::EndVoteResult {
+                passed,
+                yes,
+                no,
+                abstain,
+            } => {
                 if let Some(b) = self.vote_boards.last_mut() {
-                    b.result = Some(VoteResult { passed, yes, no, abstain });
+                    b.result = Some(VoteResult {
+                        passed,
+                        yes,
+                        no,
+                        abstain,
+                    });
                 }
             }
-            DebateEvent::Canvas { agent_id, sections, .. } => {
+            DebateEvent::Canvas {
+                agent_id, sections, ..
+            } => {
                 let sections = scrub_canvas(sections);
                 // Attach to this agent's live or most-recent turn.
                 if let Some(s) = self.streaming.as_mut().filter(|s| s.agent_id == agent_id) {
@@ -492,7 +523,10 @@ impl TurnView {
 
 /// Sidebar rows: the shared store first (newest first), then any app-index
 /// session the store doesn't have yet. Ids are unique across both.
-fn merge_session_rows(store: Option<&SessionStore>, bridge_rows: Vec<SessionRow>) -> Vec<SessionRow> {
+fn merge_session_rows(
+    store: Option<&SessionStore>,
+    bridge_rows: Vec<SessionRow>,
+) -> Vec<SessionRow> {
     let mut rows: Vec<SessionRow> = store
         .map(|s| {
             s.list()
@@ -623,7 +657,11 @@ impl App {
                 })
                 .collect()
         } else {
-            self.sessions.iter().filter(|r| r.origin == "app").cloned().collect()
+            self.sessions
+                .iter()
+                .filter(|r| r.origin == "app")
+                .cloned()
+                .collect()
         };
         self.sessions = merge_session_rows(self.store.as_ref(), bridge_rows);
     }
@@ -638,12 +676,17 @@ impl App {
     /// (a new turn landed, or the debate finished). Best-effort: a failure is
     /// surfaced once as a toast and never interrupts the debate.
     fn persist_debate(&mut self) {
-        let Some(store) = self.store.as_ref() else { return };
-        let Some(d) = self.debate.as_mut() else { return };
+        let Some(store) = self.store.as_ref() else {
+            return;
+        };
+        let Some(d) = self.debate.as_mut() else {
+            return;
+        };
         if d.read_only || (d.turns.len() == d.persisted_len && d.done == d.persisted_done) {
             return;
         }
-        let mut messages: Vec<StoredMessage> = d.turns.iter().filter_map(TurnView::to_stored).collect();
+        let mut messages: Vec<StoredMessage> =
+            d.turns.iter().filter_map(TurnView::to_stored).collect();
         if let (true, Some(c)) = (d.done, d.conclusion.as_ref()) {
             messages.push(StoredMessage {
                 agent_id: "moderator".into(),
@@ -689,7 +732,9 @@ impl App {
     /// Continue the open read-only session: the stored transcript becomes
     /// history and the council resumes on the same topic + session id.
     fn continue_session(&mut self) {
-        let Some(d) = self.debate.as_ref() else { return };
+        let Some(d) = self.debate.as_ref() else {
+            return;
+        };
         if !d.read_only {
             return;
         }
@@ -697,12 +742,23 @@ impl App {
             .turns
             .iter()
             .filter(|t| t.kind != TurnKind::Whisper && t.agent_id != "error")
-            .map(|t| Turn { agent_id: t.agent_id.clone(), name: t.name.clone(), content: t.content.clone() })
+            .map(|t| Turn {
+                agent_id: t.agent_id.clone(),
+                name: t.name.clone(),
+                content: t.content.clone(),
+            })
             .collect();
         let resume = ResumeInfo {
             session_id: d.session_id.clone(),
             created_at_ms: d.created_at_ms,
-            turns: d.turns.iter().map(|t| TurnView { canvas: Vec::new(), ..t.clone_shallow() }).collect(),
+            turns: d
+                .turns
+                .iter()
+                .map(|t| TurnView {
+                    canvas: Vec::new(),
+                    ..t.clone_shallow()
+                })
+                .collect(),
             turn_count: d.turn_count,
         };
         let topic = d.topic.clone();
@@ -744,8 +800,9 @@ impl App {
             self.composer = topic;
             // Distinguish "no keys at all" from "keys exist but --providers
             // excludes them" so the hint is actionable.
-            let keyed_but_filtered =
-                Provider::ALL.into_iter().any(|p| config.is_configured(p) && !allowed.contains(&p));
+            let keyed_but_filtered = Provider::ALL
+                .into_iter()
+                .any(|p| config.is_configured(p) && !allowed.contains(&p));
             if keyed_but_filtered {
                 self.toast("Your keyed providers are excluded by --providers this run.");
             } else {
@@ -798,9 +855,17 @@ impl App {
         };
         let display_cap = if config.max_turns == 0 { 0 } else { max_turns };
         let http = self.ctx.http.clone();
-        let engine = Engine::new(http, config, topic.clone(), agents, available, keys, max_turns)
-            .with_attachments(self.ctx.attachments.clone())
-            .with_prior_transcript(prior);
+        let engine = Engine::new(
+            http,
+            config,
+            topic.clone(),
+            agents,
+            available,
+            keys,
+            max_turns,
+        )
+        .with_attachments(self.ctx.attachments.clone())
+        .with_prior_transcript(prior);
         let (tx, rx) = unbounded_channel();
         let cancel = Arc::new(AtomicBool::new(false));
         let engine_cancel = cancel.clone();
@@ -911,7 +976,10 @@ impl App {
         // Derive a roster from the distinct speakers in the transcript.
         let mut roster: Vec<RosterEntry> = Vec::new();
         for m in &messages {
-            if matches!(m.agent_id.as_str(), "user" | "system" | "tool" | "error" | "moderator") {
+            if matches!(
+                m.agent_id.as_str(),
+                "user" | "system" | "tool" | "error" | "moderator"
+            ) {
                 continue;
             }
             if roster.iter().any(|r| r.id == m.agent_id) {
@@ -1050,10 +1118,18 @@ impl App {
         match key.code {
             KeyCode::Char('t') if !ctrl => d.show_thinking = !d.show_thinking,
             KeyCode::Char('c') if !ctrl => {
-                d.pane = if d.pane == SidePane::Tensions { SidePane::Roster } else { SidePane::Tensions };
+                d.pane = if d.pane == SidePane::Tensions {
+                    SidePane::Roster
+                } else {
+                    SidePane::Tensions
+                };
             }
             KeyCode::Char('$') if !ctrl => {
-                d.pane = if d.pane == SidePane::Costs { SidePane::Roster } else { SidePane::Costs };
+                d.pane = if d.pane == SidePane::Costs {
+                    SidePane::Roster
+                } else {
+                    SidePane::Costs
+                };
             }
             KeyCode::Up => {
                 d.follow = false;
@@ -1147,7 +1223,10 @@ impl App {
             KeyCode::Enter | KeyCode::Char('e') => {
                 if self.settings_sel < theme::AGENTS.len() {
                     let provider = theme::AGENTS[self.settings_sel].provider;
-                    self.key_draft = Some(KeyDraft { provider, buffer: String::new() });
+                    self.key_draft = Some(KeyDraft {
+                        provider,
+                        buffer: String::new(),
+                    });
                 } else {
                     let row = OptionRow::ALL[self.settings_sel - theme::AGENTS.len()];
                     match row {
@@ -1162,7 +1241,10 @@ impl App {
                         }
                         _ => {
                             let current = self.option_current_value(row);
-                            self.option_draft = Some(OptionDraft { row, buffer: current });
+                            self.option_draft = Some(OptionDraft {
+                                row,
+                                buffer: current,
+                            });
                         }
                     }
                 }
@@ -1187,7 +1269,11 @@ impl App {
         match row {
             OptionRow::MaxTurns => config.max_turns.to_string(),
             OptionRow::ObserverInterval => {
-                if config.observers_enabled { config.observer_interval.to_string() } else { "0".into() }
+                if config.observers_enabled {
+                    config.observer_interval.to_string()
+                } else {
+                    "0".into()
+                }
             }
             OptionRow::BudgetSession => {
                 if config.budget_per_session_usd > 0.0 {
@@ -1238,8 +1324,12 @@ impl App {
                 }
             },
             OptionRow::BudgetAction => {
-                config.budget_action =
-                    if value.eq_ignore_ascii_case("stop") { "stop" } else { "warn" }.to_string();
+                config.budget_action = if value.eq_ignore_ascii_case("stop") {
+                    "stop"
+                } else {
+                    "warn"
+                }
+                .to_string();
             }
             OptionRow::Proxy => {
                 let trimmed = value.trim();
@@ -1515,9 +1605,15 @@ fn render_toast(f: &mut Frame, area: Rect, app: &App) {
     f.render_widget(Clear, rect);
     let para = Paragraph::new(Line::from(Span::styled(
         msg.clone(),
-        Style::default().fg(theme::TEXT).add_modifier(Modifier::BOLD),
+        Style::default()
+            .fg(theme::TEXT)
+            .add_modifier(Modifier::BOLD),
     )))
-    .block(Block::default().borders(Borders::ALL).border_style(Style::default().fg(theme::GOLD)))
+    .block(
+        Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(theme::GOLD)),
+    )
     .alignment(ratatui::layout::Alignment::Center);
     f.render_widget(para, rect);
 }
@@ -1563,7 +1659,6 @@ mod tests {
                     }],
                     kind: TurnKind::Agent,
                     at_ms: 0,
-
                 },
                 TurnView::of_kind(
                     TurnKind::Whisper,
@@ -1588,7 +1683,6 @@ mod tests {
                 canvas: Vec::new(),
                 kind: TurnKind::Agent,
                 at_ms: 0,
-
             }),
             active: Some("Cathy".into()),
             usage: Usage::default(),
@@ -1608,7 +1702,12 @@ mod tests {
                     "George",
                     crate::types::CostLane::Council,
                     "gpt-5.5",
-                    Usage { input: 120_000, output: 30_000, reasoning: 0 },
+                    Usage {
+                        input: 120_000,
+                        output: 30_000,
+                        reasoning: 0,
+                        ..Default::default()
+                    },
                 );
                 let mut snap = ledger.snapshot();
                 snap.session_cap = 5.0;
@@ -1670,7 +1769,10 @@ mod tests {
         // Move to the Discussion-cap row (first option row after 8 providers).
         app.settings_sel = theme::AGENTS.len();
         // The draft prefills the current value.
-        app.option_draft = Some(OptionDraft { row: OptionRow::MaxTurns, buffer: "24".into() });
+        app.option_draft = Some(OptionDraft {
+            row: OptionRow::MaxTurns,
+            buffer: "24".into(),
+        });
         if let Some(d) = app.option_draft.take() {
             // Simulate save without touching the real config dir: validate only.
             assert!(d.buffer.parse::<u32>().is_ok());
@@ -1690,12 +1792,18 @@ mod tests {
             redact_proxy("socks5://user:hunter2@proxy.example:1080"),
             "socks5://•••@proxy.example:1080"
         );
-        assert_eq!(redact_proxy("http://proxy.example:8080"), "http://proxy.example:8080");
+        assert_eq!(
+            redact_proxy("http://proxy.example:8080"),
+            "http://proxy.example:8080"
+        );
 
         // Settings rows span providers + options.
         assert_eq!(settings_row_count(), 13);
         // Render the option-edit state at several sizes.
-        app.option_draft = Some(OptionDraft { row: OptionRow::Proxy, buffer: "socks5://u:p@h:1".into() });
+        app.option_draft = Some(OptionDraft {
+            row: OptionRow::Proxy,
+            buffer: "socks5://u:p@h:1".into(),
+        });
         for (w, h) in [(120, 40), (30, 10), (1, 1)] {
             render_at(&mut app, w, h);
         }
@@ -1744,7 +1852,12 @@ mod tests {
         assert!(d.cost.as_ref().unwrap().rows.is_empty());
 
         // Streamed tokens are sanitized before they reach the buffer.
-        d.streaming = Some(TurnView::of_kind(TurnKind::Agent, "george", "George", String::new()));
+        d.streaming = Some(TurnView::of_kind(
+            TurnKind::Agent,
+            "george",
+            "George",
+            String::new(),
+        ));
         d.apply(DebateEvent::Token("safe\x1b[2Jtext".into()));
         assert_eq!(d.streaming.as_ref().unwrap().content, "safe[2Jtext");
     }
@@ -1753,8 +1866,22 @@ mod tests {
     fn renders_with_sidebar_open() {
         let mut app = test_app();
         app.sessions = vec![
-            SessionRow { id: "a".into(), title: "A debate".into(), status: "completed".into(), turns: 12, archived: false, origin: "app".into() },
-            SessionRow { id: "b".into(), title: "Archived one".into(), status: "paused".into(), turns: 3, archived: true, origin: "cli".into() },
+            SessionRow {
+                id: "a".into(),
+                title: "A debate".into(),
+                status: "completed".into(),
+                turns: 12,
+                archived: false,
+                origin: "app".into(),
+            },
+            SessionRow {
+                id: "b".into(),
+                title: "Archived one".into(),
+                status: "paused".into(),
+                turns: 3,
+                archived: true,
+                origin: "cli".into(),
+            },
         ];
         app.sidebar_open = true;
         app.toast = Some("hello".into());
@@ -1767,8 +1894,10 @@ mod tests {
         app.sidebar_open = true;
         app.debate = Some(sample_debate());
         // Also exercise the Settings key-editor overlay at every size.
-        app.key_draft =
-            Some(KeyDraft { provider: theme::AGENTS[0].provider, buffer: "sk-xxxxxxxx".into() });
+        app.key_draft = Some(KeyDraft {
+            provider: theme::AGENTS[0].provider,
+            buffer: "sk-xxxxxxxx".into(),
+        });
         for view in [View::Home, View::Chat, View::Settings] {
             app.view = view;
             for (w, h) in [(1, 1), (4, 3), (10, 6), (20, 8)] {
@@ -1783,15 +1912,29 @@ mod tests {
         app.view = View::Settings;
         app.settings_sel = 0;
         let provider = theme::AGENTS[0].provider;
-        app.key_draft = Some(KeyDraft { provider, buffer: "sk-secret-value-123".into() });
+        app.key_draft = Some(KeyDraft {
+            provider,
+            buffer: "sk-secret-value-123".into(),
+        });
 
         let mut terminal = Terminal::new(TestBackend::new(120, 40)).unwrap();
         terminal.draw(|f| render(f, &mut app)).unwrap();
-        let rendered: String =
-            terminal.backend().buffer().content().iter().map(|c| c.symbol()).collect();
+        let rendered: String = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|c| c.symbol())
+            .collect();
 
-        assert!(!rendered.contains("sk-secret-value-123"), "plaintext key must never render");
-        assert!(rendered.contains('•'), "the key buffer should render as masked bullets");
+        assert!(
+            !rendered.contains("sk-secret-value-123"),
+            "plaintext key must never render"
+        );
+        assert!(
+            rendered.contains('•'),
+            "the key buffer should render as masked bullets"
+        );
     }
 
     #[test]
@@ -1799,8 +1942,10 @@ mod tests {
         // Into a Settings key draft.
         let mut app = test_app();
         app.view = View::Settings;
-        app.key_draft =
-            Some(KeyDraft { provider: theme::AGENTS[0].provider, buffer: String::new() });
+        app.key_draft = Some(KeyDraft {
+            provider: theme::AGENTS[0].provider,
+            buffer: String::new(),
+        });
         app.handle_paste("sk-abc\n".into());
         assert_eq!(app.key_draft.as_ref().unwrap().buffer, "sk-abc");
 

@@ -25,8 +25,9 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     supportsVision: true,
     supportsStreaming: true,
     pricing: {
-      inputCostPer1M: 10.0,
-      outputCostPer1M: 50.0,
+      inputCostPer1M: 10,
+      cachedInputCostPer1M: 1,
+      outputCostPer1M: 50,
     },
   },
   {
@@ -40,8 +41,9 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     supportsVision: true,
     supportsStreaming: true,
     pricing: {
-      inputCostPer1M: 4.0,
-      outputCostPer1M: 20.0,
+      inputCostPer1M: 4,
+      cachedInputCostPer1M: 0.4,
+      outputCostPer1M: 20,
     },
   },
   {
@@ -55,8 +57,9 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     supportsVision: true,
     supportsStreaming: true,
     pricing: {
-      inputCostPer1M: 2.0,
-      outputCostPer1M: 12.0,
+      inputCostPer1M: 2,
+      cachedInputCostPer1M: 0.2,
+      outputCostPer1M: 12,
     },
   },
   {
@@ -71,6 +74,7 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     supportsStreaming: true,
     pricing: {
       inputCostPer1M: 0.2,
+      cachedInputCostPer1M: 0.02,
       outputCostPer1M: 1.2,
     },
   },
@@ -80,14 +84,15 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     name: "GPT-5.5",
     description:
       "Latest flagship GPT-5 model; first ground-up retrain since GPT-4.5 with 1M context",
-    contextWindow: 1_000_000,
+    contextWindow: 1050000,
     maxOutputTokens: 128000,
     supportsThinking: true,
     supportsVision: true,
     supportsStreaming: true,
     pricing: {
-      inputCostPer1M: 5.0,
-      outputCostPer1M: 30.0,
+      inputCostPer1M: 5,
+      cachedInputCostPer1M: 0.5,
+      outputCostPer1M: 30,
     },
   },
   {
@@ -102,6 +107,7 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     supportsStreaming: true,
     pricing: {
       inputCostPer1M: 2.5,
+      cachedInputCostPer1M: 0.25,
       outputCostPer1M: 15.0,
     },
   },
@@ -132,10 +138,9 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     supportsVision: true,
     supportsStreaming: true,
     pricing: {
-      // Estimated using current GPT-5.2 Pro schedule until dedicated pricing is finalized.
-      inputCostPer1M: 2.5,
-      outputCostPer1M: 10.0,
-      reasoningCostPer1M: 15.0,
+      inputCostPer1M: 1.75,
+      cachedInputCostPer1M: 0.175,
+      outputCostPer1M: 14,
     },
   },
   {
@@ -149,9 +154,8 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     supportsVision: true,
     supportsStreaming: true,
     pricing: {
-      inputCostPer1M: 2.5,
-      outputCostPer1M: 10.0,
-      reasoningCostPer1M: 15.0,
+      inputCostPer1M: 21,
+      outputCostPer1M: 168,
     },
   },
   {
@@ -165,8 +169,9 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     supportsVision: true,
     supportsStreaming: true,
     pricing: {
-      inputCostPer1M: 5.0,
-      outputCostPer1M: 15.0,
+      inputCostPer1M: 1.75,
+      cachedInputCostPer1M: 0.175,
+      outputCostPer1M: 14,
     },
   },
   {
@@ -307,8 +312,9 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     supportsVision: true,
     supportsStreaming: true,
     pricing: {
-      inputCostPer1M: 10.0,
-      outputCostPer1M: 50.0,
+      inputCostPer1M: 10,
+      cachedInputCostPer1M: 0.25,
+      outputCostPer1M: 50,
     },
   },
   {
@@ -323,8 +329,9 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     supportsVision: true,
     supportsStreaming: true,
     pricing: {
-      inputCostPer1M: 5.0,
-      outputCostPer1M: 25.0,
+      inputCostPer1M: 5,
+      cachedInputCostPer1M: 0.5,
+      outputCostPer1M: 25,
     },
   },
   {
@@ -338,8 +345,9 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     supportsVision: true,
     supportsStreaming: true,
     pricing: {
-      inputCostPer1M: 2.0,
-      outputCostPer1M: 10.0,
+      inputCostPer1M: 2,
+      cachedInputCostPer1M: 0.2,
+      outputCostPer1M: 10,
     },
   },
   {
@@ -352,6 +360,11 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     supportsThinking: true,
     supportsVision: true,
     supportsStreaming: true,
+    pricing: {
+      inputCostPer1M: 10,
+      cachedInputCostPer1M: 1,
+      outputCostPer1M: 50,
+    },
   },
   {
     id: "claude-sonnet-4-6",
@@ -363,6 +376,11 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     supportsThinking: true,
     supportsVision: true,
     supportsStreaming: true,
+    pricing: {
+      inputCostPer1M: 3,
+      cachedInputCostPer1M: 0.3,
+      outputCostPer1M: 15,
+    },
   },
   {
     id: "claude-opus-4-8",
@@ -370,14 +388,15 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     name: "Claude Opus 4.8",
     description:
       "Most capable Claude model; 1M context, adaptive thinking only, hi-res vision (3.75MP)",
-    contextWindow: 1_000_000,
+    contextWindow: 1000000,
     maxOutputTokens: 128000,
     supportsThinking: true,
     supportsVision: true,
     supportsStreaming: true,
     pricing: {
-      inputCostPer1M: 5.0,
-      outputCostPer1M: 25.0,
+      inputCostPer1M: 5,
+      cachedInputCostPer1M: 0.5,
+      outputCostPer1M: 25,
     },
   },
   {
@@ -393,6 +412,7 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     supportsStreaming: true,
     pricing: {
       inputCostPer1M: 5.0,
+      cachedInputCostPer1M: 0.5,
       outputCostPer1M: 25.0,
     },
   },
@@ -408,6 +428,7 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     supportsStreaming: true,
     pricing: {
       inputCostPer1M: 5.0,
+      cachedInputCostPer1M: 0.5,
       outputCostPer1M: 25.0,
     },
   },
@@ -422,8 +443,9 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     supportsVision: true,
     supportsStreaming: true,
     pricing: {
-      inputCostPer1M: 5.0,
-      outputCostPer1M: 25.0,
+      inputCostPer1M: 5,
+      cachedInputCostPer1M: 0.5,
+      outputCostPer1M: 25,
     },
   },
   {
@@ -437,8 +459,9 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     supportsVision: true,
     supportsStreaming: true,
     pricing: {
-      inputCostPer1M: 3.0,
-      outputCostPer1M: 15.0,
+      inputCostPer1M: 3,
+      cachedInputCostPer1M: 0.3,
+      outputCostPer1M: 15,
     },
   },
   {
@@ -452,8 +475,9 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     supportsVision: true,
     supportsStreaming: true,
     pricing: {
-      inputCostPer1M: 1.0,
-      outputCostPer1M: 5.0,
+      inputCostPer1M: 1,
+      cachedInputCostPer1M: 0.1,
+      outputCostPer1M: 5,
     },
   },
   {
@@ -544,8 +568,9 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     supportsVision: true,
     supportsStreaming: true,
     pricing: {
-      inputCostPer1M: 2.0,
-      outputCostPer1M: 12.0,
+      inputCostPer1M: 2,
+      cachedInputCostPer1M: 0.2,
+      outputCostPer1M: 12,
     },
   },
   {
@@ -561,6 +586,7 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     supportsStreaming: true,
     pricing: {
       inputCostPer1M: 0.75,
+      cachedInputCostPer1M: 0.075,
       outputCostPer1M: 3.75,
     },
   },
@@ -576,6 +602,7 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     supportsStreaming: true,
     pricing: {
       inputCostPer1M: 0.75,
+      cachedInputCostPer1M: 0.075,
       outputCostPer1M: 3.75,
     },
   },
@@ -589,6 +616,11 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     supportsThinking: true,
     supportsVision: true,
     supportsStreaming: true,
+    pricing: {
+      inputCostPer1M: 0.75,
+      cachedInputCostPer1M: 0.075,
+      outputCostPer1M: 3.75,
+    },
   },
   {
     id: "gemini-3.5-flash",
@@ -602,7 +634,8 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     supportsStreaming: true,
     pricing: {
       inputCostPer1M: 1.5,
-      outputCostPer1M: 9.0,
+      cachedInputCostPer1M: 0.15,
+      outputCostPer1M: 9,
     },
   },
   {
@@ -617,6 +650,7 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     supportsStreaming: true,
     pricing: {
       inputCostPer1M: 0.3,
+      cachedInputCostPer1M: 0.03,
       outputCostPer1M: 2.5,
     },
   },
@@ -631,6 +665,11 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     supportsThinking: true,
     supportsVision: true,
     supportsStreaming: true,
+    pricing: {
+      inputCostPer1M: 0.25,
+      cachedInputCostPer1M: 0.025,
+      outputCostPer1M: 1.5,
+    },
   },
   {
     id: "gemini-3-pro-preview",
@@ -658,8 +697,8 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     supportsVision: true,
     supportsStreaming: true,
     pricing: {
-      inputCostPer1M: 1.25,
-      outputCostPer1M: 5.0,
+      inputCostPer1M: 2,
+      outputCostPer1M: 12,
     },
   },
   {
@@ -669,12 +708,13 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     description: "Balanced speed and intelligence",
     contextWindow: 1000000,
     maxOutputTokens: 65536,
-    supportsThinking: false,
+    supportsThinking: true,
     supportsVision: true,
     supportsStreaming: true,
     pricing: {
-      inputCostPer1M: 0.1,
-      outputCostPer1M: 0.4,
+      inputCostPer1M: 0.5,
+      cachedInputCostPer1M: 0.05,
+      outputCostPer1M: 3,
     },
   },
   {
@@ -689,7 +729,8 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     supportsStreaming: true,
     pricing: {
       inputCostPer1M: 1.25,
-      outputCostPer1M: 5.0,
+      cachedInputCostPer1M: 0.125,
+      outputCostPer1M: 10,
     },
   },
   {
@@ -703,8 +744,9 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     supportsVision: true,
     supportsStreaming: true,
     pricing: {
-      inputCostPer1M: 0.075,
-      outputCostPer1M: 0.3,
+      inputCostPer1M: 0.3,
+      cachedInputCostPer1M: 0.03,
+      outputCostPer1M: 2.5,
     },
   },
   {
@@ -718,8 +760,9 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     supportsVision: true,
     supportsStreaming: true,
     pricing: {
-      inputCostPer1M: 0.02,
-      outputCostPer1M: 0.08,
+      inputCostPer1M: 0.1,
+      cachedInputCostPer1M: 0.01,
+      outputCostPer1M: 0.4,
     },
   },
   {
@@ -781,8 +824,9 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     supportsVision: false,
     supportsStreaming: true,
     pricing: {
-      inputCostPer1M: 1.27,
-      outputCostPer1M: 3.8,
+      inputCostPer1M: 1.32,
+      cachedInputCostPer1M: 0.044,
+      outputCostPer1M: 3.96,
     },
   },
   {
@@ -797,8 +841,9 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     supportsVision: true,
     supportsStreaming: true,
     pricing: {
-      inputCostPer1M: 0.28,
-      outputCostPer1M: 1.13,
+      inputCostPer1M: 0.3,
+      cachedInputCostPer1M: 0.006,
+      outputCostPer1M: 1.2,
     },
   },
   // Kimi/Moonshot Models (latest first)
@@ -815,6 +860,7 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     supportsStreaming: true,
     pricing: {
       inputCostPer1M: 2.82,
+      cachedInputCostPer1M: 0.28,
       outputCostPer1M: 14.08,
     },
   },
@@ -831,6 +877,7 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     supportsStreaming: true,
     pricing: {
       inputCostPer1M: 0.92,
+      cachedInputCostPer1M: 0.18,
       outputCostPer1M: 3.8,
     },
   },
@@ -846,6 +893,7 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     supportsStreaming: true,
     pricing: {
       inputCostPer1M: 1.83,
+      cachedInputCostPer1M: 0.37,
       outputCostPer1M: 7.61,
     },
   },
@@ -862,6 +910,7 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     supportsStreaming: true,
     pricing: {
       inputCostPer1M: 0.92,
+      cachedInputCostPer1M: 0.15,
       outputCostPer1M: 3.8,
     },
   },
@@ -877,6 +926,11 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     supportsThinking: true,
     supportsVision: false,
     supportsStreaming: true,
+    pricing: {
+      inputCostPer1M: 1.69,
+      cachedInputCostPer1M: 0.34,
+      outputCostPer1M: 5.07,
+    },
   },
   {
     id: "qwen3.8-flash",
@@ -891,6 +945,7 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     supportsStreaming: true,
     pricing: {
       inputCostPer1M: 0.11,
+      cachedInputCostPer1M: 0.02,
       outputCostPer1M: 0.38,
     },
   },
@@ -904,6 +959,11 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     supportsThinking: true,
     supportsVision: false,
     supportsStreaming: true,
+    pricing: {
+      inputCostPer1M: 0.28,
+      cachedInputCostPer1M: 0.06,
+      outputCostPer1M: 1.13,
+    },
   },
   {
     id: "qwen3.7-max",
@@ -916,8 +976,9 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     supportsVision: false,
     supportsStreaming: true,
     pricing: {
-      inputCostPer1M: 1.3,
-      outputCostPer1M: 7.8,
+      inputCostPer1M: 1.69,
+      cachedInputCostPer1M: 0.34,
+      outputCostPer1M: 5.07,
     },
   },
   {
@@ -930,6 +991,11 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     supportsThinking: true,
     supportsVision: false,
     supportsStreaming: true,
+    pricing: {
+      inputCostPer1M: 0.03,
+      cachedInputCostPer1M: 0.006,
+      outputCostPer1M: 0.11,
+    },
   },
   {
     id: "qwen3.6-max-preview",
@@ -942,8 +1008,9 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     supportsVision: false,
     supportsStreaming: true,
     pricing: {
-      inputCostPer1M: 1.3,
-      outputCostPer1M: 7.8,
+      inputCostPer1M: 1.27,
+      cachedInputCostPer1M: 0.25,
+      outputCostPer1M: 7.61,
     },
   },
   {
@@ -957,8 +1024,9 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     supportsVision: false,
     supportsStreaming: true,
     pricing: {
-      inputCostPer1M: 0.56,
-      outputCostPer1M: 1.68,
+      inputCostPer1M: 0.11,
+      cachedInputCostPer1M: 0.02,
+      outputCostPer1M: 0.68,
     },
   },
   // MiniMax models
@@ -1038,6 +1106,7 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     supportsStreaming: true,
     pricing: {
       inputCostPer1M: 1.13,
+      cachedInputCostPer1M: 0.28,
       outputCostPer1M: 3.94,
     },
   },
@@ -1054,6 +1123,7 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     supportsStreaming: true,
     pricing: {
       inputCostPer1M: 0.11,
+      cachedInputCostPer1M: 0.03,
       outputCostPer1M: 0.39,
     },
   },
@@ -1070,6 +1140,7 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     supportsStreaming: true,
     pricing: {
       inputCostPer1M: 0.28,
+      cachedInputCostPer1M: 0.08,
       outputCostPer1M: 0.99,
     },
   },
@@ -1085,6 +1156,7 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     supportsStreaming: true,
     pricing: {
       inputCostPer1M: 1.13,
+      cachedInputCostPer1M: 0.28,
       outputCostPer1M: 3.94,
     },
   },
@@ -1100,8 +1172,9 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     supportsVision: false,
     supportsStreaming: true,
     pricing: {
-      inputCostPer1M: 1.13,
-      outputCostPer1M: 3.94,
+      inputCostPer1M: 0.85,
+      cachedInputCostPer1M: 0.18,
+      outputCostPer1M: 3.38,
     },
   },
   {
@@ -1116,8 +1189,9 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     supportsVision: false,
     supportsStreaming: true,
     pricing: {
-      inputCostPer1M: 0.85,
-      outputCostPer1M: 3.1,
+      inputCostPer1M: 0.56,
+      cachedInputCostPer1M: 0.14,
+      outputCostPer1M: 2.54,
     },
   },
   {
@@ -1132,8 +1206,9 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     supportsVision: false,
     supportsStreaming: true,
     pricing: {
-      inputCostPer1M: 0.99,
-      outputCostPer1M: 3.66,
+      inputCostPer1M: 0.7,
+      cachedInputCostPer1M: 0.17,
+      outputCostPer1M: 3.1,
     },
   },
   {
@@ -1149,6 +1224,7 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     supportsStreaming: true,
     pricing: {
       inputCostPer1M: 0.56,
+      cachedInputCostPer1M: 0.11,
       outputCostPer1M: 2.25,
     },
   },

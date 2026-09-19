@@ -18,7 +18,9 @@ fn render_brand(f: &mut Frame, area: Rect) {
         Span::styled("◆ ", Style::default().fg(theme::GOLD)),
         Span::styled(
             "socratic council",
-            Style::default().fg(theme::TEXT).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(theme::TEXT)
+                .add_modifier(Modifier::BOLD),
         ),
     ]);
     let sub = Line::from(Span::styled(
@@ -75,7 +77,9 @@ fn session_item(s: &SessionRow, selected: bool) -> ListItem<'static> {
         _ => theme::DIM,
     };
     let title_style = if selected {
-        Style::default().fg(theme::GOLD).add_modifier(Modifier::BOLD)
+        Style::default()
+            .fg(theme::GOLD)
+            .add_modifier(Modifier::BOLD)
     } else if s.archived {
         Style::default().fg(theme::DIM)
     } else {
@@ -91,7 +95,10 @@ fn session_item(s: &SessionRow, selected: bool) -> ListItem<'static> {
     let mut meta_spans = vec![
         Span::styled("    ", Style::default()),
         Span::styled(status_label(&s.status), Style::default().fg(status_color)),
-        Span::styled(format!(" · {} turns", s.turns), Style::default().fg(theme::DIM)),
+        Span::styled(
+            format!(" · {} turns", s.turns),
+            Style::default().fg(theme::DIM),
+        ),
     ];
     if s.archived {
         meta_spans.push(Span::styled(" · archived", Style::default().fg(theme::DIM)));

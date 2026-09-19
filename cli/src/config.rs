@@ -27,7 +27,11 @@ fn auto() -> String {
 
 impl Default for TierSelection {
     fn default() -> Self {
-        Self { low: auto(), medium: auto(), high: auto() }
+        Self {
+            low: auto(),
+            medium: auto(),
+            high: auto(),
+        }
     }
 }
 
@@ -302,7 +306,10 @@ impl Config {
         // win). Best-effort — a failure leaves the CLI on its own config.
         let bridge = DesktopBridge::load();
         for (slug, selection) in bridge.model_selection() {
-            config.model_selection.entry(slug.clone()).or_insert_with(|| selection.clone());
+            config
+                .model_selection
+                .entry(slug.clone())
+                .or_insert_with(|| selection.clone());
         }
         // With no CLI config file, inherit the app's council/utility tier + cap.
         if !path.exists() {
@@ -339,10 +346,18 @@ impl Config {
     /// DEK or a failed decrypt leaves `keys` empty (the user can re-add a key)
     /// rather than failing the whole `Config::load`.
     fn load_encrypted_keys(&mut self, enc_path: &Path) {
-        let Ok(dek_path) = Self::dek_path() else { return };
-        let Some(dek) = crypto::load_dek(&dek_path) else { return };
-        let Ok(envelope) = std::fs::read_to_string(enc_path) else { return };
-        let Some(plain) = crypto::decrypt_str(&dek, envelope.trim()) else { return };
+        let Ok(dek_path) = Self::dek_path() else {
+            return;
+        };
+        let Some(dek) = crypto::load_dek(&dek_path) else {
+            return;
+        };
+        let Ok(envelope) = std::fs::read_to_string(enc_path) else {
+            return;
+        };
+        let Some(plain) = crypto::decrypt_str(&dek, envelope.trim()) else {
+            return;
+        };
         if let Ok(kf) = toml::from_str::<KeyFile>(&plain) {
             self.keys = kf.keys;
         }
@@ -362,7 +377,9 @@ impl Config {
         // `env_keys`), so the whole map is safe to persist — and a local key is
         // never dropped just because a `<PROVIDER>_API_KEY` env var shares its
         // slug.
-        let kf = KeyFile { keys: self.keys.clone() };
+        let kf = KeyFile {
+            keys: self.keys.clone(),
+        };
         let toml_text = toml::to_string_pretty(&kf).map_err(|e| Error::Config(e.to_string()))?;
         let envelope = crypto::encrypt_str(&dek, &toml_text).map_err(Error::Config)?;
 
@@ -383,7 +400,12 @@ impl Config {
             .get(provider.slug())
             .map(|s| s.as_str())
             .filter(nonempty)
-            .or_else(|| self.keys.get(provider.slug()).map(|s| s.as_str()).filter(nonempty))
+            .or_else(|| {
+                self.keys
+                    .get(provider.slug())
+                    .map(|s| s.as_str())
+                    .filter(nonempty)
+            })
             .or_else(|| self.bridge.api_key(provider))
     }
 
@@ -441,7 +463,10 @@ impl Config {
     }
 
     pub fn configured_providers(&self) -> Vec<Provider> {
-        Provider::ALL.into_iter().filter(|p| self.is_configured(*p)).collect()
+        Provider::ALL
+            .into_iter()
+            .filter(|p| self.is_configured(*p))
+            .collect()
     }
 
     pub fn base_url(&self, provider: Provider) -> String {
@@ -452,7 +477,9 @@ impl Config {
     }
 
     pub fn selection(&self, provider: Provider, tier: ReasoningTier) -> Option<String> {
-        self.model_selection.get(provider.slug()).map(|s| s.get(tier).to_string())
+        self.model_selection
+            .get(provider.slug())
+            .map(|s| s.get(tier).to_string())
     }
 
     pub fn agent_tier(&self) -> ReasoningTier {
@@ -587,7 +614,10 @@ mod tests {
 
         assert_eq!(config.api_key(Provider::OpenAI), Some("sk-env"));
         assert_eq!(config.key_source(Provider::OpenAI), KeySource::Env);
-        assert_eq!(config.keys.get("openai").map(String::as_str), Some("sk-local"));
+        assert_eq!(
+            config.keys.get("openai").map(String::as_str),
+            Some("sk-local")
+        );
     }
 
     #[test]

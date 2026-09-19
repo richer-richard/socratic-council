@@ -13,132 +13,50 @@ use crate::types::{CostLane, CostRow, CostSnapshot, Usage};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-/// Per-1M-token pricing for one model.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct Pricing {
-    pub input: f64,
-    pub output: f64,
-    pub reasoning: Option<f64>,
-}
+use crate::catalog::catalog_rows;
+pub use crate::catalog::Pricing;
+use crate::types::Provider;
 
-const fn p(input: f64, output: f64) -> Pricing {
-    Pricing { input, output, reasoning: None }
-}
-const fn pr(input: f64, output: f64, reasoning: f64) -> Pricing {
-    Pricing { input, output, reasoning: Some(reasoning) }
-}
-
-/// Real `$ / 1M tokens` rows ported from the desktop `MODEL_REGISTRY`.
-/// Keys are lowercase; see `price_for` for the lookup rules.
-const PRICES: &[(&str, Pricing)] = &[
-    // OpenAI
-    // Refreshed 2026-09-19 (see packages/shared/src/constants/index.ts — the
-    // priceParity test fails CI if these two tables drift). CNY list prices for the
-    // Chinese providers are converted at 7.1 CNY/USD; models with no published
-    // price are deliberately absent (the ledger then shows a `≥` lower bound).
-    ("gpt-6-astra", p(10.0, 50.0)),
-    ("gpt-5.6-sol", p(4.0, 20.0)),
-    ("gpt-5.6-terra", p(2.0, 12.0)),
-    ("gpt-5.6-luna", p(0.2, 1.2)),
-    ("gpt-5.5", p(5.0, 30.0)),
-    ("gpt-5.4", p(2.5, 15.0)),
-    ("gpt-5.3-chat-latest", p(0.4, 2.0)),
-    ("gpt-5.3-codex", pr(2.5, 10.0, 15.0)),
-    ("gpt-5.2-pro", pr(2.5, 10.0, 15.0)),
-    ("gpt-5.2", p(5.0, 15.0)),
-    ("gpt-5-mini", p(0.4, 1.6)),
-    ("gpt-5-nano", p(0.1, 0.4)),
-    ("o4-mini", pr(1.1, 4.4, 4.4)),
-    ("o3", pr(10.0, 40.0, 40.0)),
-    ("o1", pr(15.0, 60.0, 60.0)),
-    ("gpt-4o", p(2.5, 10.0)),
-    ("gpt-4o-mini", p(0.15, 0.6)),
-    ("gpt-4-turbo", p(10.0, 30.0)),
-    // Anthropic
-    ("claude-fable-5-1", p(10.0, 50.0)),
-    ("claude-opus-5", p(5.0, 25.0)),
-    ("claude-sonnet-5", p(2.0, 10.0)),
-    ("claude-opus-4-8", p(5.0, 25.0)),
-    ("claude-opus-4-7", p(5.0, 25.0)),
-    ("claude-opus-4-6", p(5.0, 25.0)),
-    ("claude-opus-4-5-20251101", p(5.0, 25.0)),
-    ("claude-sonnet-4-5-20250929", p(3.0, 15.0)),
-    ("claude-haiku-4-5-20251001", p(1.0, 5.0)),
-    ("claude-sonnet-4-20250514", p(3.0, 15.0)),
-    ("claude-opus-4-1-20250410", p(5.0, 25.0)),
-    ("claude-3-5-sonnet-20241022", p(3.0, 15.0)),
-    ("claude-3-5-haiku-20241022", p(0.8, 4.0)),
-    ("claude-3-opus-20240229", p(15.0, 75.0)),
-    // Google
-    ("gemini-3.1-pro-preview", p(2.0, 12.0)),
-    ("gemini-3.8-flash", p(0.75, 3.75)),
-    ("gemini-3.7-flash", p(0.75, 3.75)),
-    ("gemini-3.5-flash", p(1.5, 9.0)),
-    ("gemini-3.5-flash-lite", p(0.3, 2.5)),
-    ("gemini-3-pro-preview", p(1.25, 5.0)),
-    ("gemini-3-flash-preview", p(0.1, 0.4)),
-    ("gemini-2.5-pro", p(1.25, 5.0)),
-    ("gemini-2.5-flash-lite", p(0.02, 0.08)),
-    ("gemini-2.5-flash", p(0.075, 0.3)),
-    ("gemini-2.0-flash-lite", p(0.02, 0.08)),
-    ("gemini-2.0-flash", p(0.1, 0.4)),
-    // DeepSeek (peak-hour list price)
-    ("deepseek-v4-pro", p(1.27, 3.8)),
-    ("deepseek-flash", p(0.28, 1.13)),
-    // Kimi
-    ("kimi-k3", p(2.82, 14.08)),
-    ("kimi-k2.7-code", p(0.92, 3.8)),
-    ("kimi-k2.7-code-highspeed", p(1.83, 7.61)),
-    ("kimi-k2.6", p(0.92, 3.8)),
-    // Qwen
-    ("qwen3.8-flash", p(0.11, 0.38)),
-    ("qwen3.7-max", p(1.3, 7.8)),
-    ("qwen3.6-max-preview", p(1.3, 7.8)),
-    ("qwen3.5-plus", p(0.56, 1.68)),
-    // MiniMax
-    ("minimax-m3", p(0.3, 1.18)),
-    ("minimax-m2.7", p(0.3, 1.18)),
-    // Table keys are lowercase; `price_for` lowercases the query (ids ship mixed-case).
-    ("minimax-m2.7-highspeed", p(0.59, 2.37)),
-    // Zhipu
-    ("glm-5.3", p(1.13, 3.94)),
-    ("glm-5.3-flash", p(0.11, 0.39)),
-    ("glm-5.3-flashx", p(0.28, 0.99)),
-    ("glm-5.2", p(1.13, 3.94)),
-    ("glm-5.1", p(1.13, 3.94)),
-    ("glm-5", p(0.85, 3.1)),
-    ("glm-5-turbo", p(0.99, 3.66)),
-    ("glm-4.7", p(0.56, 2.25)),
-    ("glm-4.7-flash", p(0.0, 0.0)),
-    ("glm-4.5-air", p(0.17, 1.13)),
-];
-
-/// Price for a model id: case-insensitive exact match first, then the longest
-/// table key that is a prefix of the id (so a dated snapshot like
-/// `claude-opus-4-8-20260301` bills at the `claude-opus-4-8` rate). Unknown
-/// ids return `None` — never a guessed price.
+/// The price row for a model id, from the verified catalog table: an exact
+/// (case-insensitive) match on any provider, else the longest catalogued id
+/// the query starts with (dated snapshots such as `claude-opus-4-8-20260301`
+/// bill as their family). Unpriced or unknown ids return `None`.
 pub fn price_for(model_id: &str) -> Option<Pricing> {
     let id = model_id.trim().to_ascii_lowercase();
     if id.is_empty() {
         return None;
     }
-    if let Some((_, pricing)) = PRICES.iter().find(|(k, _)| *k == id) {
-        return Some(*pricing);
-    }
-    PRICES
+    let rows: Vec<_> = Provider::ALL
         .iter()
-        .filter(|(k, _)| id.starts_with(*k))
-        .max_by_key(|(k, _)| k.len())
-        .map(|(_, pricing)| *pricing)
+        .flat_map(|p| catalog_rows(*p))
+        .collect();
+    let hit = rows
+        .iter()
+        .find(|r| r.id.eq_ignore_ascii_case(&id))
+        .or_else(|| {
+            rows.iter()
+                .filter(|r| id.starts_with(&r.id.to_ascii_lowercase()))
+                .max_by_key(|r| r.id.len())
+        })?;
+    hit.pricing.is_priced().then_some(hit.pricing)
 }
 
-/// Estimated USD for `usage` at `pricing`. Reasoning tokens with no published
-/// reasoning rate bill at the output rate (the app's conservative fix 5.15).
+/// Estimated USD for `usage` at `pricing`. Cache hits bill at the cached
+/// rate (or the input rate when the provider publishes none), cache writes
+/// at the write rate (or the input rate), and reasoning tokens at the output
+/// rate, which is what every provider in the table charges for them.
 pub fn estimate_usd(usage: Usage, pricing: Pricing) -> f64 {
-    let reasoning_rate = pricing.reasoning.unwrap_or(pricing.output);
-    (usage.input as f64 / 1_000_000.0) * pricing.input
-        + (usage.output as f64 / 1_000_000.0) * pricing.output
-        + (usage.reasoning as f64 / 1_000_000.0) * reasoning_rate
+    let input_rate = pricing.input.unwrap_or(0.0);
+    let output_rate = pricing.output.unwrap_or(0.0);
+    let cached_rate = pricing.cached_input.unwrap_or(input_rate);
+    let write_rate = pricing.cache_write.unwrap_or(input_rate);
+    let cached = usage.cached_input.min(usage.input);
+    let uncached = usage.input - cached;
+    let per_m = 1_000_000.0;
+    (uncached as f64 / per_m) * input_rate
+        + (cached as f64 / per_m) * cached_rate
+        + (usage.cache_write as f64 / per_m) * write_rate
+        + ((usage.output + usage.reasoning) as f64 / per_m) * output_rate
 }
 
 #[derive(Debug, Clone, Default)]
@@ -215,7 +133,11 @@ impl CostLedger {
                 priced: r.priced,
             })
             .collect();
-        rows.sort_by(|a, b| b.usd.partial_cmp(&a.usd).unwrap_or(std::cmp::Ordering::Equal));
+        rows.sort_by(|a, b| {
+            b.usd
+                .partial_cmp(&a.usd)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
 
         let mut lanes: BTreeMap<CostLane, f64> = BTreeMap::new();
         for r in &rows {
@@ -288,8 +210,7 @@ fn classify(consumed: f64, cap: f64, scope: &str, action: BudgetAction) -> Budge
         return BudgetVerdict::Ok;
     }
     if consumed >= cap {
-        let msg =
-            format!("Budget reached ({scope} cap ${cap:.2}, spent ${consumed:.2}).");
+        let msg = format!("Budget reached ({scope} cap ${cap:.2}, spent ${consumed:.2}).");
         return match action {
             BudgetAction::Stop => BudgetVerdict::Stop(format!("{msg} Stopping the session.")),
             BudgetAction::Warn => BudgetVerdict::Warn(msg),
@@ -359,7 +280,11 @@ impl DailyLedger {
     pub fn load(config_dir: &Path) -> DailyLedger {
         let path = config_dir.join("daily-spend.json");
         let today = daily_key(now_unix());
-        let mut ledger = DailyLedger { path, day: today.clone(), total_usd: 0.0 };
+        let mut ledger = DailyLedger {
+            path,
+            day: today.clone(),
+            total_usd: 0.0,
+        };
         if let Ok(text) = std::fs::read_to_string(&ledger.path) {
             if let Ok(v) = serde_json::from_str::<serde_json::Value>(&text) {
                 let day = v.get("day").and_then(|d| d.as_str()).unwrap_or_default();
@@ -399,11 +324,19 @@ mod tests {
     #[test]
     fn price_lookup_is_case_insensitive_with_prefix_fallback() {
         // Exact (case-insensitive) hit — the MiniMax id ships in mixed case.
-        assert_eq!(price_for("MiniMax-M2.7-highspeed"), Some(p(0.59, 2.37)));
+        let hs = price_for("MiniMax-M2.7-highspeed").unwrap();
+        assert!((hs.input.unwrap() - 4.2 / 7.1).abs() < 1e-9);
+        assert!((hs.output.unwrap() - 16.8 / 7.1).abs() < 1e-9);
         // Dated snapshot falls back to its base id's price.
-        assert_eq!(price_for("claude-opus-4-8-20260301"), Some(p(5.0, 25.0)));
+        assert_eq!(
+            price_for("claude-opus-4-8-20260301").map(|p| (p.input, p.output)),
+            Some((Some(5.0), Some(25.0)))
+        );
         // Longest prefix wins: gpt-5.2-pro must not bill as gpt-5.2.
-        assert_eq!(price_for("gpt-5.2-pro"), Some(pr(2.5, 10.0, 15.0)));
+        assert_eq!(
+            price_for("gpt-5.2-pro").map(|p| (p.input, p.cached_input, p.output)),
+            Some((Some(21.0), None, Some(168.0)))
+        );
         // Unknown models are unpriced — never guessed.
         assert_eq!(price_for("totally-new-model"), None);
         assert_eq!(price_for(""), None);
@@ -413,34 +346,64 @@ mod tests {
     fn qwen_council_models_are_priced() {
         // Regression: Quinn is seated as Provider::Qwen; missing rows billed her
         // at $0 and slipped the budget cap. Values mirror MODEL_REGISTRY.
-        assert_eq!(price_for("qwen3.8-flash"), Some(p(0.11, 0.38)));
-        assert_eq!(price_for("qwen3.7-max"), Some(p(1.3, 7.8)));
-        assert_eq!(price_for("qwen3.6-max-preview"), Some(p(1.3, 7.8)));
-        assert_eq!(price_for("qwen3.5-plus"), Some(p(0.56, 1.68)));
-        // qwen3.8-max had no confirmed output price at refresh time → unpriced (a
-        // `≥` lower bound in the ledger), never a guessed number.
-        assert_eq!(price_for("qwen3.8-max"), None);
+        let q = price_for("qwen3.8-flash").unwrap();
+        assert!((q.input.unwrap() - 0.8 / 7.1).abs() < 1e-9);
+        assert!((q.output.unwrap() - 2.7 / 7.1).abs() < 1e-9);
+        let m = price_for("qwen3.7-max").unwrap();
+        assert!((m.input.unwrap() - 12.0 / 7.1).abs() < 1e-9);
+        let m = price_for("qwen3.8-max").unwrap();
+        assert!((m.output.unwrap() - 36.0 / 7.1).abs() < 1e-9);
+        // Ids the table does not know are unpriced (a `≥` lower bound in the
+        // ledger), never a guessed number.
+        assert_eq!(price_for("qwen3.6-max-preview"), None);
     }
 
     #[test]
     fn estimate_bills_reasoning_at_output_rate_when_unpublished() {
-        let usage = Usage { input: 1_000_000, output: 500_000, reasoning: 200_000 };
-        // gpt-5.5 publishes no reasoning rate → reasoning bills at $30/1M.
+        let usage = Usage {
+            input: 1_000_000,
+            output: 500_000,
+            reasoning: 200_000,
+            ..Default::default()
+        };
+        // Reasoning bills at the output rate ($30/1M on gpt-5.5).
         let usd = estimate_usd(usage, price_for("gpt-5.5").unwrap());
         assert!((usd - (5.0 + 15.0 + 6.0)).abs() < 1e-9);
-        // o3 has an explicit reasoning rate.
-        let usd = estimate_usd(usage, price_for("o3").unwrap());
-        assert!((usd - (10.0 + 20.0 + 8.0)).abs() < 1e-9);
+        // Cache hits bill at the cached rate and writes at the write rate:
+        // gpt-6-astra $10 in / $1 cached / $12.5 write / $50 out.
+        let cached = Usage {
+            input: 1_000_000,
+            cached_input: 400_000,
+            cache_write: 100_000,
+            output: 500_000,
+            reasoning: 200_000,
+        };
+        let usd = estimate_usd(cached, price_for("gpt-6-astra").unwrap());
+        assert!(
+            (usd - (6.0 + 0.4 + 1.25 + 25.0 + 10.0)).abs() < 1e-9,
+            "{usd}"
+        );
     }
 
     #[test]
     fn ledger_accumulates_rows_and_lane_subtotals() {
         let mut ledger = CostLedger::new();
-        let usage = Usage { input: 2_000_000, output: 1_000_000, reasoning: 0 };
+        let usage = Usage {
+            input: 2_000_000,
+            output: 1_000_000,
+            reasoning: 0,
+            ..Default::default()
+        };
         ledger.record("george", "George", CostLane::Council, "gpt-5.5", usage);
         ledger.record("george", "George", CostLane::Council, "gpt-5.5", usage);
         ledger.record("greta", "Greta", CostLane::Advisors, "gpt-5.5", usage);
-        ledger.record("moderator", "Moderator", CostLane::Moderator, "unknown-model", usage);
+        ledger.record(
+            "moderator",
+            "Moderator",
+            CostLane::Moderator,
+            "unknown-model",
+            usage,
+        );
 
         let snap = ledger.snapshot();
         assert_eq!(snap.rows.len(), 3);
@@ -461,21 +424,45 @@ mod tests {
 
     #[test]
     fn budget_warns_at_80_percent_and_acts_at_the_cap() {
-        let policy =
-            BudgetPolicy { per_session: 10.0, per_day: 0.0, action: BudgetAction::Stop };
+        let policy = BudgetPolicy {
+            per_session: 10.0,
+            per_day: 0.0,
+            action: BudgetAction::Stop,
+        };
         assert_eq!(evaluate_budget(1.0, 0.0, policy), BudgetVerdict::Ok);
-        assert!(matches!(evaluate_budget(8.0, 0.0, policy), BudgetVerdict::Warn(_)));
-        assert!(matches!(evaluate_budget(10.0, 0.0, policy), BudgetVerdict::Stop(_)));
+        assert!(matches!(
+            evaluate_budget(8.0, 0.0, policy),
+            BudgetVerdict::Warn(_)
+        ));
+        assert!(matches!(
+            evaluate_budget(10.0, 0.0, policy),
+            BudgetVerdict::Stop(_)
+        ));
         // Warn action never stops.
-        let policy = BudgetPolicy { action: BudgetAction::Warn, ..policy };
-        assert!(matches!(evaluate_budget(12.0, 0.0, policy), BudgetVerdict::Warn(_)));
+        let policy = BudgetPolicy {
+            action: BudgetAction::Warn,
+            ..policy
+        };
+        assert!(matches!(
+            evaluate_budget(12.0, 0.0, policy),
+            BudgetVerdict::Warn(_)
+        ));
         // The daily dimension fires independently.
-        let policy =
-            BudgetPolicy { per_session: 0.0, per_day: 5.0, action: BudgetAction::Stop };
-        assert!(matches!(evaluate_budget(0.0, 5.0, policy), BudgetVerdict::Stop(_)));
+        let policy = BudgetPolicy {
+            per_session: 0.0,
+            per_day: 5.0,
+            action: BudgetAction::Stop,
+        };
+        assert!(matches!(
+            evaluate_budget(0.0, 5.0, policy),
+            BudgetVerdict::Stop(_)
+        ));
         // Zero caps disable everything.
-        let policy =
-            BudgetPolicy { per_session: 0.0, per_day: 0.0, action: BudgetAction::Stop };
+        let policy = BudgetPolicy {
+            per_session: 0.0,
+            per_day: 0.0,
+            action: BudgetAction::Stop,
+        };
         assert_eq!(evaluate_budget(1e9, 1e9, policy), BudgetVerdict::Ok);
     }
 

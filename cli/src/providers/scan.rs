@@ -47,9 +47,13 @@ fn parse(provider: Provider, body: &str) -> Vec<DiscoveredModel> {
         return models
             .iter()
             .filter(|m| {
-                m["supportedGenerationMethods"].as_array().is_none_or(|methods| {
-                    methods.iter().any(|x| x.as_str() == Some("generateContent"))
-                })
+                m["supportedGenerationMethods"]
+                    .as_array()
+                    .is_none_or(|methods| {
+                        methods
+                            .iter()
+                            .any(|x| x.as_str() == Some("generateContent"))
+                    })
             })
             .filter_map(|m| {
                 let name = m["name"].as_str()?.trim_start_matches("models/");
@@ -107,7 +111,10 @@ pub async fn scan_models(
     let status = resp.status();
     let body = resp.text().await.unwrap_or_default();
     if !status.is_success() {
-        return Err(Error::Provider { status: status.as_u16(), body });
+        return Err(Error::Provider {
+            status: status.as_u16(),
+            body,
+        });
     }
     let scanned = parse(provider, &body);
     if scanned.is_empty() {

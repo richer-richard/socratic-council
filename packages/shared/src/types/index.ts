@@ -508,6 +508,8 @@ export interface ModelInfo {
   supportsStreaming: boolean;
   pricing?: {
     inputCostPer1M?: number;
+    /** Prompt-cache read price (USD per 1M); undefined when the provider publishes none. */
+    cachedInputCostPer1M?: number;
     outputCostPer1M?: number;
     reasoningCostPer1M?: number;
   };

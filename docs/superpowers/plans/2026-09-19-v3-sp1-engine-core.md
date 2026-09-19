@@ -66,6 +66,7 @@ docs/provider-contract-sheet.md         refreshed with dated sources per model f
 ### Task 1: Catalog v2 with verified contracts and prices
 
 **Files:**
+
 - Modify: `cli/src/catalog.rs` (becomes the module root; add `ModelRow`, `Pricing`, `Contract`, `ApiFamily`, `ThinkingKnob`, `ModelClass`, `model_row`)
 - Create: `cli/src/catalog_rows.rs` (the table) — moved under `catalog/` in Task 6
 - Modify: `cli/src/providers/mod.rs:171-355` (`prepare` reads `Contract` instead of string tests)
@@ -74,6 +75,7 @@ docs/provider-contract-sheet.md         refreshed with dated sources per model f
 - Test: `cli/src/catalog.rs` tests module, `cli/src/providers/mod.rs` tests module
 
 **Interfaces:**
+
 - Produces:
 
 ```rust
@@ -129,7 +131,7 @@ pub fn catalog_rows(provider: Provider) -> Vec<ModelRow>;
   - Qwen: `https://help.aliyun.com/zh/model-studio/models`, `.../model-studio/deep-thinking`, `.../model-studio/qwen-function-calling`, `.../model-studio/context-cache`.
   - MiniMax: `https://platform.minimaxi.com/document/pricing`, `.../document/Anthropic-compatible` (tools, thinking).
   - Zhipu: `https://docs.bigmodel.cn/cn/guide/start/model-overview`, `.../guide/develop/function-call`, `https://open.bigmodel.cn/pricing`.
-  If a page is JS-rendered and curl returns no prices, try the `llms.txt` or `.md` variant of the URL; if still nothing, keep the existing registry value and mark the row "price unverified 2026-09-19" in the sheet. Never guess.
+    If a page is JS-rendered and curl returns no prices, try the `llms.txt` or `.md` variant of the URL; if still nothing, keep the existing registry value and mark the row "price unverified 2026-09-19" in the sheet. Never guess.
 
 - [ ] **Step 2: Write the failing tests** in `cli/src/catalog.rs`:
 
@@ -162,7 +164,7 @@ fn cached_input_never_exceeds_input() {
 
 - [ ] **Step 3: Run them to confirm failure** (`cargo test --locked catalog`): compile errors on the missing types.
 
-- [ ] **Step 4: Implement** `ModelRow`, `Pricing`, `Contract`, enums, `catalog_rows` (the table in `catalog_rows.rs`, one `row(...)` call per real id from the Sept 2026 lineup, prices from Step 1), `family_of(provider, id) -> Contract` with the prefix rules already in `prepare` (gpt-6/gpt-5 → Responses + OpenAiEffort; claude-*-4-7/4-8/5-* → AnthropicAdaptive no sampling; claude-*-4-6 and older → AnthropicExtended; gemini-3 → GeminiLevel; gemini-2.5 → GeminiBudget; deepseek-v4/flash → DeepSeekType; kimi-k3 → KimiEffort; kimi-k2.7-code → KimiAlwaysOn; kimi-k2.6 → KimiType; qwen → QwenEnable; MiniMax-M3 → MiniMaxAdaptive; MiniMax-M2 → MiniMaxAlwaysOn; glm-5.3/glm-4.7 → GlmType{forced:true}; other glm → GlmType{forced:false}), `model_row` (exact match else family), and derive `catalog_models` from rows.
+- [ ] **Step 4: Implement** `ModelRow`, `Pricing`, `Contract`, enums, `catalog_rows` (the table in `catalog_rows.rs`, one `row(...)` call per real id from the Sept 2026 lineup, prices from Step 1), `family_of(provider, id) -> Contract` with the prefix rules already in `prepare` (gpt-6/gpt-5 → Responses + OpenAiEffort; claude-_-4-7/4-8/5-_ → AnthropicAdaptive no sampling; claude-*-4-6 and older → AnthropicExtended; gemini-3 → GeminiLevel; gemini-2.5 → GeminiBudget; deepseek-v4/flash → DeepSeekType; kimi-k3 → KimiEffort; kimi-k2.7-code → KimiAlwaysOn; kimi-k2.6 → KimiType; qwen → QwenEnable; MiniMax-M3 → MiniMaxAdaptive; MiniMax-M2 → MiniMaxAlwaysOn; glm-5.3/glm-4.7 → GlmType{forced:true}; other glm → GlmType{forced:false}), `model_row` (exact match else family), and derive `catalog_models` from rows.
 
 - [ ] **Step 5: Refactor `prepare`** to read `model_row(provider, &req.model).contract` and match on `ThinkingKnob` instead of `starts_with` chains. Keep every existing provider test passing unchanged (they are the regression suite for the contracts). Add one test per knob variant asserting the exact JSON key it emits, e.g.:
 
@@ -185,12 +187,14 @@ fn knob_kimi_effort_sends_reasoning_effort_and_no_thinking_object() {
 ### Task 2: Native tool calling and cached-token usage in every client style
 
 **Files:**
+
 - Modify: `cli/src/types.rs` (`Role::Tool`, `ChatMessage` fields, `ToolSpec`, `ToolCall`, `CompletionRequest.tools/cache_key`, `CompletionOutcome`, `StopReason`, `Usage.cached_input`)
 - Modify: `cli/src/providers/mod.rs` (`prepare` encodes tools + tool results + cache markers; `parse_event` accumulates tool-call deltas; `stream_completion` returns `CompletionOutcome`)
 - Modify: callers of `stream_completion` (engine/mod.rs, moderator.rs, vote.rs, observer.rs, peereval.rs, reflect.rs, deepresearch.rs, main.rs probe) to read `.usage` from the outcome (mechanical; these modules are deleted in Task 5)
 - Test: `cli/src/providers/mod.rs` tests + fixture strings inline
 
 **Interfaces:**
+
 - Produces:
 
 ```rust
@@ -235,7 +239,7 @@ fn responses_stream_accumulates_a_function_call() {
 }
 ```
 
-  Plus `messages_stream_accumulates_tool_use_and_cache_reads`, `gemini_function_call_arrives_whole`, `chat_completions_tool_call_deltas_by_index` (DeepSeek usage `prompt_cache_hit_tokens`), and request-encoding tests: `responses_request_encodes_tools_and_prompt_cache_key`, `messages_request_marks_prefix_with_cache_control`, `gemini_request_encodes_function_declarations`, `chat_request_encodes_tool_results_as_role_tool`.
+Plus `messages_stream_accumulates_tool_use_and_cache_reads`, `gemini_function_call_arrives_whole`, `chat_completions_tool_call_deltas_by_index` (DeepSeek usage `prompt_cache_hit_tokens`), and request-encoding tests: `responses_request_encodes_tools_and_prompt_cache_key`, `messages_request_marks_prefix_with_cache_control`, `gemini_request_encodes_function_declarations`, `chat_request_encodes_tool_results_as_role_tool`.
 
 - [ ] **Step 2: Run to confirm failure.**
 - [ ] **Step 3: Implement** the types, `ToolAccumulator`, the encoders, the parsers, and change `stream_completion` to return `CompletionOutcome`. Keep `on_chunk` for live text and thinking.
@@ -247,11 +251,13 @@ fn responses_stream_accumulates_a_function_call() {
 ### Task 3: Tool registry, policy, workspace and sandboxed shell
 
 **Files:**
+
 - Create: `cli/src/tools/mod.rs`, `cli/src/tools/policy.rs`, `cli/src/tools/shell.rs`, `cli/src/tools/workspace.rs`, `cli/src/tools/web.rs`, `cli/src/tools/attachments.rs`
 - Move: the query guard, `untrusted_result_message`, web search and verify from `cli/src/engine/oracle.rs` into `tools/web.rs`; file search from `attach.rs`/`oracle.rs` into `tools/attachments.rs`
 - Test: each module's tests; `shell.rs` sandbox tests `#[cfg(target_os = "macos")]`
 
 **Interfaces:**
+
 - Produces:
 
 ```rust
@@ -283,7 +289,7 @@ pub fn resolve_inside(root: &Path, rel: &str) -> Result<PathBuf, String>;       
 (deny network*)
 ```
 
-  Run as `sandbox-exec -p <profile> /bin/sh -c <cmd>` with `env_clear()`, `PATH=/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin`, `HOME=<workspace>`, `TMPDIR=<tmp>`, cwd workspace, `kill_on_drop`, a `tokio::time::timeout`, stdout+stderr captured and truncated at `max_output_bytes` with a `[truncated]` marker. Off macOS: refuse with the error "shell tool is sandboxed only on macOS; set tools.shell.unsandboxed = true to run without a sandbox" unless `unsandboxed`.
+Run as `sandbox-exec -p <profile> /bin/sh -c <cmd>` with `env_clear()`, `PATH=/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin`, `HOME=<workspace>`, `TMPDIR=<tmp>`, cwd workspace, `kill_on_drop`, a `tokio::time::timeout`, stdout+stderr captured and truncated at `max_output_bytes` with a `[truncated]` marker. Off macOS: refuse with the error "shell tool is sandboxed only on macOS; set tools.shell.unsandboxed = true to run without a sandbox" unless `unsandboxed`.
 
 - [ ] **Step 1: Failing tests**: `resolve_inside_refuses_traversal_and_absolute_paths`, `write_then_read_round_trip_inside_workspace`, `specs_follow_policy` (none → empty; safe → 5 specs without run_command; all → 6), `fenced_output_is_labelled_untrusted`, `output_is_truncated_at_cap`; macOS-only: `sandbox_blocks_network` (`curl -s https://example.com` exits non-zero), `sandbox_blocks_writes_outside_workspace` (`touch $HOME/../escape` fails; use a temp dir parent), `sandbox_allows_echo_and_python` (`echo hi`), `timeout_kills_sleep` (`sleep 5` with timeout 1 → error contains "timed out").
 - [ ] **Step 2: Run to confirm failure.**
@@ -295,12 +301,14 @@ pub fn resolve_inside(root: &Path, rel: &str) -> Result<PathBuf, String>;       
 ### Task 4: The deliberation protocol
 
 **Files:**
+
 - Create: `cli/src/deliberation/{mod.rs, plan.rs, prompts.rs, parse.rs, board.rs, record.rs, estimate.rs, seat_turn.rs}`
 - Modify: `cli/src/engine/cost.rs` → move to `cli/src/cost.rs`; `record()` bills `cached_input` at `pricing.cached_input.unwrap_or(pricing.input)`; ledger snapshot gains `cached_input_tokens`
 - Modify: `cli/src/store.rs` (v2 document: `version`, `protocol`, `plan`, `board`, `rounds`, `record`, `document`, `costs`; `messages` still filled; `load` accepts v1)
 - Test: unit tests per module; `cli/tests/protocol_fake_provider.rs` integration test with an in-process fake provider
 
 **Interfaces:**
+
 - Consumes: `stream_completion` (Task 2), `tools::{specs_for, execute, fenced}` (Task 3), `model_row` (Task 1)
 - Produces:
 
@@ -356,7 +364,7 @@ Give uncertainty as a number when asked. Never invent sources, quotes or results
 Answer with the JSON object requested and nothing else.
 ```
 
-  Round prompts state the JSON shape verbatim (Section 4 of the spec) and the word cap ("position at most 180 words"). The planner user prompt includes the roster table one seat per line: `id | name | provider | model | class | $in/$out per 1M | tools yes/no` and the instruction "Give hard reasoning to Flagship seats. Give bounded chores (summaries, lookups, calculations) to Fast seats as subtasks. Use at most {max_principals} principals; fewer is better when the question is narrow."
+Round prompts state the JSON shape verbatim (Section 4 of the spec) and the word cap ("position at most 180 words"). The planner user prompt includes the roster table one seat per line: `id | name | provider | model | class | $in/$out per 1M | tools yes/no` and the instruction "Give hard reasoning to Flagship seats. Give bounded chores (summaries, lookups, calculations) to Fast seats as subtasks. Use at most {max_principals} principals; fewer is better when the question is narrow."
 
 - Parsers: `extract_json` (moved from peereval) then `serde_json::from_str` into a lenient intermediate with `#[serde(default)]` on every field; confidence clamped to 0..=1; unknown seats dropped by `validate`.
 - Estimate: `calls = 1 (plan) + subtasks + principals (positions) + rounds * (principals + 2) + principals (revision) + 1 (record) [+ principals + 2 for document]`; tokens per call by tier: input ≈ 1200 + 250 * principals; output ≈ word cap * 1.5; reasoning ≈ {low 300, medium 1500, high 4000}; usd from each seat's `Pricing` (unpriced → `unpriced_seats`); `usd_high = 1.6 * usd_low`.
@@ -372,12 +380,14 @@ Answer with the JSON object requested and nothing else.
 ### Task 5: The CLI on the new engine; cut the old modules; minimal TUI adaptation
 
 **Files:**
+
 - Modify: `cli/src/main.rs` (run/probe/models/config; new flags), `cli/src/config.rs` (`[[seats]]`, `[moderator]`, `[utility]`, `[tools]`, `[protocol]`, `[budget]`; `impl Config { pub fn engine_config(&self) -> EngineConfig; pub fn roster(&self, preset, seats_flag) -> Roster }`), `cli/src/tui/mod.rs`, `cli/src/tui/chat.rs`, `cli/src/tui/settings.rs`
 - Delete: `cli/src/engine/{observer,conflict,reflect,peereval,canvas,deepresearch,moderator,vote,oracle}.rs`, `cli/src/engine/mod.rs` (the old loop), old flags and TUI panes (conflict, canvas, peer-eval, research, advisors)
 - Modify: `cli/README.md`, `docs/cli-design.md`
 - Test: `cli/src/config.rs` tests; `cli/src/main.rs` plain-output tests where present
 
 **Interfaces:**
+
 - CLI: `socratic-council run "<topic>" [--preset quick|standard|full] [--seats openai:gpt-6-astra,anthropic:auto,...] [--deliverable decision|analysis|document|review] [--rounds N] [--tools none|safe|all] [--allow-shell] [--interactive] [--attach FILE]... [--budget USD] [--no-tui] [--json] [--resume ID]`; `probe [--tools]`; `models [--scan]`; `providers`; `config ...` unchanged.
 - `config.toml`:
 
@@ -413,6 +423,7 @@ per_session_usd = 0; per_day_usd = 0
 ### Task 6: Extract the `engine/` crate into a root workspace
 
 **Files:**
+
 - Create: `Cargo.toml` (root workspace `members = ["engine", "cli"]`, `exclude = ["apps/desktop/src-tauri"]`, `resolver = "2"`), `engine/Cargo.toml`, `engine/src/lib.rs`
 - Move: `cli/src/{types.rs, catalog.rs, catalog_rows.rs, providers/, tools/, deliberation/, cost.rs, store.rs, crypto.rs, attach.rs, search.rs, error.rs}` → `engine/src/...` (store + crypto under `session/`); `http_client` → `engine/src/http.rs`
 - Modify: `cli/Cargo.toml` (`engine = { package = "socratic-council-engine", version = "0.1.0", path = "../engine" }`; drop deps the CLI no longer uses directly), `cli/src/lib.rs` (re-export `pub use engine::*` modules the TUI uses), `cli/src/bridge.rs` (`open_store(bridge) -> Option<SessionStore>` using `SessionStore::at`), imports everywhere

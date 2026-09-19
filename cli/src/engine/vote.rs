@@ -33,7 +33,10 @@ pub fn build_messages(
     );
     let mut messages = vec![ChatMessage::user(format!("Discussion topic: \"{topic}\""))];
     if !recent.is_empty() {
-        messages.push(ChatMessage::user(format!("Recent discussion:\n{}", recent.join("\n"))));
+        messages.push(ChatMessage::user(format!(
+            "Recent discussion:\n{}",
+            recent.join("\n")
+        )));
     }
     messages.push(ChatMessage::user(instruction));
     messages
@@ -70,7 +73,11 @@ pub async fn cast(
             Ok(usage) => usage,
             Err(_) => {
                 // A failed ballot abstains (and never blocks the motion).
-                return (VoteChoice::Abstain, "(no response)".to_string(), Usage::default());
+                return (
+                    VoteChoice::Abstain,
+                    "(no response)".to_string(),
+                    Usage::default(),
+                );
             }
         }
     };
@@ -92,7 +99,10 @@ pub fn parse_vote(text: &str) -> (VoteChoice, String) {
     };
     // Reason = the visible text with the leading "Vote: X" prefix removed.
     let reason = re.replace(text, "").trim().to_string();
-    let reason = reason.trim_start_matches(['.', ',', '-', ' ']).trim().to_string();
+    let reason = reason
+        .trim_start_matches(['.', ',', '-', ' '])
+        .trim()
+        .to_string();
     (choice, reason)
 }
 

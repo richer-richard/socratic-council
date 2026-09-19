@@ -143,7 +143,10 @@ pub fn resolve_ddg_href(href: &str) -> String {
 }
 
 fn clean_text(s: &str) -> String {
-    decode_entities(&strip_tags(s)).split_whitespace().collect::<Vec<_>>().join(" ")
+    decode_entities(&strip_tags(s))
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 /// Extract `attr="…"` from a tag string.
@@ -165,9 +168,14 @@ pub fn parse_ddg_html(body: &str) -> Vec<SearchResultItem> {
     let mut rest = body;
     while let Some(at) = rest.find("result__snippet") {
         let tail = &rest[at..];
-        let Some(open_end) = tail.find('>') else { break };
+        let Some(open_end) = tail.find('>') else {
+            break;
+        };
         let after = &tail[open_end + 1..];
-        let end = after.find("</a>").or_else(|| after.find("</div>")).unwrap_or(0);
+        let end = after
+            .find("</a>")
+            .or_else(|| after.find("</div>"))
+            .unwrap_or(0);
         snippets.push(clean_text(&after[..end]));
         rest = &after[end..];
     }
@@ -179,7 +187,9 @@ pub fn parse_ddg_html(body: &str) -> Vec<SearchResultItem> {
         let head = &body[..tag_start];
         let Some(open) = head.rfind("<a") else { break };
         let tail = &body[open..];
-        let Some(open_end) = tail.find('>') else { break };
+        let Some(open_end) = tail.find('>') else {
+            break;
+        };
         let tag = &tail[..open_end];
         let inner_after = &tail[open_end + 1..];
         let inner_end = inner_after.find("</a>").unwrap_or(0);
@@ -188,7 +198,11 @@ pub fn parse_ddg_html(body: &str) -> Vec<SearchResultItem> {
             let url = resolve_ddg_href(&decode_entities(href));
             if !title.is_empty() && url.starts_with("http") {
                 let snippet = snippets.get(hits.len()).cloned().unwrap_or_default();
-                hits.push(SearchResultItem { title, url, snippet });
+                hits.push(SearchResultItem {
+                    title,
+                    url,
+                    snippet,
+                });
             }
         }
         rest = &rest[at + "result__a".len()..];
@@ -201,23 +215,37 @@ pub fn parse_bing_rss(body: &str) -> Vec<SearchResultItem> {
     fn tag_text(block: &str, tag: &str) -> String {
         let open = format!("<{tag}>");
         let close = format!("</{tag}>");
-        let Some(s) = block.find(&open) else { return String::new() };
+        let Some(s) = block.find(&open) else {
+            return String::new();
+        };
         let after = &block[s + open.len()..];
-        let Some(e) = after.find(&close) else { return String::new() };
-        clean_text(after[..e].trim_start_matches("<![CDATA[").trim_end_matches("]]>"))
+        let Some(e) = after.find(&close) else {
+            return String::new();
+        };
+        clean_text(
+            after[..e]
+                .trim_start_matches("<![CDATA[")
+                .trim_end_matches("]]>"),
+        )
     }
 
     let mut hits = Vec::new();
     let mut rest = body;
     while let Some(s) = rest.find("<item>") {
         let after = &rest[s..];
-        let Some(e) = after.find("</item>") else { break };
+        let Some(e) = after.find("</item>") else {
+            break;
+        };
         let block = &after[..e];
         let title = tag_text(block, "title");
         let url = tag_text(block, "link");
         let snippet = tag_text(block, "description");
         if !title.is_empty() && url.starts_with("http") {
-            hits.push(SearchResultItem { title, url, snippet });
+            hits.push(SearchResultItem {
+                title,
+                url,
+                snippet,
+            });
         }
         rest = &after[e + "</item>".len()..];
     }
@@ -231,14 +259,22 @@ pub fn parse_ddg_instant(body: &str) -> Vec<SearchResultItem> {
     };
     let mut hits = Vec::new();
     let s = |x: &serde_json::Value, k: &str| -> String {
-        x.get(k).and_then(|v| v.as_str()).unwrap_or("").trim().to_string()
+        x.get(k)
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .trim()
+            .to_string()
     };
     let abstract_text = s(&v, "AbstractText");
     let abstract_url = s(&v, "AbstractURL");
     if !abstract_text.is_empty() && !abstract_url.is_empty() {
         let heading = s(&v, "Heading");
         hits.push(SearchResultItem {
-            title: if heading.is_empty() { abstract_url.clone() } else { heading },
+            title: if heading.is_empty() {
+                abstract_url.clone()
+            } else {
+                heading
+            },
             url: abstract_url,
             snippet: abstract_text,
         });
@@ -248,7 +284,11 @@ pub fn parse_ddg_instant(body: &str) -> Vec<SearchResultItem> {
         let url = s(t, "FirstURL");
         if !text.is_empty() && !url.is_empty() {
             let title = text.split(" - ").next().unwrap_or(&text).to_string();
-            hits.push(SearchResultItem { title, url, snippet: text.clone() });
+            hits.push(SearchResultItem {
+                title,
+                url,
+                snippet: text.clone(),
+            });
         }
     };
     if let Some(topics) = v.get("RelatedTopics").and_then(|t| t.as_array()) {
@@ -353,9 +393,15 @@ mod tests {
 
     #[test]
     fn decodes_entities_and_percent_escapes() {
-        assert_eq!(decode_entities("a &amp; b &lt;c&gt; &quot;d&quot; &#39;e&#39;"), "a & b <c> \"d\" 'e'");
+        assert_eq!(
+            decode_entities("a &amp; b &lt;c&gt; &quot;d&quot; &#39;e&#39;"),
+            "a & b <c> \"d\" 'e'"
+        );
         assert_eq!(decode_entities("AT&T stays"), "AT&T stays");
-        assert_eq!(percent_decode("https%3A%2F%2Fexample.com%2Fa+b"), "https://example.com/a b");
+        assert_eq!(
+            percent_decode("https%3A%2F%2Fexample.com%2Fa+b"),
+            "https://example.com/a b"
+        );
         assert_eq!(url_encode("rust 1.82 论"), "rust+1.82+%E8%AE%BA");
     }
 
@@ -378,8 +424,14 @@ mod tests {
     fn resolves_ddg_redirect_hrefs() {
         let href = "//duckduckgo.com/l/?uddg=https%3A%2F%2Fwww.rust%2Dlang.org%2F&rut=abc";
         assert_eq!(resolve_ddg_href(href), "https://www.rust-lang.org/");
-        assert_eq!(resolve_ddg_href("https://direct.example.com/x"), "https://direct.example.com/x");
-        assert_eq!(resolve_ddg_href("//cdn.example.com/y"), "https://cdn.example.com/y");
+        assert_eq!(
+            resolve_ddg_href("https://direct.example.com/x"),
+            "https://direct.example.com/x"
+        );
+        assert_eq!(
+            resolve_ddg_href("//cdn.example.com/y"),
+            "https://cdn.example.com/y"
+        );
     }
 
     #[test]
@@ -442,8 +494,13 @@ mod tests {
             snippet: String::new(),
         };
         let hits = normalize(vec![
-            mk(1, "https://a"), mk(2, "https://a"), mk(3, "https://b"), mk(4, "https://c"),
-            mk(5, "https://d"), mk(6, "https://e"), mk(7, "https://f"),
+            mk(1, "https://a"),
+            mk(2, "https://a"),
+            mk(3, "https://b"),
+            mk(4, "https://c"),
+            mk(5, "https://d"),
+            mk(6, "https://e"),
+            mk(7, "https://f"),
         ]);
         assert_eq!(hits.len(), MAX_RESULTS);
         assert_eq!(hits[0].title, "t1");

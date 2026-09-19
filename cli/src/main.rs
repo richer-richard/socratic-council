@@ -172,7 +172,11 @@ async fn main() {
         Some(Command::Sessions) => cmd_sessions(),
         Some(Command::Models { provider, scan }) => cmd_models(provider, scan).await,
         Some(Command::Providers) => cmd_providers(),
-        Some(Command::Probe { provider, tier, scan }) => cmd_probe(provider, tier, scan).await,
+        Some(Command::Probe {
+            provider,
+            tier,
+            scan,
+        }) => cmd_probe(provider, tier, scan).await,
         Some(Command::Config { action }) => cmd_config(action),
     };
     if let Err(e) = result {
@@ -285,9 +289,9 @@ async fn cmd_run(args: RunArgs) -> anyhow::Result<()> {
         Some(id) => {
             let store = SessionStore::open(config.bridge())
                 .ok_or_else(|| anyhow::anyhow!("no session store available"))?;
-            let json = store
-                .load(id)
-                .ok_or_else(|| anyhow::anyhow!("session {id} not found in {}", store.dir().display()))?;
+            let json = store.load(id).ok_or_else(|| {
+                anyhow::anyhow!("session {id} not found in {}", store.dir().display())
+            })?;
             Some((id.clone(), json))
         }
         None => None,
@@ -305,7 +309,11 @@ async fn cmd_run(args: RunArgs) -> anyhow::Result<()> {
     if allowed.is_empty() {
         anyhow::bail!(
             "no valid providers in --providers (known slugs: {})",
-            Provider::ALL.iter().map(|p| p.slug()).collect::<Vec<_>>().join(", ")
+            Provider::ALL
+                .iter()
+                .map(|p| p.slug())
+                .collect::<Vec<_>>()
+                .join(", ")
         );
     }
 
@@ -337,8 +345,11 @@ async fn cmd_run(args: RunArgs) -> anyhow::Result<()> {
     if args.no_tui {
         // Plain mode has no interactive way to add a key, so it still requires
         // at least one configured provider up front.
-        let configured: Vec<Provider> =
-            allowed.iter().copied().filter(|p| config.is_configured(*p)).collect();
+        let configured: Vec<Provider> = allowed
+            .iter()
+            .copied()
+            .filter(|p| config.is_configured(*p))
+            .collect();
         if configured.is_empty() {
             anyhow::bail!(
                 "no API keys configured for the selected providers. Add one with \
@@ -362,10 +373,19 @@ async fn cmd_run(args: RunArgs) -> anyhow::Result<()> {
         anyhow::bail!("--resume is a plain-mode option (add --no-tui); in the TUI, press Tab, pick the session and press Enter");
     }
 
-    let initial_topic =
-        if args.topic.trim().is_empty() { None } else { Some(args.topic.clone()) };
-    let ctx =
-        AppContext { http, config, available, providers: allowed, prefetched_keys, attachments };
+    let initial_topic = if args.topic.trim().is_empty() {
+        None
+    } else {
+        Some(args.topic.clone())
+    };
+    let ctx = AppContext {
+        http,
+        config,
+        available,
+        providers: allowed,
+        prefetched_keys,
+        attachments,
+    };
     tui::run(ctx, initial_topic).await
 }
 
@@ -442,15 +462,34 @@ async fn run_plain_debate(
             content: m.content.clone(),
         })
         .collect();
-    let engine = Engine::new(http, config, topic.clone(), agents, available, keys, max_turns)
-        .with_attachments(attachments)
-        .with_prior_transcript(prior);
+    let engine = Engine::new(
+        http,
+        config,
+        topic.clone(),
+        agents,
+        available,
+        keys,
+        max_turns,
+    )
+    .with_attachments(attachments)
+    .with_prior_transcript(prior);
     // Turns already in the stored session keep counting up on resume.
     let prior_turns = prior_msgs
         .iter()
-        .filter(|m| socratic_council::tui::theme::AGENTS.iter().any(|a| a.id == m.agent_id))
+        .filter(|m| {
+            socratic_council::tui::theme::AGENTS
+                .iter()
+                .any(|a| a.id == m.agent_id)
+        })
         .count() as u32;
-    let record = PlainRecord { store, session_id, created_at_ms, topic, messages: prior_msgs, prior_turns };
+    let record = PlainRecord {
+        store,
+        session_id,
+        created_at_ms,
+        topic,
+        messages: prior_msgs,
+        prior_turns,
+    };
     run_plain(engine, display_cap, record).await;
     Ok(())
 }
@@ -466,7 +505,14 @@ struct PlainRecord {
 }
 
 impl PlainRecord {
-    fn push(&mut self, agent_id: &str, name: &str, content: String, thinking: String, model: String) {
+    fn push(
+        &mut self,
+        agent_id: &str,
+        name: &str,
+        content: String,
+        thinking: String,
+        model: String,
+    ) {
         if content.trim().is_empty() {
             return;
         }
@@ -653,7 +699,15 @@ async fn run_plain(engine: Engine, max_turns: u32, mut record: PlainRecord) {
     }
     record.save(done, turn_no, usage_total);
     if record.store.is_some() {
-        eprintln!("[session] saved {} ({})", record.session_id, if done { "completed" } else { "paused — resume with --resume" });
+        eprintln!(
+            "[session] saved {} ({})",
+            record.session_id,
+            if done {
+                "completed"
+            } else {
+                "paused — resume with --resume"
+            }
+        );
     }
 
     // Closing cost ledger.
@@ -701,14 +755,15 @@ async fn cmd_models(provider: Option<String>, scan: bool) -> anyhow::Result<()> 
         println!("\n{} ({})", provider.display_name(), provider.slug());
         let models = if scan {
             match config.resolve_api_key(provider) {
-                Some(key) => match scan_models(&http, provider, &config.base_url(provider), &key).await
-                {
-                    Ok(m) => m,
-                    Err(e) => {
-                        println!("  scan failed ({e}); showing catalog");
-                        catalog_models(provider)
+                Some(key) => {
+                    match scan_models(&http, provider, &config.base_url(provider), &key).await {
+                        Ok(m) => m,
+                        Err(e) => {
+                            println!("  scan failed ({e}); showing catalog");
+                            catalog_models(provider)
+                        }
                     }
-                },
+                }
                 None => {
                     println!("  no API key; showing catalog");
                     catalog_models(provider)
@@ -718,7 +773,11 @@ async fn cmd_models(provider: Option<String>, scan: bool) -> anyhow::Result<()> 
             catalog_models(provider)
         };
         for m in models {
-            let tag = if m.source == ModelSource::Scanned { "live" } else { "cat" };
+            let tag = if m.source == ModelSource::Scanned {
+                "live"
+            } else {
+                "cat"
+            };
             println!("  [{tag}] {}", m.id);
         }
     }
@@ -771,12 +830,19 @@ async fn cmd_probe(
         };
         let base = config.base_url(provider);
         let models = if scan {
-            scan_models(&http, provider, &base, &key).await.unwrap_or_else(|_| catalog_models(provider))
+            scan_models(&http, provider, &base, &key)
+                .await
+                .unwrap_or_else(|_| catalog_models(provider))
         } else {
             catalog_models(provider)
         };
         let selection = config.selection(provider, tier);
-        let model = resolve_model(provider, tier, &models, selection.as_deref().or(Some("auto")));
+        let model = resolve_model(
+            provider,
+            tier,
+            &models,
+            selection.as_deref().or(Some("auto")),
+        );
 
         let req = CompletionRequest {
             model: model.clone(),
@@ -820,7 +886,13 @@ async fn cmd_probe(
             Err(e) => {
                 failures += 1;
                 let msg: String = clean(&e.to_string()).chars().take(160).collect();
-                println!("{:<10} {:<28} {:>6.1}s  ERROR {}", provider.slug(), model, secs, msg);
+                println!(
+                    "{:<10} {:<28} {:>6.1}s  ERROR {}",
+                    provider.slug(),
+                    model,
+                    secs,
+                    msg
+                );
             }
         }
     }

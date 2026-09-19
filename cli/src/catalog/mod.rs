@@ -10,6 +10,12 @@ use crate::types::{Provider, ReasoningTier};
 use regex::Regex;
 use std::sync::OnceLock;
 
+pub mod rows;
+pub use rows::{
+    catalog_rows, family_class, family_contract, model_row, ApiFamily, Contract, ModelClass,
+    ModelRow, Pricing, ThinkingKnob, CNY_PER_USD,
+};
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ModelSource {
     Catalog,
@@ -27,27 +33,6 @@ pub struct DiscoveredModel {
     pub output_price: Option<f64>,
 }
 
-impl DiscoveredModel {
-    fn catalog(
-        id: &str,
-        provider: Provider,
-        name: &str,
-        ctx: u32,
-        thinking: bool,
-        out_price: f64,
-    ) -> Self {
-        Self {
-            id: id.to_string(),
-            provider,
-            display_name: Some(name.to_string()),
-            source: ModelSource::Catalog,
-            context_window: Some(ctx),
-            supports_thinking: Some(thinking),
-            output_price: Some(out_price),
-        }
-    }
-}
-
 /// Static catalog flagship per provider — the fallback "Auto" lands on when no
 /// scan has run. Real ids only.
 pub fn default_model(provider: Provider) -> &'static str {
@@ -63,73 +48,21 @@ pub fn default_model(provider: Provider) -> &'static str {
     }
 }
 
-/// A representative slice of the desktop catalog (real ids), enough for Auto to
-/// pick sensible flagship / balanced / fast models per provider offline.
+/// The catalog as the resolver sees it: derived from the verified table so
+/// Auto can pick sensible flagship / balanced / fast models offline.
 pub fn catalog_models(provider: Provider) -> Vec<DiscoveredModel> {
-    use Provider::*;
-    let m = DiscoveredModel::catalog;
-    match provider {
-        // Refreshed 2026-09-19 from each provider's live /models endpoint (Chinese
-        // endpoints for the Chinese providers) + published pricing. Output prices are
-        // USD per 1M tokens; CNY list prices are converted at 7.1 CNY/USD.
-        OpenAI => vec![
-            m("gpt-6-astra", OpenAI, "GPT-6 Astra", 1_050_000, true, 50.0),
-            m("gpt-5.6-sol", OpenAI, "GPT-5.6 Sol", 1_050_000, true, 20.0),
-            m("gpt-5.6-terra", OpenAI, "GPT-5.6 Terra", 1_050_000, true, 12.0),
-            m("gpt-5.6-luna", OpenAI, "GPT-5.6 Luna", 1_050_000, true, 1.2),
-            m("gpt-5.5", OpenAI, "GPT-5.5", 1_000_000, true, 30.0),
-            m("gpt-5.4", OpenAI, "GPT-5.4", 1_050_000, true, 15.0),
-            m("gpt-5-mini", OpenAI, "GPT-5 Mini", 128_000, true, 1.6),
-            m("gpt-5-nano", OpenAI, "GPT-5 Nano", 128_000, true, 0.4),
-        ],
-        Anthropic => vec![
-            m("claude-fable-5-1", Anthropic, "Claude Fable 5.1", 1_000_000, true, 50.0),
-            m("claude-opus-5", Anthropic, "Claude Opus 5", 1_000_000, true, 25.0),
-            m("claude-sonnet-5", Anthropic, "Claude Sonnet 5", 1_000_000, true, 10.0),
-            m("claude-opus-4-8", Anthropic, "Claude Opus 4.8", 1_000_000, true, 25.0),
-            m("claude-haiku-4-5-20251001", Anthropic, "Claude Haiku 4.5", 200_000, true, 5.0),
-        ],
-        Google => vec![
-            m("gemini-3.1-pro-preview", Google, "Gemini 3.1 Pro", 1_000_000, true, 12.0),
-            m("gemini-3.8-flash", Google, "Gemini 3.8 Flash", 1_000_000, true, 3.75),
-            m("gemini-3.7-flash", Google, "Gemini 3.7 Flash", 1_000_000, true, 3.75),
-            m("gemini-3.5-flash", Google, "Gemini 3.5 Flash", 1_000_000, true, 9.0),
-            m("gemini-3.5-flash-lite", Google, "Gemini 3.5 Flash-Lite", 1_000_000, true, 2.5),
-            m("gemini-2.5-pro", Google, "Gemini 2.5 Pro", 1_000_000, true, 5.0),
-        ],
-        DeepSeek => vec![
-            m("deepseek-v4-pro", DeepSeek, "DeepSeek V4 Pro", 1_000_000, true, 3.8),
-            m("deepseek-flash", DeepSeek, "DeepSeek V4.1 Flash", 1_000_000, true, 1.13),
-        ],
-        Kimi => vec![
-            m("kimi-k3", Kimi, "Kimi K3", 1_048_576, true, 14.08),
-            m("kimi-k2.7-code", Kimi, "Kimi K2.7 Code", 262_144, true, 3.8),
-            m("kimi-k2.7-code-highspeed", Kimi, "Kimi K2.7 Code Highspeed", 262_144, true, 7.61),
-            m("kimi-k2.6", Kimi, "Kimi K2.6", 262_144, true, 3.8),
-        ],
-        Qwen => vec![
-            // qwen3.8-max / qwen3.7-plus had no confirmed output price at refresh time;
-            // they stay unpriced (cost ledger shows a lower bound) rather than guessed.
-            DiscoveredModel { output_price: None, ..m("qwen3.8-max", Qwen, "Qwen 3.8 Max", 1_000_000, true, 0.0) },
-            m("qwen3.8-flash", Qwen, "Qwen 3.8 Flash", 1_000_000, true, 0.38),
-            DiscoveredModel { output_price: None, ..m("qwen3.7-plus", Qwen, "Qwen 3.7 Plus", 1_000_000, true, 0.0) },
-            m("qwen3.7-max", Qwen, "Qwen 3.7 Max", 1_000_000, true, 7.8),
-        ],
-        MiniMax => vec![
-            m("MiniMax-M3", MiniMax, "MiniMax M3", 1_000_000, true, 1.18),
-            m("MiniMax-M2.7", MiniMax, "MiniMax M2.7", 204_800, true, 1.18),
-            m("MiniMax-M2.7-highspeed", MiniMax, "MiniMax M2.7 Highspeed", 204_800, true, 2.37),
-        ],
-        Zhipu => vec![
-            m("glm-5.3", Zhipu, "GLM-5.3", 1_000_000, true, 3.94),
-            m("glm-5.3-flash", Zhipu, "GLM-5.3 Flash", 1_000_000, true, 0.39),
-            m("glm-5.3-flashx", Zhipu, "GLM-5.3 FlashX", 1_000_000, true, 0.99),
-            m("glm-5.2", Zhipu, "GLM-5.2", 1_000_000, true, 3.94),
-            m("glm-5.1", Zhipu, "GLM-5.1", 200_000, true, 3.94),
-            m("glm-5", Zhipu, "GLM-5", 200_000, true, 3.1),
-            m("glm-4.7", Zhipu, "GLM-4.7", 200_000, true, 2.25),
-        ],
-    }
+    catalog_rows(provider)
+        .into_iter()
+        .map(|r| DiscoveredModel {
+            id: r.id,
+            provider: r.provider,
+            display_name: Some(r.name),
+            source: ModelSource::Catalog,
+            context_window: Some(r.context_window),
+            supports_thinking: Some(r.contract.thinking != ThinkingKnob::Absent),
+            output_price: r.pricing.output,
+        })
+        .collect()
 }
 
 fn speed_re() -> &'static Regex {
@@ -177,7 +110,10 @@ pub fn version_score(id: &str) -> f64 {
         .get_or_init(|| Regex::new(r"(19|20)\d{2}[-_]\d{2}[-_]\d{2}").unwrap())
         .replace_all(&s, "")
         .into_owned();
-    s = DATE8.get_or_init(|| Regex::new(r"\d{8}").unwrap()).replace_all(&s, "").into_owned();
+    s = DATE8
+        .get_or_init(|| Regex::new(r"\d{8}").unwrap())
+        .replace_all(&s, "")
+        .into_owned();
     s = YEAR
         .get_or_init(|| Regex::new(r"(19|20)\d{2}").unwrap())
         .replace_all(&s, "")
@@ -219,7 +155,10 @@ pub fn capability_score(model: &DiscoveredModel, provider: Provider) -> f64 {
     if model.supports_thinking.unwrap_or(false) || thinking_re().is_match(&id) {
         score += 30.0;
     }
-    if Regex::new(r"(?i)(pro|max|opus|ultra|flagship|plus)").unwrap().is_match(&id) {
+    if Regex::new(r"(?i)(pro|max|opus|ultra|flagship|plus)")
+        .unwrap()
+        .is_match(&id)
+    {
         score += 20.0;
     }
     if is_speed_variant(&id) {
@@ -254,7 +193,10 @@ fn catalog_rank(provider: Provider, id: &str) -> Option<usize> {
 
 /// Merge scanned models with the catalog, deduped by id (scanned ids matching
 /// the catalog are enriched + marked Scanned; unknown ids inferred).
-pub fn merge_with_catalog(provider: Provider, scanned: Vec<DiscoveredModel>) -> Vec<DiscoveredModel> {
+pub fn merge_with_catalog(
+    provider: Provider,
+    scanned: Vec<DiscoveredModel>,
+) -> Vec<DiscoveredModel> {
     let mut out = catalog_models(provider);
     for s in scanned {
         if s.provider != provider {
@@ -300,7 +242,10 @@ pub fn resolve_model(
         // Fall back to the catalog and still rank it for the tier (parity with
         // the TS resolver), rather than always returning the flagship.
         catalog_fallback = catalog_models(provider);
-        candidates = catalog_fallback.iter().filter(|m| !is_non_chat(&m.id)).collect();
+        candidates = catalog_fallback
+            .iter()
+            .filter(|m| !is_non_chat(&m.id))
+            .collect();
     }
     if candidates.is_empty() {
         return default_model(provider).to_string();
@@ -320,22 +265,26 @@ pub fn resolve_model(
         }
         ReasoningTier::Low => {
             candidates.sort_by(|a, b| {
-                speed_score(b).partial_cmp(&speed_score(a)).unwrap_or(std::cmp::Ordering::Equal)
+                speed_score(b)
+                    .partial_cmp(&speed_score(a))
+                    .unwrap_or(std::cmp::Ordering::Equal)
             });
             candidates[0].id.clone()
         }
         ReasoningTier::Medium => {
             // Blend normalized capability + speed.
-            let caps: Vec<f64> =
-                candidates.iter().map(|m| capability_score(m, provider)).collect();
+            let caps: Vec<f64> = candidates
+                .iter()
+                .map(|m| capability_score(m, provider))
+                .collect();
             let speeds: Vec<f64> = candidates.iter().map(|m| speed_score(m)).collect();
             let (cmin, cmax) = min_max(&caps);
             let (smin, smax) = min_max(&speeds);
             let mut best = 0;
             let mut best_blend = f64::NEG_INFINITY;
             for i in 0..candidates.len() {
-                let blend = 0.55 * normalize(caps[i], cmin, cmax)
-                    + 0.45 * normalize(speeds[i], smin, smax);
+                let blend =
+                    0.55 * normalize(caps[i], cmin, cmax) + 0.45 * normalize(speeds[i], smin, smax);
                 if blend > best_blend {
                     best_blend = blend;
                     best = i;
@@ -417,7 +366,12 @@ mod tests {
     fn high_tier_picks_catalog_flagship() {
         let avail = catalog_models(Provider::Anthropic);
         assert_eq!(
-            resolve_model(Provider::Anthropic, ReasoningTier::High, &avail, Some("auto")),
+            resolve_model(
+                Provider::Anthropic,
+                ReasoningTier::High,
+                &avail,
+                Some("auto")
+            ),
             "claude-fable-5-1"
         );
     }
@@ -446,7 +400,12 @@ mod tests {
         assert!(is_speed_variant("glm-5.3-flashx"));
         assert!(is_speed_variant("gpt-5.6-luna"));
         assert_eq!(
-            resolve_model(Provider::Google, ReasoningTier::High, &catalog_models(Provider::Google), Some("auto")),
+            resolve_model(
+                Provider::Google,
+                ReasoningTier::High,
+                &catalog_models(Provider::Google),
+                Some("auto")
+            ),
             "gemini-3.1-pro-preview"
         );
     }
@@ -462,8 +421,109 @@ mod tests {
     fn explicit_selection_honored() {
         let avail = catalog_models(Provider::OpenAI);
         assert_eq!(
-            resolve_model(Provider::OpenAI, ReasoningTier::High, &avail, Some("gpt-5-mini")),
+            resolve_model(
+                Provider::OpenAI,
+                ReasoningTier::High,
+                &avail,
+                Some("gpt-5-mini")
+            ),
             "gpt-5-mini"
         );
+    }
+
+    #[test]
+    fn every_row_has_a_contract_and_a_class() {
+        for p in Provider::ALL {
+            let rows = catalog_rows(p);
+            assert!(!rows.is_empty(), "{p:?} has no rows");
+            for r in rows {
+                assert_eq!(r.provider, p);
+                assert!(r.context_window > 0, "{}", r.id);
+                assert!(r.max_output > 0, "{}", r.id);
+                assert!(r.catalogued);
+                assert!(!r.name.is_empty());
+            }
+        }
+    }
+
+    #[test]
+    fn unknown_ids_inherit_the_family_contract_and_stay_unpriced() {
+        let r = model_row(Provider::OpenAI, "gpt-99-hypothetical");
+        assert_eq!(r.contract.api, ApiFamily::Responses);
+        assert!(matches!(
+            r.contract.thinking,
+            ThinkingKnob::OpenAiEffort { .. }
+        ));
+        assert_eq!(r.pricing, Pricing::default());
+        assert!(!r.catalogued);
+        let k = model_row(Provider::Kimi, "kimi-k3-preview-2099");
+        assert_eq!(k.contract.thinking, ThinkingKnob::KimiEffort);
+        let c = model_row(Provider::Anthropic, "claude-opus-4-8");
+        assert!(matches!(
+            c.contract.thinking,
+            ThinkingKnob::AnthropicAdaptive {
+                default_on: false,
+                ..
+            }
+        ));
+        assert!(!c.contract.sampling);
+        let f = model_row(Provider::Anthropic, "claude-mythos-5-1");
+        assert!(matches!(
+            f.contract.thinking,
+            ThinkingKnob::AnthropicAdaptive {
+                always_on: true,
+                ..
+            }
+        ));
+        let g = model_row(Provider::Google, "gemini-4-pro-preview");
+        assert_eq!(g.contract.thinking, ThinkingKnob::GeminiLevel);
+        let z = model_row(Provider::Zhipu, "glm-5.3-air");
+        assert_eq!(z.contract.thinking, ThinkingKnob::GlmEffort);
+    }
+
+    #[test]
+    fn flagship_defaults_are_catalogued_and_priced() {
+        for p in Provider::ALL {
+            let r = model_row(p, default_model(p));
+            assert!(r.catalogued, "{p:?} default {} is not in the table", r.id);
+            assert_eq!(r.class, ModelClass::Flagship, "{p:?}");
+            assert!(r.pricing.is_priced(), "{p:?} flagship unpriced");
+        }
+    }
+
+    #[test]
+    fn cached_input_never_exceeds_input() {
+        for p in Provider::ALL {
+            for r in catalog_rows(p) {
+                if let (Some(c), Some(i)) = (r.pricing.cached_input, r.pricing.input) {
+                    assert!(c <= i, "{}", r.id);
+                }
+                if let (Some(w), Some(i)) = (r.pricing.cache_write, r.pricing.input) {
+                    assert!(w >= i, "{} cache write below input", r.id);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn catalog_models_derive_from_rows() {
+        let models = catalog_models(Provider::Anthropic);
+        let fable = models.iter().find(|m| m.id == "claude-fable-5-1").unwrap();
+        assert_eq!(fable.output_price, Some(50.0));
+        assert_eq!(fable.supports_thinking, Some(true));
+        assert_eq!(fable.display_name.as_deref(), Some("Claude Fable 5.1"));
+    }
+
+    #[test]
+    fn every_class_is_represented_per_provider() {
+        for p in Provider::ALL {
+            let rows = catalog_rows(p);
+            for class in [ModelClass::Flagship, ModelClass::Fast] {
+                assert!(
+                    rows.iter().any(|r| r.class == class),
+                    "{p:?} lacks a {class:?} row"
+                );
+            }
+        }
     }
 }

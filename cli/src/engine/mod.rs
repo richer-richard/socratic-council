@@ -75,18 +75,44 @@ pub enum DebateEvent {
     Moderator(String),
     /// The moderator's final scored verdict — rendered as a conclusion card.
     Conclusion(ModeratorConclusion),
-    TurnStarted { agent_id: String, name: String, provider: Provider, model: String },
+    TurnStarted {
+        agent_id: String,
+        name: String,
+        provider: Provider,
+        model: String,
+    },
     Token(String),
     Thinking(String),
-    TurnEnded { usage: Usage, thinking_ms: u64 },
+    TurnEnded {
+        usage: Usage,
+        thinking_ms: u64,
+    },
     /// An agent's private canvas was updated this turn.
-    Canvas { agent_id: String, name: String, sections: Vec<CanvasSection> },
+    Canvas {
+        agent_id: String,
+        name: String,
+        sections: Vec<CanvasSection>,
+    },
     /// An agent moved to end the session — the council now votes.
-    EndVoteStarted { proposer: String, threshold: u32, total: u32 },
+    EndVoteStarted {
+        proposer: String,
+        threshold: u32,
+        total: u32,
+    },
     /// One agent's cast ballot.
-    Vote { agent_id: String, name: String, choice: VoteChoice, reason: String },
+    Vote {
+        agent_id: String,
+        name: String,
+        choice: VoteChoice,
+        reason: String,
+    },
     /// The vote outcome.
-    EndVoteResult { passed: bool, yes: u32, no: u32, abstain: u32 },
+    EndVoteResult {
+        passed: bool,
+        yes: u32,
+        no: u32,
+        abstain: u32,
+    },
     /// The closing peer-evaluation scorecard.
     PeerEval(PeerEvalRound),
     /// The deep-research report (opt-in).
@@ -107,7 +133,9 @@ pub enum DebateEvent {
 /// `\t`. Blocks ANSI/OSC escape injection (cursor games, title/clipboard
 /// writes) in both the plain `--no-tui` output and the TUI buffer.
 pub fn sanitize_terminal(text: &str) -> String {
-    text.chars().filter(|c| !c.is_control() || *c == '\n' || *c == '\t').collect()
+    text.chars()
+        .filter(|c| !c.is_control() || *c == '\n' || *c == '\t')
+        .collect()
 }
 
 /// The council's spoken-style system prompt — ported faithfully from the desktop
@@ -117,7 +145,9 @@ pub fn sanitize_terminal(text: &str) -> String {
 pub fn base_system_prompt(name: &str) -> String {
     base_system_prompt_for(
         name,
-        &["George", "Cathy", "Grace", "Douglas", "Kate", "Quinn", "Mary", "Zara"],
+        &[
+            "George", "Cathy", "Grace", "Douglas", "Kate", "Quinn", "Mary", "Zara",
+        ],
     )
 }
 
@@ -161,8 +191,9 @@ Respond with ONLY your spoken contribution (plus any @canvas/@end lines) — no 
 pub fn strip_directives(text: &str) -> (String, bool) {
     let text = strip_think_tags(text);
 
-    const DIRECTIVES: [&str; 8] =
-        ["@end", "@canvas", "@tool", "@quote", "@react", "@handoff", "@vote", "@done"];
+    const DIRECTIVES: [&str; 8] = [
+        "@end", "@canvas", "@tool", "@quote", "@react", "@handoff", "@vote", "@done",
+    ];
     let mut out = String::with_capacity(text.len());
     let mut requested_end = false;
     let mut rest: &str = &text;
@@ -193,8 +224,13 @@ pub fn strip_directives(text: &str) -> (String, bool) {
     while out.contains("\n\n\n") {
         out = out.replace("\n\n\n", "\n\n");
     }
-    let cleaned =
-        out.lines().map(|l| l.trim_end()).collect::<Vec<_>>().join("\n").trim().to_string();
+    let cleaned = out
+        .lines()
+        .map(|l| l.trim_end())
+        .collect::<Vec<_>>()
+        .join("\n")
+        .trim()
+        .to_string();
     (cleaned, requested_end)
 }
 
@@ -309,7 +345,10 @@ fn build_messages(
         if turn.agent_id == agent.id {
             messages.push(ChatMessage::assistant(turn.content.clone()));
         } else {
-            messages.push(ChatMessage::user(format!("[{}]: {}", turn.name, turn.content)));
+            messages.push(ChatMessage::user(format!(
+                "[{}]: {}",
+                turn.name, turn.content
+            )));
         }
     }
     if !canvas_summary.trim().is_empty() {
@@ -458,8 +497,11 @@ impl Engine {
 
         // Conflict machinery.
         let detector = conflict::ConflictDetector::default();
-        let agent_pairs: Vec<(String, String)> =
-            self.agents.iter().map(|a| (a.id.clone(), a.name.clone())).collect();
+        let agent_pairs: Vec<(String, String)> = self
+            .agents
+            .iter()
+            .map(|a| (a.id.clone(), a.name.clone()))
+            .collect();
 
         // Opening: the moderator frames the topic (falls back to a plain line).
         // `generate` is internally bounded (MODERATOR_TIMEOUT) so a stalled
@@ -476,12 +518,26 @@ impl Engine {
                 self.prior_transcript.len()
             ))
         } else if let Some(m) = &moderator {
-            let _ = tx.send(DebateEvent::Phase("The moderator is framing the topic…".into()));
-            match moderator::generate(&self.http, m, &self.topic, &[], moderator::ModeratorKind::Opening)
-                .await
+            let _ = tx.send(DebateEvent::Phase(
+                "The moderator is framing the topic…".into(),
+            ));
+            match moderator::generate(
+                &self.http,
+                m,
+                &self.topic,
+                &[],
+                moderator::ModeratorKind::Opening,
+            )
+            .await
             {
                 Some((text, usage)) => {
-                    ledger.record("moderator", "Moderator", CostLane::Moderator, &m.model, usage);
+                    ledger.record(
+                        "moderator",
+                        "Moderator",
+                        CostLane::Moderator,
+                        &m.model,
+                        usage,
+                    );
                     Some(text)
                 }
                 None => None,
@@ -489,9 +545,10 @@ impl Engine {
         } else {
             None
         };
-        let _ = tx.send(DebateEvent::Moderator(
-            opening.unwrap_or_else(|| format!("The council convenes on: {}", self.topic)),
-        ));
+        let _ =
+            tx.send(DebateEvent::Moderator(opening.unwrap_or_else(|| {
+                format!("The council convenes on: {}", self.topic)
+            })));
         let _ = tx.send(DebateEvent::Phase("Discussion".into()));
 
         let mut transcript: Vec<Turn> = self.prior_transcript.clone();
@@ -523,8 +580,10 @@ impl Engine {
                 model: model.clone(),
             });
 
-            let canvas_summary =
-                canvases.get(&agent.id).map(|c| canvas::summary(c)).unwrap_or_default();
+            let canvas_summary = canvases
+                .get(&agent.id)
+                .map(|c| canvas::summary(c))
+                .unwrap_or_default();
             // Consume this agent's pending advisor whisper (latest note only).
             let advisor_note = pending_notes.remove(&agent.id);
             let mut req = CompletionRequest {
@@ -550,9 +609,16 @@ impl Engine {
             let reflecting = reflect_mode != Reflection::Off;
 
             let started = Instant::now();
-            let (mut result, mut full, mut had_thinking) =
-                stream_turn(&self.http, provider, &base_url, &api_key, &req, &tx, !reflecting)
-                    .await;
+            let (mut result, mut full, mut had_thinking) = stream_turn(
+                &self.http,
+                provider,
+                &base_url,
+                &api_key,
+                &req,
+                &tx,
+                !reflecting,
+            )
+            .await;
             // A reasoning model can spend the whole reply budget thinking and
             // return no text at all (Kimi K3 at `high` and MiniMax-M3 adaptive
             // both did in an eight-seat debate, silently seating an empty
@@ -571,9 +637,16 @@ impl Engine {
                     agent.name
                 )));
                 req.tier = ReasoningTier::Low;
-                (result, full, had_thinking) =
-                    stream_turn(&self.http, provider, &base_url, &api_key, &req, &tx, !reflecting)
-                        .await;
+                (result, full, had_thinking) = stream_turn(
+                    &self.http,
+                    provider,
+                    &base_url,
+                    &api_key,
+                    &req,
+                    &tx,
+                    !reflecting,
+                )
+                .await;
             }
 
             let mut proposed_end = false;
@@ -649,7 +722,8 @@ impl Engine {
                             if cancel.load(Ordering::Relaxed) {
                                 break;
                             }
-                            let output = oracle::run_tool(&self.http, &call, &self.attachments).await;
+                            let output =
+                                oracle::run_tool(&self.http, &call, &self.attachments).await;
                             transcript.push(Turn {
                                 agent_id: "tool".into(),
                                 name: "Tool".into(),
@@ -684,7 +758,8 @@ impl Engine {
                                 idx_max = i;
                             }
                         }
-                        let (a_id, b_id) = (pairs[idx_max].a_id.clone(), pairs[idx_max].b_id.clone());
+                        let (a_id, b_id) =
+                            (pairs[idx_max].a_id.clone(), pairs[idx_max].b_id.clone());
                         let pos_a = transcript.iter().rposition(|t| t.agent_id == a_id);
                         let pos_b = transcript.iter().rposition(|t| t.agent_id == b_id);
                         if let (Some(pos_a), Some(pos_b)) = (pos_a, pos_b) {
@@ -709,8 +784,7 @@ impl Engine {
                             };
                             let mut out = String::new();
                             let nli = {
-                                let mut on_chunk =
-                                    |c: &CompletionChunk| out.push_str(&c.content);
+                                let mut on_chunk = |c: &CompletionChunk| out.push_str(&c.content);
                                 stream_completion(
                                     &self.http,
                                     m.provider,
@@ -722,10 +796,17 @@ impl Engine {
                                 .await
                             };
                             if let Ok(usage) = nli {
-                                ledger.record("utility", "Utility", CostLane::Utility, &m.model, usage);
+                                ledger.record(
+                                    "utility",
+                                    "Utility",
+                                    CostLane::Utility,
+                                    &m.model,
+                                    usage,
+                                );
                                 let adj = conflict::nli_adjustment(&out);
                                 if adj != 0.0 {
-                                    let raw = (pairs[idx_max].score * 100.0 + adj).clamp(0.0, 100.0);
+                                    let raw =
+                                        (pairs[idx_max].score * 100.0 + adj).clamp(0.0, 100.0);
                                     pairs[idx_max].score = raw / 100.0;
                                 }
                             }
@@ -740,7 +821,9 @@ impl Engine {
             if proposed_end
                 && self.agents.len() > 1
                 && !transcript.is_empty()
-                && self.run_end_vote(&agent, &transcript, &tx, &mut ledger).await
+                && self
+                    .run_end_vote(&agent, &transcript, &tx, &mut ledger)
+                    .await
             {
                 break;
             }
@@ -760,7 +843,13 @@ impl Engine {
                     )
                     .await
                     {
-                        ledger.record("moderator", "Moderator", CostLane::Moderator, &m.model, usage);
+                        ledger.record(
+                            "moderator",
+                            "Moderator",
+                            CostLane::Moderator,
+                            &m.model,
+                            usage,
+                        );
                         let _ = tx.send(DebateEvent::Moderator(note));
                     }
                 }
@@ -776,7 +865,13 @@ impl Engine {
                     )
                     .await
                     {
-                        ledger.record("moderator", "Moderator", CostLane::Moderator, &m.model, usage);
+                        ledger.record(
+                            "moderator",
+                            "Moderator",
+                            CostLane::Moderator,
+                            &m.model,
+                            usage,
+                        );
                         let _ = tx.send(DebateEvent::Moderator(note));
                     }
                 }
@@ -790,8 +885,7 @@ impl Engine {
                 && !transcript.is_empty()
                 && !cancel.load(Ordering::Relaxed)
             {
-                let partner_ids: Vec<String> =
-                    self.agents.iter().map(|a| a.id.clone()).collect();
+                let partner_ids: Vec<String> = self.agents.iter().map(|a| a.id.clone()).collect();
                 let outcomes = observer::run_pass(
                     &self.http,
                     &self.config,
@@ -951,7 +1045,13 @@ impl Engine {
                 moderator::ModeratorKind::FinalSummary { turns },
             )
             .await?;
-            ledger.record("moderator", "Moderator", CostLane::Moderator, &m.model, usage);
+            ledger.record(
+                "moderator",
+                "Moderator",
+                CostLane::Moderator,
+                &m.model,
+                usage,
+            );
             if let Some(c) = moderator::parse_conclusion(&text) {
                 return Some(c);
             }
@@ -1023,7 +1123,12 @@ impl Engine {
         }
 
         let passed = yes >= threshold;
-        let _ = tx.send(DebateEvent::EndVoteResult { passed, yes, no, abstain });
+        let _ = tx.send(DebateEvent::EndVoteResult {
+            passed,
+            yes,
+            no,
+            abstain,
+        });
         passed
     }
 }
@@ -1031,7 +1136,10 @@ impl Engine {
 /// The last `n` transcript turns formatted as `"Name: content"` lines.
 fn recent_tail(transcript: &[Turn], n: usize) -> Vec<String> {
     let start = transcript.len().saturating_sub(n);
-    transcript[start..].iter().map(|t| format!("{}: {}", t.name, t.content)).collect()
+    transcript[start..]
+        .iter()
+        .map(|t| format!("{}: {}", t.name, t.content))
+        .collect()
 }
 
 #[cfg(test)]
@@ -1067,8 +1175,9 @@ mod tests {
 
         // A @canvas directive with nested JSON parens is excised whole (a blank
         // line where the directive sat is harmless).
-        let (clean, _) =
-            strip_directives("Point one.\n@canvas({\"op\":\"append\",\"text\":\"a(b)c\"})\nPoint two.");
+        let (clean, _) = strip_directives(
+            "Point one.\n@canvas({\"op\":\"append\",\"text\":\"a(b)c\"})\nPoint two.",
+        );
         assert_eq!(clean, "Point one.\n\nPoint two.");
 
         // An unterminated <think> drops the remainder.
@@ -1100,8 +1209,16 @@ mod tests {
         let agents = default_agents(ReasoningTier::High);
         let george = &agents[0];
         let transcript = vec![
-            Turn { agent_id: george.id.clone(), name: "George".into(), content: "hi".into() },
-            Turn { agent_id: "cathy".into(), name: "Cathy".into(), content: "hello".into() },
+            Turn {
+                agent_id: george.id.clone(),
+                name: "George".into(),
+                content: "hi".into(),
+            },
+            Turn {
+                agent_id: "cathy".into(),
+                name: "Cathy".into(),
+                content: "hello".into(),
+            },
         ];
         let msgs = build_messages(george, "topic", "", &transcript, "", None, "");
         // user framing + own(assistant) + other(user)
@@ -1120,9 +1237,11 @@ mod tests {
             partner_name: "George".into(),
             text: "Press Cathy on her cost estimate.".into(),
         };
-        let transcript = vec![
-            Turn { agent_id: "tool".into(), name: "Tool".into(), content: "Tool result (oracle.web_search): 1. X - https://x".into() },
-        ];
+        let transcript = vec![Turn {
+            agent_id: "tool".into(),
+            name: "Tool".into(),
+            content: "Tool result (oracle.web_search): 1. X - https://x".into(),
+        }];
         let msgs = build_messages(
             george,
             "topic",
@@ -1138,20 +1257,30 @@ mod tests {
         assert!(msgs[1].content.starts_with("[Tool]"));
         // The whisper sits before the final instruction, marked private.
         let whisper = &msgs[msgs.len() - 2];
-        assert!(whisper.content.contains("Private note from your advisor Greta"));
+        assert!(whisper
+            .content
+            .contains("Private note from your advisor Greta"));
         assert!(whisper.content.contains("Press Cathy"));
         // The final instruction advertises the tool syntax.
-        assert!(msgs.last().unwrap().content.contains("@tool(oracle.web_search"));
+        assert!(msgs
+            .last()
+            .unwrap()
+            .content
+            .contains("@tool(oracle.web_search"));
     }
 
     #[test]
     fn prompt_names_only_the_seated_roster() {
         let p = base_system_prompt_for("Douglas", &["Douglas", "Zara"]);
-        assert!(p.starts_with("You are Douglas in a group chat with Zara."), "{p}");
+        assert!(
+            p.starts_with("You are Douglas in a group chat with Zara."),
+            "{p}"
+        );
         assert!(!p.contains("Kate"));
         let p3 = base_system_prompt_for("Zara", &["Douglas", "Kate", "Zara"]);
         assert!(p3.contains("with Douglas, and Kate."));
-        assert!(base_system_prompt("George").contains("Cathy, Grace, Douglas, Kate, Quinn, Mary, and Zara"));
+        assert!(base_system_prompt("George")
+            .contains("Cathy, Grace, Douglas, Kate, Quinn, Mary, and Zara"));
     }
 
     #[test]

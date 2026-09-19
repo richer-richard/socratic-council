@@ -30,8 +30,7 @@ pub fn load_attachments(paths: &[std::path::PathBuf]) -> Result<Vec<Attachment>,
     }
     let mut out = Vec::new();
     for path in paths {
-        let meta = std::fs::metadata(path)
-            .map_err(|e| format!("{}: {e}", path.display()))?;
+        let meta = std::fs::metadata(path).map_err(|e| format!("{}: {e}", path.display()))?;
         if !meta.is_file() {
             return Err(format!("{}: not a file", path.display()));
         }
@@ -305,15 +304,27 @@ mod tests {
         assert!(snippet.ends_with("..."));
         // Boundary extension starts the snippet at a sentence start.
         let inner = snippet.trim_start_matches("...");
-        assert!(inner.starts_with(char::is_uppercase), "snippet starts mid-sentence: {inner:?}");
+        assert!(
+            inner.starts_with(char::is_uppercase),
+            "snippet starts mid-sentence: {inner:?}"
+        );
     }
 
     #[test]
     fn file_search_ranks_files_by_matched_terms() {
         let attachments = vec![
-            Attachment { name: "a.txt".into(), text: "alpha beta gamma".into() },
-            Attachment { name: "b.txt".into(), text: "alpha only".into() },
-            Attachment { name: "c.txt".into(), text: "nothing relevant".into() },
+            Attachment {
+                name: "a.txt".into(),
+                text: "alpha beta gamma".into(),
+            },
+            Attachment {
+                name: "b.txt".into(),
+                text: "alpha only".into(),
+            },
+            Attachment {
+                name: "c.txt".into(),
+                text: "nothing relevant".into(),
+            },
         ];
         let out = file_search(&attachments, "alpha beta");
         let a_pos = out.find("a.txt").unwrap();
@@ -337,7 +348,9 @@ mod tests {
         assert_eq!(ok.len(), 1);
         assert_eq!(ok[0].name, "ok.txt");
 
-        assert!(load_attachments(&[bin_path]).unwrap_err().contains("binary"));
+        assert!(load_attachments(&[bin_path])
+            .unwrap_err()
+            .contains("binary"));
         let summary = context_summary(&ok);
         assert!(summary.contains("ok.txt"));
         assert!(summary.contains("hello attachment"));

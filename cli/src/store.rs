@@ -67,14 +67,22 @@ pub struct StoredMessage {
 pub fn valid_id(id: &str) -> bool {
     !id.is_empty()
         && id.len() <= 120
-        && id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+        && id
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
 }
 
 /// `sc-<unix ms>-<6 hex>` — sortable, unique enough, file-name safe.
 pub fn new_session_id() -> String {
     let mut rand = [0u8; 3];
     let _ = getrandom::getrandom(&mut rand);
-    format!("sc-{}-{:02x}{:02x}{:02x}", now_ms(), rand[0], rand[1], rand[2])
+    format!(
+        "sc-{}-{:02x}{:02x}{:02x}",
+        now_ms(),
+        rand[0],
+        rand[1],
+        rand[2]
+    )
 }
 
 pub fn now_ms() -> u64 {
@@ -97,7 +105,11 @@ impl SessionStore {
         }
         let dir = Config::config_dir().ok()?.join("sessions");
         let dek = crypto::load_or_create_dek(&Config::cli_dek_path().ok()?).ok()?;
-        Some(Self { dir, dek, location: StoreLocation::CliOwn })
+        Some(Self {
+            dir,
+            dek,
+            location: StoreLocation::CliOwn,
+        })
     }
 
     /// A store at an explicit location (tests, or a custom `--sessions-dir`).
@@ -138,7 +150,9 @@ impl SessionStore {
     }
 
     pub fn delete(&self, id: &str) -> bool {
-        self.path_for(id).map(|p| std::fs::remove_file(p).is_ok()).unwrap_or(false)
+        self.path_for(id)
+            .map(|p| std::fs::remove_file(p).is_ok())
+            .unwrap_or(false)
     }
 
     /// Every readable session, newest first. Files sealed under another key
@@ -197,7 +211,9 @@ pub fn build_session_json(
                 "moderator" => ("system", "Moderator"),
                 "tool" => ("tool", "Tool"),
                 "user" => ("user", "You"),
-                id if crate::tui::theme::AGENTS.iter().any(|a| a.id == id) => (id, m.display_name.as_str()),
+                id if crate::tui::theme::AGENTS.iter().any(|a| a.id == id) => {
+                    (id, m.display_name.as_str())
+                }
                 _ => ("system", m.display_name.as_str()),
             };
             let mut v = json!({
@@ -260,7 +276,11 @@ pub fn messages_from_json(session: &Value) -> Vec<StoredMessage> {
                         .unwrap_or_else(|| "System".to_string())
                 });
             Some(StoredMessage {
-                agent_id: if display_name == "Moderator" { "moderator".into() } else { agent_id },
+                agent_id: if display_name == "Moderator" {
+                    "moderator".into()
+                } else {
+                    agent_id
+                },
                 display_name,
                 content,
                 thinking: m["thinking"].as_str().unwrap_or("").to_string(),
@@ -311,7 +331,8 @@ mod tests {
         // removed the other's directory), so add a process-wide counter.
         static N: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
         let n = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let dir = std::env::temp_dir().join(format!("sc-store-{}-{}-{n}", std::process::id(), now_ms()));
+        let dir =
+            std::env::temp_dir().join(format!("sc-store-{}-{}-{n}", std::process::id(), now_ms()));
         let mut dek = [0u8; crypto::DEK_LEN];
         getrandom::getrandom(&mut dek).unwrap();
         SessionStore::at(dir, dek, StoreLocation::CliOwn)
@@ -339,8 +360,21 @@ mod tests {
             msg("error", "⚠ Error", "dropped"),
             msg("tool", "Tool", "Tool result (oracle.web_search): 1. …"),
         ];
-        let usage = Usage { input: 10, output: 5, reasoning: 2 };
-        let session = build_session_json(&id, "Should we X?", 1_700_000_000_000, &msgs, "completed", 2, usage);
+        let usage = Usage {
+            input: 10,
+            output: 5,
+            reasoning: 2,
+            ..Default::default()
+        };
+        let session = build_session_json(
+            &id,
+            "Should we X?",
+            1_700_000_000_000,
+            &msgs,
+            "completed",
+            2,
+            usage,
+        );
         store.save(&session).unwrap();
 
         let list = store.list();
@@ -385,7 +419,11 @@ mod tests {
         let ok = build_session_json("sc-1-abc", "t", 1, &[], "completed", 0, Usage::default());
         std::fs::create_dir_all(store.dir()).unwrap();
         other.save(&ok).unwrap();
-        std::fs::copy(other.dir().join("sc-1-abc.json"), store.dir().join("sc-1-abc.json")).unwrap();
+        std::fs::copy(
+            other.dir().join("sc-1-abc.json"),
+            store.dir().join("sc-1-abc.json"),
+        )
+        .unwrap();
         assert!(store.list().is_empty());
         let _ = std::fs::remove_dir_all(store.dir());
         let _ = std::fs::remove_dir_all(other.dir());

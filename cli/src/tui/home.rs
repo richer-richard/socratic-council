@@ -60,13 +60,26 @@ fn render_mark(f: &mut Frame, area: Rect, app: &App) {
                 let configured = app.ctx.config.is_configured(agent.provider);
                 let color = if configured { agent.color } else { theme::DIM };
                 if configured {
-                    ctx.draw(&Circle { x, y, radius: 0.16 * pulse, color });
+                    ctx.draw(&Circle {
+                        x,
+                        y,
+                        radius: 0.16 * pulse,
+                        color,
+                    });
                 }
                 // Filled-looking node from concentric discs.
                 for r in [0.02, 0.05, 0.08] {
-                    ctx.draw(&Circle { x, y, radius: r, color });
+                    ctx.draw(&Circle {
+                        x,
+                        y,
+                        radius: r,
+                        color,
+                    });
                 }
-                ctx.draw(&Points { coords: &[(x, y)], color });
+                ctx.draw(&Points {
+                    coords: &[(x, y)],
+                    color,
+                });
             }
         });
     f.render_widget(canvas, area);
@@ -75,12 +88,16 @@ fn render_mark(f: &mut Frame, area: Rect, app: &App) {
 fn render_wordmark(f: &mut Frame, area: Rect) {
     let title = Line::from(Span::styled(
         "S O C R A T I C   C O U N C I L",
-        Style::default().fg(theme::GOLD).add_modifier(Modifier::BOLD),
+        Style::default()
+            .fg(theme::GOLD)
+            .add_modifier(Modifier::BOLD),
     ))
     .alignment(Alignment::Center);
     let tagline = Line::from(Span::styled(
         "eight minds, one table — pressure-test any idea",
-        Style::default().fg(theme::MUTED).add_modifier(Modifier::ITALIC),
+        Style::default()
+            .fg(theme::MUTED)
+            .add_modifier(Modifier::ITALIC),
     ))
     .alignment(Alignment::Center);
     f.render_widget(Paragraph::new(vec![title, tagline]), area);
@@ -98,8 +115,10 @@ fn render_composer(f: &mut Frame, area: Rect, app: &App) {
         }
         Line::from(spans)
     } else {
-        let mut spans =
-            vec![Span::styled(app.composer.clone(), Style::default().fg(theme::TEXT))];
+        let mut spans = vec![Span::styled(
+            app.composer.clone(),
+            Style::default().fg(theme::TEXT),
+        )];
         spans.push(Span::styled(
             if caret_on { "▌" } else { " " },
             Style::default().fg(theme::GOLD),
@@ -112,9 +131,14 @@ fn render_composer(f: &mut Frame, area: Rect, app: &App) {
         .border_style(Style::default().fg(theme::GOLD))
         .title(Span::styled(
             " Convene a debate ",
-            Style::default().fg(theme::GOLD).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(theme::GOLD)
+                .add_modifier(Modifier::BOLD),
         ));
-    f.render_widget(Paragraph::new(body).block(block).wrap(Wrap { trim: false }), area);
+    f.render_widget(
+        Paragraph::new(body).block(block).wrap(Wrap { trim: false }),
+        area,
+    );
 }
 
 fn render_roster(f: &mut Frame, area: Rect, app: &App) {
@@ -175,5 +199,10 @@ fn render_footer(f: &mut Frame, area: Rect) {
 }
 
 fn key(label: &str) -> Span<'_> {
-    Span::styled(label, Style::default().fg(theme::GOLD).add_modifier(Modifier::BOLD))
+    Span::styled(
+        label,
+        Style::default()
+            .fg(theme::GOLD)
+            .add_modifier(Modifier::BOLD),
+    )
 }

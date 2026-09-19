@@ -56,7 +56,9 @@ Write ONLY the revised final response that will be shown to the council. Do not 
     let mut out = String::new();
     let usage = {
         let mut on_chunk = |c: &CompletionChunk| out.push_str(&c.content);
-        stream_completion(http, provider, base_url, key, &req, &mut on_chunk).await.ok()?
+        stream_completion(http, provider, base_url, key, &req, &mut on_chunk)
+            .await
+            .ok()?
     };
     let out = out.trim().to_string();
     (!out.is_empty()).then_some((out, usage))

@@ -93,8 +93,11 @@ pub enum ReasoningTier {
 }
 
 impl ReasoningTier {
-    pub const ALL: [ReasoningTier; 3] =
-        [ReasoningTier::Low, ReasoningTier::Medium, ReasoningTier::High];
+    pub const ALL: [ReasoningTier; 3] = [
+        ReasoningTier::Low,
+        ReasoningTier::Medium,
+        ReasoningTier::High,
+    ];
 
     pub fn label(self) -> &'static str {
         match self {
@@ -182,7 +185,9 @@ impl std::str::FromStr for Reflection {
             "off" | "none" => Ok(Reflection::Off),
             "light" => Ok(Reflection::Light),
             "deep" => Ok(Reflection::Deep),
-            other => Err(format!("unknown reflection mode: {other} (use off|light|deep)")),
+            other => Err(format!(
+                "unknown reflection mode: {other} (use off|light|deep)"
+            )),
         }
     }
 }
@@ -205,13 +210,22 @@ pub struct ChatMessage {
 
 impl ChatMessage {
     pub fn system(content: impl Into<String>) -> Self {
-        Self { role: Role::System, content: content.into() }
+        Self {
+            role: Role::System,
+            content: content.into(),
+        }
     }
     pub fn user(content: impl Into<String>) -> Self {
-        Self { role: Role::User, content: content.into() }
+        Self {
+            role: Role::User,
+            content: content.into(),
+        }
     }
     pub fn assistant(content: impl Into<String>) -> Self {
-        Self { role: Role::Assistant, content: content.into() }
+        Self {
+            role: Role::Assistant,
+            content: content.into(),
+        }
     }
 }
 
@@ -221,6 +235,11 @@ pub struct Usage {
     pub input: u64,
     pub output: u64,
     pub reasoning: u64,
+    /// Prompt-cache hits, a subset of `input`, billed at the cached rate.
+    pub cached_input: u64,
+    /// Prompt-cache writes (Anthropic `cache_creation_input_tokens` and the
+    /// like), billed at the write rate where the provider has one.
+    pub cache_write: u64,
 }
 
 /// One inner-circle council agent.

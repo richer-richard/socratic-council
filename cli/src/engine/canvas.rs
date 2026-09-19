@@ -28,12 +28,21 @@ pub fn apply_directives(canvas: &mut Vec<CanvasSection>, text: &str) -> bool {
             continue;
         };
         let op = v.get("op").and_then(|x| x.as_str()).unwrap_or("append");
-        let section =
-            v.get("section").and_then(|x| x.as_str()).unwrap_or("Notes").trim().to_string();
+        let section = v
+            .get("section")
+            .and_then(|x| x.as_str())
+            .unwrap_or("Notes")
+            .trim()
+            .to_string();
         if section.is_empty() {
             continue;
         }
-        let mut body = v.get("text").and_then(|x| x.as_str()).unwrap_or("").trim().to_string();
+        let mut body = v
+            .get("text")
+            .and_then(|x| x.as_str())
+            .unwrap_or("")
+            .trim()
+            .to_string();
         if body.chars().count() > MAX_TEXT {
             body = body.chars().take(MAX_TEXT).collect();
         }
@@ -51,7 +60,10 @@ pub fn apply_directives(canvas: &mut Vec<CanvasSection>, text: &str) -> bool {
                     s.text = body;
                     changed = true;
                 } else if canvas.len() < MAX_SECTIONS {
-                    canvas.push(CanvasSection { label: section, text: body });
+                    canvas.push(CanvasSection {
+                        label: section,
+                        text: body,
+                    });
                     changed = true;
                 }
             }
@@ -64,7 +76,10 @@ pub fn apply_directives(canvas: &mut Vec<CanvasSection>, text: &str) -> bool {
                         changed = true;
                     }
                 } else if canvas.len() < MAX_SECTIONS {
-                    canvas.push(CanvasSection { label: section, text: body });
+                    canvas.push(CanvasSection {
+                        label: section,
+                        text: body,
+                    });
                     changed = true;
                 }
             }
@@ -110,7 +125,11 @@ fn balanced_object(s: &str) -> Option<&str> {
 
 /// Render the canvas for re-injection into the same agent's next prompt.
 pub fn summary(canvas: &[CanvasSection]) -> String {
-    canvas.iter().map(|s| format!("## {}\n{}", s.label, s.text)).collect::<Vec<_>>().join("\n\n")
+    canvas
+        .iter()
+        .map(|s| format!("## {}\n{}", s.label, s.text))
+        .collect::<Vec<_>>()
+        .join("\n\n")
 }
 
 #[cfg(test)]
@@ -120,11 +139,20 @@ mod tests {
     #[test]
     fn append_then_replace() {
         let mut c = Vec::new();
-        assert!(apply_directives(&mut c, "@canvas({\"op\":\"append\",\"section\":\"Key Points\",\"text\":\"a\"})"));
-        assert!(apply_directives(&mut c, "text\n@canvas({\"op\":\"append\",\"section\":\"Key Points\",\"text\":\"b\"})"));
+        assert!(apply_directives(
+            &mut c,
+            "@canvas({\"op\":\"append\",\"section\":\"Key Points\",\"text\":\"a\"})"
+        ));
+        assert!(apply_directives(
+            &mut c,
+            "text\n@canvas({\"op\":\"append\",\"section\":\"Key Points\",\"text\":\"b\"})"
+        ));
         assert_eq!(c.len(), 1);
         assert_eq!(c[0].text, "a\nb");
-        apply_directives(&mut c, "@canvas({\"op\":\"replace\",\"section\":\"Key Points\",\"text\":\"c\"})");
+        apply_directives(
+            &mut c,
+            "@canvas({\"op\":\"replace\",\"section\":\"Key Points\",\"text\":\"c\"})",
+        );
         assert_eq!(c[0].text, "c");
     }
 
@@ -133,7 +161,10 @@ mod tests {
         let mut c = Vec::new();
         assert!(!apply_directives(&mut c, "just talking, no directive"));
         for i in 0..8 {
-            apply_directives(&mut c, &format!("@canvas({{\"op\":\"append\",\"section\":\"S{i}\",\"text\":\"x\"}})"));
+            apply_directives(
+                &mut c,
+                &format!("@canvas({{\"op\":\"append\",\"section\":\"S{i}\",\"text\":\"x\"}})"),
+            );
         }
         assert_eq!(c.len(), MAX_SECTIONS);
     }
@@ -156,13 +187,25 @@ mod tests {
         let mut c = Vec::new();
         // Fill to the cap.
         for i in 0..MAX_SECTIONS {
-            apply_directives(&mut c, &format!("@canvas({{\"op\":\"append\",\"section\":\"S{i}\",\"text\":\"x\"}})"));
+            apply_directives(
+                &mut c,
+                &format!("@canvas({{\"op\":\"append\",\"section\":\"S{i}\",\"text\":\"x\"}})"),
+            );
         }
         // A NEW section past the cap is a no-op for both append and replace.
-        assert!(!apply_directives(&mut c, "@canvas({\"op\":\"append\",\"section\":\"Extra\",\"text\":\"y\"})"));
-        assert!(!apply_directives(&mut c, "@canvas({\"op\":\"replace\",\"section\":\"Extra\",\"text\":\"y\"})"));
+        assert!(!apply_directives(
+            &mut c,
+            "@canvas({\"op\":\"append\",\"section\":\"Extra\",\"text\":\"y\"})"
+        ));
+        assert!(!apply_directives(
+            &mut c,
+            "@canvas({\"op\":\"replace\",\"section\":\"Extra\",\"text\":\"y\"})"
+        ));
         // An append with empty text to an existing section is a no-op too.
-        assert!(!apply_directives(&mut c, "@canvas({\"op\":\"append\",\"section\":\"S0\",\"text\":\"\"})"));
+        assert!(!apply_directives(
+            &mut c,
+            "@canvas({\"op\":\"append\",\"section\":\"S0\",\"text\":\"\"})"
+        ));
         assert_eq!(c.len(), MAX_SECTIONS);
     }
 }

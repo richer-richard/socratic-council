@@ -33,8 +33,11 @@ Respond with EXACTLY one JSON object and nothing else. No preamble, no markdown 
 }
 
 fn build_user(topic: &str, peers: &[(&str, &str)], transcript: &[Turn]) -> String {
-    let peer_lines: String =
-        peers.iter().map(|(id, name)| format!("- id=\"{id}\" — {name}")).collect::<Vec<_>>().join("\n");
+    let peer_lines: String = peers
+        .iter()
+        .map(|(id, name)| format!("- id=\"{id}\" — {name}"))
+        .collect::<Vec<_>>()
+        .join("\n");
     let mut block = String::new();
     for t in transcript {
         block.push_str(&format!("[{}] {}\n", t.name, t.content));
@@ -63,7 +66,11 @@ Now produce your strict JSON evaluation. One entry per peer above. JSON only."
 /// make `serde_json` reject — which would silently drop a whole evaluator's
 /// ratings or the entire research report.
 pub(super) fn extract_json(raw: &str) -> Option<&str> {
-    let s = raw.trim().trim_start_matches("```json").trim_start_matches("```").trim_end_matches("```");
+    let s = raw
+        .trim()
+        .trim_start_matches("```json")
+        .trim_start_matches("```")
+        .trim_end_matches("```");
     let start = s.find('{')?;
     let mut depth = 0i32;
     let mut in_string = false;
@@ -99,7 +106,10 @@ fn score(v: &serde_json::Value, key: &str) -> u8 {
     // numbers ("80") despite the integer-N instruction. `as_i64` returns None
     // for the latter two and would silently record 0; coerce all three.
     v.get(key)
-        .and_then(|x| x.as_f64().or_else(|| x.as_str().and_then(|s| s.trim().parse::<f64>().ok())))
+        .and_then(|x| {
+            x.as_f64()
+                .or_else(|| x.as_str().and_then(|s| s.trim().parse::<f64>().ok()))
+        })
         .map(|n| n.round().clamp(0.0, 100.0) as u8)
         .unwrap_or(0)
 }
@@ -129,8 +139,14 @@ fn parse_eval(raw: &str) -> Vec<(String, PeerEvalScores, u8, Stance, String)> {
             on_topic: score(&s, "onTopic"),
         };
         let overall = score(r, "overall");
-        let stance = Stance::from_str_lenient(r.get("stance").and_then(|x| x.as_str()).unwrap_or("mixed"));
-        let critique = r.get("critique").and_then(|x| x.as_str()).unwrap_or("").trim().to_string();
+        let stance =
+            Stance::from_str_lenient(r.get("stance").and_then(|x| x.as_str()).unwrap_or("mixed"));
+        let critique = r
+            .get("critique")
+            .and_then(|x| x.as_str())
+            .unwrap_or("")
+            .trim()
+            .to_string();
         out.push((target.to_string(), scores, overall, stance, critique));
     }
     out
@@ -169,7 +185,9 @@ pub async fn run(
             evaluator.provider,
             evaluator.tier,
             avail,
-            config.selection(evaluator.provider, evaluator.tier).as_deref(),
+            config
+                .selection(evaluator.provider, evaluator.tier)
+                .as_deref(),
         );
         let req = CompletionRequest {
             model: model.clone(),
@@ -217,15 +235,23 @@ pub async fn run(
     }
 
     let summaries = aggregate(agents, &critiques);
-    (Some(PeerEvalRound { critiques, summaries }), usages)
+    (
+        Some(PeerEvalRound {
+            critiques,
+            summaries,
+        }),
+        usages,
+    )
 }
 
 /// Average each agent's received critiques into a ranked scorecard.
 fn aggregate(agents: &[Agent], critiques: &[PeerCritique]) -> Vec<PeerEvalSummary> {
     let mut summaries: Vec<PeerEvalSummary> = Vec::new();
     for agent in agents {
-        let received: Vec<&PeerCritique> =
-            critiques.iter().filter(|c| c.target_id == agent.id).collect();
+        let received: Vec<&PeerCritique> = critiques
+            .iter()
+            .filter(|c| c.target_id == agent.id)
+            .collect();
         if received.is_empty() {
             continue;
         }

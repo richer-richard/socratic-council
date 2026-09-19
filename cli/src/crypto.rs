@@ -47,7 +47,10 @@ pub fn encrypt(dek: &[u8; DEK_LEN], plaintext: &[u8]) -> Result<String, String> 
     let mut combined = Vec::with_capacity(NONCE_LEN + sealed.len());
     combined.extend_from_slice(&nonce);
     combined.extend_from_slice(&sealed);
-    Ok(format!("{ENC_PREFIX}{}", base64::engine::general_purpose::STANDARD.encode(combined)))
+    Ok(format!(
+        "{ENC_PREFIX}{}",
+        base64::engine::general_purpose::STANDARD.encode(combined)
+    ))
 }
 
 /// Decrypt an `ENC1:` envelope. Returns `None` on any failure — not enveloped,
@@ -55,7 +58,9 @@ pub fn encrypt(dek: &[u8; DEK_LEN], plaintext: &[u8]) -> Result<String, String> 
 /// legacy-plaintext passthrough should check [`is_enveloped`] first.
 pub fn decrypt(dek: &[u8; DEK_LEN], envelope: &str) -> Option<Vec<u8>> {
     let b64 = envelope.strip_prefix(ENC_PREFIX)?;
-    let payload = base64::engine::general_purpose::STANDARD.decode(b64.trim()).ok()?;
+    let payload = base64::engine::general_purpose::STANDARD
+        .decode(b64.trim())
+        .ok()?;
     if payload.len() < NONCE_LEN + TAG_LEN {
         return None;
     }
@@ -168,7 +173,10 @@ mod tests {
     fn fresh_nonce_each_time() {
         let d = dek();
         // Same plaintext encrypts to different envelopes (random nonce).
-        assert_ne!(encrypt_str(&d, "same").unwrap(), encrypt_str(&d, "same").unwrap());
+        assert_ne!(
+            encrypt_str(&d, "same").unwrap(),
+            encrypt_str(&d, "same").unwrap()
+        );
     }
 
     #[test]

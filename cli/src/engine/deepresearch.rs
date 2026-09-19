@@ -67,9 +67,16 @@ pub async fn run(
     let mut out = String::new();
     let usage = {
         let mut on_chunk = |c: &CompletionChunk| out.push_str(&c.content);
-        stream_completion(http, pick.provider, &pick.base_url, &pick.key, &req, &mut on_chunk)
-            .await
-            .ok()?
+        stream_completion(
+            http,
+            pick.provider,
+            &pick.base_url,
+            &pick.key,
+            &req,
+            &mut on_chunk,
+        )
+        .await
+        .ok()?
     };
     parse_report(&out).map(|report| (report, pick.model.clone(), usage))
 }
@@ -77,19 +84,40 @@ pub async fn run(
 fn parse_report(raw: &str) -> Option<DeepResearchReport> {
     let json = extract_json(raw)?;
     let v: serde_json::Value = serde_json::from_str(json).ok()?;
-    let title = v.get("title").and_then(|x| x.as_str()).unwrap_or("").trim().to_string();
-    let abstract_text =
-        v.get("abstract").and_then(|x| x.as_str()).unwrap_or("").trim().to_string();
-    let confidence =
-        Confidence::from_str_lenient(v.get("confidence").and_then(|x| x.as_str()).unwrap_or("medium"));
+    let title = v
+        .get("title")
+        .and_then(|x| x.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    let abstract_text = v
+        .get("abstract")
+        .and_then(|x| x.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    let confidence = Confidence::from_str_lenient(
+        v.get("confidence")
+            .and_then(|x| x.as_str())
+            .unwrap_or("medium"),
+    );
     let sections: Vec<ResearchSection> = v
         .get("sections")
         .and_then(|s| s.as_array())
         .map(|arr| {
             arr.iter()
                 .filter_map(|s| {
-                    let heading = s.get("heading").and_then(|x| x.as_str())?.trim().to_string();
-                    let body = s.get("body").and_then(|x| x.as_str()).unwrap_or("").trim().to_string();
+                    let heading = s
+                        .get("heading")
+                        .and_then(|x| x.as_str())?
+                        .trim()
+                        .to_string();
+                    let body = s
+                        .get("body")
+                        .and_then(|x| x.as_str())
+                        .unwrap_or("")
+                        .trim()
+                        .to_string();
                     if heading.is_empty() && body.is_empty() {
                         return None;
                     }
@@ -97,7 +125,9 @@ fn parse_report(raw: &str) -> Option<DeepResearchReport> {
                         heading,
                         body,
                         confidence: Confidence::from_str_lenient(
-                            s.get("confidence").and_then(|x| x.as_str()).unwrap_or("medium"),
+                            s.get("confidence")
+                                .and_then(|x| x.as_str())
+                                .unwrap_or("medium"),
                         ),
                     })
                 })
@@ -108,7 +138,12 @@ fn parse_report(raw: &str) -> Option<DeepResearchReport> {
     if title.is_empty() && sections.is_empty() {
         return None;
     }
-    Some(DeepResearchReport { title, abstract_text, confidence, sections })
+    Some(DeepResearchReport {
+        title,
+        abstract_text,
+        confidence,
+        sections,
+    })
 }
 
 #[cfg(test)]

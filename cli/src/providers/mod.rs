@@ -6,7 +6,9 @@ pub mod scan;
 pub mod sse;
 
 use crate::error::{Error, Result};
-use crate::types::{ChatMessage, CompletionChunk, CompletionRequest, Provider, ReasoningTier, Role, Usage};
+use crate::types::{
+    ChatMessage, CompletionChunk, CompletionRequest, Provider, ReasoningTier, Role, Usage,
+};
 use futures_util::StreamExt;
 use serde_json::{json, Value};
 use sse::SseDecoder;
@@ -37,115 +39,109 @@ pub(crate) fn google_v1beta(base: &str) -> String {
     }
 }
 
-/// Reasoning models (Responses API `reasoning.effort`, no temperature): every GPT-5.x,
-/// the GPT-6 family (gpt-6-astra, Sept 2026) and the o-series.
-fn is_openai_reasoning(model: &str) -> bool {
-    model.starts_with("gpt-5") || model.starts_with("gpt-6") || model.starts_with('o')
-}
+use crate::catalog::{model_row, ApiFamily, ThinkingKnob};
 
-fn openai_effort(model: &str, tier: ReasoningTier) -> &'static str {
+/// `reasoning.effort` for the Responses API: the three tiers map onto the
+/// documented low / medium / high; xhigh and max are never sent by default
+/// (they exist for long-horizon agent work, not a council turn).
+fn openai_effort(tier: ReasoningTier) -> &'static str {
     match tier {
         ReasoningTier::Low => "low",
         ReasoningTier::Medium => "medium",
-        ReasoningTier::High => {
-            // xhigh only for the gpt-5.x / gpt-6 flagship tiers; mini/nano/luna
-            // speed variants, chat-latest and the o-series take "high" (parity
-            // with the TS SDK). gpt-6-astra documents low..max.
-            let flagship = (model.starts_with("gpt-5") || model.starts_with("gpt-6"))
-                && !crate::catalog::is_speed_variant(model)
-                && !model.contains("luna")
-                && !model.contains("chat");
-            if flagship {
-                "xhigh"
-            } else {
-                "high"
-            }
-        }
+        ReasoningTier::High => "high",
     }
 }
 
-enum AntMode {
-    Adaptive,
-    Extended,
-    None,
-}
-
-/// Claude 5.x ids (`claude-opus-5`, `claude-sonnet-5`, `claude-fable-5`, `claude-fable-5-1`).
-fn is_claude5(model: &str) -> bool {
-    let m = model.to_ascii_lowercase();
-    ["-opus-5", "-sonnet-5", "-haiku-5", "-fable-5"].iter().any(|s| m.contains(s))
-}
-
-/// Fable cannot turn thinking off (`thinking.type: "disabled"` → 400).
-fn thinking_always_on(model: &str) -> bool {
-    model.to_ascii_lowercase().contains("fable")
-}
-
-fn ant_profile(model: &str) -> (AntMode, bool) {
-    // (mode, prohibits_sampling). The live API is authoritative and non-monotonic:
-    // claude-opus-4-8 rejects `thinking.type.enabled` ("Use thinking.type.adaptive")
-    // and rejects an explicit temperature — so 4.8, like 4.7, is adaptive-only.
-    // The Claude 5 generation (Opus 5 / Sonnet 5 / Fable 5.x) thinks by default,
-    // is adaptive-only, and takes depth via `output_config.effort`.
-    let m = model.to_ascii_lowercase();
-    if is_claude5(&m) || m.contains("opus-4-8") || m.contains("opus-4-7") {
-        (AntMode::Adaptive, true)
-    } else if m.contains("opus-4-6") || m.contains("sonnet-4-6") {
-        (AntMode::Adaptive, false)
-    } else if m.contains("minimax") {
-        // MiniMax routes through this Anthropic-shaped branch and takes extended
-        // thinking with an explicit `budget_tokens` (faithful to the app's
-        // `minimax.ts`), NOT Claude's adaptive mode. Without this the reasoning
-        // tier was silently dropped for Mary (every MiniMax id fell through to
-        // `None`, so no thinking knob was ever sent).
-        (AntMode::Extended, false)
-    } else if m.contains("opus-4") || m.contains("sonnet-4") || m.contains("haiku-4") {
-        (AntMode::Extended, false)
-    } else {
-        (AntMode::None, false)
+/// The three-step effort ladder DeepSeek V4, Kimi K3 and GLM-5.3 share
+/// (`low | high | max`): the fast tier turns thinking off or down, the
+/// balanced tier is the providers' recommended `high`, the deep tier `max`.
+fn ladder_effort(tier: ReasoningTier) -> &'static str {
+    match tier {
+        ReasoningTier::Low => "low",
+        ReasoningTier::Medium => "high",
+        ReasoningTier::High => "max",
     }
 }
 
-fn ant_thinking(model: &str, max_tokens: u32, tier: ReasoningTier) -> Option<Value> {
-    let (mode, _) = ant_profile(model);
-    match mode {
-        AntMode::None => None,
-        AntMode::Adaptive => {
-            if tier == ReasoningTier::Low {
-                // Fast tier: 4.x omits thinking (= off); Opus/Sonnet 5 think by
-                // default so "off" is explicit; Fable can't be switched off and is
-                // throttled with effort=low instead.
-                if is_claude5(model) && !thinking_always_on(model) {
-                    Some(json!({ "type": "disabled" }))
-                } else {
-                    None
-                }
-            } else {
-                // `display: summarized` is what makes thinking text stream at all —
-                // the 4.7+/5.x default is `omitted` (empty thinking blocks).
-                Some(json!({ "type": "adaptive", "display": "summarized" }))
-            }
-        }
-        AntMode::Extended => {
-            if tier == ReasoningTier::Low {
-                return None;
-            }
-            let cap: i64 = if tier == ReasoningTier::Medium { 4096 } else { 8192 };
-            let budget = cap.min(max_tokens as i64 - 256);
-            if budget >= 1024 {
-                Some(json!({ "type": "enabled", "budget_tokens": budget }))
-            } else {
-                None
-            }
-        }
+fn gemini_level(tier: ReasoningTier) -> &'static str {
+    match tier {
+        ReasoningTier::Low => "low",
+        ReasoningTier::Medium => "medium",
+        ReasoningTier::High => "high",
     }
 }
 
-fn google_budget(tier: ReasoningTier) -> i64 {
+fn gemini_budget(tier: ReasoningTier) -> i64 {
     match tier {
         ReasoningTier::Low => 0,
         ReasoningTier::Medium => 8192,
         ReasoningTier::High => 24576,
+    }
+}
+
+/// The `thinking` block for the Messages API (Claude and MiniMax), or `None`
+/// when the block must be omitted. Returns `(block, thinking_is_on)`.
+fn messages_thinking(
+    knob: ThinkingKnob,
+    max_tokens: u32,
+    tier: ReasoningTier,
+) -> (Option<Value>, bool) {
+    match knob {
+        ThinkingKnob::AnthropicAdaptive {
+            default_on,
+            always_on,
+        } => {
+            if tier == ReasoningTier::Low {
+                if always_on {
+                    // Fable cannot be switched off; it is throttled with effort=low instead.
+                    (None, true)
+                } else if default_on {
+                    // Opus 5 / Sonnet 5 think unless told not to.
+                    (Some(json!({ "type": "disabled" })), false)
+                } else {
+                    // 4.6 / 4.7 / 4.8 are off until asked.
+                    (None, false)
+                }
+            } else {
+                // `display: summarized` is what makes thinking text stream at all —
+                // the 4.7+/5.x default is `omitted` (empty thinking blocks).
+                (
+                    Some(json!({ "type": "adaptive", "display": "summarized" })),
+                    true,
+                )
+            }
+        }
+        ThinkingKnob::AnthropicExtended => {
+            if tier == ReasoningTier::Low {
+                return (None, false);
+            }
+            let cap: i64 = if tier == ReasoningTier::Medium {
+                4096
+            } else {
+                8192
+            };
+            let budget = cap.min(max_tokens as i64 - 256);
+            if budget >= 1024 {
+                (
+                    Some(json!({ "type": "enabled", "budget_tokens": budget })),
+                    true,
+                )
+            } else {
+                (None, false)
+            }
+        }
+        // MiniMax-M3: `adaptive` switches interleaved thinking on; omitting the
+        // block leaves it off (the fast tier).
+        ThinkingKnob::MiniMaxAdaptive => {
+            if tier == ReasoningTier::Low {
+                (None, false)
+            } else {
+                (Some(json!({ "type": "adaptive" })), true)
+            }
+        }
+        // M2.x cannot be turned off: send nothing, it thinks regardless.
+        ThinkingKnob::MiniMaxAlwaysOn => (None, true),
+        _ => (None, false),
     }
 }
 
@@ -167,9 +163,16 @@ fn bearer(api_key: &str) -> Vec<(String, String)> {
     vec![("Authorization".into(), format!("Bearer {api_key}"))]
 }
 
-fn prepare(provider: Provider, base_url: &str, api_key: &str, req: &CompletionRequest) -> PreparedRequest {
-    match provider {
-        Provider::OpenAI => {
+fn prepare(
+    provider: Provider,
+    base_url: &str,
+    api_key: &str,
+    req: &CompletionRequest,
+) -> PreparedRequest {
+    let row = model_row(provider, &req.model);
+    let contract = row.contract;
+    match contract.api {
+        ApiFamily::Responses => {
             let mut body = json!({
                 "model": req.model,
                 "input": non_system(&req.messages),
@@ -179,10 +182,16 @@ fn prepare(provider: Provider, base_url: &str, api_key: &str, req: &CompletionRe
             if let Some(system) = &req.system {
                 body["instructions"] = json!(system);
             }
-            if is_openai_reasoning(&req.model) {
-                body["reasoning"] = json!({ "effort": openai_effort(&req.model, req.tier), "summary": "auto" });
-            } else {
-                body["temperature"] = json!(req.temperature);
+            match contract.thinking {
+                ThinkingKnob::OpenAiEffort { .. } => {
+                    body["reasoning"] =
+                        json!({ "effort": openai_effort(req.tier), "summary": "auto" });
+                }
+                _ => {
+                    if contract.sampling {
+                        body["temperature"] = json!(req.temperature);
+                    }
+                }
             }
             PreparedRequest {
                 url: ensure_path(base_url, "v1", "responses"),
@@ -190,7 +199,7 @@ fn prepare(provider: Provider, base_url: &str, api_key: &str, req: &CompletionRe
                 body,
             }
         }
-        Provider::Anthropic | Provider::MiniMax => {
+        ApiFamily::Messages => {
             let mut body = json!({
                 "model": req.model,
                 "messages": non_system(&req.messages),
@@ -200,29 +209,21 @@ fn prepare(provider: Provider, base_url: &str, api_key: &str, req: &CompletionRe
             if let Some(system) = &req.system {
                 body["system"] = json!(system);
             }
-            let (mode, prohibits) = ant_profile(&req.model);
-            let is_minimax_m3 = provider == Provider::MiniMax && req.model.to_ascii_lowercase().contains("m3");
-            let thinking = if is_minimax_m3 {
-                // MiniMax-M3: `adaptive` switches interleaved thinking on; omitting
-                // the block leaves it off (the fast tier).
-                (req.tier != ReasoningTier::Low).then(|| json!({ "type": "adaptive" }))
-            } else {
-                ant_thinking(&req.model, req.max_tokens, req.tier)
-            };
-            let thinking_off = thinking.is_none();
+            let (thinking, thinking_on) =
+                messages_thinking(contract.thinking, req.max_tokens, req.tier);
             if let Some(t) = thinking {
                 body["thinking"] = t;
             }
             // Effort (Claude 4.6+ / 5.x adaptive models): low/medium are explicit,
             // high is the API default.
-            if provider == Provider::Anthropic && matches!(mode, AntMode::Adaptive) {
+            if let ThinkingKnob::AnthropicAdaptive { .. } = contract.thinking {
                 match req.tier {
                     ReasoningTier::Low => body["output_config"] = json!({ "effort": "low" }),
                     ReasoningTier::Medium => body["output_config"] = json!({ "effort": "medium" }),
                     ReasoningTier::High => {}
                 }
             }
-            if thinking_off && !prohibits {
+            if !thinking_on && contract.sampling {
                 body["temperature"] = json!(req.temperature.min(1.0));
             }
             let headers = vec![
@@ -231,16 +232,24 @@ fn prepare(provider: Provider, base_url: &str, api_key: &str, req: &CompletionRe
             ];
             // Anthropic: `<base>/v1/messages`. MiniMax base already ends with
             // `/anthropic`, so this yields `<base>/anthropic/v1/messages`.
-            PreparedRequest { url: ensure_path(base_url, "v1", "messages"), headers, body }
+            PreparedRequest {
+                url: ensure_path(base_url, "v1", "messages"),
+                headers,
+                body,
+            }
         }
-        Provider::Google => {
+        ApiFamily::Gemini => {
             let system = req.system.clone();
             let contents: Vec<Value> = req
                 .messages
                 .iter()
                 .filter(|m| m.role != Role::System)
                 .map(|m| {
-                    let role = if m.role == Role::Assistant { "model" } else { "user" };
+                    let role = if m.role == Role::Assistant {
+                        "model"
+                    } else {
+                        "user"
+                    };
                     json!({ "role": role, "parts": [{ "text": m.content }] })
                 })
                 .collect();
@@ -248,22 +257,22 @@ fn prepare(provider: Provider, base_url: &str, api_key: &str, req: &CompletionRe
                 "temperature": req.temperature,
                 "maxOutputTokens": req.max_tokens,
             });
-            if req.model.starts_with("gemini-3") {
-                // Gemini 3.x (Pro and Flash) thinks dynamically; steer with
-                // thinking_level (low|medium|high — never "minimal", which 3.8/3.7
-                // Flash and 3.1 Pro reject) and ask for thought summaries so the
-                // TUI can show thinking apart from the answer (`part.thought`).
-                let level = match req.tier {
-                    ReasoningTier::Low => "low",
-                    ReasoningTier::Medium => "medium",
-                    ReasoningTier::High => "high",
-                };
-                gen["thinkingConfig"] = json!({ "thinkingLevel": level, "includeThoughts": true });
-            } else if req.model.contains("pro") {
-                let budget = google_budget(req.tier);
-                if budget > 0 {
-                    gen["thinkingConfig"] = json!({ "thinkingBudget": budget, "includeThoughts": true });
+            match contract.thinking {
+                // Gemini 3.x and 2.5 Pro think dynamically; steer with thinking_level
+                // (low|medium|high — never "minimal", which the Pro and newer Flash
+                // models reject) and ask for thought summaries (`part.thought`).
+                ThinkingKnob::GeminiLevel => {
+                    gen["thinkingConfig"] =
+                        json!({ "thinkingLevel": gemini_level(req.tier), "includeThoughts": true });
                 }
+                ThinkingKnob::GeminiBudget => {
+                    let budget = gemini_budget(req.tier);
+                    if budget > 0 {
+                        gen["thinkingConfig"] =
+                            json!({ "thinkingBudget": budget, "includeThoughts": true });
+                    }
+                }
+                _ => {}
             }
             let mut body = json!({ "contents": contents, "generationConfig": gen });
             if let Some(system) = system {
@@ -280,8 +289,7 @@ fn prepare(provider: Provider, base_url: &str, api_key: &str, req: &CompletionRe
                 body,
             }
         }
-        // OpenAI-compatible chat-completions providers.
-        Provider::DeepSeek | Provider::Kimi | Provider::Qwen | Provider::Zhipu => {
+        ApiFamily::ChatCompletions => {
             // Carry the system prompt as the leading `system` message — these
             // providers have no separate field for it. Without this the agent
             // never learns its role/constraints and rambles or invents.
@@ -301,41 +309,56 @@ fn prepare(provider: Provider, base_url: &str, api_key: &str, req: &CompletionRe
                 "model": req.model,
                 "messages": messages,
                 "max_tokens": req.max_tokens,
-                "temperature": req.temperature,
                 "stream": true,
                 "stream_options": { "include_usage": true },
             });
             let low = req.tier == ReasoningTier::Low;
-            let model = req.model.to_ascii_lowercase();
-            match provider {
-                Provider::Qwen => {
+            let mut thinking_on = false;
+            match contract.thinking {
+                ThinkingKnob::QwenEnable => {
                     body["enable_thinking"] = json!(!low);
+                    thinking_on = !low;
                 }
-                // DeepSeek V4 merges chat/reasoner into one id with a per-request switch.
-                Provider::DeepSeek if model.starts_with("deepseek-v4") || model.starts_with("deepseek-flash") => {
+                // DeepSeek V4 merges chat/reasoner into one id with a per-request
+                // switch, plus a low|high|max effort ladder while thinking.
+                ThinkingKnob::DeepSeekType => {
                     body["thinking"] = json!({ "type": if low { "disabled" } else { "enabled" } });
+                    if !low {
+                        body["reasoning_effort"] = json!(ladder_effort(req.tier));
+                    }
+                    thinking_on = !low;
                 }
-                // Kimi: K3 always reasons and takes top-level reasoning_effort
-                // (low|high|max, default max) and must NOT get a `thinking` object;
-                // K2.7-code is always-on (sending "disabled" is a 400); K2.6 toggles.
-                Provider::Kimi if model.starts_with("kimi-k3") => {
-                    let effort = match req.tier {
-                        ReasoningTier::Low => "low",
-                        ReasoningTier::Medium => "high",
-                        ReasoningTier::High => "max",
-                    };
-                    body["reasoning_effort"] = json!(effort);
+                // Kimi K3 always reasons and takes top-level reasoning_effort
+                // (low|high|max, default max) and must NOT get a `thinking` object.
+                ThinkingKnob::KimiEffort => {
+                    body["reasoning_effort"] = json!(ladder_effort(req.tier));
+                    thinking_on = true;
                 }
-                Provider::Kimi if model.starts_with("kimi-k2.6") => {
+                ThinkingKnob::KimiType => {
                     body["thinking"] = json!({ "type": if low { "disabled" } else { "enabled" } });
+                    thinking_on = !low;
                 }
-                // GLM-4.5+: chain-of-thought switch; the 5.3 family and 4.7 force it on.
-                Provider::Zhipu => {
-                    let forced = model.starts_with("glm-5.3") || model == "glm-4.7";
-                    body["thinking"] =
-                        json!({ "type": if low && !forced { "disabled" } else { "enabled" } });
+                // K2.7-code is always on (sending "disabled" is a 400): send nothing.
+                ThinkingKnob::KimiAlwaysOn => thinking_on = true,
+                // GLM-5.3 family: always on, depth via reasoning_effort.
+                ThinkingKnob::GlmEffort => {
+                    body["thinking"] = json!({ "type": "enabled" });
+                    body["reasoning_effort"] = json!(ladder_effort(req.tier));
+                    thinking_on = true;
+                }
+                ThinkingKnob::GlmType { forced } => {
+                    let on = !low || forced;
+                    body["thinking"] = json!({ "type": if on { "enabled" } else { "disabled" } });
+                    thinking_on = on;
                 }
                 _ => {}
+            }
+            // The reasoning models either ignore or reject sampling parameters
+            // while thinking; only send a temperature when the contract allows it.
+            if contract.sampling
+                && (!thinking_on || contract_allows_temperature_while_thinking(provider))
+            {
+                body["temperature"] = json!(req.temperature);
             }
             let (version, base_seg) = match provider {
                 Provider::Qwen => ("v1", "chat/completions"),
@@ -349,6 +372,13 @@ fn prepare(provider: Provider, base_url: &str, api_key: &str, req: &CompletionRe
             }
         }
     }
+}
+
+/// Qwen and Zhipu document temperature as valid alongside thinking; DeepSeek
+/// ignores it and Kimi rejects anything but its fixed value, and both of
+/// those already have `sampling: false` on their rows.
+fn contract_allows_temperature_while_thinking(provider: Provider) -> bool {
+    matches!(provider, Provider::Qwen | Provider::Zhipu)
 }
 
 fn num(value: &Value) -> u64 {
@@ -461,7 +491,10 @@ pub async fn stream_completion(
     let status = resp.status();
     if !status.is_success() {
         let body = resp.text().await.unwrap_or_default();
-        return Err(Error::Provider { status: status.as_u16(), body });
+        return Err(Error::Provider {
+            status: status.as_u16(),
+            body,
+        });
     }
 
     let mut stream = resp.bytes_stream();
@@ -542,36 +575,281 @@ mod tests {
     /// The OpenAI-compatible providers must carry it as a leading system message.
     #[test]
     fn openai_compatible_prepends_system_message() {
-        for provider in [Provider::DeepSeek, Provider::Kimi, Provider::Qwen, Provider::Zhipu] {
+        for provider in [
+            Provider::DeepSeek,
+            Provider::Kimi,
+            Provider::Qwen,
+            Provider::Zhipu,
+        ] {
             let p = prepare(provider, "https://example.com", "k", &req("chat"));
             let msgs = p.body["messages"].as_array().expect("messages array");
-            assert_eq!(msgs[0]["role"], "system", "{provider:?} should lead with system");
+            assert_eq!(
+                msgs[0]["role"], "system",
+                "{provider:?} should lead with system"
+            );
             assert!(msgs[0]["content"].as_str().unwrap().contains("Douglas"));
         }
     }
 
-    /// Regression: MiniMax must receive an extended-thinking budget at the high
-    /// tier (its reasoning knob was previously dropped — `ant_profile` only knew
-    /// Claude ids), and no temperature alongside the thinking block.
+    /// MiniMax-M3 (docs: `thinking.type: adaptive` switches thinking on,
+    /// omitting the block leaves it off) — no temperature while thinking.
     #[test]
-    fn minimax_high_tier_gets_extended_thinking_budget() {
-        let mut r = req("MiniMax-M2.7-highspeed");
-        r.max_tokens = 2048;
+    fn minimax_m3_adaptive_at_high_off_at_low() {
+        let mut r = req("MiniMax-M3");
         r.tier = ReasoningTier::High;
-        let p = prepare(Provider::MiniMax, "https://api.minimaxi.com/anthropic", "k", &r);
-        assert_eq!(p.body["thinking"]["type"], "enabled");
-        assert!(p.body["thinking"]["budget_tokens"].as_i64().unwrap() >= 1024);
+        let p = prepare(
+            Provider::MiniMax,
+            "https://api.minimaxi.com/anthropic",
+            "k",
+            &r,
+        );
+        assert_eq!(p.body["thinking"]["type"], "adaptive");
+        assert!(p.body.get("temperature").is_none());
+        r.tier = ReasoningTier::Low;
+        let p = prepare(
+            Provider::MiniMax,
+            "https://api.minimaxi.com/anthropic",
+            "k",
+            &r,
+        );
+        assert!(p.body.get("thinking").is_none());
+        assert!(p.body.get("temperature").is_some());
+        assert!(p.url.ends_with("/anthropic/v1/messages"));
+    }
+
+    /// MiniMax M2.x cannot turn thinking off (docs): no thinking block is sent
+    /// at any tier and no temperature rides along.
+    #[test]
+    fn minimax_m2_is_always_on_and_never_gets_a_thinking_block() {
+        for tier in ReasoningTier::ALL {
+            let mut r = req("MiniMax-M2.7-highspeed");
+            r.tier = tier;
+            let p = prepare(
+                Provider::MiniMax,
+                "https://api.minimaxi.com/anthropic",
+                "k",
+                &r,
+            );
+            assert!(p.body.get("thinking").is_none(), "{tier:?}");
+            assert!(p.body.get("temperature").is_none(), "{tier:?}");
+        }
+    }
+
+    // One test per thinking knob: the exact key each contract emits.
+
+    #[test]
+    fn knob_openai_effort_never_sends_temperature() {
+        for (model, tier, effort) in [
+            ("gpt-6-astra", ReasoningTier::High, "high"),
+            ("gpt-5.6-luna", ReasoningTier::Medium, "medium"),
+            ("gpt-5.5", ReasoningTier::Low, "low"),
+        ] {
+            let mut r = req(model);
+            r.tier = tier;
+            let p = prepare(Provider::OpenAI, "https://api.openai.com", "k", &r);
+            assert_eq!(p.body["reasoning"]["effort"], effort, "{model}");
+            assert!(p.body.get("temperature").is_none(), "{model}");
+            assert!(p.body["instructions"].as_str().unwrap().contains("Douglas"));
+        }
+    }
+
+    #[test]
+    fn knob_anthropic_adaptive_per_generation() {
+        // Fable: always on; low tier = effort low, no thinking block.
+        let mut r = req("claude-fable-5-1");
+        r.tier = ReasoningTier::Low;
+        let p = prepare(Provider::Anthropic, "https://api.anthropic.com", "k", &r);
+        assert!(p.body.get("thinking").is_none());
+        assert_eq!(p.body["output_config"]["effort"], "low");
+        assert!(p.body.get("temperature").is_none());
+        // Opus 5: thinks by default, so the low tier says `disabled` explicitly.
+        let mut r = req("claude-opus-5");
+        r.tier = ReasoningTier::Low;
+        let p = prepare(Provider::Anthropic, "https://api.anthropic.com", "k", &r);
+        assert_eq!(p.body["thinking"]["type"], "disabled");
+        assert!(p.body.get("temperature").is_none());
+        // Opus 4.8: adaptive-only, off until asked, never a temperature.
+        let mut r = req("claude-opus-4-8");
+        r.tier = ReasoningTier::High;
+        let p = prepare(Provider::Anthropic, "https://api.anthropic.com", "k", &r);
+        assert_eq!(p.body["thinking"]["type"], "adaptive");
+        assert_eq!(p.body["thinking"]["display"], "summarized");
+        assert!(p.body.get("output_config").is_none());
+        assert!(p.body.get("temperature").is_none());
+        r.tier = ReasoningTier::Low;
+        let p = prepare(Provider::Anthropic, "https://api.anthropic.com", "k", &r);
+        assert!(p.body.get("thinking").is_none());
         assert!(p.body.get("temperature").is_none());
     }
 
-    /// At the low tier MiniMax skips extended thinking and keeps a temperature.
     #[test]
-    fn minimax_low_tier_skips_thinking_keeps_temperature() {
-        let mut r = req("MiniMax-M2.7-highspeed");
+    fn knob_anthropic_extended_budget_and_temperature_when_off() {
+        let mut r = req("claude-haiku-4-5-20251001");
+        r.max_tokens = 4096;
+        r.tier = ReasoningTier::High;
+        let p = prepare(Provider::Anthropic, "https://api.anthropic.com", "k", &r);
+        assert_eq!(p.body["thinking"]["type"], "enabled");
+        assert!(p.body["thinking"]["budget_tokens"].as_i64().unwrap() >= 1024);
+        assert!(p.body.get("temperature").is_none());
         r.tier = ReasoningTier::Low;
-        let p = prepare(Provider::MiniMax, "https://api.minimaxi.com/anthropic", "k", &r);
+        let p = prepare(Provider::Anthropic, "https://api.anthropic.com", "k", &r);
         assert!(p.body.get("thinking").is_none());
         assert!(p.body.get("temperature").is_some());
+    }
+
+    #[test]
+    fn knob_gemini_level_and_budget() {
+        let r = req("gemini-3.1-pro-preview");
+        let p = prepare(
+            Provider::Google,
+            "https://generativelanguage.googleapis.com",
+            "k",
+            &r,
+        );
+        assert_eq!(
+            p.body["generationConfig"]["thinkingConfig"]["thinkingLevel"],
+            "high"
+        );
+        assert_eq!(
+            p.body["generationConfig"]["thinkingConfig"]["includeThoughts"],
+            true
+        );
+        let mut r = req("gemini-2.5-flash");
+        r.tier = ReasoningTier::Medium;
+        let p = prepare(
+            Provider::Google,
+            "https://generativelanguage.googleapis.com",
+            "k",
+            &r,
+        );
+        assert_eq!(
+            p.body["generationConfig"]["thinkingConfig"]["thinkingBudget"],
+            8192
+        );
+        r.tier = ReasoningTier::Low;
+        let p = prepare(
+            Provider::Google,
+            "https://generativelanguage.googleapis.com",
+            "k",
+            &r,
+        );
+        assert!(p.body["generationConfig"].get("thinkingConfig").is_none());
+    }
+
+    #[test]
+    fn knob_deepseek_type_with_effort_ladder() {
+        let mut r = req("deepseek-v4-pro");
+        r.tier = ReasoningTier::Medium;
+        let p = prepare(Provider::DeepSeek, "https://api.deepseek.com", "k", &r);
+        assert_eq!(p.body["thinking"]["type"], "enabled");
+        assert_eq!(p.body["reasoning_effort"], "high");
+        assert!(p.body.get("temperature").is_none());
+        r.tier = ReasoningTier::Low;
+        let p = prepare(Provider::DeepSeek, "https://api.deepseek.com", "k", &r);
+        assert_eq!(p.body["thinking"]["type"], "disabled");
+        assert!(p.body.get("reasoning_effort").is_none());
+    }
+
+    #[test]
+    fn knob_kimi_effort_sends_reasoning_effort_and_no_thinking_object() {
+        let r = req("kimi-k3");
+        let p = prepare(Provider::Kimi, "https://api.moonshot.cn", "k", &r);
+        assert_eq!(p.body["reasoning_effort"], "max");
+        assert!(p.body.get("thinking").is_none());
+        assert!(p.body.get("temperature").is_none());
+    }
+
+    #[test]
+    fn knob_kimi_always_on_and_type() {
+        let mut r = req("kimi-k2.7-code");
+        r.tier = ReasoningTier::Low;
+        let p = prepare(Provider::Kimi, "https://api.moonshot.cn", "k", &r);
+        assert!(
+            p.body.get("thinking").is_none(),
+            "k2.7-code must never receive disabled"
+        );
+        let p = prepare(Provider::Kimi, "https://api.moonshot.cn", "k", &r);
+        assert!(p.body.get("reasoning_effort").is_none());
+        let mut r = req("kimi-k2.6");
+        r.tier = ReasoningTier::Low;
+        let p = prepare(Provider::Kimi, "https://api.moonshot.cn", "k", &r);
+        assert_eq!(p.body["thinking"]["type"], "disabled");
+    }
+
+    #[test]
+    fn knob_qwen_enable_thinking_keeps_temperature() {
+        let mut r = req("qwen3.8-max");
+        r.tier = ReasoningTier::High;
+        let p = prepare(
+            Provider::Qwen,
+            "https://dashscope.aliyuncs.com/compatible-mode",
+            "k",
+            &r,
+        );
+        assert_eq!(p.body["enable_thinking"], true);
+        assert!(p.body.get("temperature").is_some());
+        r.tier = ReasoningTier::Low;
+        let p = prepare(
+            Provider::Qwen,
+            "https://dashscope.aliyuncs.com/compatible-mode",
+            "k",
+            &r,
+        );
+        assert_eq!(p.body["enable_thinking"], false);
+    }
+
+    #[test]
+    fn knob_glm_effort_and_type() {
+        let mut r = req("glm-5.3");
+        r.tier = ReasoningTier::Low;
+        let p = prepare(
+            Provider::Zhipu,
+            "https://open.bigmodel.cn/api/paas",
+            "k",
+            &r,
+        );
+        assert_eq!(
+            p.body["thinking"]["type"], "enabled",
+            "GLM-5.3 cannot be disabled"
+        );
+        assert_eq!(p.body["reasoning_effort"], "low");
+        assert!(p.url.ends_with("/v4/chat/completions"));
+        let mut r = req("glm-5.2");
+        r.tier = ReasoningTier::Low;
+        let p = prepare(
+            Provider::Zhipu,
+            "https://open.bigmodel.cn/api/paas",
+            "k",
+            &r,
+        );
+        assert_eq!(p.body["thinking"]["type"], "disabled");
+        assert!(p.body.get("reasoning_effort").is_none());
+        let mut r = req("glm-4.7");
+        r.tier = ReasoningTier::Low;
+        let p = prepare(
+            Provider::Zhipu,
+            "https://open.bigmodel.cn/api/paas",
+            "k",
+            &r,
+        );
+        assert_eq!(
+            p.body["thinking"]["type"], "enabled",
+            "GLM-4.7 is forced on"
+        );
+    }
+
+    /// An id the table does not know inherits its family's knob.
+    #[test]
+    fn unknown_ids_follow_their_family() {
+        let r = req("gpt-99-hypothetical");
+        let p = prepare(Provider::OpenAI, "https://api.openai.com", "k", &r);
+        assert_eq!(p.body["reasoning"]["effort"], "high");
+        let r = req("kimi-k3-preview-2099");
+        let p = prepare(Provider::Kimi, "https://api.moonshot.cn", "k", &r);
+        assert_eq!(p.body["reasoning_effort"], "max");
+        let r = req("claude-opus-4-8-20990101");
+        let p = prepare(Provider::Anthropic, "https://api.anthropic.com", "k", &r);
+        assert_eq!(p.body["thinking"]["type"], "adaptive");
     }
 
     /// OpenAI reasoning capture is restricted to incremental `.delta` events so
@@ -580,10 +858,14 @@ mod tests {
     fn openai_reasoning_only_captured_on_delta_events() {
         let mut usage = Usage::default();
         let delta = json!({ "type": "response.reasoning_summary_text.delta", "delta": "step " });
-        let done = json!({ "type": "response.reasoning_summary_text.done", "text": "step step step" });
+        let done =
+            json!({ "type": "response.reasoning_summary_text.done", "text": "step step step" });
         let d = parse_event(Provider::OpenAI, &delta, &mut usage);
         let f = parse_event(Provider::OpenAI, &done, &mut usage);
         assert_eq!(d.thinking, "step ");
-        assert!(f.thinking.is_empty(), "the aggregate .done event must not re-emit reasoning");
+        assert!(
+            f.thinking.is_empty(),
+            "the aggregate .done event must not re-emit reasoning"
+        );
     }
 }

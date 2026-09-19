@@ -63,9 +63,18 @@ impl ModeratorPick {
         let avail = available.get(&provider).unwrap_or(&empty);
         // Moderator runs at the cheaper utility tier (like the app's utilityTier).
         let tier = config.utility_tier;
-        let model =
-            resolve_model(provider, tier, avail, config.selection(provider, tier).as_deref());
-        Some(ModeratorPick { provider, model, key, base_url: config.base_url(provider) })
+        let model = resolve_model(
+            provider,
+            tier,
+            avail,
+            config.selection(provider, tier).as_deref(),
+        );
+        Some(ModeratorPick {
+            provider,
+            model,
+            key,
+            base_url: config.base_url(provider),
+        })
     }
 }
 
@@ -125,7 +134,10 @@ pub async fn generate(
 ) -> Option<(String, Usage)> {
     let mut messages = vec![ChatMessage::user(format!("Discussion topic: \"{topic}\""))];
     if !recent.is_empty() {
-        messages.push(ChatMessage::user(format!("Recent discussion:\n{}", recent.join("\n"))));
+        messages.push(ChatMessage::user(format!(
+            "Recent discussion:\n{}",
+            recent.join("\n")
+        )));
     }
     messages.push(ChatMessage::user(kind.instruction()));
 
@@ -141,12 +153,21 @@ pub async fn generate(
     let mut out = String::new();
     let usage = {
         let mut on_chunk = |c: &CompletionChunk| out.push_str(&c.content);
-        let fut =
-            stream_completion(http, pick.provider, &pick.base_url, &pick.key, &req, &mut on_chunk);
+        let fut = stream_completion(
+            http,
+            pick.provider,
+            &pick.base_url,
+            &pick.key,
+            &req,
+            &mut on_chunk,
+        );
         // `timeout` → None on stall; the inner `.ok()?` → None on a request error.
         // Either way the caller falls back (opening → plain framing line,
         // synthesis/resolution → skipped, conclusion → its own retry).
-        tokio::time::timeout(MODERATOR_TIMEOUT, fut).await.ok()?.ok()?
+        tokio::time::timeout(MODERATOR_TIMEOUT, fut)
+            .await
+            .ok()?
+            .ok()?
     };
     let out = out.trim().to_string();
     (!out.is_empty()).then_some((out, usage))
@@ -168,12 +189,18 @@ pub fn parse_conclusion(text: &str) -> Option<ModeratorConclusion> {
     let summary = strip_leading_label(before).trim().to_string();
 
     // After the score: reason (first sentence) then an optional next-step.
-    let after = text[score_match.end()..].trim_start_matches(['.', ' ', '\n']).trim();
+    let after = text[score_match.end()..]
+        .trim_start_matches(['.', ' ', '\n'])
+        .trim();
     let (reason, next) = split_reason_next(after);
 
     Some(ModeratorConclusion {
         status,
-        summary: if summary.is_empty() { text.lines().next().unwrap_or("").to_string() } else { summary },
+        summary: if summary.is_empty() {
+            text.lines().next().unwrap_or("").to_string()
+        } else {
+            summary
+        },
         score,
         reason,
         next,
@@ -193,12 +220,19 @@ fn detect_status(text: &str) -> ConclusionStatus {
 }
 
 fn strip_leading_label(s: &str) -> &str {
-    for label in ["Consensus:", "Majority with dissent:", "Majority:", "Unresolved:"] {
+    for label in [
+        "Consensus:",
+        "Majority with dissent:",
+        "Majority:",
+        "Unresolved:",
+    ] {
         if let Some(rest) = s.strip_prefix(label) {
             return rest.trim_start();
         }
         // case-insensitive fallback
-        if s.to_ascii_lowercase().starts_with(&label.to_ascii_lowercase()) {
+        if s.to_ascii_lowercase()
+            .starts_with(&label.to_ascii_lowercase())
+        {
             return s[label.len()..].trim_start();
         }
     }
@@ -212,8 +246,11 @@ fn split_reason_next(s: &str) -> (String, Option<String>) {
         return (String::new(), None);
     }
     // Sentence boundaries: split on ". " keeping it simple + robust.
-    let sentences: Vec<&str> =
-        s.split_inclusive(['.', '!', '?']).map(|x| x.trim()).filter(|x| !x.is_empty()).collect();
+    let sentences: Vec<&str> = s
+        .split_inclusive(['.', '!', '?'])
+        .map(|x| x.trim())
+        .filter(|x| !x.is_empty())
+        .collect();
     match sentences.len() {
         0 => (s.to_string(), None),
         1 => (sentences[0].to_string(), None),

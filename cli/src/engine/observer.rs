@@ -66,7 +66,10 @@ pub fn build_observer_messages(
 
     let start = transcript.len().saturating_sub(MAX_OBSERVER_CONTEXT);
     for turn in &transcript[start..] {
-        messages.push(ChatMessage::user(format!("{}: {}", turn.name, turn.content)));
+        messages.push(ChatMessage::user(format!(
+            "{}: {}",
+            turn.name, turn.content
+        )));
     }
 
     messages.push(ChatMessage::user(format!(
@@ -101,12 +104,19 @@ pub async fn run_pass(
         if !active_partner_ids.iter().any(|id| id == partner_id) {
             continue;
         }
-        let Some(key) = keys.get(&provider) else { continue };
+        let Some(key) = keys.get(&provider) else {
+            continue;
+        };
         let empty = Vec::new();
         let avail = available.get(&provider).unwrap_or(&empty);
         // Notes are short + tactical: the partner's model at the Low tier.
         let tier = ReasoningTier::Low;
-        let model = resolve_model(provider, tier, avail, config.selection(provider, tier).as_deref());
+        let model = resolve_model(
+            provider,
+            tier,
+            avail,
+            config.selection(provider, tier).as_deref(),
+        );
         let req = CompletionRequest {
             model: model.clone(),
             system: Some(observer_system_prompt(obs_name, partner_name)),
@@ -126,7 +136,10 @@ pub async fn run_pass(
                     .await
                     .ok()?
             };
-            let text: String = super::sanitize_terminal(out.trim()).chars().take(NOTE_CHAR_CAP).collect();
+            let text: String = super::sanitize_terminal(out.trim())
+                .chars()
+                .take(NOTE_CHAR_CAP)
+                .collect();
             if text.is_empty() {
                 return None;
             }
@@ -144,7 +157,11 @@ pub async fn run_pass(
         });
     }
 
-    futures_util::future::join_all(jobs).await.into_iter().flatten().collect()
+    futures_util::future::join_all(jobs)
+        .await
+        .into_iter()
+        .flatten()
+        .collect()
 }
 
 #[cfg(test)]
@@ -159,7 +176,10 @@ mod tests {
             vec!["george", "cathy", "grace", "douglas", "kate", "quinn", "mary", "zara"]
         );
         // Provider must match the partner's provider (same key, no extra setup).
-        for (i, agent) in super::super::default_agents(ReasoningTier::High).iter().enumerate() {
+        for (i, agent) in super::super::default_agents(ReasoningTier::High)
+            .iter()
+            .enumerate()
+        {
             assert_eq!(OBSERVERS[i].4, agent.provider);
             assert_eq!(OBSERVERS[i].2, agent.id);
         }
