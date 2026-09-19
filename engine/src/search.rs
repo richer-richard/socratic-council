@@ -1,9 +1,13 @@
-//! Keyless web search for the oracle tools — the app's three-tier chain
-//! (`services/tools.ts`) in pure Rust: the DuckDuckGo html endpoint first,
-//! then the Bing RSS feed, then DuckDuckGo's instant-answer JSON API. Each
-//! tier is a pure parser over the response body, so all three are unit-tested
-//! against fixtures without any network.
+//! Keyless web search for the seats' tools: the DuckDuckGo html endpoint
+//! and the Bing RSS feed race each other (the first with results wins), then
+//! Wikipedia's search API as a reference backend, then DuckDuckGo's
+//! instant-answer JSON API. Every request pins English and the US region
+//! (query parameters, a cookie where the engine reads one, and
+//! `Accept-Language`), because the keyless engines otherwise localise
+//! results to the caller's IP. Each tier is a pure parser over the response
+//! body, unit-tested against fixtures without any network.
 
+use futures_util::stream::{FuturesUnordered, StreamExt};
 use std::time::Duration;
 
 /// One normalized search hit.
@@ -325,51 +329,187 @@ pub fn format_results(hits: &[SearchResultItem]) -> String {
         .join("\n\n")
 }
 
-/// One search backend: URL, accept header, and a pure body parser.
-type SearchAttempt = (String, &'static str, fn(&str) -> Vec<SearchResultItem>);
+/// The language every search request asks for.
+pub const ACCEPT_LANGUAGE: &str = "en-US,en;q=0.9";
+/// Wikipedia asks API clients to identify themselves.
+const WIKIPEDIA_USER_AGENT: &str =
+    "socratic-council (https://github.com/richer-richard/socratic-council)";
 
-/// Run the three-tier search chain. Best-effort: each tier gets its own
-/// timeout; the first tier yielding results wins.
+/// One search backend: the request and a pure body parser.
+pub struct SearchAttempt {
+    pub name: &'static str,
+    pub url: String,
+    pub accept: &'static str,
+    /// A cookie pinning the region and language where the engine reads one.
+    pub cookie: Option<&'static str>,
+    pub user_agent: Option<&'static str>,
+    pub parse: fn(&str) -> Vec<SearchResultItem>,
+}
+
+/// The backends for `query`, in priority order: DuckDuckGo html, Bing RSS,
+/// Wikipedia, DuckDuckGo instant answers.
+pub fn search_attempts(query: &str) -> Vec<SearchAttempt> {
+    let encoded = url_encode(query.trim());
+    vec![
+        SearchAttempt {
+            name: "duckduckgo",
+            url: format!("https://html.duckduckgo.com/html/?q={encoded}&kl=us-en&kad=en_US"),
+            accept: "text/html,application/xhtml+xml",
+            cookie: Some("kl=us-en; kad=en_US"),
+            user_agent: None,
+            parse: parse_ddg_html,
+        },
+        SearchAttempt {
+            name: "bing",
+            // `ensearch=1` is the China edition's "international" switch: Bing
+            // redirects callers there by IP and ignores `mkt` and `cc` alone.
+            url: format!(
+                "https://www.bing.com/search?format=rss&q={encoded}&mkt=en-US&setlang=en-US&cc=US&ensearch=1"
+            ),
+            accept: "application/rss+xml, application/xml, text/xml",
+            cookie: None,
+            user_agent: None,
+            parse: parse_bing_rss,
+        },
+        SearchAttempt {
+            name: "wikipedia",
+            url: format!(
+                "https://en.wikipedia.org/w/api.php?action=query&list=search&format=json&utf8=1&srlimit={MAX_RESULTS}&srsearch={encoded}"
+            ),
+            accept: "application/json",
+            cookie: None,
+            user_agent: Some(WIKIPEDIA_USER_AGENT),
+            parse: parse_wikipedia,
+        },
+        SearchAttempt {
+            name: "duckduckgo-instant",
+            url: format!(
+                "https://api.duckduckgo.com/?q={encoded}&format=json&no_redirect=1&no_html=1&kl=us-en"
+            ),
+            accept: "application/json",
+            cookie: None,
+            user_agent: None,
+            parse: parse_ddg_instant,
+        },
+    ]
+}
+
+/// The canonical article URL for a Wikipedia title.
+pub fn wikipedia_page_url(title: &str) -> String {
+    let mut out = String::from("https://en.wikipedia.org/wiki/");
+    for b in title.trim().replace(' ', "_").as_bytes() {
+        match b {
+            b'A'..=b'Z'
+            | b'a'..=b'z'
+            | b'0'..=b'9'
+            | b'-'
+            | b'_'
+            | b'.'
+            | b'~'
+            | b'('
+            | b')'
+            | b','
+            | b':'
+            | b'\''
+            | b'/' => out.push(*b as char),
+            b => out.push_str(&format!("%{b:02X}")),
+        }
+    }
+    out
+}
+
+/// Parse Wikipedia's `list=search` JSON: `query.search[].{title, snippet}`;
+/// the snippet carries `<span class="searchmatch">` highlights.
+pub fn parse_wikipedia(body: &str) -> Vec<SearchResultItem> {
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(body) else {
+        return Vec::new();
+    };
+    let Some(items) = v["query"]["search"].as_array() else {
+        return Vec::new();
+    };
+    let hits = items
+        .iter()
+        .filter_map(|item| {
+            let title = item["title"].as_str()?.trim();
+            if title.is_empty() {
+                return None;
+            }
+            let snippet = clean_text(item["snippet"].as_str().unwrap_or(""));
+            Some(SearchResultItem {
+                title: format!("{title} - Wikipedia"),
+                url: wikipedia_page_url(title),
+                snippet,
+            })
+        })
+        .collect();
+    normalize(hits)
+}
+
+/// `primary` first, then whatever `extra` adds, deduplicated by URL and
+/// capped like a single engine's results.
+pub fn merge_hits(
+    primary: Vec<SearchResultItem>,
+    extra: Vec<SearchResultItem>,
+) -> Vec<SearchResultItem> {
+    normalize(primary.into_iter().chain(extra).collect())
+}
+
+/// One attempt with its own timeout; empty on any failure.
+async fn fetch(http: &reqwest::Client, attempt: &SearchAttempt) -> Vec<SearchResultItem> {
+    let fut = async {
+        let mut req = http
+            .get(&attempt.url)
+            .header("accept", attempt.accept)
+            .header("accept-language", ACCEPT_LANGUAGE);
+        if let Some(cookie) = attempt.cookie {
+            req = req.header("cookie", cookie);
+        }
+        if let Some(ua) = attempt.user_agent {
+            req = req.header("user-agent", ua);
+        }
+        let resp = req.send().await.ok()?;
+        if !resp.status().is_success() {
+            return None;
+        }
+        resp.text().await.ok()
+    };
+    match tokio::time::timeout(ATTEMPT_TIMEOUT, fut).await {
+        Ok(Some(body)) => (attempt.parse)(&body),
+        _ => Vec::new(),
+    }
+}
+
+/// Run the search chain. The two general engines race and the first one to
+/// return results wins; Wikipedia and the instant-answer API follow when
+/// both come back empty. Best-effort: never an error, at worst no hits.
 pub async fn web_search(http: &reqwest::Client, query: &str) -> Vec<SearchResultItem> {
     let query = query.trim();
     if query.is_empty() {
         return Vec::new();
     }
-    let encoded: String = url_encode(query);
-    let attempts: [SearchAttempt; 3] = [
-        (
-            format!("https://html.duckduckgo.com/html/?q={encoded}&kl=us-en"),
-            "text/html,application/xhtml+xml",
-            parse_ddg_html,
-        ),
-        (
-            format!("https://www.bing.com/search?format=rss&q={encoded}&mkt=en-US&setlang=en"),
-            "application/rss+xml, application/xml, text/xml",
-            parse_bing_rss,
-        ),
-        (
-            format!("https://api.duckduckgo.com/?q={encoded}&format=json&no_redirect=1&no_html=1"),
-            "application/json",
-            parse_ddg_instant,
-        ),
-    ];
-
-    for (url, accept, parser) in attempts {
-        let fut = async {
-            let resp = http.get(&url).header("accept", accept).send().await.ok()?;
-            if !resp.status().is_success() {
-                return None;
-            }
-            resp.text().await.ok()
-        };
-        if let Ok(Some(body)) = tokio::time::timeout(ATTEMPT_TIMEOUT, fut).await {
-            let hits = parser(&body);
-            if !hits.is_empty() {
-                return hits;
-            }
+    let attempts = search_attempts(query);
+    let mut race: FuturesUnordered<_> = attempts[..2].iter().map(|a| fetch(http, a)).collect();
+    while let Some(hits) = race.next().await {
+        if !hits.is_empty() {
+            return hits;
+        }
+    }
+    for attempt in &attempts[2..] {
+        let hits = fetch(http, attempt).await;
+        if !hits.is_empty() {
+            return hits;
         }
     }
     Vec::new()
+}
+
+/// Wikipedia alone — the reference backend claim verification tops up with.
+pub async fn wikipedia_search(http: &reqwest::Client, query: &str) -> Vec<SearchResultItem> {
+    let attempts = search_attempts(query);
+    match attempts.iter().find(|a| a.name == "wikipedia") {
+        Some(a) => fetch(http, a).await,
+        None => Vec::new(),
+    }
 }
 
 /// Minimal percent-encoder for a query-string value.
@@ -484,6 +624,70 @@ mod tests {
         assert_eq!(hits[1].title, "Cargo");
         assert_eq!(hits[2].url, "https://github.com/rust-lang/rust-clippy");
         assert!(parse_ddg_instant("not json").is_empty());
+    }
+
+    #[test]
+    fn attempts_pin_english_us_on_every_engine() {
+        let a = search_attempts("rust lang");
+        assert_eq!(
+            a.iter().map(|x| x.name).collect::<Vec<_>>(),
+            ["duckduckgo", "bing", "wikipedia", "duckduckgo-instant"]
+        );
+        assert!(a[0].url.contains("q=rust+lang") && a[0].url.contains("kl=us-en"));
+        assert_eq!(a[0].cookie, Some("kl=us-en; kad=en_US"));
+        assert!(a[1].url.contains("mkt=en-US") && a[1].url.contains("cc=US"));
+        assert!(a[1].url.contains("ensearch=1"));
+        assert!(a[2].url.starts_with("https://en.wikipedia.org/w/api.php?"));
+        assert!(a[2].url.contains("srsearch=rust+lang"));
+        assert!(a[2].user_agent.unwrap().contains("socratic-council"));
+        assert!(a[3].url.contains("kl=us-en"));
+        assert_eq!(ACCEPT_LANGUAGE, "en-US,en;q=0.9");
+    }
+
+    #[test]
+    fn parses_wikipedia_search_json() {
+        let body = r#"{"batchcomplete":"","query":{"searchinfo":{"totalhits":2},"search":[
+          {"ns":0,"title":"Rust (programming language)","pageid":1,"snippet":"<span class=\"searchmatch\">Rust</span> is a general-purpose &amp; systems language","timestamp":"2026-01-01T00:00:00Z"},
+          {"ns":0,"title":"Rust","pageid":2,"snippet":"<span class=\"searchmatch\">Rust</span> is an iron oxide"},
+          {"ns":0,"title":"   ","pageid":3,"snippet":"blank title is skipped"}
+        ]}}"#;
+        let hits = parse_wikipedia(body);
+        assert_eq!(hits.len(), 2);
+        assert_eq!(hits[0].title, "Rust (programming language) - Wikipedia");
+        assert_eq!(
+            hits[0].url,
+            "https://en.wikipedia.org/wiki/Rust_(programming_language)"
+        );
+        assert_eq!(
+            hits[0].snippet,
+            "Rust is a general-purpose & systems language"
+        );
+        assert_eq!(hits[1].url, "https://en.wikipedia.org/wiki/Rust");
+        assert!(parse_wikipedia("not json").is_empty());
+        assert!(parse_wikipedia(r#"{"query":{}}"#).is_empty());
+        assert_eq!(
+            wikipedia_page_url("Café au lait"),
+            "https://en.wikipedia.org/wiki/Caf%C3%A9_au_lait"
+        );
+    }
+
+    #[test]
+    fn merge_hits_keeps_primary_first_and_dedupes() {
+        let mk = |t: &str, url: &str| SearchResultItem {
+            title: t.into(),
+            url: url.into(),
+            snippet: String::new(),
+        };
+        let merged = merge_hits(
+            vec![mk("a", "https://a"), mk("b", "https://b")],
+            vec![
+                mk("dup", "https://a"),
+                mk("w", "https://en.wikipedia.org/wiki/W"),
+            ],
+        );
+        assert_eq!(merged.len(), 3);
+        assert_eq!(merged[0].title, "a");
+        assert_eq!(merged[2].title, "w");
     }
 
     #[test]

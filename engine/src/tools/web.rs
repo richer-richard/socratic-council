@@ -3,7 +3,9 @@
 //! result gets, and the claim grader (a port of `packages/core/src/oracle.ts`).
 
 use crate::attach::Attachment;
-use crate::search::{format_results, web_search as search_web, SearchResultItem};
+use crate::search::{
+    format_results, merge_hits, web_search as search_web, wikipedia_search, SearchResultItem,
+};
 use crate::text::sanitize_terminal;
 use regex::Regex;
 use std::sync::OnceLock;
@@ -13,6 +15,10 @@ use std::time::Duration;
 pub const WEB_TIMEOUT: Duration = Duration::from_secs(25);
 /// Cap on a web result handed back to a model.
 pub const OUTPUT_CHAR_CAP: usize = 3500;
+/// Fewer hits than this and claim verification adds the reference backend.
+pub const MIN_EVIDENCE_BEFORE_REFERENCE: usize = 3;
+/// Budget for that top-up.
+const REFERENCE_TIMEOUT: Duration = Duration::from_secs(12);
 
 /// Outbound queries are short topic phrases, never quoted passages.
 pub const MAX_QUERY_CHARS: usize = 200;
@@ -133,9 +139,18 @@ pub async fn verify_claim(
     attachments: &[Attachment],
 ) -> Result<String, String> {
     let claim = guard_outbound_query(claim, attachments)?;
-    let evidence = tokio::time::timeout(WEB_TIMEOUT, search_web(http, &claim))
+    let mut evidence = tokio::time::timeout(WEB_TIMEOUT, search_web(http, &claim))
         .await
         .map_err(|_| "search timed out".to_string())?;
+    // Thin evidence gets the reference backend on top: the encyclopedia is
+    // English, stable and not localised to whoever is asking.
+    if evidence.len() < MIN_EVIDENCE_BEFORE_REFERENCE {
+        if let Ok(more) =
+            tokio::time::timeout(REFERENCE_TIMEOUT, wikipedia_search(http, &claim)).await
+        {
+            evidence = merge_hits(evidence, more);
+        }
+    }
     let (verdict, confidence) = assess_verification(&claim, &evidence);
     Ok(clean_output(&format!(
         "Verdict: {verdict} (confidence {confidence:.2})\n\n{}",
