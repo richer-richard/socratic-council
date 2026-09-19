@@ -149,6 +149,15 @@ pub fn parse_spec(
     Ok((provider, choice))
 }
 
+/// `2.82`, `0.30`, `10` — a per-million price without float noise.
+fn usd(v: f64) -> String {
+    if (v - v.round()).abs() < 1e-9 {
+        format!("{}", v.round() as i64)
+    } else {
+        format!("{v:.2}")
+    }
+}
+
 fn cycle_reasoning(current: Option<ReasoningTier>) -> Option<ReasoningTier> {
     match current {
         None => Some(ReasoningTier::Low),
@@ -205,7 +214,7 @@ impl App {
         };
         let row = model_row(provider, &id);
         let price = match (row.pricing.input, row.pricing.output) {
-            (Some(i), Some(o)) => format!(" · ${i}/{o} per 1M"),
+            (Some(i), Some(o)) => format!(" · ${}/{} per 1M", usd(i), usd(o)),
             _ => " · unpriced".to_string(),
         };
         let arrow = if matches!(choice, ModelChoice::Auto(_)) {
@@ -1238,6 +1247,9 @@ mod tests {
         let available: HashMap<Provider, Vec<DiscoveredModel>> =
             [(Provider::OpenAI, vec![scanned])].into_iter().collect();
         assert!(parse_spec("openai:gpt-99-hypothetical", &available).is_ok());
+        assert_eq!(usd(2.8169014084507045), "2.82");
+        assert_eq!(usd(10.0), "10");
+        assert_eq!(usd(0.3), "0.30");
         assert_eq!(cycle_reasoning(None), Some(ReasoningTier::Low));
         assert_eq!(cycle_reasoning(Some(ReasoningTier::High)), None);
     }

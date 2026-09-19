@@ -477,14 +477,10 @@ fn push_record(lines: &mut Vec<Line<'static>>, r: &DecisionRecord, names: &Names
     push_list(
         lines,
         "evidence",
-        &mut r.evidence.iter().map(|e| {
-            format!(
-                "{} ({}, {})",
-                clean(&e.claim),
-                clean(&e.source),
-                name(&e.by)
-            )
-        }),
+        &mut r
+            .evidence
+            .iter()
+            .map(|e| evidence_line(&e.claim, &e.source, &name(&e.by))),
     );
     push_list(
         lines,
@@ -701,12 +697,7 @@ fn board_lines(board: Option<&Board>, names: &Names) -> Vec<Line<'static>> {
         lines.push(heading(&format!("evidence · {}", b.evidence.len())));
         for e in &b.evidence {
             lines.push(bullet(
-                &format!(
-                    "{} — {} ({})",
-                    clean(&e.claim),
-                    clean(&e.source),
-                    name(&e.by)
-                ),
+                &evidence_line(&e.claim, &e.source, &name(&e.by)),
                 theme::MUTED,
             ));
         }
@@ -1063,6 +1054,20 @@ fn render_approval(f: &mut Frame, area: Rect, who: &str, tool: &str, args: &str)
 // ---------------------------------------------------------------------------
 // Small helpers
 // ---------------------------------------------------------------------------
+
+/// `claim (source, by)` with the empty parts left out.
+fn evidence_line(claim: &str, source: &str, by: &str) -> String {
+    let tail: Vec<String> = [source, by]
+        .iter()
+        .filter(|s| !s.trim().is_empty())
+        .map(|s| clean(s))
+        .collect();
+    if tail.is_empty() {
+        clean(claim)
+    } else {
+        format!("{} ({})", clean(claim), tail.join(", "))
+    }
+}
 
 fn confidence_color(c: f32) -> Color {
     if c >= 0.75 {

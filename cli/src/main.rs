@@ -62,7 +62,7 @@ enum Command {
         /// Ask before every tool call (plain mode answers on stdin).
         #[arg(long)]
         ask_tools: bool,
-        /// Let the moderator ask one clarifying question first (plain mode answers on stdin).
+        /// Force the moderator's clarifying question on for this run (else the Settings toggle decides; plain mode answers on stdin).
         #[arg(long)]
         interactive: bool,
         /// Attach a plain-text file (repeatable); seats can search and read it.
@@ -302,7 +302,10 @@ fn apply_run_flags(config: &mut Config, args: &RunArgs) -> anyhow::Result<()> {
     if args.ask_tools {
         config.tools.approval = Approval::Ask;
     }
-    config.protocol.interactive = args.interactive;
+    // The Settings toggle decides; the flag forces the question on for this run.
+    if args.interactive {
+        config.protocol.interactive = true;
+    }
     if let Some(budget) = args.budget {
         anyhow::ensure!(budget.is_finite() && budget >= 0.0, "--budget must be ≥ 0");
         config.budget_per_session_usd = budget;

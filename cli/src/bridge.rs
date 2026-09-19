@@ -528,7 +528,7 @@ mod imp {
     /// zero high-byte unambiguously marks UTF-16LE.
     fn decode_webkit_blob(bytes: &[u8]) -> String {
         let looks_utf16 = bytes.len() >= 2
-            && bytes.len() % 2 == 0
+            && bytes.len().is_multiple_of(2)
             && bytes.iter().skip(1).step_by(2).any(|&b| b == 0);
         if looks_utf16 {
             let units: Vec<u16> = bytes

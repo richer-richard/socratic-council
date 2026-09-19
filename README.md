@@ -852,12 +852,17 @@ cargo install socratic-council
 socratic-council run "Is P = NP?"
 ```
 
-It runs the same engine crate as the desktop app on the same protocol, shares
-the desktop app's keys and saved sessions through a read-only bridge (optional;
-the CLI is fully self-contained with its own encrypted `keys.enc` store), and
-adds presets, `--seats` for any model per seat, `--deliverable`, `--tools`,
-`--json` for scripts and `--resume`. See [`cli/README.md`](cli/README.md) for
-keys, flags, and keybindings.
+It runs the same engine crate as the desktop app on the same protocol and
+shares the desktop app's keys and saved sessions through a read-only bridge
+(optional; the CLI is fully self-contained with its own encrypted `keys.enc`
+store). The TUI has the same three surfaces as the app: Home with the council
+preset and the deliverable, a Session screen that renders the rounds, the
+board, the convergence judgements and the decision record as the engine emits
+them (and answers the moderator's question and tool approvals), and Settings
+for keys, the roster, the moderator and utility slots, tools, the protocol
+and the budget. Flags add `--seats` for any model per seat, `--deliverable`,
+`--tools`, `--json` for scripts and `--resume`. See
+[`cli/README.md`](cli/README.md) for keys, flags and keybindings.
 
 ---
 

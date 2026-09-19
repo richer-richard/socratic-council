@@ -136,14 +136,7 @@ impl std::str::FromStr for ReasoningTier {
     }
 }
 
-/// One labelled section of an agent's private canvas (scratchpad).
-#[derive(Debug, Clone)]
-pub struct CanvasSection {
-    pub label: String,
-    pub text: String,
-}
-
-/// Confidence band on a research finding (mirrors the app's high/medium/low).
+/// Confidence band on a piece of evidence (high / medium / low).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Confidence {
     High,
@@ -164,46 +157,6 @@ impl Confidence {
             "high" => Confidence::High,
             "low" => Confidence::Low,
             _ => Confidence::Medium,
-        }
-    }
-}
-
-/// One section of the deep-research report.
-#[derive(Debug, Clone)]
-pub struct ResearchSection {
-    pub heading: String,
-    pub body: String,
-    pub confidence: Confidence,
-}
-
-/// A structured analytical report synthesized from the debate transcript.
-#[derive(Debug, Clone)]
-pub struct DeepResearchReport {
-    pub title: String,
-    pub abstract_text: String,
-    pub confidence: Confidence,
-    pub sections: Vec<ResearchSection>,
-}
-
-/// Optional draft → critique → revise pass after each council turn (off default).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum Reflection {
-    #[default]
-    Off,
-    Light,
-    Deep,
-}
-
-impl std::str::FromStr for Reflection {
-    type Err = String;
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s.to_ascii_lowercase().as_str() {
-            "off" | "none" => Ok(Reflection::Off),
-            "light" => Ok(Reflection::Light),
-            "deep" => Ok(Reflection::Deep),
-            other => Err(format!(
-                "unknown reflection mode: {other} (use off|light|deep)"
-            )),
         }
     }
 }
@@ -289,16 +242,6 @@ pub struct Usage {
     pub cache_write: u64,
 }
 
-/// One inner-circle council agent.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Agent {
-    pub id: String,
-    pub name: String,
-    pub provider: Provider,
-    pub system_prompt: String,
-    pub tier: ReasoningTier,
-}
-
 /// A tool the model may call, described with a JSON-schema `parameters` object.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ToolSpec {
@@ -378,83 +321,6 @@ pub struct CompletionChunk {
     pub thinking: String,
 }
 
-/// The Moderator's official closing verdict — mirrors the app's
-/// `ModeratorConclusionSnapshot`. Parsed from the moderator's final-summary text.
-#[derive(Debug, Clone)]
-pub struct ModeratorConclusion {
-    pub status: ConclusionStatus,
-    pub summary: String,
-    pub score: u8, // 0..=10
-    pub reason: String,
-    pub next: Option<String>,
-}
-
-/// Five 0-100 dimensions one agent scores a peer on.
-#[derive(Debug, Clone, Copy, Default)]
-pub struct PeerEvalScores {
-    pub rigor: u8,
-    pub evidence: u8,
-    pub novelty: u8,
-    pub civility: u8,
-    pub on_topic: u8,
-}
-
-/// How an evaluator stands relative to the peer they reviewed.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Stance {
-    Agree,
-    Disagree,
-    Mixed,
-}
-
-impl Stance {
-    pub fn label(self) -> &'static str {
-        match self {
-            Stance::Agree => "agree",
-            Stance::Disagree => "disagree",
-            Stance::Mixed => "mixed",
-        }
-    }
-    pub fn from_str_lenient(s: &str) -> Stance {
-        match s.to_ascii_lowercase().as_str() {
-            "agree" => Stance::Agree,
-            "disagree" => Stance::Disagree,
-            _ => Stance::Mixed,
-        }
-    }
-}
-
-/// One evaluator's review of one peer.
-#[derive(Debug, Clone)]
-pub struct PeerCritique {
-    pub evaluator_name: String,
-    pub target_id: String,
-    pub scores: PeerEvalScores,
-    pub overall: u8,
-    pub stance: Stance,
-    pub critique: String,
-}
-
-/// Aggregated standing for one reviewed agent.
-#[derive(Debug, Clone)]
-pub struct PeerEvalSummary {
-    pub agent_id: String,
-    pub name: String,
-    pub avg: PeerEvalScores,
-    pub overall: u8,
-    pub rank: u32,
-    pub reviews: u32,
-    /// The sharpest (lowest-overall) critique received — the standout.
-    pub standout: Option<String>,
-}
-
-/// A full peer-evaluation round, ready to render as a scorecard.
-#[derive(Debug, Clone)]
-pub struct PeerEvalRound {
-    pub critiques: Vec<PeerCritique>,
-    pub summaries: Vec<PeerEvalSummary>,
-}
-
 /// Which engine lane a completion is billed to in the cost ledger.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default, Serialize, Deserialize)]
 pub enum CostLane {
@@ -511,83 +377,6 @@ pub struct CostSnapshot {
     pub daily_cap: f64,
     /// A budget warning/stop message, when one fired with this snapshot.
     pub note: Option<String>,
-}
-
-/// A private note an outer-circle advisor passed to its council partner.
-#[derive(Debug, Clone)]
-pub struct AdvisorNote {
-    pub observer_id: String,
-    pub observer_name: String,
-    pub partner_id: String,
-    pub partner_name: String,
-    pub text: String,
-}
-
-/// One executed oracle tool call (web search / file search / verify / cite).
-#[derive(Debug, Clone)]
-pub struct ToolUse {
-    /// Tool name, e.g. `oracle.web_search`.
-    pub name: String,
-    /// The query/claim the agent asked about.
-    pub query: String,
-    /// The formatted result text (sanitized; shared with the whole council).
-    pub output: String,
-    /// The agent that requested the call.
-    pub agent_name: String,
-}
-
-/// Pairwise tension between two agents, normalized to 0..1.
-#[derive(Debug, Clone)]
-pub struct PairScore {
-    pub a_id: String,
-    pub a_name: String,
-    pub b_id: String,
-    pub b_name: String,
-    pub score: f32,
-}
-
-/// A council agent's ballot when someone moves to end the session.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum VoteChoice {
-    Yes,
-    No,
-    Abstain,
-}
-
-impl VoteChoice {
-    pub fn label(self) -> &'static str {
-        match self {
-            VoteChoice::Yes => "YES",
-            VoteChoice::No => "NO",
-            VoteChoice::Abstain => "ABSTAIN",
-        }
-    }
-}
-
-/// Outcome label the moderator leads its verdict with.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ConclusionStatus {
-    Consensus,
-    Majority,
-    Unresolved,
-}
-
-impl ConclusionStatus {
-    pub fn label(self) -> &'static str {
-        match self {
-            ConclusionStatus::Consensus => "Consensus",
-            ConclusionStatus::Majority => "Majority with dissent",
-            ConclusionStatus::Unresolved => "Unresolved",
-        }
-    }
-    /// The disclosure glyph shown in the conclusion card.
-    pub fn glyph(self) -> &'static str {
-        match self {
-            ConclusionStatus::Consensus => "✓",
-            ConclusionStatus::Majority => "≈",
-            ConclusionStatus::Unresolved => "✕",
-        }
-    }
 }
 
 /// How a seat picks its model: the Auto resolver at a tier (High = flagship,

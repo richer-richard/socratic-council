@@ -97,11 +97,11 @@ socratic-council run "…" --preset quick       # 3 seats; full = all 8
 socratic-council run "…" --seats openai:gpt-6-astra,anthropic:auto,openai:gpt-5.6-luna
 socratic-council run "…" --providers openai,anthropic,google
 socratic-council run "…" --deliverable decision   # decision | analysis | document | review
-socratic-council run "…" --rounds 2           # cross-examination rounds allowed (1..5)
+socratic-council run "…" --rounds 2           # cross-examination rounds allowed (1..6)
 socratic-council run "…" --tier medium        # one reasoning tier for every round
 socratic-council run "…" --tools all          # none | safe (default) | all (adds the sandboxed shell)
 socratic-council run "…" --ask-tools          # approve every tool call on stdin (plain mode)
-socratic-council run "…" --interactive        # let the moderator ask one clarifying question first
+socratic-council run "…" --interactive        # force the moderator's clarifying question on (else Settings decides)
 socratic-council run "…" --file notes.md --file data.csv  # attach files the seats can search and read
 socratic-council run "…" --budget 2.50 --budget-action stop  # USD cap per session
 socratic-council run "…" --workspace ./scratch  # where tools read, write and run
@@ -114,59 +114,71 @@ socratic-council models --scan                # list live models per provider
 socratic-council probe                        # one tiny live call per provider (keys + contracts)
 socratic-council probe --tools                # plus one native tool-calling request per provider
 socratic-council sessions                     # list stored sessions
-socratic-council run --no-tui --resume <id>   # reconvene: the old record becomes the planner's notes
+socratic-council run --resume <id>            # reconvene: the old record becomes the planner's notes
 ```
 
 Sessions are stored as encrypted files (one per session) in the desktop
 app's data directory when the app is installed — so a debate started in the
 terminal shows up in the app's history and can be opened there, and the
-app's sessions appear in the TUI history sidebar (`Tab`), where `Enter`
-continues one. Without the app, the same store lives under the CLI's own
+app's sessions appear in the TUI sidebar (`Tab`), where `Enter` opens one
+and `r` reconvenes it. Without the app, the same store lives under the CLI's own
 config dir; the terminal never needs the app.
 
 ### TUI
 
 Three surfaces mirror the desktop app:
 
-- **Home** — the animated council mark, a topic composer, and the agent roster.
-  Type a topic and press `Enter` to convene.
-- **History sidebar** (`Tab`) — your saved sessions; `↑`/`↓` to select, `Enter`
-  on an empty composer to open one read-only.
-- **Debate chamber** — the live streaming transcript with a per-speaker roster,
-  a header **progress gauge** (`turn 12/40 ▰▰▰▱▱▱▱▱ · round 2/5 · $0.0123`),
-  advisor whispers (🔒, rendered in the partner's color), and `[Tool]` result
-  blocks. A **Moderator** (its own model) frames the topic, synthesizes
-  periodically, and publishes a final scored verdict (`Consensus` / `Majority`
-  / `Unresolved` + `Score X/10`). Each agent's reasoning is quarantined in a
-  collapsible "Thought for Xs" panel (`t` toggles) — it never leaks into the
-  spoken message. The right pane cycles between the **roster**, the
-  **Tensions** conflict graph (`c` — pairwise scores 0–1, hot pairs ≥ 0.75),
-  and the **Costs** ledger (`$` — per-agent USD, council/advisors/moderator/
-  utility lanes, budget state).
-- **Settings / Models** (`^P`) — manage API keys (add / replace / remove, masked,
-  stored `0600`), see each provider's key source + resolved model — plus the
-  editable **Options** rows: discussion cap, advisor interval, session budget,
-  budget action (warn/stop), and the proxy URL (rendered with credentials
-  redacted).
+- **Home** — the council mark, a topic composer, the **council preset**
+  (`←`/`→`: Quick · 3, Standard · 4, Full — keyed seats in roster order) and
+  the **deliverable** (`^D`: auto, decision, analysis, document, review), and
+  the roster strip (`◆` convenes, `●` keyed, `○` no key). `Enter` convenes.
+- **Sessions sidebar** (`Tab`) — every stored session with its status,
+  deliverable, cost and the record's answer; `↑`/`↓` select, `Enter` opens
+  one read-only, `r` reconvenes it.
+- **Session** — the deliberation as the engine runs it. The header shows the
+  status, the deliverable, the phase trail (`Framing ▸ Prep ▸ Positions ▸
+  Cross-examination 1 ▸ …`), the estimate and the running cost. The main
+  column puts the **decision record** first (answer, confidence, votes,
+  dissent, options, assumptions, evidence, open questions, next actions),
+  then the document, then every round with a card per seat — live seats
+  pulse, tool calls show as `⚙` chips with their result, `t` folds the
+  reasoning trace out. The side column has **Plan**, **Board**, **Converge**,
+  **Cost** and **Seats** tabs (`p` `b` `v` `$` `s`). When the moderator asks
+  its clarifying question, or a seat asks to run a tool under `approval =
+  "ask"`, an overlay takes the keyboard (`Enter`/`Esc` answer; `y`/`n`
+  approve). `Esc` twice stops a live council; on a finished one `r`
+  reconvenes it (the record becomes the planner's notes) and `e` exports the
+  record and document as Markdown.
+- **Settings** (`^P`) — keys (masked entry, source labels), the **roster**
+  (each seat's `provider:model`, resolved model, class and prices; edit,
+  rename, reasoning override, add, remove, reset), the **moderator** and
+  **utility** slots, **tools** (none / safe / all, approval auto / ask), the
+  **protocol** (cross-examination cap, clarifying question), the **budget**
+  (session and daily caps, warn / stop) and the **proxy** (masked). A model id
+  must exist in the provider's catalog or last scan; the editor refuses a
+  made-up one.
 
-| Key                    | Action                                     |
-| ---------------------- | ------------------------------------------ |
-| `Enter`                | convene a debate (Home) / open a session   |
-| `Tab`                  | toggle the history sidebar                 |
-| `^P`                   | toggle the Settings / Models panel         |
-| `Esc`                  | back to Home (Chat/Settings) / quit (Home) |
-| `q`                    | stop the debate, back to Home (Chat)       |
-| `t`                    | toggle thinking traces                     |
-| `c`                    | toggle the Tensions (conflict) pane        |
-| `$`                    | toggle the Costs (ledger) pane             |
-| `↑`/`↓`, `PgUp`/`PgDn` | scroll the transcript                      |
-| `g`                    | follow the tail                            |
-| `^C`                   | quit from anywhere                         |
+| Key                    | Action                                                       |
+| ---------------------- | ------------------------------------------------------------ |
+| `Enter`                | convene (Home) / open a session (sidebar) / answer (overlay) |
+| `←`/`→`                | council preset (Home) / side tab (Session)                   |
+| `^D`                   | deliverable (Home)                                           |
+| `Tab`                  | toggle the sessions sidebar                                  |
+| `^P`                   | toggle Settings                                              |
+| `Esc`                  | stop a live council (press twice) / back / quit (Home)       |
+| `t`                    | toggle reasoning traces                                      |
+| `p` `b` `v` `$` `s`    | Plan / Board / Converge / Cost / Seats                       |
+| `y` / `n`              | allow / deny a tool call                                     |
+| `r`                    | reconvene a finished session                                 |
+| `e`                    | export the record and document as Markdown                   |
+| `↑`/`↓`, `PgUp`/`PgDn` | scroll                                                       |
+| `g`                    | follow the newest row                                        |
+| `^C`                   | quit from anywhere                                           |
 
-In **Settings** (`^P`): `↑`/`↓` select a provider or option row · `Enter` / `e`
-edit (keys and the proxy are masked) · `d` remove a key / reset an option ·
-`Enter` save · `Esc` cancel / back. Keys you add here are stored locally at
-`keys.enc` (`0600`); options persist to `config.toml`.
+In **Settings**: `↑`/`↓` select · `Enter` edit or toggle · `d` remove a key or
+a seat, or reset a row · `a` add a seat · `n` rename a seat · `r` cycle a
+seat's reasoning · `R` reset the roster · `Esc` cancel / back. Keys go to
+`keys.enc` (`0600`); everything else to `config.toml`.
 
 ## The session
 
