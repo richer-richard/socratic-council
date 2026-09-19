@@ -1,8 +1,11 @@
 //! `run_command`: a shell command in the session workspace, sandboxed on
 //! macOS (`sandbox-exec`: no network, reads of the system and the workspace,
-//! writes only inside the workspace and a private temp dir), with a wall-clock
-//! timeout and an output cap. Off macOS the tool refuses unless the policy
-//! opts into running unsandboxed.
+//! writes only inside the workspace) and on Linux when bubblewrap is
+//! installed (`bwrap`: read-only system, the workspace bound read-write, no
+//! network, its own pid namespace), with a wall-clock timeout and an output
+//! cap. Elsewhere the tool refuses unless the policy opts into running
+//! unsandboxed, and every unsandboxed result says so on its first line so
+//! the record can note it.
 
 use super::policy::ShellPolicy;
 use super::ToolOutput;
@@ -11,7 +14,32 @@ use std::process::Stdio;
 use tokio::io::AsyncReadExt;
 use tokio::process::Command;
 
+/// Longest command the tool accepts; anything longer belongs in a file.
+pub const MAX_COMMAND_CHARS: usize = 4096;
+/// The first line of every result that ran without a sandbox.
+pub const UNSANDBOXED_MARKER: &str = "[sandbox: none]";
+
+/// How a command was confined.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SandboxKind {
+    /// `sandbox-exec` with the generated profile.
+    MacOs,
+    /// `bwrap` with the generated arguments.
+    Bubblewrap,
+    /// No confinement (the policy opted in).
+    None,
+}
+
 /// The macOS sandbox profile (SBPL) for a workspace and its temp dir.
+///
+/// `(deny default)` and then: exec, fork and signals; metadata everywhere
+/// (paths must resolve); reads of the system trees, the workspace and its
+/// temp dir — but never the keychains, the local directory service or the
+/// privacy database; writes only inside the workspace, `/dev/null`, and the
+/// Xcode command shims' cache file (`xcrun_db`, written next to the user's
+/// temp dir, without which `git` and `python3` refuse to start); user and
+/// group lookups and logging through the directory service (no file or
+/// network grant comes with them); no network at all.
 pub fn sandbox_profile(workspace: &Path, tmp: &Path) -> String {
     let ws = workspace.display().to_string().replace('"', "\\\"");
     let tmp = tmp.display().to_string().replace('"', "\\\"");
@@ -21,15 +49,61 @@ pub fn sandbox_profile(workspace: &Path, tmp: &Path) -> String {
 (allow process-exec process-fork signal sysctl-read)
 (allow file-read-metadata)
 (allow file-read* (literal "/") (subpath "/usr") (subpath "/bin") (subpath "/sbin") (subpath "/System") (subpath "/Library") (subpath "/private/etc") (subpath "/private/var/db") (subpath "/dev") (subpath "/opt/homebrew") (subpath "{ws}") (subpath "{tmp}"))
+(deny file-read* (subpath "/Library/Keychains") (subpath "/private/var/db/dslocal") (subpath "/Library/Application Support/com.apple.TCC"))
 (allow file-write* (subpath "{ws}") (subpath "{tmp}") (literal "/dev/null"))
+(allow file-read* file-write* (regex #"^/private/tmp/xcrun_db(-[A-Za-z0-9]+)?$") (regex #"^/private/var/folders/[^/]+/[^/]+/T/xcrun_db(-[A-Za-z0-9]+)?$"))
 (allow file-write-data (literal "/dev/tty"))
+(allow mach-lookup (global-name "com.apple.system.opendirectoryd.libinfo") (global-name "com.apple.system.opendirectoryd.membership") (global-name "com.apple.system.logger") (global-name "com.apple.system.notification_center"))
 (deny network*)
 "#
     )
 }
 
+/// The bubblewrap arguments for a workspace: the system trees read-only, the
+/// workspace read-write, a private `/tmp`, fresh `/proc` and `/dev`, every
+/// namespace unshared (so no network and no view of other processes), the
+/// child dies with the tool, and the command runs in the workspace.
+pub fn bwrap_args(workspace: &Path, cmd: &str) -> Vec<String> {
+    let ws = workspace.display().to_string();
+    let mut args: Vec<String> = Vec::new();
+    for dir in [
+        "/usr", "/bin", "/sbin", "/lib", "/lib64", "/lib32", "/etc", "/opt",
+    ] {
+        if Path::new(dir).exists() {
+            args.extend(["--ro-bind".into(), dir.into(), dir.into()]);
+        }
+    }
+    args.extend(["--bind".into(), ws.clone(), ws.clone()]);
+    args.extend(["--tmpfs".into(), "/tmp".into()]);
+    args.extend(["--proc".into(), "/proc".into()]);
+    args.extend(["--dev".into(), "/dev".into()]);
+    args.extend([
+        "--unshare-all".into(),
+        "--die-with-parent".into(),
+        "--new-session".into(),
+        "--chdir".into(),
+        ws,
+        "/bin/sh".into(),
+        "-c".into(),
+        cmd.into(),
+    ]);
+    args
+}
+
+/// The sandbox this host can offer, or `None` when only an unsandboxed run
+/// is possible.
+pub fn available_sandbox() -> Option<SandboxKind> {
+    if cfg!(target_os = "macos") {
+        Some(SandboxKind::MacOs)
+    } else if cfg!(target_os = "linux") && Path::new("/usr/bin/bwrap").exists() {
+        Some(SandboxKind::Bubblewrap)
+    } else {
+        None
+    }
+}
+
 fn unsupported_message() -> String {
-    "shell tool is sandboxed only on macOS; set tools.shell.unsandboxed = true to run without a sandbox".into()
+    "run_command has no sandbox on this host (macOS uses sandbox-exec; Linux needs bubblewrap at /usr/bin/bwrap); set tools.shell.unsandboxed = true to run without one".into()
 }
 
 /// Run `cmd` under the policy. The output is stdout followed by stderr,
@@ -42,6 +116,11 @@ pub async fn run_command(cmd: &str, policy: &ShellPolicy, workspace: &Path) -> T
     if cmd.trim().is_empty() {
         return ToolOutput::error("command is empty");
     }
+    if cmd.chars().count() > MAX_COMMAND_CHARS {
+        return ToolOutput::error(format!(
+            "command exceeds {MAX_COMMAND_CHARS} characters; write a script with write_file and run that"
+        ));
+    }
     let workspace = match workspace.canonicalize() {
         Ok(p) => p,
         Err(e) => return ToolOutput::error(format!("workspace unavailable: {e}")),
@@ -51,23 +130,33 @@ pub async fn run_command(cmd: &str, policy: &ShellPolicy, workspace: &Path) -> T
         return ToolOutput::error(format!("cannot create workspace temp dir: {e}"));
     }
 
-    let sandboxed = cfg!(target_os = "macos") && !policy.unsandboxed;
-    if !cfg!(target_os = "macos") && !policy.unsandboxed {
-        return ToolOutput::error(unsupported_message());
-    }
+    let kind = match available_sandbox() {
+        Some(k) if !policy.unsandboxed => k,
+        Some(_) | None if policy.unsandboxed => SandboxKind::None,
+        None => return ToolOutput::error(unsupported_message()),
+        Some(k) => k,
+    };
 
-    let mut command = if sandboxed {
-        let mut c = Command::new("/usr/bin/sandbox-exec");
-        c.arg("-p")
-            .arg(sandbox_profile(&workspace, &tmp))
-            .arg("/bin/sh")
-            .arg("-c")
-            .arg(cmd);
-        c
-    } else {
-        let mut c = Command::new("/bin/sh");
-        c.arg("-c").arg(cmd);
-        c
+    let mut command = match kind {
+        SandboxKind::MacOs => {
+            let mut c = Command::new("/usr/bin/sandbox-exec");
+            c.arg("-p")
+                .arg(sandbox_profile(&workspace, &tmp))
+                .arg("/bin/sh")
+                .arg("-c")
+                .arg(cmd);
+            c
+        }
+        SandboxKind::Bubblewrap => {
+            let mut c = Command::new("/usr/bin/bwrap");
+            c.args(bwrap_args(&workspace, cmd));
+            c
+        }
+        SandboxKind::None => {
+            let mut c = Command::new("/bin/sh");
+            c.arg("-c").arg(cmd);
+            c
+        }
     };
     command
         .current_dir(&workspace)
@@ -76,6 +165,9 @@ pub async fn run_command(cmd: &str, policy: &ShellPolicy, workspace: &Path) -> T
         .env("HOME", &workspace)
         .env("TMPDIR", &tmp)
         .env("LANG", "C.UTF-8")
+        .env("TERM", "dumb")
+        .env("NO_COLOR", "1")
+        .env("GIT_TERMINAL_PROMPT", "0")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -163,6 +255,9 @@ pub async fn run_command(cmd: &str, policy: &ShellPolicy, workspace: &Path) -> T
         }
     };
     let mut text = String::from_utf8_lossy(&out.0).into_owned();
+    if kind == SandboxKind::None {
+        text = format!("{UNSANDBOXED_MARKER}\n{text}");
+    }
     if !err.0.is_empty() {
         if !text.is_empty() {
             text.push('\n');
@@ -231,11 +326,44 @@ mod tests {
     }
 
     #[test]
-    fn profile_denies_network_and_confines_writes() {
+    fn profile_denies_network_secrets_and_confines_writes() {
         let p = sandbox_profile(Path::new("/tmp/ws"), Path::new("/tmp/ws/.tmp"));
         assert!(p.contains("(deny network*)"));
         assert!(p.contains("(allow file-write* (subpath \"/tmp/ws\")"));
         assert!(p.starts_with("(version 1)\n(deny default)"));
+        assert!(p.contains("(deny file-read* (subpath \"/Library/Keychains\")"));
+        assert!(p.contains("/private/var/db/dslocal"));
+        assert!(p.contains(
+            "(allow file-read* file-write* (regex #\"^/private/tmp/xcrun_db(-[A-Za-z0-9]+)?$\")"
+        ));
+        assert!(p.contains("opendirectoryd.libinfo"));
+        // The two allowances never widen to a whole temp dir.
+        assert!(!p.contains("(subpath \"/private/tmp\")"));
+        assert!(!p.contains("(subpath \"/private/var/folders\")"));
+    }
+
+    #[test]
+    fn bwrap_args_confine_network_and_writes() {
+        let args = bwrap_args(Path::new("/home/u/ws"), "echo hi");
+        let joined = args.join(" ");
+        assert!(joined.contains("--unshare-all"));
+        assert!(joined.contains("--die-with-parent"));
+        assert!(joined.contains("--bind /home/u/ws /home/u/ws"));
+        assert!(joined.contains("--tmpfs /tmp"));
+        assert!(joined.contains("--chdir /home/u/ws /bin/sh -c echo hi"));
+        // The system trees are read-only binds, never writable.
+        assert!(joined.contains("--ro-bind /usr /usr"));
+        assert!(!joined.contains("--bind /usr"));
+        assert!(!joined.contains("--share-net"));
+    }
+
+    #[test]
+    fn overlong_commands_are_refused() {
+        let cmd = "x".repeat(MAX_COMMAND_CHARS + 1);
+        let out = tokio::runtime::Runtime::new()
+            .unwrap()
+            .block_on(run_command(&cmd, &policy(), &ws()));
+        assert!(out.error.as_deref().unwrap_or("").contains("exceeds"));
     }
 
     #[tokio::test]
@@ -251,6 +379,45 @@ mod tests {
         assert!(out.text.starts_with("hi"), "{out:?}");
         assert!(out.text.contains("[exit 3]"), "{out:?}");
         assert!(out.error.is_some());
+    }
+
+    #[cfg(target_os = "macos")]
+    #[tokio::test]
+    async fn sandbox_runs_the_xcode_shims_and_hides_the_keychains() {
+        let out = run_command("git --version && python3 -c 'print(6*7)'", &policy(), &ws()).await;
+        assert!(out.text.contains("git version"), "{out:?}");
+        assert!(out.text.contains("42"), "{out:?}");
+        assert!(
+            !out.text.contains("couldn't"),
+            "the shim cache must be writable: {out:?}"
+        );
+        assert!(!out.text.contains(UNSANDBOXED_MARKER));
+        let out = run_command(
+            "ls /Library/Keychains; ls /var/db/dslocal",
+            &policy(),
+            &ws(),
+        )
+        .await;
+        assert!(out.text.contains("Operation not permitted"), "{out:?}");
+        assert!(!out.text.contains("System.keychain"), "{out:?}");
+        // The whole user temp dir stays closed even though the shim cache opens.
+        let out = run_command(
+            "touch \"$(getconf DARWIN_USER_TEMP_DIR)/sc-escape\" && echo wrote",
+            &policy(),
+            &ws(),
+        )
+        .await;
+        assert!(!out.text.contains("wrote"), "{out:?}");
+    }
+
+    #[cfg(target_os = "macos")]
+    #[tokio::test]
+    async fn unsandboxed_runs_are_marked() {
+        let mut p = policy();
+        p.unsandboxed = true;
+        let out = run_command("echo free", &p, &ws()).await;
+        assert!(out.text.starts_with(UNSANDBOXED_MARKER), "{out:?}");
+        assert!(out.text.contains("free"));
     }
 
     #[cfg(target_os = "macos")]

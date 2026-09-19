@@ -1211,6 +1211,11 @@ impl Deliberation {
                 record.answer = format!("Stopped at {why}. {}", record.answer);
             }
         }
+        if ran_unsandboxed(&state.rounds) {
+            record
+                .assumptions
+                .push("Shell commands ran without a sandbox.".into());
+        }
 
         // ---- Document (drafted, critiqued once, revised) --------------------
         if plan.deliverable == Deliverable::Document && !hub.is_stopped() {
@@ -1668,6 +1673,19 @@ impl Deliberation {
 /// The one-line evidence a tool call leaves on the board, or `None` when the
 /// raw output is not a claim (search listings, errors, empty results). The
 /// seat's own `evidence` field carries what it took from a search.
+/// Whether any `run_command` in the session ran without a sandbox (its
+/// output starts with the marker the shell tool writes).
+fn ran_unsandboxed(rounds: &[RoundLog]) -> bool {
+    rounds
+        .iter()
+        .flat_map(|r| r.entries.iter())
+        .flat_map(|e| e.tool_uses.iter())
+        .any(|t| {
+            t.call.name == tools::RUN_COMMAND
+                && t.output.starts_with(tools::shell::UNSANDBOXED_MARKER)
+        })
+}
+
 fn tool_evidence(t: &ToolUseRecord) -> Option<String> {
     if t.error.is_some() || t.output.trim().is_empty() || t.output.starts_with("No results") {
         return None;
