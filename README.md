@@ -41,14 +41,14 @@ The eight council debaters speak in public. Each is shadowed by a silent advisor
 
 | Agent     | Advisor | Provider  | Default model                                                  |
 | --------- | ------- | --------- | -------------------------------------------------------------- |
-| George    | Greta   | OpenAI    | GPT-5.5                                                        |
-| Cathy     | Clara   | Anthropic | Claude Opus 4.8                                                |
+| George    | Greta   | OpenAI    | GPT-6 Astra                                                    |
+| Cathy     | Clara   | Anthropic | Claude Fable 5.1                                               |
 | Grace     | Gaia    | Google    | Gemini 3.1 Pro                                                 |
 | Douglas   | Dara    | DeepSeek  | DeepSeek V4 Pro                                                |
-| Kate      | Kira    | Kimi      | Kimi K2.6                                                      |
-| Quinn     | Quincy  | Qwen      | Qwen 3.7 Max                                                   |
-| Mary      | Mila    | MiniMax   | MiniMax M2.7 Highspeed                                         |
-| Zara      | Zoe     | Z.AI      | GLM-5.1                                                        |
+| Kate      | Kira    | Kimi      | Kimi K3                                                        |
+| Quinn     | Quincy  | Qwen      | Qwen 3.8 Max                                                   |
+| Mary      | Mila    | MiniMax   | MiniMax M3                                                     |
+| Zara      | Zoe     | Z.AI      | GLM-5.3                                                        |
 | Moderator |         | Google    | Gemini 3.1 Pro (falls back to whatever provider is configured) |
 
 ## Installation Paths
@@ -616,7 +616,9 @@ The Moderator is a system-role voice that opens the session, nudges balance and 
 The home screen is your library. From here you can:
 
 - Type a topic (multi-line supported) and start a new discussion (with optional file attachments)
-- Browse recent and archived sessions in the sidebar
+- Browse recent and archived sessions in the sidebar — including debates run in the
+  `socratic-council` terminal CLI, which shares the same encrypted session store (and can
+  continue any session started here)
 - Open or create a Project, which groups related sessions and a shared evidence dossier
 - Import a `.scbundle` archive that someone else exported
 - Open Settings or the global Command Palette (`⌘K` / `Ctrl+K`)

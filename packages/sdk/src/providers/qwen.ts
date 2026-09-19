@@ -62,7 +62,7 @@ export class QwenProvider implements BaseProvider {
   private normalizeModel(model: string): string {
     // Pass any non-empty id through (including live-scanned ids); only fall
     // back to the flagship when nothing was supplied.
-    return model && model.trim() !== "" ? model : "qwen3.7-max";
+    return model && model.trim() !== "" ? model : "qwen3.8-max";
   }
 
   private buildRequestBody(

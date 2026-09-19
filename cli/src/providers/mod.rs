@@ -37,8 +37,10 @@ pub(crate) fn google_v1beta(base: &str) -> String {
     }
 }
 
+/// Reasoning models (Responses API `reasoning.effort`, no temperature): every GPT-5.x,
+/// the GPT-6 family (gpt-6-astra, Sept 2026) and the o-series.
 fn is_openai_reasoning(model: &str) -> bool {
-    model.starts_with("gpt-5") || model.starts_with('o')
+    model.starts_with("gpt-5") || model.starts_with("gpt-6") || model.starts_with('o')
 }
 
 fn openai_effort(model: &str, tier: ReasoningTier) -> &'static str {
@@ -46,9 +48,14 @@ fn openai_effort(model: &str, tier: ReasoningTier) -> &'static str {
         ReasoningTier::Low => "low",
         ReasoningTier::Medium => "medium",
         ReasoningTier::High => {
-            // xhigh only for the gpt-5 flagships; mini/nano speed variants and
-            // the o-series take "high" (parity with the TS SDK).
-            if model.starts_with("gpt-5") && !crate::catalog::is_speed_variant(model) {
+            // xhigh only for the gpt-5.x / gpt-6 flagship tiers; mini/nano/luna
+            // speed variants, chat-latest and the o-series take "high" (parity
+            // with the TS SDK). gpt-6-astra documents low..max.
+            let flagship = (model.starts_with("gpt-5") || model.starts_with("gpt-6"))
+                && !crate::catalog::is_speed_variant(model)
+                && !model.contains("luna")
+                && !model.contains("chat");
+            if flagship {
                 "xhigh"
             } else {
                 "high"
@@ -63,14 +70,27 @@ enum AntMode {
     None,
 }
 
+/// Claude 5.x ids (`claude-opus-5`, `claude-sonnet-5`, `claude-fable-5`, `claude-fable-5-1`).
+fn is_claude5(model: &str) -> bool {
+    let m = model.to_ascii_lowercase();
+    ["-opus-5", "-sonnet-5", "-haiku-5", "-fable-5"].iter().any(|s| m.contains(s))
+}
+
+/// Fable cannot turn thinking off (`thinking.type: "disabled"` → 400).
+fn thinking_always_on(model: &str) -> bool {
+    model.to_ascii_lowercase().contains("fable")
+}
+
 fn ant_profile(model: &str) -> (AntMode, bool) {
     // (mode, prohibits_sampling). The live API is authoritative and non-monotonic:
     // claude-opus-4-8 rejects `thinking.type.enabled` ("Use thinking.type.adaptive")
     // and rejects an explicit temperature — so 4.8, like 4.7, is adaptive-only.
+    // The Claude 5 generation (Opus 5 / Sonnet 5 / Fable 5.x) thinks by default,
+    // is adaptive-only, and takes depth via `output_config.effort`.
     let m = model.to_ascii_lowercase();
-    if m.contains("opus-4-8") || m.contains("opus-4-7") {
+    if is_claude5(&m) || m.contains("opus-4-8") || m.contains("opus-4-7") {
         (AntMode::Adaptive, true)
-    } else if m.contains("opus-4-6") {
+    } else if m.contains("opus-4-6") || m.contains("sonnet-4-6") {
         (AntMode::Adaptive, false)
     } else if m.contains("minimax") {
         // MiniMax routes through this Anthropic-shaped branch and takes extended
@@ -92,9 +112,18 @@ fn ant_thinking(model: &str, max_tokens: u32, tier: ReasoningTier) -> Option<Val
         AntMode::None => None,
         AntMode::Adaptive => {
             if tier == ReasoningTier::Low {
-                None
+                // Fast tier: 4.x omits thinking (= off); Opus/Sonnet 5 think by
+                // default so "off" is explicit; Fable can't be switched off and is
+                // throttled with effort=low instead.
+                if is_claude5(model) && !thinking_always_on(model) {
+                    Some(json!({ "type": "disabled" }))
+                } else {
+                    None
+                }
             } else {
-                Some(json!({ "type": "adaptive" }))
+                // `display: summarized` is what makes thinking text stream at all —
+                // the 4.7+/5.x default is `omitted` (empty thinking blocks).
+                Some(json!({ "type": "adaptive", "display": "summarized" }))
             }
         }
         AntMode::Extended => {
@@ -171,11 +200,29 @@ fn prepare(provider: Provider, base_url: &str, api_key: &str, req: &CompletionRe
             if let Some(system) = &req.system {
                 body["system"] = json!(system);
             }
-            let thinking = ant_thinking(&req.model, req.max_tokens, req.tier);
-            let (_, prohibits) = ant_profile(&req.model);
+            let (mode, prohibits) = ant_profile(&req.model);
+            let is_minimax_m3 = provider == Provider::MiniMax && req.model.to_ascii_lowercase().contains("m3");
+            let thinking = if is_minimax_m3 {
+                // MiniMax-M3: `adaptive` switches interleaved thinking on; omitting
+                // the block leaves it off (the fast tier).
+                (req.tier != ReasoningTier::Low).then(|| json!({ "type": "adaptive" }))
+            } else {
+                ant_thinking(&req.model, req.max_tokens, req.tier)
+            };
+            let thinking_off = thinking.is_none();
             if let Some(t) = thinking {
                 body["thinking"] = t;
-            } else if !prohibits {
+            }
+            // Effort (Claude 4.6+ / 5.x adaptive models): low/medium are explicit,
+            // high is the API default.
+            if provider == Provider::Anthropic && matches!(mode, AntMode::Adaptive) {
+                match req.tier {
+                    ReasoningTier::Low => body["output_config"] = json!({ "effort": "low" }),
+                    ReasoningTier::Medium => body["output_config"] = json!({ "effort": "medium" }),
+                    ReasoningTier::High => {}
+                }
+            }
+            if thinking_off && !prohibits {
                 body["temperature"] = json!(req.temperature.min(1.0));
             }
             let headers = vec![
@@ -201,7 +248,18 @@ fn prepare(provider: Provider, base_url: &str, api_key: &str, req: &CompletionRe
                 "temperature": req.temperature,
                 "maxOutputTokens": req.max_tokens,
             });
-            if req.model.contains("pro") {
+            if req.model.starts_with("gemini-3") {
+                // Gemini 3.x (Pro and Flash) thinks dynamically; steer with
+                // thinking_level (low|medium|high — never "minimal", which 3.8/3.7
+                // Flash and 3.1 Pro reject) and ask for thought summaries so the
+                // TUI can show thinking apart from the answer (`part.thought`).
+                let level = match req.tier {
+                    ReasoningTier::Low => "low",
+                    ReasoningTier::Medium => "medium",
+                    ReasoningTier::High => "high",
+                };
+                gen["thinkingConfig"] = json!({ "thinkingLevel": level, "includeThoughts": true });
+            } else if req.model.contains("pro") {
                 let budget = google_budget(req.tier);
                 if budget > 0 {
                     gen["thinkingConfig"] = json!({ "thinkingBudget": budget, "includeThoughts": true });
@@ -247,8 +305,37 @@ fn prepare(provider: Provider, base_url: &str, api_key: &str, req: &CompletionRe
                 "stream": true,
                 "stream_options": { "include_usage": true },
             });
-            if provider == Provider::Qwen {
-                body["enable_thinking"] = json!(req.tier != ReasoningTier::Low);
+            let low = req.tier == ReasoningTier::Low;
+            let model = req.model.to_ascii_lowercase();
+            match provider {
+                Provider::Qwen => {
+                    body["enable_thinking"] = json!(!low);
+                }
+                // DeepSeek V4 merges chat/reasoner into one id with a per-request switch.
+                Provider::DeepSeek if model.starts_with("deepseek-v4") || model.starts_with("deepseek-flash") => {
+                    body["thinking"] = json!({ "type": if low { "disabled" } else { "enabled" } });
+                }
+                // Kimi: K3 always reasons and takes top-level reasoning_effort
+                // (low|high|max, default max) and must NOT get a `thinking` object;
+                // K2.7-code is always-on (sending "disabled" is a 400); K2.6 toggles.
+                Provider::Kimi if model.starts_with("kimi-k3") => {
+                    let effort = match req.tier {
+                        ReasoningTier::Low => "low",
+                        ReasoningTier::Medium => "high",
+                        ReasoningTier::High => "max",
+                    };
+                    body["reasoning_effort"] = json!(effort);
+                }
+                Provider::Kimi if model.starts_with("kimi-k2.6") => {
+                    body["thinking"] = json!({ "type": if low { "disabled" } else { "enabled" } });
+                }
+                // GLM-4.5+: chain-of-thought switch; the 5.3 family and 4.7 force it on.
+                Provider::Zhipu => {
+                    let forced = model.starts_with("glm-5.3") || model == "glm-4.7";
+                    body["thinking"] =
+                        json!({ "type": if low && !forced { "disabled" } else { "enabled" } });
+                }
+                _ => {}
             }
             let (version, base_seg) = match provider {
                 Provider::Qwen => ("v1", "chat/completions"),
@@ -301,6 +388,14 @@ fn parse_event(provider: Provider, value: &Value, usage: &mut Usage) -> Completi
             } else if t == "message_delta" {
                 if let Some(o) = value["usage"]["output_tokens"].as_u64() {
                     usage.output = o;
+                }
+                // MiniMax's Anthropic-compatible stream reports input_tokens on
+                // message_delta (Anthropic puts it on message_start); take it
+                // wherever it appears so Mary isn't billed as 0 input.
+                if let Some(i) = value["usage"]["input_tokens"].as_u64() {
+                    if i > 0 {
+                        usage.input = i;
+                    }
                 }
             } else if t == "message_start" {
                 let u = &value["message"]["usage"];
@@ -395,6 +490,13 @@ pub async fn stream_completion(
                 continue;
             }
             if let Ok(value) = serde_json::from_str::<Value>(&payload) {
+                // `SC_STREAM_DEBUG=1` prints only event *types* (never content)
+                // — enough to see which reasoning/summary events a provider emits.
+                if std::env::var_os("SC_STREAM_DEBUG").is_some() {
+                    if let Some(t) = value["type"].as_str() {
+                        eprintln!("[stream:{}] {t}", provider.slug());
+                    }
+                }
                 let chunk = parse_event(provider, &value, &mut usage);
                 if !chunk.content.is_empty() || !chunk.thinking.is_empty() {
                     on_chunk(&chunk);

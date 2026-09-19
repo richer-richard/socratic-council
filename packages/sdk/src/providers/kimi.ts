@@ -100,10 +100,23 @@ export class KimiProvider implements BaseProvider {
       stream,
     };
 
-    // Temperature (Kimi uses 0-1 range; K2 models require temperature=1)
+    // Temperature (Kimi uses 0-1 range; the K2/K3 thinking models require temperature=1)
     const temperature = options.temperature ?? agent.temperature ?? 0.7;
-    const requiresTemperatureOne = String(agent.model).startsWith("kimi-k2");
+    const modelId = String(agent.model);
+    const requiresTemperatureOne = modelId.startsWith("kimi-k");
     request.temperature = requiresTemperatureOne ? 1 : Math.max(0, Math.min(1, temperature));
+
+    // Thinking knobs differ per generation (platform.kimi.com "思考模型"):
+    //  - kimi-k3: always reasons; depth via top-level reasoning_effort low|high|max
+    //    (default max). It must NOT receive a `thinking` object.
+    //  - kimi-k2.7-code(-highspeed): thinking always on; "disabled" is a 400 — send nothing.
+    //  - kimi-k2.6: `thinking.type` enabled (default) | disabled.
+    const tier = options.reasoningTier;
+    if (modelId.startsWith("kimi-k3")) {
+      request.reasoning_effort = tier === "low" ? "low" : tier === "medium" ? "high" : "max";
+    } else if (modelId.startsWith("kimi-k2.6")) {
+      request.thinking = { type: tier === "low" ? "disabled" : "enabled" };
+    }
 
     // Max tokens
     if (options.maxTokens) {

@@ -23,11 +23,26 @@ import type {
 import { createHeaders, resolveEndpoint } from "./base.js";
 import { createSseParser } from "./sse.js";
 
-/** Gemini `thinkingBudget` for a reasoning tier (0 → omit thinking). */
+/** Gemini 2.5 `thinkingBudget` for a reasoning tier (0 → omit thinking). */
 function thinkingBudgetForTier(tier: ReasoningTier | undefined): number {
   if (tier === "low") return 0;
   if (tier === "medium") return 8192;
   return 24576; // high / unset → max budget supported by the schema
+}
+
+/** Gemini 3.x (`gemini-3*`) thinks dynamically by default and is steered with `thinking_level`. */
+function isGemini3(model: string): boolean {
+  return /^gemini-3/.test(model);
+}
+
+/**
+ * Gemini 3.x `thinkingLevel` for a council tier. "minimal" is deliberately never
+ * sent: 3.8/3.7 Flash and 3.1 Pro only accept low | medium | high.
+ */
+function thinkingLevelForTier(tier: ReasoningTier | undefined): "low" | "medium" | "high" {
+  if (tier === "low") return "low";
+  if (tier === "medium") return "medium";
+  return "high";
 }
 
 export class GoogleProvider implements BaseProvider {
@@ -133,9 +148,16 @@ export class GoogleProvider implements BaseProvider {
       generationConfig.maxOutputTokens = agent.maxTokens;
     }
 
-    // Thinking config for models that support it (gemini-2.5-pro, gemini-3-pro-preview).
-    // The reasoning tier scales the budget; the low tier omits thinking entirely.
-    if (modelInfo?.supportsThinking && agent.model.includes("pro")) {
+    // Thinking config. Gemini 3.x (Pro and Flash alike) takes `thinkingLevel` and
+    // streams thought summaries when `includeThoughts` is set — that summary is what
+    // the UI shows as thinking, kept apart from the answer via `part.thought`.
+    // Gemini 2.5 Pro keeps the legacy token budget; the low tier omits it.
+    if (isGemini3(String(agent.model))) {
+      generationConfig.thinkingConfig = {
+        thinkingLevel: thinkingLevelForTier(options.reasoningTier),
+        includeThoughts: true,
+      };
+    } else if (modelInfo?.supportsThinking && agent.model.includes("pro")) {
       const budget = thinkingBudgetForTier(options.reasoningTier);
       if (budget > 0) {
         generationConfig.thinkingConfig = {

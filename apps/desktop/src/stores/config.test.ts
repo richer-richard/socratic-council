@@ -35,15 +35,15 @@ describe("config model resolution", () => {
   });
 
   it("resolves the debate model to the catalog flagship by default (Auto/high)", () => {
-    expect(resolveDebateModel("openai")).toBe("gpt-5.5");
-    expect(resolveDebateModel("anthropic")).toBe("claude-opus-4-8");
+    expect(resolveDebateModel("openai")).toBe("gpt-6-astra");
+    expect(resolveDebateModel("anthropic")).toBe("claude-fable-5-1");
     expect(resolveDebateModel("google")).toBe("gemini-3.1-pro-preview");
-    expect(resolveDebateModel("zhipu")).toBe("glm-5.1");
+    expect(resolveDebateModel("zhipu")).toBe("glm-5.3");
   });
 
   it("resolves the utility (low-tier) model to a faster, non-flagship model", () => {
     const utility = resolveUtilityModel("openai");
-    expect(utility).not.toBe("gpt-5.5");
+    expect(utility).not.toBe("gpt-6-astra");
     // Some catalog model for the provider.
     expect(availableModelsForProvider("openai").some((m) => m.id === utility)).toBe(true);
   });
@@ -60,9 +60,10 @@ describe("config model resolution", () => {
       "socratic-council-models:openai",
       JSON.stringify({
         scannedAt: 1,
-        models: [{ id: "gpt-5.6", provider: "openai", source: "scanned" }],
+        // A deliberately fake "newer than the catalog" id — not a real model.
+        models: [{ id: "gpt-99-hypothetical", provider: "openai", source: "scanned" }],
       }),
     );
-    expect(resolveDebateModel("openai")).toBe("gpt-5.6");
+    expect(resolveDebateModel("openai")).toBe("gpt-99-hypothetical");
   });
 });

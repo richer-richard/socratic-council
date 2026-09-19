@@ -17,6 +17,11 @@ export type Provider =
 // =============================================================================
 
 export const OpenAIModels = [
+  // GPT-6 / GPT-5.6 generation (Sept 2026, Responses API, reasoning.effort up to max)
+  "gpt-6-astra",
+  "gpt-5.6-sol",
+  "gpt-5.6-terra",
+  "gpt-5.6-luna",
   "gpt-5.5",
   "gpt-5.4",
   "gpt-5.3-chat-latest",
@@ -43,11 +48,11 @@ export const OpenAIConfigSchema = z.object({
   frequency_penalty: z.number().min(-2).max(2).optional(),
   presence_penalty: z.number().min(-2).max(2).optional(),
   // For reasoning models (o1, o3, o4-mini)
-  reasoning_effort: z.enum(["minimal", "low", "medium", "high", "xhigh"]).optional(),
+  reasoning_effort: z.enum(["minimal", "low", "medium", "high", "xhigh", "max"]).optional(),
   // New Responses API format
   reasoning: z
     .object({
-      effort: z.enum(["minimal", "low", "medium", "high", "xhigh"]).optional(),
+      effort: z.enum(["minimal", "low", "medium", "high", "xhigh", "max"]).optional(),
       summary: z.enum(["auto", "concise", "detailed"]).optional(),
     })
     .optional(),
@@ -66,11 +71,11 @@ export interface OpenAIRequest {
   top_p?: number;
   // Preferred Responses API format
   reasoning?: {
-    effort?: "minimal" | "low" | "medium" | "high" | "xhigh";
+    effort?: "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
     summary?: "auto" | "concise" | "detailed";
   };
   // Deprecated (kept for compatibility)
-  reasoning_effort?: "minimal" | "low" | "medium" | "high" | "xhigh";
+  reasoning_effort?: "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
   stream?: boolean;
 }
 
@@ -79,12 +84,18 @@ export interface OpenAIRequest {
 // =============================================================================
 
 export const AnthropicModels = [
-  // Claude 4.8 model (latest flagship)
+  // Claude 5 generation (adaptive thinking always available; effort via output_config)
+  "claude-fable-5-1",
+  "claude-opus-5",
+  "claude-sonnet-5",
+  "claude-fable-5",
+  // Claude 4.8 model
   "claude-opus-4-8",
   // Claude 4.7 model
   "claude-opus-4-7",
-  // Claude 4.6 model
+  // Claude 4.6 models
   "claude-opus-4-6",
+  "claude-sonnet-4-6",
   // Claude 4.5 models with full dated IDs (recommended for production)
   "claude-opus-4-5-20251101",
   "claude-sonnet-4-5-20250929",
@@ -137,6 +148,13 @@ export interface AnthropicRequest {
 
 export const GeminiModels = [
   "gemini-3.1-pro-preview",
+  // Gemini 3.x Flash line (thinking_level: low | medium | high)
+  "gemini-3.8-flash",
+  "gemini-3.7-flash",
+  "gemini-3.6-flash",
+  "gemini-3.5-flash",
+  "gemini-3.5-flash-lite",
+  "gemini-3.1-flash-lite",
   // Legacy alias retained for migration/back-compat
   "gemini-3-pro-preview",
   "gemini-3-pro-image-preview",
@@ -199,7 +217,10 @@ export interface GeminiRequest {
     topP?: number;
     topK?: number;
     thinkingConfig?: {
+      /** Gemini 2.5: explicit token budget. */
       thinkingBudget?: number;
+      /** Gemini 3.x: dynamic thinking steered by level (minimal is flash-only). */
+      thinkingLevel?: "minimal" | "low" | "medium" | "high";
       includeThoughts?: boolean;
     };
   };
@@ -210,10 +231,9 @@ export interface GeminiRequest {
 // =============================================================================
 
 export const DeepSeekModels = [
+  // The two ids the live api.deepseek.com /models endpoint returns (Sept 2026).
   "deepseek-v4-pro",
-  "deepseek-v4-flash",
-  "deepseek-reasoner",
-  "deepseek-chat",
+  "deepseek-flash",
 ] as const;
 
 export type DeepSeekModel = (typeof DeepSeekModels)[number];
@@ -243,6 +263,8 @@ export interface DeepSeekRequest {
   top_p?: number;
   frequency_penalty?: number;
   presence_penalty?: number;
+  /** DeepSeek V4: per-request thinking toggle (`reasoning_content` when enabled). */
+  thinking?: { type: "enabled" | "disabled" };
   stream?: boolean;
 }
 
@@ -251,19 +273,11 @@ export interface DeepSeekRequest {
 // =============================================================================
 
 export const KimiModels = [
+  // The ids the live api.moonshot.cn /models endpoint returns (Sept 2026).
+  "kimi-k3",
+  "kimi-k2.7-code",
+  "kimi-k2.7-code-highspeed",
   "kimi-k2.6",
-  "kimi-k2.5",
-  "kimi-k2-thinking",
-  "kimi-k2-thinking-turbo",
-  "kimi-k2-turbo-preview",
-  "kimi-k2-0905-preview",
-  "kimi-k2-0711-preview",
-  "moonshot-v1-128k",
-  "moonshot-v1-128k-vision-preview",
-  "moonshot-v1-32k",
-  "moonshot-v1-32k-vision-preview",
-  "moonshot-v1-8k",
-  "moonshot-v1-8k-vision-preview",
 ] as const;
 
 export type KimiModel = (typeof KimiModels)[number];
@@ -310,6 +324,10 @@ export interface KimiRequest {
   max_tokens?: number;
   top_p?: number;
   use_search?: boolean;
+  /** K2.6: thinking toggle. K2.7-code: always on (must not send "disabled"). K3: no `thinking` field. */
+  thinking?: { type: "enabled" | "disabled" };
+  /** K3 only: top-level reasoning depth (default "max"). */
+  reasoning_effort?: "low" | "high" | "max";
   stream_options?: {
     include_usage?: boolean;
   };
@@ -321,9 +339,13 @@ export interface KimiRequest {
 // =============================================================================
 
 export const QwenModels = [
+  // DashScope China compatible-mode ids (Sept 2026 scan).
+  "qwen3.8-max",
+  "qwen3.8-flash",
+  "qwen3.7-plus",
   "qwen3.7-max",
+  "qwen3.7-flash",
   "qwen3.6-max-preview",
-  "qwen3.6-plus",
   "qwen3.5-plus",
 ] as const;
 
@@ -361,8 +383,9 @@ export interface QwenRequest {
 // =============================================================================
 
 export const MiniMaxModels = [
+  "MiniMax-M3",
+  "MiniMax-M2.7",
   "MiniMax-M2.7-highspeed",
-  // Lowercase alias retained for migration/back-compat.
   "minimax-m2.7-highspeed",
 ] as const;
 
@@ -386,10 +409,13 @@ export interface MiniMaxRequest {
     content: string | Array<{ type: "text"; text: string }>;
   }>;
   system?: string;
-  thinking?: {
-    type: "enabled";
-    budget_tokens?: number;
-  };
+  /** M3: `adaptive` (omit = off). M2.x: `enabled` + budget (cannot be turned off). */
+  thinking?:
+    | {
+        type: "enabled";
+        budget_tokens?: number;
+      }
+    | { type: "adaptive" };
   reasoning_split?: boolean;
   metadata?: {
     user_id?: string;
@@ -404,7 +430,19 @@ export interface MiniMaxRequest {
 // ZHIPU (Z.AI) MODELS & PARAMETERS
 // =============================================================================
 
-export const ZhipuModels = ["glm-5.1", "glm-5", "glm-4.7"] as const;
+export const ZhipuModels = [
+  // open.bigmodel.cn /v4/models (Sept 2026 scan).
+  "glm-5.3",
+  "glm-5.3-flash",
+  "glm-5.3-flashx",
+  "glm-5.2",
+  "glm-5.1",
+  "glm-5",
+  "glm-5-turbo",
+  "glm-4.7",
+  "glm-4.7-flash",
+  "glm-4.5-air",
+] as const;
 
 export type ZhipuModel = (typeof ZhipuModels)[number];
 
@@ -425,6 +463,8 @@ export interface ZhipuRequest {
     role: "user" | "assistant" | "system";
     content: string;
   }>;
+  /** GLM-4.5+: chain-of-thought toggle; GLM-5.3 family and GLM-4.7 force `enabled`. */
+  thinking?: { type: "enabled" | "disabled" };
   temperature?: number;
   max_tokens?: number;
   top_p?: number;

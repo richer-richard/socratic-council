@@ -80,6 +80,13 @@ export class DeepSeekProvider implements BaseProvider {
       request.max_tokens = agent.maxTokens;
     }
 
+    // DeepSeek V4 (deepseek-v4-pro / deepseek-flash) merges the old chat/reasoner
+    // split into one id with a per-request `thinking` switch. Medium/high tiers
+    // think (reasoning_content streams separately); the fast tier turns it off.
+    if (/^deepseek-(v4|flash)/.test(String(agent.model))) {
+      request.thinking = { type: options.reasoningTier === "low" ? "disabled" : "enabled" };
+    }
+
     return request;
   }
 
@@ -255,7 +262,7 @@ export class DeepSeekProvider implements BaseProvider {
         method: "POST",
         headers: createHeaders("deepseek", this.apiKey),
         body: JSON.stringify({
-          model: model ?? "deepseek-chat",
+          model: model ?? "deepseek-flash",
           messages: [{ role: "user", content: "Hello" }],
           max_tokens: 10,
         }),

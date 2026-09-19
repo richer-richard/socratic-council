@@ -46,6 +46,7 @@ import {
   secretsPut,
 } from "../services/secrets";
 import { initVault } from "../services/vault";
+import { registerKnownSecrets } from "../utils/redact";
 
 export type { ReasoningTier } from "@socratic-council/shared";
 
@@ -146,15 +147,15 @@ export interface AppConfig {
  * real (no fabricated bumps); newer ids arrive via live scanning instead.
  */
 export const LOCKED_MODELS: Record<Provider, string> = {
-  openai: "gpt-5.5",
-  anthropic: "claude-opus-4-8",
+  openai: "gpt-6-astra",
+  anthropic: "claude-fable-5-1",
   google: "gemini-3.1-pro-preview",
   deepseek: "deepseek-v4-pro",
-  kimi: "kimi-k2.6",
-  qwen: "qwen3.7-max",
+  kimi: "kimi-k3",
+  qwen: "qwen3.8-max",
   // Canonical TitleCase id (matches MODEL_REGISTRY + the provider's testConnection).
-  minimax: "MiniMax-M2.7-highspeed",
-  zhipu: "glm-5.1",
+  minimax: "MiniMax-M3",
+  zhipu: "glm-5.3",
 };
 
 /** Which inner-circle character runs on each provider (for per-agent tiers). */
@@ -231,7 +232,7 @@ function withResolvedModels(config: AppConfig): AppConfig {
  * model fails. Centralized here (per fix 3.17) so model rotations update
  * the fallback alongside `LOCKED_MODELS`.
  */
-export const ANTHROPIC_OPUS_FALLBACK_MODEL = "claude-opus-4-7";
+export const ANTHROPIC_OPUS_FALLBACK_MODEL = "claude-opus-5";
 
 export function isProvider(value: unknown): value is Provider {
   return typeof value === "string" && VALID_PROVIDERS.includes(value as Provider);
@@ -505,6 +506,8 @@ function syncCredentialsToStorage(
   prev: Partial<Record<Provider, ProviderCredential>>,
   next: Partial<Record<Provider, ProviderCredential>>,
 ): void {
+  // Keep the redactor's exact-value list current with every credential change.
+  queueMicrotask(publishKnownSecrets);
   for (const provider of VALID_PROVIDERS) {
     const prevKey = prev[provider]?.apiKey ?? "";
     const nextKey = next[provider]?.apiKey ?? "";
@@ -684,11 +687,32 @@ function ensureInit(): void {
           vaultReady: true,
         };
       });
+      publishKnownSecrets();
     } catch (error) {
       console.error("[config] Vault init failed:", error);
       setSnapshot((prev) => ({ ...prev, vaultReady: true }));
     }
   })();
+}
+
+/**
+ * Hand the redactor the exact secret values in play (every provider key + the
+ * proxy password) so any log / error / diagnostics string that echoes one is
+ * scrubbed by value, whatever the key's shape. Called after the vault hydrates
+ * credentials and whenever they change.
+ */
+function publishKnownSecrets(): void {
+  const values: Array<string | null | undefined> = [];
+  for (const cred of Object.values(storeSnapshot.config.credentials)) {
+    values.push(cred?.apiKey);
+  }
+  try {
+    values.push(secretsGet("proxy:password"));
+  } catch {
+    // proxy password unreadable — nothing to register for it
+  }
+  values.push(storeSnapshot.config.proxy?.password);
+  registerKnownSecrets(values);
 }
 
 function subscribe(callback: () => void): () => void {

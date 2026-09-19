@@ -67,7 +67,12 @@ interface AnthropicRequest {
       }
     | {
         type: "adaptive";
-      };
+        /** "summarized" returns thinking text; the 4.7+/5.x default is "omitted" (empty). */
+        display?: "summarized" | "omitted";
+      }
+    | { type: "disabled" };
+  /** Top-level effort knob (4.6+ and all 5.x models). Omitted == "high" (the default). */
+  output_config?: { effort: "low" | "medium" | "high" | "xhigh" | "max" };
   stream?: boolean;
   metadata?: {
     user_id?: string;
@@ -139,6 +144,10 @@ interface AnthropicThinkingProfile {
  *  - Claude 3.x and anything else: no thinking.
  */
 function anthropicThinkingProfile(model: AnthropicModel): AnthropicThinkingProfile {
+  // Claude 5 generation (Opus 5 / Sonnet 5 / Fable 5 / Fable 5.1): thinking is ON by
+  // default and adaptive-only (extended budgets are not accepted), sampling params
+  // are rejected like 4.7/4.8, and depth is steered with `output_config.effort`.
+  if (isClaude5(model)) return { mode: "adaptive", prohibitsSampling: true };
   if (model.includes("opus-4-8")) return { mode: "adaptive", prohibitsSampling: true };
   if (model.includes("opus-4-7")) return { mode: "adaptive", prohibitsSampling: true };
   if (model.includes("opus-4-6")) return { mode: "adaptive", prohibitsSampling: false };
@@ -146,6 +155,26 @@ function anthropicThinkingProfile(model: AnthropicModel): AnthropicThinkingProfi
     return { mode: "extended", prohibitsSampling: false };
   }
   return { mode: "none", prohibitsSampling: false };
+}
+
+/** Claude 5.x ids: `claude-opus-5`, `claude-sonnet-5`, `claude-fable-5`, `claude-fable-5-1`, … */
+function isClaude5(model: string): boolean {
+  return /-(opus|sonnet|haiku|fable)-5(?:-|$)/.test(model);
+}
+
+/** Fable models cannot turn thinking off (`thinking.type: "disabled"` is a 400). */
+function thinkingAlwaysOn(model: string): boolean {
+  return model.includes("fable");
+}
+
+/**
+ * `output_config.effort` for the council tier on adaptive-thinking models. "high" is
+ * the API default, so it is omitted; low/medium are sent explicitly.
+ */
+function effortForTier(tier: ReasoningTier | undefined): "low" | "medium" | undefined {
+  if (tier === "low") return "low";
+  if (tier === "medium") return "medium";
+  return undefined;
 }
 
 /** Extended-thinking budget for the requested tier (undefined → omit thinking). */
@@ -171,17 +200,32 @@ function buildThinkingConfig(
     }
   | {
       type: "adaptive";
+      display?: "summarized" | "omitted";
     }
+  | { type: "disabled" }
   | undefined {
-  if (options?.disableThinking) return undefined;
-
   const profile = anthropicThinkingProfile(model);
   const tier = options?.reasoningTier;
+  const claude5 = isClaude5(model);
+
+  if (options?.disableThinking) {
+    // 5.x thinks by default, so "off" has to be sent explicitly — except on Fable,
+    // which rejects it; there we omit the block and rely on effort=low instead.
+    if (claude5 && !thinkingAlwaysOn(model)) return { type: "disabled" };
+    return undefined;
+  }
 
   if (profile.mode === "none") return undefined;
   if (profile.mode === "adaptive") {
-    // Adaptive can't accept a budget; the fast tier just omits thinking.
-    return tier === "low" ? undefined : { type: "adaptive" };
+    if (tier === "low") {
+      // Fast tier: 4.x omits thinking (off); Opus/Sonnet 5 must say so explicitly;
+      // Fable keeps thinking on (cannot be disabled) and is throttled via effort.
+      if (claude5 && !thinkingAlwaysOn(model)) return { type: "disabled" };
+      return undefined;
+    }
+    // `display: "summarized"` is what makes the thinking text stream at all — the
+    // 4.7+/5.x default is "omitted", which returns empty thinking blocks.
+    return { type: "adaptive", display: "summarized" };
   }
   const budget = extendedBudgetForTier(tier, maxTokens);
   return budget ? { type: "enabled", budget_tokens: budget } : undefined;
@@ -435,7 +479,13 @@ export class AnthropicProvider implements BaseProvider {
     const thinking = buildThinkingConfig(model, request.max_tokens, options);
     if (thinking) {
       request.thinking = thinking;
-    } else if (!anthropicThinkingProfile(model).prohibitsSampling) {
+    }
+    // Effort (4.6+ / 5.x): low/medium tiers are sent explicitly, high is the default.
+    if (anthropicThinkingProfile(model).mode === "adaptive") {
+      const effort = effortForTier(options?.reasoningTier);
+      if (effort) request.output_config = { effort };
+    }
+    if (!thinking && !anthropicThinkingProfile(model).prohibitsSampling) {
       // Anthropic thinking mode is not compatible with temperature overrides.
       // Opus 4.7 rejects sampling params at any non-default value.
       const temp = options?.temperature ?? agent.temperature ?? 1;

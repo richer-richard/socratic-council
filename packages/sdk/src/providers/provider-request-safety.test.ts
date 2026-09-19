@@ -65,7 +65,7 @@ describe("provider request safety", () => {
       { stream: false },
     );
 
-    expect(request.thinking).toEqual({ type: "adaptive" });
+    expect(request.thinking).toEqual({ type: "adaptive", display: "summarized" });
     expect(request.temperature).toBeUndefined();
   });
 
@@ -88,7 +88,7 @@ describe("provider request safety", () => {
       { stream: false },
     );
 
-    expect(request.thinking).toEqual({ type: "adaptive" });
+    expect(request.thinking).toEqual({ type: "adaptive", display: "summarized" });
     expect(request.temperature).toBeUndefined();
     expect(request.top_p).toBeUndefined();
   });
@@ -115,7 +115,7 @@ describe("provider request safety", () => {
       { stream: false },
     );
 
-    expect(request.thinking).toEqual({ type: "adaptive" });
+    expect(request.thinking).toEqual({ type: "adaptive", display: "summarized" });
     expect(request.temperature).toBeUndefined();
     expect(request.top_p).toBeUndefined();
   });
@@ -401,12 +401,12 @@ describe("DeepSeek + Zhipu request shapes (fix 12.1)", () => {
         buildRequestBody: (...args: unknown[]) => Record<string, unknown>;
       }
     ).buildRequestBody(
-      createAgent({ provider: "deepseek", model: "deepseek-chat" }),
+      createAgent({ provider: "deepseek", model: "deepseek-flash" }),
       messages,
       {},
       true,
     );
-    expect(body.model).toBe("deepseek-chat");
+    expect(body.model).toBe("deepseek-flash");
     expect(body.stream).toBe(true);
     expect(body.messages).toEqual(messages);
   });

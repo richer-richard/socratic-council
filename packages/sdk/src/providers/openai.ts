@@ -25,36 +25,18 @@ import {
 } from "./base.js";
 import { createSseParser } from "./sse.js";
 
-// Models that support reasoning.effort parameter
-const REASONING_MODELS: OpenAIModel[] = [
-  "o1",
-  "o3",
-  "o4-mini",
-  "gpt-5.5",
-  "gpt-5.4",
-  "gpt-5.3-codex",
-  "gpt-5.2-pro",
-  "gpt-5.2",
-  "gpt-5-mini",
-  "gpt-5-nano",
-];
+// Reasoning models (Responses API `reasoning.effort`, no temperature): every GPT-5.x,
+// the GPT-6 family (gpt-6-astra, Sept 2026), and the o-series. A predicate rather than
+// a list so a newer scanned id (gpt-5.7, gpt-6-…) is handled without a code bump.
+function isReasoningModel(model: string): boolean {
+  return /^(gpt-5|gpt-6|o\d)/.test(model);
+}
 
-// Models that DON'T support temperature (reasoning models use reasoning.effort instead)
-const NO_TEMPERATURE_MODELS: OpenAIModel[] = [
-  "o1",
-  "o3",
-  "o4-mini",
-  "gpt-5.5",
-  "gpt-5.4",
-  "gpt-5.3-codex",
-  "gpt-5.2-pro",
-  "gpt-5.2",
-  "gpt-5-mini",
-  "gpt-5-nano",
-];
-
-// Models that reject prompt_cache_retention="in_memory" with HTTP 400 and require "24h".
-const EXTENDED_CACHE_ONLY_MODELS: OpenAIModel[] = ["gpt-5.5", "gpt-5.4"];
+// Models that reject prompt_cache_retention="in_memory" with HTTP 400 and require "24h":
+// gpt-5.4 and every later release (5.5, 5.6-*, gpt-6-*).
+function requiresExtendedCacheRetention(model: string): boolean {
+  return /^(gpt-5\.[4-9]|gpt-6)/.test(model);
+}
 
 interface OpenAIResponsesRequest {
   model: string;
@@ -213,7 +195,12 @@ function extractOutputThinking(data: OpenAIResponsesResponse): string {
 }
 
 function reasoningEffortForModel(model: OpenAIModel): "high" | "xhigh" {
+  // xhigh for the flagship tiers only; mini/nano/luna/chat-latest speed variants and
+  // the o-series take "high". gpt-6-astra documents low..max and rejects "none".
+  if (/^gpt-6-/.test(model) && !/(mini|nano|chat)/.test(model)) return "xhigh";
   if (
+    model === "gpt-5.6-sol" ||
+    model === "gpt-5.6-terra" ||
     model === "gpt-5.5" ||
     model === "gpt-5.4" ||
     model === "gpt-5.3-codex" ||
@@ -566,7 +553,7 @@ export class OpenAIProvider implements BaseProvider {
     }
 
     // Handle temperature - reasoning models don't support it
-    if (!NO_TEMPERATURE_MODELS.includes(model)) {
+    if (!isReasoningModel(model)) {
       request.temperature = options?.temperature ?? agent.temperature ?? 1;
     }
 
@@ -576,7 +563,7 @@ export class OpenAIProvider implements BaseProvider {
     }
 
     // Handle reasoning effort for reasoning models
-    if (REASONING_MODELS.includes(model)) {
+    if (isReasoningModel(model)) {
       request.reasoning = {
         effort: reasoningEffortForTier(model, options?.reasoningTier),
         summary: "auto",
@@ -586,9 +573,7 @@ export class OpenAIProvider implements BaseProvider {
     const promptCacheKey = this.buildPromptCacheKey(messages);
     if (promptCacheKey) {
       request.prompt_cache_key = promptCacheKey;
-      request.prompt_cache_retention = EXTENDED_CACHE_ONLY_MODELS.includes(model)
-        ? "24h"
-        : "in_memory";
+      request.prompt_cache_retention = requiresExtendedCacheRetention(model) ? "24h" : "in_memory";
     }
 
     return request;

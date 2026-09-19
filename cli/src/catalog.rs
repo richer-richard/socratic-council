@@ -52,14 +52,14 @@ impl DiscoveredModel {
 /// scan has run. Real ids only.
 pub fn default_model(provider: Provider) -> &'static str {
     match provider {
-        Provider::OpenAI => "gpt-5.5",
-        Provider::Anthropic => "claude-opus-4-8",
+        Provider::OpenAI => "gpt-6-astra",
+        Provider::Anthropic => "claude-fable-5-1",
         Provider::Google => "gemini-3.1-pro-preview",
         Provider::DeepSeek => "deepseek-v4-pro",
-        Provider::Kimi => "kimi-k2.6",
-        Provider::Qwen => "qwen3.7-max",
-        Provider::MiniMax => "MiniMax-M2.7-highspeed",
-        Provider::Zhipu => "glm-5.1",
+        Provider::Kimi => "kimi-k3",
+        Provider::Qwen => "qwen3.8-max",
+        Provider::MiniMax => "MiniMax-M3",
+        Provider::Zhipu => "glm-5.3",
     }
 }
 
@@ -69,53 +69,65 @@ pub fn catalog_models(provider: Provider) -> Vec<DiscoveredModel> {
     use Provider::*;
     let m = DiscoveredModel::catalog;
     match provider {
+        // Refreshed 2026-09-19 from each provider's live /models endpoint (Chinese
+        // endpoints for the Chinese providers) + published pricing. Output prices are
+        // USD per 1M tokens; CNY list prices are converted at 7.1 CNY/USD.
         OpenAI => vec![
+            m("gpt-6-astra", OpenAI, "GPT-6 Astra", 1_050_000, true, 50.0),
+            m("gpt-5.6-sol", OpenAI, "GPT-5.6 Sol", 1_050_000, true, 20.0),
+            m("gpt-5.6-terra", OpenAI, "GPT-5.6 Terra", 1_050_000, true, 12.0),
+            m("gpt-5.6-luna", OpenAI, "GPT-5.6 Luna", 1_050_000, true, 1.2),
             m("gpt-5.5", OpenAI, "GPT-5.5", 1_000_000, true, 30.0),
             m("gpt-5.4", OpenAI, "GPT-5.4", 1_050_000, true, 15.0),
-            m("gpt-5.2", OpenAI, "GPT-5.2", 128_000, true, 15.0),
             m("gpt-5-mini", OpenAI, "GPT-5 Mini", 128_000, true, 1.6),
             m("gpt-5-nano", OpenAI, "GPT-5 Nano", 128_000, true, 0.4),
         ],
         Anthropic => vec![
+            m("claude-fable-5-1", Anthropic, "Claude Fable 5.1", 1_000_000, true, 50.0),
+            m("claude-opus-5", Anthropic, "Claude Opus 5", 1_000_000, true, 25.0),
+            m("claude-sonnet-5", Anthropic, "Claude Sonnet 5", 1_000_000, true, 10.0),
             m("claude-opus-4-8", Anthropic, "Claude Opus 4.8", 1_000_000, true, 25.0),
-            m("claude-opus-4-7", Anthropic, "Claude Opus 4.7", 1_000_000, true, 25.0),
-            m("claude-sonnet-4-5-20250929", Anthropic, "Claude Sonnet 4.5", 200_000, true, 15.0),
             m("claude-haiku-4-5-20251001", Anthropic, "Claude Haiku 4.5", 200_000, true, 5.0),
         ],
         Google => vec![
             m("gemini-3.1-pro-preview", Google, "Gemini 3.1 Pro", 1_000_000, true, 12.0),
-            m("gemini-3-flash-preview", Google, "Gemini 3 Flash", 1_000_000, false, 0.4),
+            m("gemini-3.8-flash", Google, "Gemini 3.8 Flash", 1_000_000, true, 3.75),
+            m("gemini-3.7-flash", Google, "Gemini 3.7 Flash", 1_000_000, true, 3.75),
+            m("gemini-3.5-flash", Google, "Gemini 3.5 Flash", 1_000_000, true, 9.0),
+            m("gemini-3.5-flash-lite", Google, "Gemini 3.5 Flash-Lite", 1_000_000, true, 2.5),
             m("gemini-2.5-pro", Google, "Gemini 2.5 Pro", 1_000_000, true, 5.0),
-            m("gemini-2.5-flash-lite", Google, "Gemini 2.5 Flash Lite", 1_000_000, false, 0.08),
         ],
         DeepSeek => vec![
-            m("deepseek-v4-pro", DeepSeek, "DeepSeek V4 Pro", 1_000_000, true, 3.48),
-            m("deepseek-v4-flash", DeepSeek, "DeepSeek V4 Flash", 1_000_000, true, 1.1),
-            m("deepseek-reasoner", DeepSeek, "DeepSeek Reasoner", 128_000, true, 2.19),
-            m("deepseek-chat", DeepSeek, "DeepSeek Chat", 128_000, false, 1.1),
+            m("deepseek-v4-pro", DeepSeek, "DeepSeek V4 Pro", 1_000_000, true, 3.8),
+            m("deepseek-flash", DeepSeek, "DeepSeek V4.1 Flash", 1_000_000, true, 1.13),
         ],
         Kimi => vec![
-            m("kimi-k2.6", Kimi, "Kimi K2.6", 262_144, true, 4.0),
-            m("kimi-k2.5", Kimi, "Kimi K2.5", 256_000, false, 3.6),
-            m("kimi-k2-thinking", Kimi, "Kimi K2 Thinking", 256_000, true, 2.4),
-            m("kimi-k2-turbo-preview", Kimi, "Kimi K2 Turbo", 256_000, false, 2.4),
+            m("kimi-k3", Kimi, "Kimi K3", 1_048_576, true, 14.08),
+            m("kimi-k2.7-code", Kimi, "Kimi K2.7 Code", 262_144, true, 3.8),
+            m("kimi-k2.7-code-highspeed", Kimi, "Kimi K2.7 Code Highspeed", 262_144, true, 7.61),
+            m("kimi-k2.6", Kimi, "Kimi K2.6", 262_144, true, 3.8),
         ],
         Qwen => vec![
+            // qwen3.8-max / qwen3.7-plus had no confirmed output price at refresh time;
+            // they stay unpriced (cost ledger shows a lower bound) rather than guessed.
+            DiscoveredModel { output_price: None, ..m("qwen3.8-max", Qwen, "Qwen 3.8 Max", 1_000_000, true, 0.0) },
+            m("qwen3.8-flash", Qwen, "Qwen 3.8 Flash", 1_000_000, true, 0.38),
+            DiscoveredModel { output_price: None, ..m("qwen3.7-plus", Qwen, "Qwen 3.7 Plus", 1_000_000, true, 0.0) },
             m("qwen3.7-max", Qwen, "Qwen 3.7 Max", 1_000_000, true, 7.8),
-            m("qwen3.6-plus", Qwen, "Qwen 3.6 Plus", 131_072, true, 1.68),
         ],
-        MiniMax => vec![m(
-            "MiniMax-M2.7-highspeed",
-            MiniMax,
-            "MiniMax M2.7 Highspeed",
-            1_000_000,
-            true,
-            2.4,
-        )],
+        MiniMax => vec![
+            m("MiniMax-M3", MiniMax, "MiniMax M3", 1_000_000, true, 1.18),
+            m("MiniMax-M2.7", MiniMax, "MiniMax M2.7", 204_800, true, 1.18),
+            m("MiniMax-M2.7-highspeed", MiniMax, "MiniMax M2.7 Highspeed", 204_800, true, 2.37),
+        ],
         Zhipu => vec![
-            m("glm-5.1", Zhipu, "GLM-5.1", 200_000, true, 4.4),
-            m("glm-5", Zhipu, "GLM-5", 200_000, true, 2.0),
-            m("glm-4.7", Zhipu, "GLM-4.7", 128_000, false, 1.0),
+            m("glm-5.3", Zhipu, "GLM-5.3", 1_000_000, true, 3.94),
+            m("glm-5.3-flash", Zhipu, "GLM-5.3 Flash", 1_000_000, true, 0.39),
+            m("glm-5.3-flashx", Zhipu, "GLM-5.3 FlashX", 1_000_000, true, 0.99),
+            m("glm-5.2", Zhipu, "GLM-5.2", 1_000_000, true, 3.94),
+            m("glm-5.1", Zhipu, "GLM-5.1", 200_000, true, 3.94),
+            m("glm-5", Zhipu, "GLM-5", 200_000, true, 3.1),
+            m("glm-4.7", Zhipu, "GLM-4.7", 200_000, true, 2.25),
         ],
     }
 }
@@ -123,7 +135,10 @@ pub fn catalog_models(provider: Provider) -> Vec<DiscoveredModel> {
 fn speed_re() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| {
-        Regex::new(r"(?i)(mini|flash|lite|nano|turbo|haiku|air|small|fast|instant|highspeed|speed|tiny|micro)")
+        // Anchored to id separators: a bare substring match tagged every Gemini
+        // id as "mini" (ge-MINI) and cost the Pro flagship the speed penalty.
+        // A trailing `x` covers the flashx / airx variants.
+        Regex::new(r"(?i)(?:^|[-_.\s])(mini|flash|lite|nano|turbo|haiku|air|small|fast|instant|highspeed|speed|tiny|micro|luna)(?:$|[-_.\s0-9x])")
             .unwrap()
     })
 }
@@ -394,7 +409,7 @@ mod tests {
         );
         assert_eq!(
             resolve_model(Provider::Qwen, ReasoningTier::High, &merged, Some("auto")),
-            "qwen3.7-max"
+            "qwen3.8-max"
         );
     }
 
@@ -403,16 +418,36 @@ mod tests {
         let avail = catalog_models(Provider::Anthropic);
         assert_eq!(
             resolve_model(Provider::Anthropic, ReasoningTier::High, &avail, Some("auto")),
-            "claude-opus-4-8"
+            "claude-fable-5-1"
         );
     }
 
     #[test]
     fn adopts_newer_scanned_flagship() {
-        let merged = merge_with_catalog(Provider::OpenAI, vec![scanned("gpt-5.6", Provider::OpenAI)]);
+        // A never-seen newer generation beats the catalog flagship (gpt-6-astra).
+        // "gpt-99-hypothetical" is a deliberately fake id, not a real model.
+        let merged = merge_with_catalog(
+            Provider::OpenAI,
+            vec![scanned("gpt-99-hypothetical", Provider::OpenAI)],
+        );
         assert_eq!(
             resolve_model(Provider::OpenAI, ReasoningTier::High, &merged, Some("auto")),
-            "gpt-5.6"
+            "gpt-99-hypothetical"
+        );
+    }
+
+    #[test]
+    fn speed_markers_are_anchored_to_separators() {
+        // "gemini" must not read as "mini"; flashx/airx and luna count as fast tiers.
+        assert!(!is_speed_variant("gemini-3.1-pro-preview"));
+        assert!(is_speed_variant("gemini-3.8-flash"));
+        assert!(!is_speed_variant("MiniMax-M3"));
+        assert!(is_speed_variant("MiniMax-M2.7-highspeed"));
+        assert!(is_speed_variant("glm-5.3-flashx"));
+        assert!(is_speed_variant("gpt-5.6-luna"));
+        assert_eq!(
+            resolve_model(Provider::Google, ReasoningTier::High, &catalog_models(Provider::Google), Some("auto")),
+            "gemini-3.1-pro-preview"
         );
     }
 

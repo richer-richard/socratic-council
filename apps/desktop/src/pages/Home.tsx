@@ -60,7 +60,7 @@ const AGENT_CARDS: Array<{
 
 // Highspeed and non-highspeed M2.7 are the same model — show the short label.
 const MODEL_DISPLAY_OVERRIDES: Partial<Record<Provider, string>> = {
-  minimax: "MiniMax M2.7",
+  minimax: "MiniMax M3",
 };
 
 function getModelDisplayName(provider: Provider): string {

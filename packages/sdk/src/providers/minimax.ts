@@ -83,6 +83,7 @@ const THINK_OPEN_TAG = "<think>";
 const THINK_CLOSE_TAG = "</think>";
 
 function buildSafeThinking(
+  model: string,
   maxTokens: number,
   tier?: ReasoningTier,
 ):
@@ -90,7 +91,14 @@ function buildSafeThinking(
       type: "enabled";
       budget_tokens: number;
     }
+  | { type: "adaptive" }
   | undefined {
+  // MiniMax-M3 (Anthropic-compatible Messages API): `thinking.type: "adaptive"`
+  // turns interleaved thinking on; omitting the block leaves it OFF. M2.x can't
+  // turn thinking off at all and takes the legacy enabled+budget shape.
+  if (/m3/i.test(model)) {
+    return tier === "low" ? undefined : { type: "adaptive" };
+  }
   // Low tier skips extended thinking; medium/high (and the default) scale the
   // budget. Keep budget strictly below max_tokens to avoid validation failures.
   if (tier === "low") return undefined;
@@ -212,7 +220,7 @@ export class MiniMaxProvider implements BaseProvider {
   private normalizeModel(model: string): string {
     // Pass any non-empty id through (including live-scanned ids); only fall
     // back to the flagship when nothing was supplied.
-    return model && model.trim() !== "" ? model : "MiniMax-M2.7-highspeed";
+    return model && model.trim() !== "" ? model : "MiniMax-M3";
   }
 
   private buildRequestBody(
@@ -224,10 +232,11 @@ export class MiniMaxProvider implements BaseProvider {
     const systemMessage = messages.find((m) => m.role === "system");
     const maxTokens = options.maxTokens ?? agent.maxTokens ?? 4096;
     const temperature = options.temperature ?? agent.temperature ?? 1;
-    const thinking = buildSafeThinking(maxTokens, options.reasoningTier);
+    const modelId = this.normalizeModel(agent.model);
+    const thinking = buildSafeThinking(modelId, maxTokens, options.reasoningTier);
 
     const request: MiniMaxRequest = {
-      model: this.normalizeModel(agent.model),
+      model: modelId,
       messages: messages
         .filter((m) => m.role !== "system")
         .map((m) => ({

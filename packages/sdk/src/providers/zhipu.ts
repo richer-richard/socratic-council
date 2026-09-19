@@ -48,7 +48,7 @@ export class ZhipuProvider implements BaseProvider {
   private normalizeModel(model: string): string {
     // Pass any non-empty id through (including live-scanned ids); only fall
     // back to the flagship when nothing was supplied.
-    return model && model.trim() !== "" ? model : "glm-5.1";
+    return model && model.trim() !== "" ? model : "glm-5.3";
   }
 
   private buildRequestBody(
@@ -70,6 +70,15 @@ export class ZhipuProvider implements BaseProvider {
     // Fix 6.3: GLM accepts temperature up to 2; the previous Math.min(1) clamp
     // silently capped users' configured higher-temperature setups.
     request.temperature = Math.max(0, Math.min(2, temperature));
+
+    // Chain-of-thought switch (GLM-4.5+). The GLM-5.3 family and GLM-4.7 force it on;
+    // everything else is auto by default, so the fast tier turns it off explicitly
+    // and medium/high ask for it (reasoning_content then streams separately).
+    const id = request.model.toLowerCase();
+    const forcedOn = id.startsWith("glm-5.3") || id === "glm-4.7";
+    request.thinking = {
+      type: !forcedOn && options.reasoningTier === "low" ? "disabled" : "enabled",
+    };
 
     if (options.maxTokens) {
       request.max_tokens = options.maxTokens;

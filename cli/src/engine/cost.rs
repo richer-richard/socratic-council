@@ -32,6 +32,14 @@ const fn pr(input: f64, output: f64, reasoning: f64) -> Pricing {
 /// Keys are lowercase; see `price_for` for the lookup rules.
 const PRICES: &[(&str, Pricing)] = &[
     // OpenAI
+    // Refreshed 2026-09-19 (see packages/shared/src/constants/index.ts — the
+    // priceParity test fails CI if these two tables drift). CNY list prices for the
+    // Chinese providers are converted at 7.1 CNY/USD; models with no published
+    // price are deliberately absent (the ledger then shows a `≥` lower bound).
+    ("gpt-6-astra", p(10.0, 50.0)),
+    ("gpt-5.6-sol", p(4.0, 20.0)),
+    ("gpt-5.6-terra", p(2.0, 12.0)),
+    ("gpt-5.6-luna", p(0.2, 1.2)),
     ("gpt-5.5", p(5.0, 30.0)),
     ("gpt-5.4", p(2.5, 15.0)),
     ("gpt-5.3-chat-latest", p(0.4, 2.0)),
@@ -47,6 +55,9 @@ const PRICES: &[(&str, Pricing)] = &[
     ("gpt-4o-mini", p(0.15, 0.6)),
     ("gpt-4-turbo", p(10.0, 30.0)),
     // Anthropic
+    ("claude-fable-5-1", p(10.0, 50.0)),
+    ("claude-opus-5", p(5.0, 25.0)),
+    ("claude-sonnet-5", p(2.0, 10.0)),
     ("claude-opus-4-8", p(5.0, 25.0)),
     ("claude-opus-4-7", p(5.0, 25.0)),
     ("claude-opus-4-6", p(5.0, 25.0)),
@@ -60,6 +71,10 @@ const PRICES: &[(&str, Pricing)] = &[
     ("claude-3-opus-20240229", p(15.0, 75.0)),
     // Google
     ("gemini-3.1-pro-preview", p(2.0, 12.0)),
+    ("gemini-3.8-flash", p(0.75, 3.75)),
+    ("gemini-3.7-flash", p(0.75, 3.75)),
+    ("gemini-3.5-flash", p(1.5, 9.0)),
+    ("gemini-3.5-flash-lite", p(0.3, 2.5)),
     ("gemini-3-pro-preview", p(1.25, 5.0)),
     ("gemini-3-flash-preview", p(0.1, 0.4)),
     ("gemini-2.5-pro", p(1.25, 5.0)),
@@ -67,34 +82,35 @@ const PRICES: &[(&str, Pricing)] = &[
     ("gemini-2.5-flash", p(0.075, 0.3)),
     ("gemini-2.0-flash-lite", p(0.02, 0.08)),
     ("gemini-2.0-flash", p(0.1, 0.4)),
-    // DeepSeek
-    ("deepseek-v4-pro", pr(1.74, 3.48, 3.48)),
-    ("deepseek-v4-flash", p(0.27, 1.1)),
-    ("deepseek-reasoner", p(0.55, 2.19)),
-    ("deepseek-chat", p(0.27, 1.1)),
-    // Kimi / Moonshot
-    ("kimi-k2.6", p(0.95, 4.0)),
-    ("kimi-k2.5", p(0.9, 3.6)),
-    ("kimi-k2-thinking-turbo", p(0.6, 2.4)),
-    ("kimi-k2-thinking", p(0.6, 2.4)),
-    ("kimi-k2-turbo-preview", p(0.6, 2.4)),
-    ("kimi-k2-0905-preview", p(0.6, 2.4)),
-    ("kimi-k2-0711-preview", p(0.55, 2.2)),
-    ("moonshot-v1-128k", p(0.8, 0.8)),
-    ("moonshot-v1-32k", p(0.35, 0.35)),
-    ("moonshot-v1-8k", p(0.17, 0.17)),
-    // MiniMax
-    ("minimax-m2.7-highspeed", p(0.6, 2.4)),
-    // Qwen / Alibaba DashScope (must stay in sync with MODEL_REGISTRY — Quinn is
-    // seated as Provider::Qwen, so a missing row bills her at $0 and slips the cap)
+    // DeepSeek (peak-hour list price)
+    ("deepseek-v4-pro", p(1.27, 3.8)),
+    ("deepseek-flash", p(0.28, 1.13)),
+    // Kimi
+    ("kimi-k3", p(2.82, 14.08)),
+    ("kimi-k2.7-code", p(0.92, 3.8)),
+    ("kimi-k2.7-code-highspeed", p(1.83, 7.61)),
+    ("kimi-k2.6", p(0.92, 3.8)),
+    // Qwen
+    ("qwen3.8-flash", p(0.11, 0.38)),
     ("qwen3.7-max", p(1.3, 7.8)),
     ("qwen3.6-max-preview", p(1.3, 7.8)),
-    ("qwen3.6-plus", p(0.56, 1.68)),
     ("qwen3.5-plus", p(0.56, 1.68)),
-    // Zhipu / Z.AI
-    ("glm-5.1", p(1.4, 4.4)),
-    ("glm-5", p(0.5, 2.0)),
-    ("glm-4.7", p(0.25, 1.0)),
+    // MiniMax
+    ("minimax-m3", p(0.3, 1.18)),
+    ("minimax-m2.7", p(0.3, 1.18)),
+    // Table keys are lowercase; `price_for` lowercases the query (ids ship mixed-case).
+    ("minimax-m2.7-highspeed", p(0.59, 2.37)),
+    // Zhipu
+    ("glm-5.3", p(1.13, 3.94)),
+    ("glm-5.3-flash", p(0.11, 0.39)),
+    ("glm-5.3-flashx", p(0.28, 0.99)),
+    ("glm-5.2", p(1.13, 3.94)),
+    ("glm-5.1", p(1.13, 3.94)),
+    ("glm-5", p(0.85, 3.1)),
+    ("glm-5-turbo", p(0.99, 3.66)),
+    ("glm-4.7", p(0.56, 2.25)),
+    ("glm-4.7-flash", p(0.0, 0.0)),
+    ("glm-4.5-air", p(0.17, 1.13)),
 ];
 
 /// Price for a model id: case-insensitive exact match first, then the longest
@@ -383,7 +399,7 @@ mod tests {
     #[test]
     fn price_lookup_is_case_insensitive_with_prefix_fallback() {
         // Exact (case-insensitive) hit — the MiniMax id ships in mixed case.
-        assert_eq!(price_for("MiniMax-M2.7-highspeed"), Some(p(0.6, 2.4)));
+        assert_eq!(price_for("MiniMax-M2.7-highspeed"), Some(p(0.59, 2.37)));
         // Dated snapshot falls back to its base id's price.
         assert_eq!(price_for("claude-opus-4-8-20260301"), Some(p(5.0, 25.0)));
         // Longest prefix wins: gpt-5.2-pro must not bill as gpt-5.2.
@@ -397,10 +413,13 @@ mod tests {
     fn qwen_council_models_are_priced() {
         // Regression: Quinn is seated as Provider::Qwen; missing rows billed her
         // at $0 and slipped the budget cap. Values mirror MODEL_REGISTRY.
+        assert_eq!(price_for("qwen3.8-flash"), Some(p(0.11, 0.38)));
         assert_eq!(price_for("qwen3.7-max"), Some(p(1.3, 7.8)));
         assert_eq!(price_for("qwen3.6-max-preview"), Some(p(1.3, 7.8)));
-        assert_eq!(price_for("qwen3.6-plus"), Some(p(0.56, 1.68)));
         assert_eq!(price_for("qwen3.5-plus"), Some(p(0.56, 1.68)));
+        // qwen3.8-max had no confirmed output price at refresh time → unpriced (a
+        // `≥` lower bound in the ledger), never a guessed number.
+        assert_eq!(price_for("qwen3.8-max"), None);
     }
 
     #[test]

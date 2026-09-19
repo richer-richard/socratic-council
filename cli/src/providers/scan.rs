@@ -1,6 +1,6 @@
 //! Live model-capability scanning: GET each provider's own list-models
 //! endpoint (Chinese endpoints for Chinese providers). Falls back to the
-//! catalog for providers without one (MiniMax).
+//! catalog on any failure.
 
 use super::{ensure_path, google_v1beta};
 use crate::catalog::{catalog_models, DiscoveredModel, ModelSource};
@@ -17,15 +17,18 @@ fn models_url(provider: Provider, base_url: &str) -> Option<String> {
         | Provider::Qwen => Some(ensure_path(base_url, "v1", "models")),
         Provider::Zhipu => Some(ensure_path(base_url, "v4", "models")),
         Provider::Google => Some(format!("{}/models", google_v1beta(base_url))),
-        Provider::MiniMax => None,
+        // MiniMax's Anthropic-compatible surface lists models at
+        // `<base>/anthropic/v1/models` (base already ends in `/anthropic`).
+        Provider::MiniMax => Some(ensure_path(base_url, "v1", "models")),
     }
 }
 
 fn auth_headers(provider: Provider, api_key: &str) -> Vec<(String, String)> {
     match provider {
-        Provider::Anthropic => vec![
+        Provider::Anthropic | Provider::MiniMax => vec![
             ("x-api-key".into(), api_key.to_string()),
             ("anthropic-version".into(), "2023-06-01".into()),
+            ("Authorization".into(), format!("Bearer {api_key}")),
         ],
         Provider::Google => vec![("x-goog-api-key".into(), api_key.to_string())],
         _ => vec![("Authorization".into(), format!("Bearer {api_key}"))],
@@ -93,7 +96,7 @@ pub async fn scan_models(
     api_key: &str,
 ) -> Result<Vec<DiscoveredModel>> {
     let Some(url) = models_url(provider, base_url) else {
-        return Ok(catalog_models(provider)); // e.g. MiniMax — no list endpoint
+        return Ok(catalog_models(provider));
     };
 
     let mut builder = http.get(&url);
