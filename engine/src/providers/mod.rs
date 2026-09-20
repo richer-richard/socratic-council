@@ -1048,7 +1048,12 @@ pub async fn stream_completion(
                 // — enough to see which reasoning/summary events a provider emits.
                 if std::env::var_os("SC_STREAM_DEBUG").is_some() {
                     if let Some(t) = value["type"].as_str() {
-                        eprintln!("[stream:{}] {t}", provider.slug());
+                        // Block and delta kinds only — never content.
+                        let kind = value["content_block"]["type"]
+                            .as_str()
+                            .or_else(|| value["delta"]["type"].as_str())
+                            .unwrap_or("");
+                        eprintln!("[stream:{}] {t} {kind}", provider.slug());
                     }
                 }
                 let chunk = parse_event(provider, &value, &mut usage, &mut acc);

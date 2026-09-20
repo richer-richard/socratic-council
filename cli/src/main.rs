@@ -905,7 +905,7 @@ async fn cmd_probe(
 
     println!("provider   model                        latency  content                   thinking  usage in/out/reason");
     let mut failures = 0usize;
-    for provider in providers {
+    for provider in providers.iter().copied() {
         let Some(key) = config.resolve_api_key(provider) else {
             println!("{:<10} {:<28} {:>7}  no API key", provider.slug(), "-", "-");
             continue;
@@ -985,7 +985,7 @@ async fn cmd_probe(
         println!(
             "\ntool calling: one request per provider offering read_file; expects a tool call back, then a final answer built on the tool result"
         );
-        for provider in Provider::ALL {
+        for provider in providers.iter().copied() {
             let Some(key) = config.resolve_api_key(provider) else {
                 continue;
             };
@@ -993,12 +993,9 @@ async fn cmd_probe(
             let models = catalog_models(provider);
             let model = resolve_model(
                 provider,
-                ReasoningTier::Low,
+                tier,
                 &models,
-                config
-                    .selection(provider, ReasoningTier::Low)
-                    .as_deref()
-                    .or(Some("auto")),
+                config.selection(provider, tier).as_deref().or(Some("auto")),
             );
             if !model_row(provider, &model).contract.tools {
                 println!(
@@ -1011,7 +1008,7 @@ async fn cmd_probe(
             let specs = socratic_council::tools::specs_for(&ToolPolicy::safe(), false);
             let system = "You are a connectivity probe for tool calling.";
             let ask = ChatMessage::user(
-                "Read the file \"notes.txt\" with the read_file tool, then reply with the single word the file contains. Do not guess.",
+                "Think it through before acting. Read the file \"notes.txt\" with the read_file tool, then reply with the single word the file contains. Do not guess.",
             );
             let req = CompletionRequest {
                 model: model.clone(),
@@ -1019,7 +1016,7 @@ async fn cmd_probe(
                 messages: vec![ask.clone()],
                 max_tokens: 1024,
                 temperature: 1.0,
-                tier: ReasoningTier::Low,
+                tier,
                 tools: specs.clone(),
                 cache_key: None,
             };
@@ -1066,7 +1063,8 @@ async fn cmd_probe(
             let follow = CompletionRequest {
                 messages: vec![
                     ask,
-                    ChatMessage::assistant_with_calls(first.text.clone(), vec![call.clone()]),
+                    ChatMessage::assistant_with_calls(first.text.clone(), vec![call.clone()])
+                        .with_thinking_blocks(first.thinking_blocks.clone()),
                     ChatMessage::tool(
                         call.id.clone(),
                         call.name.clone(),
@@ -1079,7 +1077,7 @@ async fn cmd_probe(
                     messages: Vec::new(),
                     max_tokens: 1024,
                     temperature: 1.0,
-                    tier: ReasoningTier::Low,
+                    tier,
                     tools: specs,
                     cache_key: None,
                 }
@@ -1091,12 +1089,14 @@ async fn cmd_probe(
                     let answer = clean(second.text.trim());
                     if answer.to_ascii_lowercase().contains("tangerine") {
                         println!(
-                            "{:<10} {:<28} {:>6.1}s  call {}({}) ✓ · result ✓",
+                            "{:<10} {:<28} {:>6.1}s  call {}({}) ✓ · result ✓ · thinking {} chars, {} signed block(s) replayed",
                             provider.slug(),
                             model,
                             secs,
                             call.name,
-                            clean(&call.arguments.to_string())
+                            clean(&call.arguments.to_string()),
+                            first.thinking.chars().count(),
+                            first.thinking_blocks.len()
                         );
                     } else {
                         failures += 1;
