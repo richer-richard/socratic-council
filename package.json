@@ -43,7 +43,7 @@
     "url": "https://github.com/richer-richard/socratic-council.git"
   },
   "devDependencies": {
-    "@eslint/js": "^9.13.0",
+    "@eslint/js": "^9.39.5",
     "@vitest/coverage-v8": "^2.1.5",
     "eslint": "^9.13.0",
     "eslint-config-prettier": "^10.1.8",
