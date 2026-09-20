@@ -121,7 +121,7 @@ jobs:
           if ! gh release view "$TAG" >/dev/null 2>&1; then
             gh release create "$TAG" \
               --title "socratic-council CLI ${TAG#cli-v}" \
-              --notes "Terminal multi-agent debate workstation. Install with \`cargo install socratic-council\`, or grab a prebuilt binary below."
+              --notes "Terminal multi-model deliberation workstation: a moderated council of frontier models that settles a question and leaves a decision record. Install with \`cargo install socratic-council\`, or grab a prebuilt binary below."
           fi
           gh release upload "$TAG" dist/* --clobber
 

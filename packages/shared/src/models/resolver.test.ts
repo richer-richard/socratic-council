@@ -57,7 +57,7 @@ describe("classifiers", () => {
     expect(isNonChatModel("gpt-5.5")).toBe(false);
   });
   it("flags speed variants", () => {
-    expect(isSpeedVariant("gpt-5-mini")).toBe(true);
+    expect(isSpeedVariant("gpt-5.4-mini")).toBe(true);
     expect(isSpeedVariant("gemini-3-flash-preview")).toBe(true);
     expect(isSpeedVariant("claude-haiku-4-5-20251001")).toBe(true);
     expect(isSpeedVariant("gpt-5.5")).toBe(false);
@@ -75,7 +75,7 @@ describe("classifiers", () => {
 describe("resolveModel", () => {
   it("honors an explicit (non-auto) selection", () => {
     const available = catalogModelsForProvider("openai");
-    expect(resolveModel("openai", "high", available, "gpt-5-mini")).toBe("gpt-5-mini");
+    expect(resolveModel("openai", "high", available, "gpt-5.4-mini")).toBe("gpt-5.4-mini");
   });
 
   it("honors a stale explicit selection not in the available set", () => {
@@ -171,7 +171,7 @@ describe("mergeDiscoveredWithCatalog", () => {
 describe("ranking sanity", () => {
   it("ranks a flagship above its mini sibling", () => {
     const flagship = catalogModelsForProvider("openai").find((m) => m.id === "gpt-5.5")!;
-    const mini = catalogModelsForProvider("openai").find((m) => m.id === "gpt-5-mini")!;
+    const mini = catalogModelsForProvider("openai").find((m) => m.id === "gpt-5.4-mini")!;
     expect(capabilityScore(flagship)).toBeGreaterThan(capabilityScore(mini));
     expect(speedScore(mini)).toBeGreaterThan(speedScore(flagship));
   });

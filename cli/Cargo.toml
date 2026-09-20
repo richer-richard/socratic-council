@@ -1,6 +1,6 @@
 [package]
 name = "socratic-council"
-version = "1.1.0"
+version = "2.0.0"
 edition = "2021"
 rust-version = "1.88"
 description = "A terminal council of AI models that deliberates a question in structured rounds and leaves a decision record — any model per seat across eight providers, native tools, a cost ledger with caps, and a ratatui TUI."

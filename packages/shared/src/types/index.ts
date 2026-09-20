@@ -23,19 +23,14 @@ export const OpenAIModels = [
   "gpt-5.6-terra",
   "gpt-5.6-luna",
   "gpt-5.5",
+  "gpt-5.5-pro",
   "gpt-5.4",
-  "gpt-5.3-chat-latest",
+  "gpt-5.4-mini",
+  "gpt-5.4-nano",
   "gpt-5.3-codex",
   "gpt-5.2-pro",
   "gpt-5.2",
-  "gpt-5-mini",
-  "gpt-5-nano",
-  "o4-mini",
-  "o3",
-  "o1",
-  "gpt-4o",
-  "gpt-4o-mini",
-  "gpt-4-turbo",
+  "gpt-5.1",
 ] as const;
 
 export type OpenAIModel = (typeof OpenAIModels)[number];
@@ -47,7 +42,7 @@ export const OpenAIConfigSchema = z.object({
   top_p: z.number().min(0).max(1).optional(),
   frequency_penalty: z.number().min(-2).max(2).optional(),
   presence_penalty: z.number().min(-2).max(2).optional(),
-  // For reasoning models (o1, o3, o4-mini)
+  // Reasoning depth for gpt-5.x / gpt-6 (the Responses API `reasoning.effort`)
   reasoning_effort: z.enum(["minimal", "low", "medium", "high", "xhigh", "max"]).optional(),
   // New Responses API format
   reasoning: z
@@ -100,13 +95,6 @@ export const AnthropicModels = [
   "claude-opus-4-5-20251101",
   "claude-sonnet-4-5-20250929",
   "claude-haiku-4-5-20251001",
-  // Claude 4 models
-  "claude-sonnet-4-20250514",
-  "claude-opus-4-1-20250410",
-  // Legacy Claude 3.5 models
-  "claude-3-5-sonnet-20241022",
-  "claude-3-5-haiku-20241022",
-  "claude-3-opus-20240229",
 ] as const;
 
 export type AnthropicModel = (typeof AnthropicModels)[number];
@@ -155,16 +143,10 @@ export const GeminiModels = [
   "gemini-3.5-flash",
   "gemini-3.5-flash-lite",
   "gemini-3.1-flash-lite",
-  // Legacy alias retained for migration/back-compat
-  "gemini-3-pro-preview",
-  "gemini-3-pro-image-preview",
   "gemini-3-flash-preview",
   "gemini-2.5-pro",
   "gemini-2.5-flash",
   "gemini-2.5-flash-lite",
-  "gemini-2.5-flash-image",
-  "gemini-2.0-flash",
-  "gemini-2.0-flash-lite",
 ] as const;
 
 export type GeminiModel = (typeof GeminiModels)[number];
@@ -341,12 +323,12 @@ export interface KimiRequest {
 export const QwenModels = [
   // DashScope China compatible-mode ids (Sept 2026 scan).
   "qwen3.8-max",
+  "qwen3.8-2.4t-a95b",
   "qwen3.8-flash",
+  "qwen3.8-27b",
   "qwen3.7-plus",
   "qwen3.7-max",
   "qwen3.7-flash",
-  "qwen3.6-max-preview",
-  "qwen3.5-plus",
 ] as const;
 
 export type QwenModel = (typeof QwenModels)[number];
@@ -382,12 +364,7 @@ export interface QwenRequest {
 // MINIMAX MODELS & PARAMETERS
 // =============================================================================
 
-export const MiniMaxModels = [
-  "MiniMax-M3",
-  "MiniMax-M2.7",
-  "MiniMax-M2.7-highspeed",
-  "minimax-m2.7-highspeed",
-] as const;
+export const MiniMaxModels = ["MiniMax-M3", "MiniMax-M2.7", "MiniMax-M2.7-highspeed"] as const;
 
 export type MiniMaxModel = (typeof MiniMaxModels)[number];
 
@@ -440,8 +417,6 @@ export const ZhipuModels = [
   "glm-5",
   "glm-5-turbo",
   "glm-4.7",
-  "glm-4.7-flash",
-  "glm-4.5-air",
 ] as const;
 
 export type ZhipuModel = (typeof ZhipuModels)[number];
