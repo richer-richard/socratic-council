@@ -6,7 +6,7 @@
     <title>Socratic Council</title>
     <meta
       name="description"
-      content="Socratic Council is a local-first desktop app where eight AI agents debate any topic — shadowed by eight silent advisors passing private notes — with search, exports, conflict tracking, and a source-first build path."
+      content="Socratic Council is a local-first deliberation workstation: a moderator convenes a council of frontier models from eight providers to settle your question in structured rounds with tools, and leaves a decision record and a hand-off folder. Desktop app and terminal CLI on one Rust engine."
     />
     <!-- Fonts are self-hosted (copied from @fontsource by scripts/build-site.mjs);
          no third-party request on page load. -->
@@ -30,8 +30,8 @@
       </a>
 
       <nav class="topnav" aria-label="Primary navigation">
-        <a href="#voices">Voices</a>
-        <a href="#flow">Flow</a>
+        <a href="#voices">Council</a>
+        <a href="#flow">Protocol</a>
         <a href="#install">Install</a>
         <a href="#builders">Builders</a>
       </nav>
@@ -63,15 +63,16 @@
         <div class="hero-scrim" aria-hidden="true"></div>
 
         <div class="hero-inner">
-          <p class="hero-kicker">Local-first desktop debate app</p>
+          <p class="hero-kicker">Local-first deliberation workstation</p>
           <h1>Socratic Council</h1>
           <p class="hero-statement">
-            Eight agents enter the same chamber with your question, your files, and no hosted
-            control plane between them.
+            A moderator convenes eight frontier models around your question and leaves a record you
+            can act on.
           </p>
           <p class="hero-support">
-            Bring your own provider keys. Run the discussion locally. Search the transcript, track
-            disagreement, verify evidence, and export the room when the argument is finished.
+            Bring your own provider keys. Everything runs on your machine: the desktop app and the
+            terminal CLI share one Rust engine and one encrypted store. Seats search the web, verify
+            claims, read your files and run commands in a sandbox.
           </p>
 
           <div class="hero-actions">
@@ -92,11 +93,13 @@
         <div class="section-inner section-two-up">
           <div class="section-copy reveal">
             <p class="section-kicker">Council lineup</p>
-            <h2>The room is diverse on purpose, not theatrical by accident.</h2>
+            <h2>Eight seats, any model each, one moderator.</h2>
             <p>
-              Each seat maps to a different provider family so the conversation has real model
-              variance. No one is asked to cosplay a stock archetype. The chamber is there to
-              pressure weak claims, surface disagreement, and reach a defensible close.
+              Each seat maps to a different provider family so the council has real model variance.
+              Rename a seat, give it any model the provider serves or Auto at a reasoning level, add
+              seats, or convene three, four or all of them with a preset. The moderator plans the
+              session, judges convergence and writes the record; a fast utility model keeps the
+              board.
             </p>
           </div>
 
@@ -143,8 +146,13 @@
             </li>
             <li>
               <span class="voice-name">Moderator</span>
-              <span class="voice-provider">Optional</span>
-              <span class="voice-model">Focus, fairness, and closure</span>
+              <span class="voice-provider">Google by default</span>
+              <span class="voice-model">Plans, judges convergence, writes the record</span>
+            </li>
+            <li>
+              <span class="voice-name">Utility</span>
+              <span class="voice-provider">Any fast model</span>
+              <span class="voice-model">Rewrites the board between rounds</span>
             </li>
           </ol>
         </div>
@@ -153,22 +161,21 @@
       <section class="section" id="flow">
         <div class="section-inner">
           <div class="section-copy reveal">
-            <p class="section-kicker">How the chamber moves</p>
-            <h2>
-              The product is not a chat skin. It is a discussion loop with memory, bidding, and
-              visible evidence.
-            </h2>
+            <p class="section-kicker">How a session moves</p>
+            <h2>Not a chat with eight voices. A protocol with a record at the end.</h2>
             <p>
-              A turn begins with context building, passes through speaker selection and provider
-              streaming, then folds tool results, quotes, reactions, and analytics back into the
-              transcript surface.
+              The moderator frames the question and routes the work. Seats write independent
+              positions in parallel, then cross-examine each other with tools. A utility model
+              rewrites the board after every round and the moderator judges convergence; when the
+              seats stop moving, a revision round collects final positions and votes and the record
+              is written.
             </p>
           </div>
 
           <figure class="visual-plane reveal">
             <img
               src="./assets/conversation-loop.svg"
-              alt="Conversation loop showing user input, UI, context building, bidding, provider streaming, parsed actions, tool results, and analytics refresh."
+              alt="Deliberation protocol showing frame, position, cross-examine, board and convergence, and revise and record, with the tools and moderator lanes beneath."
             />
           </figure>
 
@@ -176,21 +183,24 @@
             <div>
               <span>01</span>
               <p>
-                Context is built from the live transcript, memory, attachments, and session state.
+                Framing: the deliverable, the exact question, the options, who leads and who
+                supports, a lens per seat, and a cost estimate before anything runs.
               </p>
             </div>
             <div>
               <span>02</span>
               <p>
-                Each round chooses a speaker instead of flattening every reply into one assistant
-                voice.
+                Rounds: every seat writes independently and in parallel; cross-examination lets them
+                call web search, claim verification, attachments, workspace files and a sandboxed
+                shell.
               </p>
             </div>
             <div>
               <span>03</span>
               <p>
-                Structured actions stay visible in the room, so verification and follow-up are part
-                of the record.
+                Closure: the board tracks what is settled and what is disputed, the moderator judges
+                convergence, and the run ends in a decision record with dissent, evidence and next
+                actions.
               </p>
             </div>
           </div>
@@ -201,33 +211,40 @@
         <div class="section-inner section-two-up section-two-up-reverse">
           <div class="section-copy reveal">
             <p class="section-kicker">What leaves the room</p>
-            <h2>Search, conflict, cost, and exports are not side quests after the debate.</h2>
+            <h2>The record, the board, the rounds, and a hand-off folder.</h2>
             <p>
-              The transcript remains searchable, tool results stay in context, disagreement gets
-              rendered instead of buried, and the export layer writes structured artifacts directly
-              to disk.
+              The decision record states the answer with its confidence, the votes, the dissent and
+              why it did not carry, what changed, the evidence, the open questions and the next
+              actions. A document deliverable gets a draft, a critique round and a revision instead.
+              Every run ends in a hand-off folder you can point a person or an agent at.
             </p>
 
             <dl class="evidence-list">
               <div>
-                <dt>Search</dt>
-                <dd>Jump straight to the line that matters in the transcript.</dd>
-              </div>
-              <div>
-                <dt>Conflict graph</dt>
-                <dd>Track pairwise disagreement instead of losing it in a long scrollback.</dd>
-              </div>
-              <div>
-                <dt>Exports</dt>
+                <dt>Record</dt>
                 <dd>
-                  Markdown, JSON, PDF, DOCX, and PPTX all come from the same local transcript.
+                  The answer, its confidence, dissent, evidence and next actions, copied as
+                  Markdown.
                 </dd>
               </div>
               <div>
-                <dt>Logs</dt>
+                <dt>Board</dt>
                 <dd>
-                  Provider behavior, failures, and app events remain inspectable when things go
-                  wrong.
+                  Settled points, disagreements, evidence and open questions, rewritten every round.
+                </dd>
+              </div>
+              <div>
+                <dt>Hand-off</dt>
+                <dd>
+                  A brief with a next-steps checklist, plus the record, the document, the board and
+                  the session file. Markdown, PDF, DOCX, PPTX and a portable bundle export locally.
+                </dd>
+              </div>
+              <div>
+                <dt>Cost</dt>
+                <dd>
+                  An estimate before the run, a per-seat ledger during it, session and daily caps,
+                  and redacted diagnostics when something goes wrong.
                 </dd>
               </div>
             </dl>
@@ -236,7 +253,7 @@
           <figure class="visual-plane reveal">
             <img
               src="./assets/export-pipeline.svg"
-              alt="Export pipeline diagram showing transcript data flowing through stats and conflict calculation into local export formats."
+              alt="Diagram showing the record, board, rounds and ledger flowing through a local renderer into export formats and the hand-off folder."
             />
           </figure>
         </div>
@@ -249,7 +266,9 @@
             <h2>The repo is the product perimeter, so the install path is explicit by design.</h2>
             <p>
               Quick install exists for macOS. The manual path remains the source-of-truth for people
-              who want exact control over prerequisites, toolchains, and the desktop bundle.
+              who want exact control over prerequisites, toolchains, and the desktop bundle. The
+              terminal workstation installs on its own with
+              <code>cargo install socratic-council</code>.
             </p>
           </div>
 
@@ -281,7 +300,7 @@ cd socratic-council
               <ul>
                 <li>Node.js 22 or newer</li>
                 <li>pnpm 9.15.0 via corepack</li>
-                <li>Rust stable 1.77.2 or newer</li>
+                <li>Rust stable 1.82 or newer (1.88 for the CLI)</li>
                 <li>Tauri v2 platform prerequisites</li>
               </ul>
             </div>
@@ -301,20 +320,21 @@ cd socratic-council
           <div class="section-copy reveal">
             <p class="section-kicker">For builders</p>
             <h2>
-              The repo stays compact: one desktop shell, three shared packages, and a readable build
-              path.
+              The repo stays compact: one Rust engine, a desktop shell, a terminal CLI, and two
+              shared packages.
             </h2>
             <p>
-              The monorepo is small enough to reason about without ceremony. Desktop UI lives in
-              `apps/desktop`; orchestration, transport, and shared contracts live in the workspace
-              packages behind it.
+              The engine crate in `engine/` runs the deliberation for both surfaces. `apps/desktop`
+              hosts it behind a Tauri backend that brokers every outbound byte; `cli/` hosts it in a
+              ratatui TUI. `packages/shared` and `packages/core` hold the event types and the model
+              registry.
             </p>
           </div>
 
           <figure class="visual-plane reveal">
             <img
               src="./assets/architecture-diagram.svg"
-              alt="Architecture diagram showing the desktop app, core package, SDK package, shared package, and provider APIs."
+              alt="Architecture diagram showing the desktop app, the engine crate, the terminal CLI, and the provider APIs."
             />
           </figure>
 
@@ -323,9 +343,9 @@ cd socratic-council
               <h3>Core commands</h3>
               <pre><code>pnpm --filter @socratic-council/desktop tauri:dev
 pnpm --filter @socratic-council/desktop tauri:build
-pnpm test
-pnpm lint
-pnpm typecheck</code></pre>
+pnpm test &amp;&amp; pnpm lint &amp;&amp; pnpm typecheck
+cargo test --workspace
+cargo run -p socratic-council -- run "Is P = NP?"</code></pre>
             </div>
 
             <div class="builder-links">
@@ -343,6 +363,13 @@ pnpm typecheck</code></pre>
                 rel="noreferrer"
               >
                 Full README
+              </a>
+              <a
+                href="https://github.com/richer-richard/socratic-council/blob/main/cli/README.md"
+                target="_blank"
+                rel="noreferrer"
+              >
+                CLI README
               </a>
               <a
                 href="https://github.com/richer-richard/socratic-council/releases/latest"
@@ -366,7 +393,7 @@ pnpm typecheck</code></pre>
 
     <footer class="footer">
       <p>Socratic Council</p>
-      <p>Local-first desktop debate, shipped from source.</p>
+      <p>Local-first deliberation, shipped from source.</p>
       <p>&copy; <span data-year></span> Socratic Council Team</p>
     </footer>
 

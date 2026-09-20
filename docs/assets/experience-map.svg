@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 660" role="img" aria-labelledby="title desc" preserveAspectRatio="xMidYMid meet">
   <title id="title">Experience map: Socratic Council</title>
-  <desc id="desc">Left: the council — your topic at the center of two rings, eight provider-colored debaters on the inner ring, eight paired advisors on the outer ring. Right: the four surfaces the session produces — live debate, evidence, sense-making, and takeaways.</desc>
+  <desc id="desc">Left: the council — your topic at the center of a ring of eight provider-colored seats, with the moderator above and the utility slot below. Right: the four things a session produces — the framing, the rounds, the board, and the decision record with its hand-off folder.</desc>
   <defs>
     <style>
       .sans { font-family: -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; }
@@ -12,8 +12,9 @@
       .cardtitle { fill: #ECF0F6; font-size: 16.5px; font-weight: 650; }
       .cardbody  { fill: #AEB8CC; font-size: 13px; }
       .chip      { fill: #8B96AD; font-size: 11.5px; }
-      .pairname  { fill: #D7DEEA; font-size: 12.5px; font-weight: 600; }
+      .seatname  { fill: #D7DEEA; font-size: 12.5px; font-weight: 600; }
       .ringlabel { fill: #6B7690; font-size: 10.5px; letter-spacing: 1.6px; }
+      .slot      { fill: #F5C542; font-size: 10.5px; font-weight: 600; letter-spacing: 1.6px; }
       .footer    { fill: #6B7690; font-size: 11px; letter-spacing: 1.8px; }
     </style>
     <radialGradient id="bgGlow" cx="28%" cy="62%" r="55%">
@@ -37,60 +38,47 @@
   <!-- masthead -->
   <text x="64" y="58" class="mono tag">SOCRATIC COUNCIL</text>
   <text x="1136" y="58" class="mono meta" text-anchor="end">FIG. 01 — EXPERIENCE</text>
-  <text x="64" y="98" class="sans h1">Sixteen agents, one room, your question</text>
-  <text x="64" y="126" class="sans sub">Eight debaters argue in public. Eight paired advisors whisper private notes. A moderator keeps the room honest.</text>
+  <text x="64" y="98" class="sans h1">One question, a moderated council, a record you can act on</text>
+  <text x="64" y="126" class="sans sub">Eight seats from eight providers argue in structured rounds. A moderator plans, judges convergence and writes the record.</text>
 
-  <!-- ================= LEFT: COUNCIL RINGS (center 340,408) ================= -->
+  <!-- ================= LEFT: THE COUNCIL (center 340,408) ================= -->
   <circle cx="340" cy="408" r="208" fill="url(#topicGlow)"/>
-  <circle cx="340" cy="408" r="160" fill="none" stroke="#283349" stroke-dasharray="2 6"/>
-  <circle cx="340" cy="408" r="105" fill="none" stroke="#2E3A54"/>
+  <circle cx="340" cy="408" r="128" fill="none" stroke="#2E3A54"/>
 
-  <!-- pair links inner(105) -> outer(160) -->
+  <!-- spokes seat -> topic -->
   <g stroke="#3A4866" stroke-width="1" stroke-dasharray="3 4">
-    <line x1="340"    y1="303"    x2="340"    y2="248"/>
-    <line x1="414.25" y1="333.75" x2="453.14" y2="294.86"/>
-    <line x1="445"    y1="408"    x2="500"    y2="408"/>
-    <line x1="414.25" y1="482.25" x2="453.14" y2="521.14"/>
-    <line x1="340"    y1="513"    x2="340"    y2="568"/>
-    <line x1="265.75" y1="482.25" x2="226.86" y2="521.14"/>
-    <line x1="235"    y1="408"    x2="180"    y2="408"/>
-    <line x1="265.75" y1="333.75" x2="226.86" y2="294.86"/>
+    <line x1="340" y1="280" x2="340" y2="362"/>
+    <line x1="430.5" y1="317.5" x2="372.5" y2="375.5"/>
+    <line x1="468" y1="408" x2="386" y2="408"/>
+    <line x1="430.5" y1="498.5" x2="372.5" y2="440.5"/>
+    <line x1="340" y1="536" x2="340" y2="454"/>
+    <line x1="249.5" y1="498.5" x2="307.5" y2="440.5"/>
+    <line x1="212" y1="408" x2="294" y2="408"/>
+    <line x1="249.5" y1="317.5" x2="307.5" y2="375.5"/>
   </g>
 
-  <!-- inner debaters (r=105) -->
+  <!-- seats (r=128) -->
   <g stroke="#0A0E16" stroke-width="2">
-    <circle cx="340"    cy="303"    r="13" fill="#60A5FA"/>
-    <circle cx="414.25" cy="333.75" r="13" fill="#FBBF24"/>
-    <circle cx="445"    cy="408"    r="13" fill="#34D399"/>
-    <circle cx="414.25" cy="482.25" r="13" fill="#F87171"/>
-    <circle cx="340"    cy="513"    r="13" fill="#2DD4BF"/>
-    <circle cx="265.75" cy="482.25" r="13" fill="#22D3EE"/>
-    <circle cx="235"    cy="408"    r="13" fill="#F472B6"/>
-    <circle cx="265.75" cy="333.75" r="13" fill="#A78BFA"/>
+    <circle cx="340"   cy="280"   r="13" fill="#60A5FA"/>
+    <circle cx="430.5" cy="317.5" r="13" fill="#FBBF24"/>
+    <circle cx="468"   cy="408"   r="13" fill="#34D399"/>
+    <circle cx="430.5" cy="498.5" r="13" fill="#F87171"/>
+    <circle cx="340"   cy="536"   r="13" fill="#2DD4BF"/>
+    <circle cx="249.5" cy="498.5" r="13" fill="#22D3EE"/>
+    <circle cx="212"   cy="408"   r="13" fill="#F472B6"/>
+    <circle cx="249.5" cy="317.5" r="13" fill="#A78BFA"/>
   </g>
 
-  <!-- outer advisors (r=160), dimmer -->
-  <g stroke="#0A0E16" stroke-width="1.5" opacity="0.62">
-    <circle cx="340"    cy="248"    r="8" fill="#60A5FA"/>
-    <circle cx="453.14" cy="294.86" r="8" fill="#FBBF24"/>
-    <circle cx="500"    cy="408"    r="8" fill="#34D399"/>
-    <circle cx="453.14" cy="521.14" r="8" fill="#F87171"/>
-    <circle cx="340"    cy="568"    r="8" fill="#2DD4BF"/>
-    <circle cx="226.86" cy="521.14" r="8" fill="#22D3EE"/>
-    <circle cx="180"    cy="408"    r="8" fill="#F472B6"/>
-    <circle cx="226.86" cy="294.86" r="8" fill="#A78BFA"/>
-  </g>
-
-  <!-- pair labels (debater · advisor) -->
-  <g class="sans pairname">
-    <text x="340" y="226" text-anchor="middle">George · Greta</text>
-    <text x="470" y="280" text-anchor="start">Cathy · Clara</text>
-    <text x="522" y="412" text-anchor="start">Grace · Gaia</text>
-    <text x="470" y="544" text-anchor="start">Douglas · Dara</text>
-    <text x="340" y="596" text-anchor="middle">Kate · Kira</text>
-    <text x="210" y="544" text-anchor="end">Quinn · Quincy</text>
-    <text x="158" y="412" text-anchor="end">Mary · Mila</text>
-    <text x="210" y="280" text-anchor="end">Zara · Zoe</text>
+  <!-- seat labels -->
+  <g class="sans seatname">
+    <text x="340" y="262" text-anchor="middle">George · OpenAI</text>
+    <text x="450" y="308" text-anchor="start">Cathy · Anthropic</text>
+    <text x="490" y="412" text-anchor="start">Grace · Google</text>
+    <text x="450" y="520" text-anchor="start">Douglas · DeepSeek</text>
+    <text x="340" y="566" text-anchor="middle">Kate · Kimi</text>
+    <text x="230" y="520" text-anchor="end">Quinn · Qwen</text>
+    <text x="190" y="412" text-anchor="end">Mary · MiniMax</text>
+    <text x="230" y="308" text-anchor="end">Zara · Z.AI</text>
   </g>
 
   <!-- topic core -->
@@ -98,57 +86,61 @@
   <text x="340" y="404" class="sans" font-size="15.5" font-weight="650" fill="#F2F5FA" text-anchor="middle">Topic</text>
   <text x="340" y="422" class="mono" font-size="9.5" fill="#8B96AD" text-anchor="middle" letter-spacing="1.2">+ FILES</text>
 
-  <!-- ring labels -->
-  <text x="340" y="338" class="mono ringlabel" text-anchor="middle">DEBATERS</text>
-  <text x="340" y="180" class="mono ringlabel" text-anchor="middle" opacity="0.9">ADVISORS — PRIVATE NOTES</text>
+  <!-- slots above and below the ring -->
+  <g>
+    <rect x="262" y="196" width="156" height="30" rx="15" fill="#161408" stroke="#F5C542" stroke-width="1"/>
+    <text x="340" y="215" class="mono slot" text-anchor="middle">MODERATOR · PLANS</text>
+    <rect x="262" y="590" width="156" height="30" rx="15" fill="#0E1422" stroke="#3A4866" stroke-width="1"/>
+    <text x="340" y="609" class="mono ringlabel" text-anchor="middle">UTILITY · THE BOARD</text>
+  </g>
 
-  <!-- ================= RIGHT: FOUR SURFACES ================= -->
-  <!-- I. LIVE DEBATE -->
+  <!-- ================= RIGHT: FOUR PRODUCTS ================= -->
+  <!-- I. FRAMING -->
   <g transform="translate(640,176)">
     <rect width="496" height="96" rx="12" fill="#121826" stroke="#283349"/>
     <rect x="0" y="0" width="3.5" height="96" rx="1.75" fill="#F5C542"/>
     <text x="24" y="30" class="mono meta">I</text>
-    <text x="46" y="31" class="sans cardtitle">Live debate</text>
-    <text x="46" y="55" class="sans cardbody">Streaming turns with quotes and reactions, advisor whispers,</text>
-    <text x="46" y="74" class="sans cardbody">moderator framing and synthesis, end-of-session vote.</text>
-    <text x="472" y="31" class="mono chip" text-anchor="end">@quote · @react · @end</text>
+    <text x="54" y="31" class="sans cardtitle">Framing</text>
+    <text x="54" y="55" class="sans cardbody">The moderator writes the plan: the deliverable, the question,</text>
+    <text x="54" y="74" class="sans cardbody">the options, who leads and who supports, a lens per seat.</text>
+    <text x="472" y="31" class="mono chip" text-anchor="end">plan · estimate</text>
   </g>
 
-  <!-- II. EVIDENCE -->
+  <!-- II. ROUNDS -->
   <g transform="translate(640,288)">
     <rect width="496" height="96" rx="12" fill="#121826" stroke="#283349"/>
     <rect x="0" y="0" width="3.5" height="96" rx="1.75" fill="#60A5FA"/>
     <text x="24" y="30" class="mono meta">II</text>
-    <text x="46" y="31" class="sans cardtitle">Evidence</text>
-    <text x="46" y="55" class="sans cardbody">Oracle web search, file search over encrypted attachments,</text>
-    <text x="46" y="74" class="sans cardbody">claim verification graded into fact-check badges.</text>
-    <text x="472" y="31" class="mono chip" text-anchor="end">@tool(oracle.*)</text>
+    <text x="54" y="31" class="sans cardtitle">Rounds</text>
+    <text x="54" y="55" class="sans cardbody">Independent positions in parallel, then cross-examination with</text>
+    <text x="54" y="74" class="sans cardbody">tools: search, claim checks, attachments, files, a sandboxed shell.</text>
+    <text x="472" y="31" class="mono chip" text-anchor="end">positions · cross-exam</text>
   </g>
 
-  <!-- III. SENSE-MAKING -->
+  <!-- III. BOARD -->
   <g transform="translate(640,400)">
     <rect width="496" height="96" rx="12" fill="#121826" stroke="#283349"/>
     <rect x="0" y="0" width="3.5" height="96" rx="1.75" fill="#34D399"/>
     <text x="24" y="30" class="mono meta">III</text>
-    <text x="46" y="31" class="sans cardtitle">Sense-making</text>
-    <text x="46" y="55" class="sans cardbody">A living argument map, pairwise conflict graph, peer-eval</text>
-    <text x="46" y="74" class="sans cardbody">scorecard, and a cited deep-research report.</text>
-    <text x="472" y="31" class="mono chip" text-anchor="end">claims → rebuttals</text>
+    <text x="54" y="31" class="sans cardtitle">Board</text>
+    <text x="54" y="55" class="sans cardbody">Rewritten after every round: what is settled, what is disputed,</text>
+    <text x="54" y="74" class="sans cardbody">the evidence, the open questions; the moderator judges convergence.</text>
+    <text x="472" y="31" class="mono chip" text-anchor="end">settled · disputed</text>
   </g>
 
-  <!-- IV. TAKEAWAYS -->
+  <!-- IV. RECORD -->
   <g transform="translate(640,512)">
     <rect width="496" height="96" rx="12" fill="#121826" stroke="#283349"/>
     <rect x="0" y="0" width="3.5" height="96" rx="1.75" fill="#F472B6"/>
     <text x="24" y="30" class="mono meta">IV</text>
-    <text x="46" y="31" class="sans cardtitle">Takeaways</text>
-    <text x="46" y="55" class="sans cardbody">Markdown, PDF, DOCX, PPTX, or a portable .scbundle archive —</text>
-    <text x="46" y="74" class="sans cardbody">with the cost ledger and per-session budgets alongside.</text>
-    <text x="472" y="31" class="mono chip" text-anchor="end">exports · budgets</text>
+    <text x="54" y="31" class="sans cardtitle">Record</text>
+    <text x="54" y="55" class="sans cardbody">The answer with its confidence, the votes, the dissent and why</text>
+    <text x="54" y="74" class="sans cardbody">it lost, what changed, evidence, next actions, a hand-off folder.</text>
+    <text x="472" y="31" class="mono chip" text-anchor="end">record · hand-off</text>
   </g>
 
   <!-- footer -->
   <line x1="64" y1="630" x2="1136" y2="630" stroke="#222B3F"/>
-  <text x="64" y="650" class="mono footer">8 PROVIDERS · 16 AGENTS + MODERATOR</text>
+  <text x="64" y="650" class="mono footer">8 PROVIDERS · ANY MODEL PER SEAT · ONE RUST ENGINE</text>
   <text x="1136" y="650" class="mono footer" text-anchor="end">EVERYTHING RUNS LOCALLY</text>
 </svg>

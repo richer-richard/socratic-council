@@ -120,7 +120,7 @@ For the current manual installation guide, see [Build from source (manual instal
   - [Verification checklist](#verification-checklist)
 - [How it works](#how-it-works)
   - [Architecture](#architecture)
-  - [Conversation loop](#conversation-loop)
+  - [Deliberation protocol](#deliberation-protocol)
   - [Export pipeline](#export-pipeline)
 - [First run setup](#first-run-setup)
   - [API keys](#api-keys)
@@ -132,7 +132,7 @@ For the current manual installation guide, see [Build from source (manual instal
   - [Session](#session)
   - [Export](#export)
   - [Logs](#logs)
-- [Tool calling (oracle)](#tool-calling-oracle)
+- [Tools](#tools)
 - [Troubleshooting](#troubleshooting)
 - [Developer workflows](#developer-workflows)
 - [Terminal CLI](#terminal-cli)
@@ -154,15 +154,15 @@ This is the current manual installation guide for the repo. If you do not want t
 | Quick install  | You want the macOS app installed as fast as possible           | `./install.sh`  |
 | Manual install | You want explicit control over dependencies and build commands | Steps 1-7 below |
 
-| Dependency               | Minimum version                  | Why                                                                            |
-| ------------------------ | -------------------------------- | ------------------------------------------------------------------------------ |
-| **Git**                  | any recent                       | Clone the repository                                                           |
-| **Node.js**              | **≥ 22.0.0**                     | Run the frontend toolchain (Vite, TypeScript, build scripts)                   |
-| **pnpm**                 | **9.15.0** (exact, via corepack) | Workspace package manager. The repo's `packageManager` field pins this version |
-| **Rust**                 | **stable ≥ 1.77.2**              | Compile the Tauri v2 native backend                                            |
-| **Tauri v2 system deps** | (per OS, see below)              | WebView, native build tools                                                    |
+| Dependency               | Minimum version                      | Why                                                                            |
+| ------------------------ | ------------------------------------ | ------------------------------------------------------------------------------ |
+| **Git**                  | any recent                           | Clone the repository                                                           |
+| **Node.js**              | **≥ 22.0.0**                         | Run the frontend toolchain (Vite, TypeScript, build scripts)                   |
+| **pnpm**                 | **9.15.0** (exact, via corepack)     | Workspace package manager. The repo's `packageManager` field pins this version |
+| **Rust**                 | **stable ≥ 1.82** (1.88 for the CLI) | Compile the engine crate and the Tauri v2 native backend                       |
+| **Tauri v2 system deps** | (per OS, see below)                  | WebView, native build tools                                                    |
 
-The Tauri CLI (`@tauri-apps/cli ^2.5.0`) is declared as a devDependency and installed automatically by `pnpm install`, so you do **not** install it globally.
+The Tauri CLI (`@tauri-apps/cli ^2.11`) is declared as a devDependency and installed automatically by `pnpm install`, so you do **not** install it globally.
 
 ---
 
@@ -338,7 +338,7 @@ corepack -v
 
 ### Step 3: Install Rust
 
-Tauri v2 compiles a Rust binary as the native backend. You need a **stable** Rust toolchain ≥ 1.77.2.
+Tauri v2 compiles a Rust binary as the native backend. You need a **stable** Rust toolchain ≥ 1.82 (≥ 1.88 to build the terminal CLI).
 
 **macOS / Linux:**
 
@@ -370,10 +370,10 @@ rustup default stable-msvc
 
 ```bash
 rustc -V
-# expected: rustc 1.77.2 (or newer)
+# expected: rustc 1.82.0 (or newer)
 
 cargo -V
-# expected: cargo 1.77.2 (or newer)
+# expected: cargo 1.82.0 (or newer)
 
 rustup show
 # look for: "stable" and your platform triple (e.g. aarch64-apple-darwin, x86_64-pc-windows-msvc)
@@ -476,7 +476,6 @@ pnpm --filter @socratic-council/desktop tauri:build
 1. Tauri CLI starts (`tauri build`).
 2. Tauri runs the `beforeBuildCommand` from `tauri.conf.json`, which is `pnpm build`. This:
    - Builds `@socratic-council/shared` (TypeScript → JS via tsup)
-   - Builds `@socratic-council/sdk` (TypeScript → JS via tsup)
    - Builds `@socratic-council/core` (TypeScript → JS via tsup)
    - Runs `tsc` type-checking on the desktop frontend
    - Runs `vite build` to produce the optimized frontend bundle in `apps/desktop/dist/`
@@ -521,7 +520,7 @@ pnpm -v
 
 # 4. Rust compiler
 rustc -V
-# ✓ must be 1.77.2 or higher
+# ✓ must be 1.82 or higher (1.88 for the CLI)
 
 # 5. Cargo
 cargo -V
@@ -556,7 +555,7 @@ Socratic Council is a pnpm monorepo (the desktop app and two shared TypeScript p
 
 The moderator reads the topic and writes a plan: the deliverable (decision, analysis, document or review), the exact question, the options, who leads and who supports (hard work to strong models, small tasks to fast ones), a lens per seat so positions diverge, optional prep subtasks, and, when the topic is ambiguous, one clarifying question for you. After a cost estimate, the seats write independent positions in parallel, then cross-examine each other with tools (attachments, web search, claim verification, workspace files, an optional sandboxed shell). A fast utility model rewrites the board after each round and the moderator judges convergence; when the seats stop moving, a revision round collects final positions and votes and the moderator writes the record. Every phase is persisted, so a run you stop early still has its board and rounds.
 
-![Conversation loop diagram](docs/assets/conversation-loop.svg)
+![Deliberation protocol diagram](docs/assets/conversation-loop.svg)
 
 ### Export pipeline
 

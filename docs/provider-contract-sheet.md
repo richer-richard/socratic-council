@@ -3,7 +3,7 @@
 Updated: 2026-09-19. Every row below was read from the provider's published
 docs on that date with `curl` (WebFetch stalls on these hosts). When docs and
 existing behaviour conflict, docs win. The Rust table that encodes this sheet
-is `cli/src/catalog/rows.rs` (`catalog_rows`, `family_contract`); the request
+is `engine/src/catalog/rows.rs` (`catalog_rows`, `family_contract`); the request
 builders in `cli/src/providers/mod.rs` read the contract from it.
 
 Prices are USD per million tokens at the standard tier. CNY list prices are
@@ -241,5 +241,5 @@ Sources: docs.bigmodel.cn/cn/guide/start/pricing, .../start/model-overview,
 ## Unknown ids
 
 Ids the table does not know inherit their family's contract by prefix
-(`family_contract` in `cli/src/catalog/rows.rs`) and stay unpriced; the
+(`family_contract` in `engine/src/catalog/rows.rs`) and stay unpriced; the
 ledger reports them as an unpriced lower bound. Never guess a price.
