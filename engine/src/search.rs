@@ -515,7 +515,9 @@ async fn fetch(http: &reqwest::Client, attempt: &SearchAttempt) -> Vec<SearchRes
         if !resp.status().is_success() {
             return None;
         }
-        resp.text().await.ok()
+        crate::providers::read_capped(resp, crate::providers::BODY_CAP)
+            .await
+            .ok()
     };
     match tokio::time::timeout(ATTEMPT_TIMEOUT, fut).await {
         Ok(Some(body)) => filter_relevant(&attempt.query, (attempt.parse)(&body)),

@@ -416,7 +416,18 @@ impl SessionView {
 
 fn scrub_call(mut call: ToolCall) -> ToolCall {
     call.name = scrub(&call.name);
+    scrub_value(&mut call.arguments);
     call
+}
+
+/// Every string inside a tool call's arguments is model output: scrub them.
+fn scrub_value(v: &mut serde_json::Value) {
+    match v {
+        serde_json::Value::String(s) => *s = scrub(s),
+        serde_json::Value::Array(items) => items.iter_mut().for_each(scrub_value),
+        serde_json::Value::Object(map) => map.values_mut().for_each(scrub_value),
+        _ => {}
+    }
 }
 
 #[cfg(test)]

@@ -60,9 +60,9 @@ pub fn sandbox_profile(workspace: &Path, tmp: &Path) -> String {
 (allow file-read-metadata)
 (allow file-read* (literal "/") (subpath "/usr") (subpath "/bin") (subpath "/sbin") (subpath "/System") (subpath "/Library") (subpath "/private/etc") (subpath "/private/var/db") (subpath "/dev") (subpath "/opt/homebrew") (subpath "{ws}") (subpath "{tmp}"){dev})
 (deny file-read* (subpath "/Library/Keychains") (subpath "/private/var/db/dslocal") (subpath "/Library/Application Support/com.apple.TCC"))
+(deny file-read* file-write* (literal "/dev/tty"))
 (allow file-write* (subpath "{ws}") (subpath "{tmp}") (literal "/dev/null"))
 (allow file-read* file-write* (regex #"^/private/tmp/xcrun_db(-[A-Za-z0-9]+)?$") (regex #"^/private/var/folders/[^/]+/[^/]+/T/xcrun_db(-[A-Za-z0-9]+)?$"))
-(allow file-write-data (literal "/dev/tty"))
 (allow mach-lookup (global-name "com.apple.system.opendirectoryd.libinfo") (global-name "com.apple.system.opendirectoryd.membership") (global-name "com.apple.system.logger") (global-name "com.apple.system.notification_center"))
 (deny network*)
 "#
@@ -396,6 +396,10 @@ mod tests {
         assert!(p.contains("(allow file-write* (subpath \"/tmp/ws\")"));
         assert!(p.starts_with("(version 1)\n(deny default)"));
         assert!(p.contains("(deny file-read* (subpath \"/Library/Keychains\")"));
+        // The controlling terminal is off limits: nothing a model runs can
+        // write escapes or read keystrokes past the captured pipes.
+        assert!(p.contains("(deny file-read* file-write* (literal \"/dev/tty\"))"));
+        assert!(!p.contains("(allow file-write-data (literal \"/dev/tty\"))"));
         assert!(p.contains("/private/var/db/dslocal"));
         assert!(p.contains(
             "(allow file-read* file-write* (regex #\"^/private/tmp/xcrun_db(-[A-Za-z0-9]+)?$\")"

@@ -1,8 +1,11 @@
 //! `socratic-council` CLI entry point.
 
+#![forbid(unsafe_code)]
+
 use clap::{Parser, Subcommand};
 use socratic_council::catalog::{catalog_models, model_row, DiscoveredModel, ModelSource};
 use socratic_council::config::{parse_seats_flag, select_roster, Config, Preset};
+use socratic_council::deliberation::plan::MAX_ROUNDS;
 use socratic_council::deliberation::{
     record, DebateEvent, Deliberation, Deliverable, EngineInput, Recommend,
 };
@@ -311,7 +314,10 @@ fn apply_run_flags(config: &mut Config, args: &RunArgs) -> anyhow::Result<()> {
         t.record = tier;
     }
     if let Some(rounds) = args.rounds {
-        anyhow::ensure!((1..=6).contains(&rounds), "--rounds must be 1..6");
+        anyhow::ensure!(
+            (1..=MAX_ROUNDS).contains(&rounds),
+            "--rounds must be 1..{MAX_ROUNDS}"
+        );
         config.protocol.max_rounds = rounds;
     }
     if let Some(level) = &args.tools {
@@ -437,7 +443,7 @@ async fn cmd_run(args: RunArgs) -> anyhow::Result<()> {
         None => None,
     };
 
-    let http = http_client(config.proxy.as_deref());
+    let http = http_client(config.proxy.as_deref()).map_err(anyhow::Error::msg)?;
 
     // The available-models map for every allowed provider. Catalog is offline
     // and free; only `--scan` the providers that have a key, keeping each
@@ -703,16 +709,15 @@ async fn run_plain(
             } => {
                 let name = names.get(&seat_id).cloned().unwrap_or(seat_id);
                 let shown: String = clean(&output).chars().take(200).collect();
+                let tool = clean(&call.name);
                 match error {
                     Some(e) => println!(
-                        "  ⚙ {name} {}({}) → ERROR {}",
-                        call.name,
+                        "  ⚙ {name} {tool}({}) → ERROR {}",
                         clean(&call.arguments.to_string()),
                         clean(&e)
                     ),
                     None => println!(
-                        "  ⚙ {name} {}({}) → {shown}",
-                        call.name,
+                        "  ⚙ {name} {tool}({}) → {shown}",
                         clean(&call.arguments.to_string())
                     ),
                 }
@@ -749,7 +754,12 @@ async fn run_plain(
                     if convergence.moved.is_empty() {
                         "nobody".to_string()
                     } else {
-                        convergence.moved.join(", ")
+                        convergence
+                            .moved
+                            .iter()
+                            .map(|m| clean(m))
+                            .collect::<Vec<_>>()
+                            .join(", ")
                     },
                     clean(&convergence.why)
                 );
@@ -795,7 +805,7 @@ async fn run_plain(
 
 async fn cmd_models(provider: Option<String>, scan: bool) -> anyhow::Result<()> {
     let config = Config::load()?;
-    let http = http_client(config.proxy.as_deref());
+    let http = http_client(config.proxy.as_deref()).map_err(anyhow::Error::msg)?;
     let providers: Vec<Provider> = match provider {
         Some(slug) => vec![Provider::from_slug(&slug)
             .ok_or_else(|| anyhow::anyhow!("unknown provider: {slug}"))?],
@@ -838,7 +848,7 @@ async fn cmd_models(provider: Option<String>, scan: bool) -> anyhow::Result<()> 
 /// `socratic-council search <query>`: what a seat gets back from the search chain.
 async fn cmd_search(query: &str) -> anyhow::Result<()> {
     let config = Config::load()?;
-    let http = http_client(config.proxy.as_deref());
+    let http = http_client(config.proxy.as_deref()).map_err(anyhow::Error::msg)?;
     let query = socratic_council::tools::web::guard_outbound_query(query, &[])
         .map_err(anyhow::Error::msg)?;
     let started = std::time::Instant::now();
@@ -885,7 +895,7 @@ async fn cmd_probe(
     use socratic_council::types::{ChatMessage, CompletionChunk, CompletionRequest, StopReason};
 
     let config = Config::load()?;
-    let http = http_client(config.proxy.as_deref());
+    let http = http_client(config.proxy.as_deref()).map_err(anyhow::Error::msg)?;
     let tier = tier.unwrap_or(config.council_tier);
     let providers: Vec<Provider> = match provider {
         Some(slug) => vec![Provider::from_slug(&slug)

@@ -365,12 +365,24 @@ impl InputHub {
 
     /// Wait for the reply to `id`; `None` on cancel.
     pub async fn wait(&self, id: String) -> Option<Reply> {
-        if self.is_cancelled() {
-            return None;
-        }
         let (tx, rx) = oneshot::channel();
-        if let Ok(mut p) = self.pending.lock() {
-            p.insert(id, tx);
+        {
+            // The cancel check and the insert share the lock the cancel
+            // handler clears under, so a cancel cannot slip between them
+            // and leave a sender the clear never reached.
+            let Ok(mut p) = self.pending.lock() else {
+                return None;
+            };
+            if self.is_cancelled() {
+                return None;
+            }
+            p.insert(id.clone(), tx);
+        }
+        if self.is_cancelled() {
+            if let Ok(mut p) = self.pending.lock() {
+                p.remove(&id);
+            }
+            return None;
         }
         rx.await.ok()
     }
@@ -387,6 +399,26 @@ impl InputHub {
     fn stop(&self) {
         self.stopped.store(true, Ordering::Relaxed);
     }
+}
+
+/// The first endpoint that fails `providers::check_base_url`, named by
+/// provider (the URL itself is never echoed: it may carry credentials).
+fn base_url_problem(seats: &[SeatSpec], slots: &[&ModeratorSpec]) -> Option<String> {
+    seats
+        .iter()
+        .map(|s| (s.provider, s.base_url.as_str()))
+        .chain(slots.iter().map(|m| (m.provider, m.base_url.as_str())))
+        .find_map(|(provider, url)| {
+            crate::providers::check_base_url(url)
+                .err()
+                .map(|e| format!("{}: {e}", provider.slug()))
+        })
+}
+
+/// A rough token count (four characters per token) for usage the provider
+/// never reported.
+fn approx_tokens(s: &str) -> u64 {
+    (s.chars().count() as u64).div_ceil(4)
 }
 
 // ---------------------------------------------------------------------------
@@ -626,6 +658,18 @@ impl Deliberation {
         let utility = self
             .pick_slot(&this.config.utility, ReasoningTier::Low)
             .or_else(|| moderator.clone());
+        // Every endpoint this run would talk to passes the transport policy
+        // before any key leaves the process.
+        let slots: Vec<&ModeratorSpec> = moderator.iter().chain(utility.iter()).collect();
+        if let Some(problem) = base_url_problem(&seats, &slots) {
+            send(DebateEvent::Error {
+                message: format!("refusing to start: {problem}"),
+            });
+            send(DebateEvent::Done {
+                session_id: session_id.clone(),
+            });
+            return this.session_json(&session_id, created_at, &state, &ledger, "failed");
+        }
         let attachments_summary = context_summary(&this.attachments);
         let has_attachments = !this.attachments.is_empty();
         let tool_names: Vec<String> = tools::specs_for(&this.config.tools, has_attachments)
@@ -633,6 +677,15 @@ impl Deliberation {
             .map(|s| s.name)
             .collect();
         let _ = std::fs::create_dir_all(&this.config.workspace);
+        #[cfg(unix)]
+        {
+            // Seats write here and the hand-off lands here: owner-only.
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(
+                &this.config.workspace,
+                std::fs::Permissions::from_mode(0o700),
+            );
+        }
         let tiers = this.config.protocol.tiers;
 
         // A cost snapshot plus the budget check, after anything billable.
@@ -799,7 +852,17 @@ impl Deliberation {
                 .unwrap_or_default(),
             at_ms: now_ms(),
         });
-        this.persist(&session_id, created_at, &state, &ledger, "active");
+        this.persist(
+            &session_id,
+            created_at,
+            &state,
+            &ledger,
+            if hub.is_cancelled() {
+                "stopped"
+            } else {
+                "active"
+            },
+        );
 
         let principals: Vec<SeatSpec> = plan
             .principals()
@@ -914,7 +977,17 @@ impl Deliberation {
             send(DebateEvent::Board {
                 board: state.board.clone(),
             });
-            this.persist(&session_id, created_at, &state, &ledger, "active");
+            this.persist(
+                &session_id,
+                created_at,
+                &state,
+                &ledger,
+                if hub.is_cancelled() {
+                    "stopped"
+                } else {
+                    "active"
+                },
+            );
         }
 
         // ---- Positions -----------------------------------------------------
@@ -990,7 +1063,17 @@ impl Deliberation {
             send(DebateEvent::Board {
                 board: state.board.clone(),
             });
-            this.persist(&session_id, created_at, &state, &ledger, "active");
+            this.persist(
+                &session_id,
+                created_at,
+                &state,
+                &ledger,
+                if hub.is_cancelled() {
+                    "stopped"
+                } else {
+                    "active"
+                },
+            );
         }
         let first_positions_text = prompts::positions_text(&state.positions, &names, None);
 
@@ -1145,13 +1228,33 @@ impl Deliberation {
                 let rec = conv.recommend;
                 state.convergences.push(conv);
                 settle(&ledger, &mut state, &hub);
-                this.persist(&session_id, created_at, &state, &ledger, "active");
+                this.persist(
+                    &session_id,
+                    created_at,
+                    &state,
+                    &ledger,
+                    if hub.is_cancelled() {
+                        "stopped"
+                    } else {
+                        "active"
+                    },
+                );
                 match rec {
                     Recommend::Close | Recommend::Revise => break,
                     Recommend::AnotherRound => continue,
                 }
             } else {
-                this.persist(&session_id, created_at, &state, &ledger, "active");
+                this.persist(
+                    &session_id,
+                    created_at,
+                    &state,
+                    &ledger,
+                    if hub.is_cancelled() {
+                        "stopped"
+                    } else {
+                        "active"
+                    },
+                );
                 break;
             }
         }
@@ -1250,7 +1353,17 @@ impl Deliberation {
             }
             state.rounds.push(log);
             settle(&ledger, &mut state, &hub);
-            this.persist(&session_id, created_at, &state, &ledger, "active");
+            this.persist(
+                &session_id,
+                created_at,
+                &state,
+                &ledger,
+                if hub.is_cancelled() {
+                    "stopped"
+                } else {
+                    "active"
+                },
+            );
         }
 
         // ---- Record ----------------------------------------------------------
@@ -1539,15 +1652,31 @@ impl Deliberation {
                 let _ = ctx.tx.send(DebateEvent::Error {
                     message: format!("{} produced no answer this round", seat.name),
                 });
+                Self::seat_failed(ctx, seat, round);
                 None
             }
             Err(e) => {
                 let _ = ctx.tx.send(DebateEvent::Error {
                     message: format!("{} failed: {e}", seat.name),
                 });
+                Self::seat_failed(ctx, seat, round);
                 None
             }
         }
+    }
+
+    /// The `SeatFinished` a failed turn still owes the reducers, so the seat
+    /// is not shown as generating until the run ends (the reducers keep any
+    /// text that streamed and mark the turn done).
+    fn seat_failed(ctx: &seat_turn::TurnCtx<'_>, seat: &SeatSpec, round: RoundKind) {
+        let _ = ctx.tx.send(DebateEvent::SeatFinished {
+            seat_id: seat.id.clone(),
+            name: seat.name.clone(),
+            round,
+            usage: crate::types::Usage::default(),
+            content: String::new(),
+            structured: json!({}),
+        });
     }
 
     /// A moderator or utility call: bounded, billed, text returned.
@@ -1583,15 +1712,28 @@ impl Deliberation {
                 &req,
                 &mut on_chunk,
             );
-            tokio::time::timeout(MODERATOR_TIMEOUT, fut)
-                .await
-                .ok()?
-                .ok()?
+            tokio::time::timeout(MODERATOR_TIMEOUT, fut).await
         };
         let (lane, name) = if lane_id == "utility" {
             (CostLane::Utility, "Utility")
         } else {
             (CostLane::Moderator, "Moderator")
+        };
+        let outcome = match outcome {
+            Ok(Ok(outcome)) => outcome,
+            Ok(Err(_)) | Err(_) => {
+                // The provider billed whatever streamed before the timeout or
+                // error: keep an estimate in the ledger so the caps still trip.
+                let usage = crate::types::Usage {
+                    input: approx_tokens(system) + approx_tokens(user),
+                    output: approx_tokens(&text),
+                    ..Default::default()
+                };
+                if let Ok(mut l) = ledger.lock() {
+                    l.record(lane_id, name, lane, &m.model, usage);
+                }
+                return None;
+            }
         };
         if let Ok(mut l) = ledger.lock() {
             l.record(lane_id, name, lane, &m.model, outcome.usage);

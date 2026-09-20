@@ -63,6 +63,10 @@ fn add(usage: &mut Usage, u: Usage) {
     usage.cache_write += u.cache_write;
 }
 
+/// Appended to the results of the last allowed tool round so the model
+/// answers instead of asking for more.
+const LAST_ROUND_NOTE: &str = "\n\n(This was the last tool round for this turn; no further calls will run — write your answer now.)";
+
 /// Run one turn. Streams live tokens when `live`, runs at most
 /// `policy.max_calls_per_turn` tool calls per model round and
 /// `policy.max_iterations` rounds, asks for approval when the policy says so,
@@ -84,6 +88,7 @@ pub async fn run_seat_turn(
     let mut outcome = TurnOutcome::default();
     let mut tier = tier;
     let mut retried_empty = false;
+    let mut refused_after_budget = false;
     let max_iterations = ctx.policy.max_iterations.max(1) as usize;
     let mut iteration = 0usize;
 
@@ -98,11 +103,9 @@ pub async fn run_seat_turn(
             max_tokens: SEAT_MAX_TOKENS,
             temperature: 1.0,
             tier,
-            tools: if iteration < max_iterations {
-                tools.clone()
-            } else {
-                Vec::new()
-            },
+            // Always defined: a transcript that carries tool calls and
+            // results is rejected by the Messages API without them.
+            tools: tools.clone(),
             cache_key: ctx.cache_key.clone(),
         };
         let tx = ctx.tx.clone();
@@ -139,8 +142,31 @@ pub async fn run_seat_turn(
         outcome.thinking.push_str(&result.thinking);
 
         let wants_tools = result.stop == StopReason::ToolUse && !result.tool_calls.is_empty();
+        if wants_tools && iteration >= max_iterations && !refused_after_budget {
+            // Out of tool rounds but the model asked for more: answer every
+            // call with a refusal (a tool call left unanswered invalidates the
+            // transcript) and let it write its answer in one more reply.
+            refused_after_budget = true;
+            let calls = result.tool_calls;
+            messages.push(
+                ChatMessage::assistant_with_calls(result.text.clone(), calls.clone())
+                    .with_thinking_blocks(result.thinking_blocks.clone()),
+            );
+            for call in calls {
+                let out = tools::ToolOutput::error(format!(
+                    "the tool budget for this turn ({max_iterations} rounds of calls) is spent; no more calls will run — answer with what you have"
+                ));
+                messages.push(ChatMessage::tool(
+                    call.id.clone(),
+                    call.name.clone(),
+                    tools::fenced(&call, &out),
+                ));
+            }
+            continue;
+        }
         if wants_tools && iteration < max_iterations {
             iteration += 1;
+            let last_round = iteration >= max_iterations;
             let mut calls = result.tool_calls;
             let budget = ctx.policy.max_calls_per_turn.max(1) as usize;
             let overflow: Vec<ToolCall> = if calls.len() > budget {
@@ -151,7 +177,8 @@ pub async fn run_seat_turn(
             let assistant = ChatMessage::assistant_with_calls(
                 result.text.clone(),
                 calls.iter().chain(overflow.iter()).cloned().collect(),
-            );
+            )
+            .with_thinking_blocks(result.thinking_blocks.clone());
             messages.push(assistant);
             for call in calls {
                 let out = if ctx.policy.approval == tools::Approval::Ask {
@@ -175,7 +202,10 @@ pub async fn run_seat_turn(
                 } else {
                     tools::execute(&call, ctx.policy, &ctx.tools).await
                 };
-                let fenced = tools::fenced(&call, &out);
+                let mut fenced = tools::fenced(&call, &out);
+                if last_round {
+                    fenced.push_str(LAST_ROUND_NOTE);
+                }
                 let _ = ctx.tx.send(DebateEvent::ToolCall {
                     seat_id: seat.id.clone(),
                     call: call.clone(),

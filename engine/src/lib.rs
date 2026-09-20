@@ -8,6 +8,8 @@
 //! desktop app drive this crate through `deliberation::Deliberation` and
 //! render its `DebateEvent` stream.
 
+#![forbid(unsafe_code)]
+
 pub mod attach;
 pub mod catalog;
 pub mod cost;
@@ -22,18 +24,26 @@ pub mod text;
 pub mod tools;
 pub mod types;
 
-/// Build an HTTP client, optionally routed through a proxy URL. A connect +
-/// overall request timeout means a stalled provider eventually errors (the
-/// turn fails gracefully) instead of hanging the whole session forever.
-pub fn http_client(proxy: Option<&str>) -> reqwest::Client {
+/// Build the HTTP client every provider and search call goes through.
+/// Redirects are never followed (one could carry the key headers to another
+/// host); a connect + overall timeout means a stalled provider eventually
+/// errors instead of hanging the session; and a proxy URL that cannot be
+/// parsed is an error, never a silent direct connection.
+pub fn http_client(proxy: Option<&str>) -> Result<reqwest::Client, String> {
     let mut builder = reqwest::Client::builder()
         .user_agent("socratic-council")
+        .redirect(reqwest::redirect::Policy::none())
         .connect_timeout(std::time::Duration::from_secs(30))
         .timeout(std::time::Duration::from_secs(300));
-    if let Some(p) = proxy {
-        if let Ok(px) = reqwest::Proxy::all(p) {
-            builder = builder.proxy(px);
-        }
+    if let Some(p) = proxy.map(str::trim).filter(|p| !p.is_empty()) {
+        // The URL may carry credentials: never echo it.
+        let px = reqwest::Proxy::all(p).map_err(|_| {
+            "the proxy URL could not be parsed (expected http(s)://host:port or socks5://host:port)"
+                .to_string()
+        })?;
+        builder = builder.proxy(px);
     }
-    builder.build().unwrap_or_default()
+    builder
+        .build()
+        .map_err(|_| "the HTTP client could not be built".to_string())
 }

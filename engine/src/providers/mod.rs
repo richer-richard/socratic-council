@@ -6,6 +6,7 @@ pub mod scan;
 pub mod sse;
 
 use crate::error::{Error, Result};
+use crate::types::ThinkingBlock;
 use crate::types::{
     ChatMessage, CompletionChunk, CompletionOutcome, CompletionRequest, Provider, ReasoningTier,
     Role, StopReason, ToolCall, Usage,
@@ -197,6 +198,12 @@ fn messages_turns(messages: &[ChatMessage]) -> Vec<Value> {
                     out.push(json!({ "role": "assistant", "content": m.content }));
                 } else {
                     let mut blocks = Vec::new();
+                    // With thinking on, the API checks that the assistant turn
+                    // carrying tool calls starts with the (signed) reasoning it
+                    // produced; replay it verbatim.
+                    for b in &m.thinking_blocks {
+                        blocks.push(serde_json::to_value(b).unwrap_or_default());
+                    }
                     if !m.content.trim().is_empty() {
                         blocks.push(json!({ "type": "text", "text": m.content }));
                     }
@@ -604,6 +611,14 @@ fn num(value: &Value) -> u64 {
 pub struct ToolAccumulator {
     calls: Vec<PendingCall>,
     stop: Option<StopReason>,
+    /// Reasoning blocks (Messages API) in stream order.
+    thinking: Vec<PendingThinking>,
+}
+
+#[derive(Debug)]
+struct PendingThinking {
+    index: u64,
+    block: ThinkingBlock,
 }
 
 #[derive(Debug, Default)]
@@ -659,6 +674,58 @@ impl ToolAccumulator {
     }
     pub fn has_calls(&self) -> bool {
         !self.calls.is_empty()
+    }
+    /// A `thinking` block opened at `index`; its text and signature stream in.
+    fn open_thinking(&mut self, index: u64) {
+        if !self.thinking.iter().any(|t| t.index == index) {
+            self.thinking.push(PendingThinking {
+                index,
+                block: ThinkingBlock::Thinking {
+                    thinking: String::new(),
+                    signature: String::new(),
+                },
+            });
+        }
+    }
+    fn push_redacted(&mut self, index: u64, data: &str) {
+        self.thinking.push(PendingThinking {
+            index,
+            block: ThinkingBlock::RedactedThinking {
+                data: data.to_string(),
+            },
+        });
+    }
+    fn append_thinking(&mut self, index: u64, text: &str) {
+        if let Some(PendingThinking {
+            block: ThinkingBlock::Thinking { thinking, .. },
+            ..
+        }) = self.thinking.iter_mut().find(|t| t.index == index)
+        {
+            thinking.push_str(text);
+        }
+    }
+    fn append_signature(&mut self, index: u64, sig: &str) {
+        if let Some(PendingThinking {
+            block: ThinkingBlock::Thinking { signature, .. },
+            ..
+        }) = self.thinking.iter_mut().find(|t| t.index == index)
+        {
+            signature.push_str(sig);
+        }
+    }
+    /// The reasoning blocks the provider signed, in stream order. An unsigned
+    /// block cannot be replayed (the API rejects it), so it is dropped.
+    pub fn thinking_blocks(&self) -> Vec<ThinkingBlock> {
+        let mut blocks: Vec<&PendingThinking> = self.thinking.iter().collect();
+        blocks.sort_by_key(|t| t.index);
+        blocks
+            .into_iter()
+            .filter(|t| match &t.block {
+                ThinkingBlock::Thinking { signature, .. } => !signature.is_empty(),
+                ThinkingBlock::RedactedThinking { .. } => true,
+            })
+            .map(|t| t.block.clone())
+            .collect()
     }
     /// The finished calls; malformed argument text is kept under `_raw` so
     /// the tool layer can report it instead of guessing.
@@ -761,18 +828,30 @@ fn parse_event(
         ApiFamily::Messages => {
             let t = value["type"].as_str().unwrap_or("");
             let index = num(&value["index"]);
-            if t == "content_block_start" && value["content_block"]["type"] == "tool_use" {
+            if t == "content_block_start" {
                 let b = &value["content_block"];
-                acc.open(
-                    index,
-                    b["id"].as_str().unwrap_or(""),
-                    b["name"].as_str().unwrap_or(""),
-                    "",
-                );
+                match b["type"].as_str() {
+                    Some("tool_use") => acc.open(
+                        index,
+                        b["id"].as_str().unwrap_or(""),
+                        b["name"].as_str().unwrap_or(""),
+                        "",
+                    ),
+                    // Reasoning blocks are signed and must be replayed with
+                    // the turn's tool calls: collect them as they stream.
+                    Some("thinking") => acc.open_thinking(index),
+                    Some("redacted_thinking") => {
+                        acc.push_redacted(index, b["data"].as_str().unwrap_or(""))
+                    }
+                    _ => {}
+                }
             } else if t == "content_block_delta" {
                 let d = &value["delta"];
                 if let Some(tk) = d["thinking"].as_str() {
                     chunk.thinking = tk.to_string();
+                    acc.append_thinking(index, tk);
+                } else if let Some(sig) = d["signature"].as_str() {
+                    acc.append_signature(index, sig);
                 } else if let Some(tx) = d["text"].as_str() {
                     chunk.content = tx.to_string();
                 } else if d["type"] == "input_json_delta" {
@@ -911,6 +990,7 @@ pub async fn stream_completion(
     req: &CompletionRequest,
     on_chunk: &mut (dyn FnMut(&CompletionChunk) + Send),
 ) -> Result<CompletionOutcome> {
+    check_base_url(base_url).map_err(|e| Error::Config(format!("{}: {e}", provider.slug())))?;
     let prepared = prepare(provider, base_url, api_key, req);
     let mut builder = http.post(&prepared.url).json(&prepared.body);
     for (name, value) in &prepared.headers {
@@ -920,7 +1000,7 @@ pub async fn stream_completion(
     let resp = builder.send().await?;
     let status = resp.status();
     if !status.is_success() {
-        let body = resp.text().await.unwrap_or_default();
+        let body = read_capped(resp, ERROR_BODY_CAP).await.unwrap_or_default();
         return Err(Error::Provider {
             status: status.as_u16(),
             body,
@@ -928,6 +1008,7 @@ pub async fn stream_completion(
     }
 
     let mut stream = resp.bytes_stream();
+    let mut total_bytes = 0usize;
     let mut decoder = SseDecoder::new();
     let mut usage = Usage::default();
     let mut acc = ToolAccumulator::default();
@@ -939,6 +1020,13 @@ pub async fn stream_completion(
 
     while let Some(item) = stream.next().await {
         let bytes = item?;
+        total_bytes += bytes.len();
+        if total_bytes > MAX_STREAM_BYTES {
+            return Err(Error::Other(format!(
+                "the response stream exceeded {} MB",
+                MAX_STREAM_BYTES / (1024 * 1024)
+            )));
+        }
         byte_buf.extend_from_slice(&bytes);
         let valid_len = match std::str::from_utf8(&byte_buf) {
             Ok(s) => s.len(),
@@ -973,14 +1061,74 @@ pub async fn stream_completion(
         }
     }
 
+    let thinking_blocks = acc.thinking_blocks();
     let (tool_calls, stop) = acc.finish();
     Ok(CompletionOutcome {
         usage,
         text,
         thinking,
+        thinking_blocks,
         tool_calls,
         stop,
     })
+}
+
+/// The most of an error body the engine keeps (enough to read the message).
+pub const ERROR_BODY_CAP: usize = 64 * 1024;
+/// The most of a non-streamed body (model lists, search pages) the engine reads.
+pub const BODY_CAP: usize = 8 * 1024 * 1024;
+/// The most a completion stream may deliver before the turn is abandoned.
+pub const MAX_STREAM_BYTES: usize = 64 * 1024 * 1024;
+
+/// Read at most `cap` bytes of a response body (lossy UTF-8); the rest of
+/// the connection is dropped, so a hostile endpoint cannot fill memory.
+pub async fn read_capped(
+    resp: reqwest::Response,
+    cap: usize,
+) -> std::result::Result<String, reqwest::Error> {
+    let mut stream = resp.bytes_stream();
+    let mut buf: Vec<u8> = Vec::new();
+    while let Some(item) = stream.next().await {
+        let bytes = item?;
+        let room = cap.saturating_sub(buf.len());
+        if room == 0 {
+            break;
+        }
+        buf.extend_from_slice(&bytes[..bytes.len().min(room)]);
+        if buf.len() >= cap {
+            break;
+        }
+    }
+    Ok(String::from_utf8_lossy(&buf).into_owned())
+}
+
+/// The transport policy for a provider base URL: `https://` anywhere, or
+/// `http://` only to this machine (a local gateway), and never credentials
+/// in the URL. Keys ride in headers, so plaintext transport to a remote
+/// host would expose them. The URL is never echoed back.
+pub fn check_base_url(url: &str) -> std::result::Result<(), String> {
+    let parsed =
+        reqwest::Url::parse(url.trim()).map_err(|_| "base URL is not a valid URL".to_string())?;
+    if !parsed.username().is_empty() || parsed.password().is_some() {
+        return Err("base URL must not embed credentials".into());
+    }
+    let host = parsed
+        .host_str()
+        .unwrap_or("")
+        .trim_matches(|c| c == '[' || c == ']');
+    let local = host.eq_ignore_ascii_case("localhost")
+        || host
+            .parse::<std::net::IpAddr>()
+            .map(|ip| ip.is_loopback())
+            .unwrap_or(false);
+    match parsed.scheme() {
+        "https" => Ok(()),
+        "http" if local => Ok(()),
+        "http" => Err("base URL must use https (http is only allowed for localhost)".into()),
+        other => Err(format!(
+            "base URL scheme {other:?} is not supported (use https)"
+        )),
+    }
 }
 
 #[cfg(test)]
@@ -1581,5 +1729,73 @@ mod tests {
             f.thinking.is_empty(),
             "the aggregate .done event must not re-emit reasoning"
         );
+    }
+
+    #[test]
+    fn messages_thinking_blocks_are_collected_and_replayed_before_tool_calls() {
+        let mut usage = Usage::default();
+        let mut acc = ToolAccumulator::default();
+        let events = [
+            json!({"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":"","signature":""}}),
+            json!({"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"weigh it"}}),
+            json!({"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"sig-9"}}),
+            json!({"type":"content_block_stop","index":0}),
+            json!({"type":"content_block_start","index":1,"content_block":{"type":"redacted_thinking","data":"opaque"}}),
+            json!({"type":"content_block_start","index":2,"content_block":{"type":"tool_use","id":"t1","name":"web_search","input":{}}}),
+            json!({"type":"content_block_delta","index":2,"delta":{"type":"input_json_delta","partial_json":"{\"query\":\"rust\"}"}}),
+            json!({"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"output_tokens":9}}),
+        ];
+        let mut shown = String::new();
+        for ev in &events {
+            shown.push_str(&parse_event(Provider::Anthropic, ev, &mut usage, &mut acc).thinking);
+        }
+        assert_eq!(shown, "weigh it");
+        let blocks = acc.thinking_blocks();
+        assert_eq!(
+            blocks,
+            vec![
+                ThinkingBlock::Thinking {
+                    thinking: "weigh it".into(),
+                    signature: "sig-9".into()
+                },
+                ThinkingBlock::RedactedThinking {
+                    data: "opaque".into()
+                },
+            ]
+        );
+        let (calls, stop) = acc.finish();
+        assert_eq!(stop, StopReason::ToolUse);
+        let turn = ChatMessage::assistant_with_calls("", calls).with_thinking_blocks(blocks);
+        let turns = messages_turns(&[
+            ChatMessage::user("q"),
+            turn,
+            ChatMessage::tool("t1", "web_search", "hit"),
+        ]);
+        let content = turns[1]["content"].as_array().unwrap();
+        assert_eq!(content[0]["type"], "thinking");
+        assert_eq!(content[0]["signature"], "sig-9");
+        assert_eq!(content[1]["type"], "redacted_thinking");
+        assert_eq!(content[2]["type"], "tool_use");
+        assert_eq!(turns[2]["content"][0]["type"], "tool_result");
+    }
+
+    #[test]
+    fn unsigned_thinking_is_not_replayed() {
+        let mut acc = ToolAccumulator::default();
+        acc.open_thinking(0);
+        acc.append_thinking(0, "unsigned");
+        assert!(acc.thinking_blocks().is_empty());
+    }
+
+    #[test]
+    fn base_urls_must_be_https_or_local() {
+        assert!(check_base_url("https://api.openai.com/v1").is_ok());
+        assert!(check_base_url("http://localhost:11434/v1").is_ok());
+        assert!(check_base_url("http://127.0.0.1:8080").is_ok());
+        assert!(check_base_url("http://[::1]:8080/v1").is_ok());
+        assert!(check_base_url("http://api.example.com/v1").is_err());
+        assert!(check_base_url("ftp://api.example.com").is_err());
+        assert!(check_base_url("https://user:pw@api.example.com").is_err());
+        assert!(check_base_url("not a url").is_err());
     }
 }

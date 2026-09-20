@@ -149,7 +149,10 @@ pub fn parse_plan(raw: &str) -> Option<Plan> {
                 .collect()
         })
         .unwrap_or_default();
-    let rounds = v["rounds"].as_u64().unwrap_or(1).clamp(1, 5) as u8;
+    let rounds = v["rounds"]
+        .as_u64()
+        .unwrap_or(1)
+        .clamp(1, super::plan::MAX_ROUNDS as u64) as u8;
     let ask_user = {
         let q = s(&v, "ask_user");
         (!q.is_empty() && !q.eq_ignore_ascii_case("null") && !q.eq_ignore_ascii_case("none"))
@@ -425,7 +428,7 @@ mod tests {
         assert_eq!(p.participants.len(), 2);
         assert_eq!(p.participants[1].role, SeatRole::Support);
         assert_eq!(p.subtasks[0].word_cap, 400);
-        assert_eq!(p.rounds, 5);
+        assert_eq!(p.rounds, 6, "clamped to MAX_ROUNDS");
         assert!(p.ask_user.is_none());
         assert_eq!(p.lenses["george"], "cost");
     }

@@ -255,6 +255,9 @@ pub async fn engine_start(
         Some(id) if !id.is_empty() => id.to_string(),
         _ => new_session_id(),
     };
+    if !socratic_council_engine::store::valid_id(&session_id) {
+        return Err("invalid session id".into());
+    }
     if registry.is_live(&session_id) {
         return Err(format!("session {session_id} is already running"));
     }
@@ -301,7 +304,7 @@ pub async fn engine_start(
             text: a.text.clone(),
         })
         .collect();
-    let http = http_client(request.proxy.as_deref());
+    let http = http_client(request.proxy.as_deref())?;
     let engine = Deliberation::new(
         http,
         config,
@@ -385,7 +388,7 @@ pub async fn engine_scan(
     api_key: String,
     proxy: Option<String>,
 ) -> Result<Vec<CatalogRowJson>, String> {
-    let http = http_client(proxy.as_deref());
+    let http = http_client(proxy.as_deref())?;
     let scanned = scan_models(&http, provider, &base_url, &api_key)
         .await
         .map_err(|e| redact_with_secrets(&e.to_string(), std::slice::from_ref(&api_key)))?;

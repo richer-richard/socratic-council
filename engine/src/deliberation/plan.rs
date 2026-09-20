@@ -1,6 +1,10 @@
 //! The moderator's plan: what the session delivers, who takes part in which
 //! role, what chores run first, and how many rounds the council gets.
 
+/// The most cross-examination rounds a plan may ask for; the CLI flag and
+/// the desktop's protocol limits agree on it.
+pub const MAX_ROUNDS: u8 = 6;
+
 use crate::types::Roster;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;

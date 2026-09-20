@@ -99,6 +99,8 @@ pub async fn scan_models(
     base_url: &str,
     api_key: &str,
 ) -> Result<Vec<DiscoveredModel>> {
+    super::check_base_url(base_url)
+        .map_err(|e| Error::Config(format!("{}: {e}", provider.slug())))?;
     let Some(url) = models_url(provider, base_url) else {
         return Ok(catalog_models(provider));
     };
@@ -109,7 +111,9 @@ pub async fn scan_models(
     }
     let resp = builder.send().await?;
     let status = resp.status();
-    let body = resp.text().await.unwrap_or_default();
+    let body = super::read_capped(resp, super::BODY_CAP)
+        .await
+        .unwrap_or_default();
     if !status.is_success() {
         return Err(Error::Provider {
             status: status.as_u16(),

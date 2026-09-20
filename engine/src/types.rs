@@ -172,11 +172,26 @@ pub enum Role {
     Tool,
 }
 
+/// A reasoning block a Messages-style provider (Claude, MiniMax) returned
+/// with an assistant turn. The provider signs it and expects it back
+/// verbatim, ahead of that turn's tool calls, or it rejects the follow-up
+/// request that carries the tool results.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ThinkingBlock {
+    Thinking { thinking: String, signature: String },
+    RedactedThinking { data: String },
+}
+
 /// One transcript message destined for a provider request.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChatMessage {
     pub role: Role,
     pub content: String,
+    /// Reasoning blocks the provider returned with an assistant turn;
+    /// replayed verbatim ahead of its tool calls.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub thinking_blocks: Vec<ThinkingBlock>,
     /// Tool calls an assistant turn requested (echoed back to the provider
     /// ahead of their results).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -194,10 +209,16 @@ impl ChatMessage {
         Self {
             role,
             content: content.into(),
+            thinking_blocks: Vec::new(),
             tool_calls: Vec::new(),
             tool_call_id: None,
             tool_name: None,
         }
+    }
+    /// Attach the reasoning blocks the provider returned with this turn.
+    pub fn with_thinking_blocks(mut self, blocks: Vec<ThinkingBlock>) -> Self {
+        self.thinking_blocks = blocks;
+        self
     }
     pub fn system(content: impl Into<String>) -> Self {
         Self::plain(Role::System, content)
@@ -279,6 +300,8 @@ pub struct CompletionOutcome {
     pub usage: Usage,
     pub text: String,
     pub thinking: String,
+    /// Signed reasoning blocks (Messages API) to replay with `tool_calls`.
+    pub thinking_blocks: Vec<ThinkingBlock>,
     pub tool_calls: Vec<ToolCall>,
     pub stop: StopReason,
 }

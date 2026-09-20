@@ -320,6 +320,21 @@ pub struct App {
     store: Option<SessionStore>,
 }
 
+/// Rewrite a stored session the engine could not finish as stopped.
+fn mark_stopped(store: &SessionStore, id: &str) {
+    let Some(mut doc) = store.load(id) else {
+        return;
+    };
+    if doc["status"].as_str() != Some("active") {
+        return;
+    }
+    doc["status"] = serde_json::Value::from("stopped");
+    if doc["stoppedEarly"].is_null() {
+        doc["stoppedEarly"] = serde_json::Value::from("cancelled");
+    }
+    let _ = store.save(&doc);
+}
+
 impl App {
     fn new(ctx: AppContext) -> Self {
         let store = crate::bridge::open_store(ctx.config.bridge());
@@ -527,12 +542,19 @@ impl App {
 
     /// Cancel and abort the current engine task if one is live.
     fn abort_engine(&mut self) {
-        if let Some(s) = self.session.as_mut() {
-            if let Some(e) = &s.engine {
-                let _ = e.input.send(EngineInput::Cancel);
-                e.handle.abort();
-                s.view.mark_cancelled();
-            }
+        let Some(s) = self.session.as_mut() else {
+            return;
+        };
+        let Some(e) = &s.engine else {
+            return;
+        };
+        let _ = e.input.send(EngineInput::Cancel);
+        e.handle.abort();
+        s.view.mark_cancelled();
+        // The aborted task never reaches its own final save, which would
+        // leave the stored session `active` for good: mark it stopped here.
+        if let Some(store) = &self.store {
+            mark_stopped(store, &s.session_id);
         }
     }
 

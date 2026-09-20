@@ -3,6 +3,8 @@
 //! This is the Rust backend for the Tauri desktop application.
 //! Handles HTTP requests with proxy support for AI API calls.
 
+#![forbid(unsafe_code)]
+
 mod allowlist;
 mod engine_host;
 mod http;
