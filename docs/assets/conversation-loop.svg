@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 700" role="img" aria-labelledby="title desc" preserveAspectRatio="xMidYMid meet">
-  <title id="title">Conversation loop: one turn of the council</title>
-  <desc id="desc">A five-step pipeline that repeats every turn — build context, bid for relevance, stream the winner's turn, optionally reflect, then analyze for conflict, facts, and argument structure. Two parallel lanes run beneath it: the advisors who whisper private notes, and the moderator. A closing strip shows the end-vote, peer evaluation, and final verdict.</desc>
+  <title id="title">Deliberation protocol: one session of the council</title>
+  <desc id="desc">A five-step pipeline — frame, position, cross-examine, board and convergence, revise and record — with a loop from the convergence check back to cross-examination while positions still move. Two lanes run beneath it: the tools the seats may call, and the moderator and utility slots. A closing strip shows the document path and the hand-off folder.</desc>
   <defs>
     <style>
       .sans { font-family: -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; }
@@ -37,98 +37,99 @@
 
   <!-- masthead -->
   <text x="64" y="58" class="mono tag">SOCRATIC COUNCIL</text>
-  <text x="1136" y="58" class="mono meta" text-anchor="end">FIG. 03 — CONVERSATION LOOP</text>
-  <text x="64" y="98" class="sans h1">What happens every single turn</text>
-  <text x="64" y="126" class="sans sub">The loop repeats until the turn cap, a passed end-vote, or you stop it. Advisors and the moderator work alongside, not inside, the pipeline.</text>
+  <text x="1136" y="58" class="mono meta" text-anchor="end">FIG. 03 — DELIBERATION PROTOCOL</text>
+  <text x="64" y="98" class="sans h1">What happens in a session</text>
+  <text x="64" y="126" class="sans sub">The moderator plans, the seats argue in parallel rounds with tools, the board tracks what is settled, and the run ends in a record.</text>
 
-  <!-- loop-back arrow (5 -> 1) -->
-  <path d="M 1007 196 L 1007 170 L 159 170 L 159 196" class="edgedash" marker-end="url(#arr3)"/>
-  <text x="583" y="162" class="mono meta" text-anchor="middle">NEXT TURN</text>
+  <!-- loop-back arrow (4 -> 3) -->
+  <path d="M 795 196 L 795 170 L 583 170 L 583 196" class="edgedash" marker-end="url(#arr3)"/>
+  <text x="689" y="162" class="mono meta" text-anchor="middle">WHILE POSITIONS STILL MOVE</text>
 
   <!-- ============ MAIN PIPELINE ============ -->
-  <!-- 1 CONTEXT -->
+  <!-- 1 FRAME -->
   <g transform="translate(64,200)">
     <rect width="190" height="128" rx="12" fill="#121826" stroke="#283349"/>
     <text x="18" y="30" class="mono stepnum">01</text>
-    <text x="18" y="54" class="sans steptitle">Context</text>
-    <text x="18" y="78" class="sans stepbody">Recent window, rolling</text>
-    <text x="18" y="95" class="sans stepbody">summary, attachments —</text>
-    <text x="18" y="112" class="sans stepbody">plus your advisor's note.</text>
+    <text x="18" y="54" class="sans steptitle">Frame</text>
+    <text x="18" y="78" class="sans stepbody">The moderator's plan:</text>
+    <text x="18" y="95" class="sans stepbody">deliverable, question,</text>
+    <text x="18" y="112" class="sans stepbody">options, routing, lenses.</text>
   </g>
   <line x1="254" y1="264" x2="276" y2="264" class="edgegold" marker-end="url(#arrGold3)"/>
 
-  <!-- 2 BID -->
+  <!-- 2 POSITION -->
   <g transform="translate(276,200)">
     <rect width="190" height="128" rx="12" fill="#121826" stroke="#283349"/>
     <text x="18" y="30" class="mono stepnum">02</text>
-    <text x="18" y="54" class="sans steptitle">Bid</text>
-    <text x="18" y="78" class="sans stepbody">One utility call scores all</text>
-    <text x="18" y="95" class="sans stepbody">eight 0–100; fairness damps</text>
-    <text x="18" y="112" class="sans stepbody">whoever just spoke.</text>
+    <text x="18" y="54" class="sans steptitle">Position</text>
+    <text x="18" y="78" class="sans stepbody">Prep subtasks, then every</text>
+    <text x="18" y="95" class="sans stepbody">seat writes its position</text>
+    <text x="18" y="112" class="sans stepbody">independently, in parallel.</text>
   </g>
   <line x1="466" y1="264" x2="488" y2="264" class="edgegold" marker-end="url(#arrGold3)"/>
 
-  <!-- 3 SPEAK -->
+  <!-- 3 CROSS-EXAMINE -->
   <g transform="translate(488,200)">
     <rect width="190" height="128" rx="12" fill="#161408" stroke="#F5C542" stroke-width="1.2"/>
     <text x="18" y="30" class="mono stepnum">03</text>
-    <text x="18" y="54" class="sans steptitle">Speak</text>
-    <text x="18" y="78" class="sans stepbody">The winner streams its turn</text>
-    <text x="18" y="95" class="sans stepbody">over SSE — reasoning is</text>
-    <text x="18" y="112" class="sans stepbody">captured separately.</text>
+    <text x="18" y="54" class="sans steptitle">Cross-examine</text>
+    <text x="18" y="78" class="sans stepbody">Seats read each other,</text>
+    <text x="18" y="95" class="sans stepbody">call tools, and answer</text>
+    <text x="18" y="112" class="sans stepbody">the strongest objection.</text>
   </g>
   <line x1="678" y1="264" x2="700" y2="264" class="edgegold" marker-end="url(#arrGold3)"/>
 
-  <!-- 4 REFLECT -->
+  <!-- 4 BOARD + CONVERGE -->
   <g transform="translate(700,200)">
     <rect width="190" height="128" rx="12" fill="#121826" stroke="#283349"/>
     <text x="18" y="30" class="mono stepnum">04</text>
-    <text x="18" y="54" class="sans steptitle">Reflect</text>
-    <text x="18" y="78" class="sans stepbody">Optional draft → critique →</text>
-    <text x="18" y="95" class="sans stepbody">revise before the turn is</text>
-    <text x="18" y="112" class="sans stepbody">shown (light or deep).</text>
+    <text x="18" y="54" class="sans steptitle">Board · converge</text>
+    <text x="18" y="78" class="sans stepbody">The utility model rewrites</text>
+    <text x="18" y="95" class="sans stepbody">the board; the moderator</text>
+    <text x="18" y="112" class="sans stepbody">judges the movement.</text>
   </g>
   <line x1="890" y1="264" x2="912" y2="264" class="edgegold" marker-end="url(#arrGold3)"/>
 
-  <!-- 5 ANALYZE -->
+  <!-- 5 REVISE + RECORD -->
   <g transform="translate(912,200)">
     <rect width="190" height="128" rx="12" fill="#121826" stroke="#283349"/>
     <text x="18" y="30" class="mono stepnum">05</text>
-    <text x="18" y="54" class="sans steptitle">Analyze</text>
-    <text x="18" y="78" class="sans stepbody">Conflict scoring (regex →</text>
-    <text x="18" y="95" class="sans stepbody">NLI), fact-check badges,</text>
-    <text x="18" y="112" class="sans stepbody">argument map, cost ledger.</text>
+    <text x="18" y="54" class="sans steptitle">Revise · record</text>
+    <text x="18" y="78" class="sans stepbody">Final positions and votes;</text>
+    <text x="18" y="95" class="sans stepbody">the moderator writes the</text>
+    <text x="18" y="112" class="sans stepbody">record, dissent included.</text>
   </g>
 
   <!-- ============ PARALLEL LANES ============ -->
-  <!-- advisors lane -->
+  <!-- tools lane -->
   <g transform="translate(64,376)">
     <rect width="1038" height="86" rx="12" fill="#0E1422" stroke="#283349" stroke-dasharray="6 4"/>
-    <text x="20" y="24" class="mono lanetag">PARALLEL · EVERY FEW TURNS</text>
-    <text x="20" y="50" class="sans lanetitle">Advisors</text>
-    <text x="130" y="50" class="sans lanebody">Each of the eight advisors reads the public record and may slip a private note to its partner.</text>
-    <text x="130" y="70" class="sans lanebody">The note lands only in that partner's next context — no other agent ever sees it.</text>
+    <text x="20" y="24" class="mono lanetag">UNDER THE SESSION POLICY · NONE / SAFE / ALL · AUTO OR ASK</text>
+    <text x="20" y="50" class="sans lanetitle">Tools</text>
+    <text x="130" y="50" class="sans lanebody">web_search · verify_claim · search and read attachments · workspace files · run_command in a sandbox.</text>
+    <text x="130" y="70" class="sans lanebody">Every result is capped, sanitised and fenced as untrusted data; raw search listings never reach the board.</text>
   </g>
-  <path d="M 159 376 L 159 328" class="edge" marker-end="url(#arr3)"/>
+  <path d="M 583 376 L 583 328" class="edge" marker-end="url(#arr3)"/>
 
-  <!-- moderator lane -->
+  <!-- moderator + utility lane -->
   <g transform="translate(64,486)">
     <rect width="1038" height="86" rx="12" fill="#0E1422" stroke="#283349"/>
-    <text x="20" y="24" class="mono lanetag">SYSTEM VOICE</text>
+    <text x="20" y="24" class="mono lanetag">TWO SLOTS · ANY MODEL</text>
     <text x="20" y="50" class="sans lanetitle">Moderator</text>
-    <text x="130" y="50" class="sans lanebody">Opens the session, synthesizes periodically, spotlights contradictions when conflict spikes,</text>
-    <text x="130" y="70" class="sans lanebody">calls the closing ballot, and writes the final scored verdict.</text>
+    <text x="130" y="50" class="sans lanebody">Frames the question, asks you at most one clarifying question, judges convergence, writes the record.</text>
+    <text x="20" y="72" class="sans lanetitle">Utility</text>
+    <text x="130" y="72" class="sans lanebody">A fast model that rewrites the board and summarises tool output between rounds.</text>
   </g>
 
   <!-- ============ CLOSING STRIP ============ -->
   <g transform="translate(64,596)">
     <rect width="1038" height="56" rx="12" fill="#161408" stroke="#F5C542" stroke-width="1.1"/>
-    <text x="20" y="24" class="mono stepnum">WHEN THE ROOM CONVERGES</text>
-    <text x="20" y="44" class="sans lanebody">Any agent moves <tspan class="mono" fill="#F5C542">@end()</tspan> → majority vote → peer-eval scorecard (rigor · evidence · novelty · civility · on-topic) → scored verdict · optional deep-research report.</text>
+    <text x="20" y="24" class="mono stepnum">DOCUMENT DELIVERABLES · HAND-OFF</text>
+    <text x="20" y="44" class="sans lanebody">A document gets a draft, a critique round with severities and a revision. Every run ends in a hand-off folder: brief, record, document, board, session.</text>
   </g>
 
   <!-- footer -->
   <line x1="64" y1="672" x2="1136" y2="672" stroke="#222B3F"/>
-  <text x="64" y="690" class="mono footer">PAUSE / RESUME / STOP AT ANY POINT</text>
-  <text x="1136" y="690" class="mono footer" text-anchor="end">BUDGET CAPS CAN WARN, PAUSE, OR STOP THE LOOP</text>
+  <text x="64" y="690" class="mono footer">STOP AT ANY POINT — THE BOARD AND ROUNDS ARE KEPT</text>
+  <text x="1136" y="690" class="mono footer" text-anchor="end">ESTIMATE BEFORE THE RUN · SESSION AND DAILY CAPS DURING IT</text>
 </svg>

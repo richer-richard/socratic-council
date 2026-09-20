@@ -1,6 +1,6 @@
 {
   "name": "socratic-council",
-  "version": "2.2.5",
+  "version": "3.0.0",
   "description": "A real-time multi-agent group chat where eight AI agents debate any topic",
   "private": true,
   "type": "module",
@@ -14,7 +14,7 @@
     "build": "pnpm -r build",
     "build:desktop": "pnpm --filter @socratic-council/desktop build",
     "test": "vitest run --config vitest.config.ts",
-    "lint": "eslint \"apps/*/src/**/*.{ts,tsx}\" \"packages/*/src/**/*.{ts,tsx}\" --max-warnings=12",
+    "lint": "eslint \"apps/*/src/**/*.{ts,tsx}\" \"packages/*/src/**/*.{ts,tsx}\" --max-warnings=1",
     "lint:fix": "eslint \"apps/*/src/**/*.{ts,tsx}\" \"packages/*/src/**/*.{ts,tsx}\" --fix",
     "typecheck": "pnpm -r typecheck",
     "site:build": "node scripts/build-site.mjs",

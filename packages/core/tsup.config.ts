@@ -11,5 +11,5 @@ export default defineConfig({
   outDir: "dist",
   splitting: false,
   treeshake: true,
-  external: ["@socratic-council/shared", "@socratic-council/sdk"],
+  external: ["@socratic-council/shared"],
 });

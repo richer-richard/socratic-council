@@ -1,6 +1,6 @@
 [package]
 name = "socratic-council"
-version = "2.2.1"
+version = "3.0.0"
 description = "Socratic Council - Multi-Agent Debate Application"
 authors = ["Socratic Council Team"]
 edition = "2021"
@@ -13,9 +13,9 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
+socratic-council-engine = { path = "../../../engine" }
 tauri = { version = "2", features = [] }
 tauri-plugin-store = "2"
-tauri-plugin-http = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-fs = "2"
 tauri-plugin-opener = "2"

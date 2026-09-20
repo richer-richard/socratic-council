@@ -1,6 +1,6 @@
 {
   "name": "@socratic-council/core",
-  "version": "2.1.8",
+  "version": "3.0.0",
   "description": "Core engine for Socratic Council - bidding, orchestration, and state management",
   "type": "module",
   "main": "./dist/index.js",
@@ -20,8 +20,7 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@socratic-council/shared": "workspace:*",
-    "@socratic-council/sdk": "workspace:*"
+    "@socratic-council/shared": "workspace:*"
   },
   "devDependencies": {
     "tsup": "^8.0.1",

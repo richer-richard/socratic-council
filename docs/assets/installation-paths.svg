@@ -67,7 +67,7 @@
   <g transform="translate(64,332)">
     <rect width="312" height="84" rx="12" fill="#121826" stroke="#283349"/>
     <text x="20" y="34" class="mono cmd">steps 1–7</text>
-    <text x="20" y="58" class="sans cmdnote">system prereqs · Node ≥ 22 · Rust ≥ 1.77.2</text>
+    <text x="20" y="58" class="sans cmdnote">system prereqs · Node ≥ 22 · Rust ≥ 1.82</text>
     <text x="20" y="74" class="sans cmdnote">pnpm 9.15 · clone · dev · build</text>
   </g>
   <line x1="376" y1="374" x2="430" y2="374" class="edge" marker-end="url(#arr5)"/>
@@ -93,7 +93,7 @@
   <line x1="506" y1="498" x2="560" y2="498" class="edge" marker-end="url(#arr5)"/>
   <g transform="translate(564,472)">
     <rect width="572" height="52" rx="12" fill="#121826" stroke="#283349"/>
-    <text x="20" y="32" class="sans midtext">One static binary — the full debate TUI, no Node, no clone, no desktop app required.</text>
+    <text x="20" y="32" class="sans midtext">One static binary — the full council TUI, no Node, no clone, no desktop app required.</text>
   </g>
 
 </svg>

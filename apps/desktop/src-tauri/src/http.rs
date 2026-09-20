@@ -12,7 +12,7 @@ use tauri::{AppHandle, Emitter, State};
 use tokio::sync::{watch, Mutex};
 
 use crate::allowlist::{check_rate_limit, validate_body_size, validate_outbound_url};
-use crate::redact::redact_urls_in;
+use crate::redact::{redact_urls_in, redact_with_secrets};
 
 const MAX_RESPONSE_BYTES: usize = 8 * 1024 * 1024;
 const MAX_ERROR_BODY_BYTES: usize = 64 * 1024;
@@ -127,6 +127,21 @@ fn emit_stream_event(
             error,
         },
     );
+}
+
+/// The credential values this request carries — the only secrets the broker knows
+/// verbatim. Any error string that reaches JS is scrubbed of these exact values
+/// (provider 401 bodies sometimes echo the key), independent of key shape.
+fn secret_header_values(headers: &HashMap<String, String>) -> Vec<String> {
+    headers
+        .iter()
+        .filter(|(k, _)| {
+            let k = k.to_ascii_lowercase();
+            k == "authorization" || k == "x-api-key" || k == "x-goog-api-key"
+        })
+        .map(|(_, v)| v.trim().strip_prefix("Bearer ").unwrap_or(v.trim()).to_string())
+        .filter(|v| !v.is_empty())
+        .collect()
 }
 
 fn format_request_error(error: reqwest::Error) -> String {
@@ -270,6 +285,8 @@ pub async fn http_request(
         request = request.body(body);
     }
 
+    let secrets = secret_header_values(&config.headers);
+
     // If the caller supplied a request_id, register it so http_cancel can
     // race the request to a clean abort.
     let request_id = config.request_id.clone();
@@ -305,7 +322,8 @@ pub async fn http_request(
             error: None,
         })
     }
-    .await;
+    .await
+    .map_err(|e| redact_with_secrets(&e, &secrets));
 
     if let Some(id) = request_id.as_deref() {
         if !id.is_empty() {
@@ -333,6 +351,7 @@ pub async fn http_request_stream(
         .clone()
         .unwrap_or_else(|| "default".to_string());
     let client = build_client(config.proxy.as_ref(), config.timeout_ms.unwrap_or(120000))?;
+    let secrets = secret_header_values(&config.headers);
     let mut cancel_rx = registry.register(&request_id).await;
 
     let method = config.method.to_uppercase();
@@ -372,7 +391,8 @@ pub async fn http_request_stream(
         if !response.status().is_success() {
             let status = response.status().as_u16();
             let body = read_response_text_truncated(response, MAX_ERROR_BODY_BYTES).await?;
-            let error_msg = format!("HTTP {}: {}", status, body);
+            // The error body is provider text that can echo the key back.
+            let error_msg = redact_with_secrets(&format!("HTTP {}: {}", status, body), &secrets);
             emit_stream_event(&app, &request_id, String::new(), true, Some(error_msg.clone()));
             return Err(error_msg);
         }
@@ -484,7 +504,7 @@ pub async fn http_request_stream(
     .await;
 
     registry.unregister(&request_id).await;
-    result
+    result.map_err(|e| redact_with_secrets(&e, &secrets))
 }
 
 #[tauri::command]

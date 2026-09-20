@@ -1,0 +1,35 @@
+[package]
+name = "socratic-council-engine"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.82"
+description = "The Socratic Council deliberation engine: a council of AI models (any model per seat, eight providers) deliberates in structured rounds with native tool calling and leaves a decision record."
+authors = ["Socratic Council Team"]
+license = "Apache-2.0"
+repository = "https://github.com/richer-richard/socratic-council"
+homepage = "https://github.com/richer-richard/socratic-council"
+keywords = ["ai", "agents", "deliberation", "llm", "council"]
+categories = ["api-bindings"]
+
+[lib]
+name = "socratic_council_engine"
+path = "src/lib.rs"
+
+[dependencies]
+tokio = { version = "1", features = ["rt", "macros", "sync", "time", "io-util", "process"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls", "socks"] }
+futures-util = "0.3"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+regex = "1"
+thiserror = "2"
+
+# At-rest secret encryption (pure Rust): session files and the CLI's key
+# store are XChaCha20-Poly1305 `ENC1:` envelopes shared with the desktop app.
+chacha20poly1305 = "0.10"
+base64 = "0.22"
+getrandom = "0.2"
+
+[dev-dependencies]
+# `net` for the in-process fake provider the protocol test runs against.
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "io-util"] }

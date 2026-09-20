@@ -14,6 +14,12 @@ pub const MUTED: Color = Color::Rgb(0x94, 0xA3, 0xB8);
 pub const DIM: Color = Color::Rgb(0x5B, 0x61, 0x72);
 /// Faint line color for the council-mark web.
 pub const WEB: Color = Color::Rgb(0x3A, 0x40, 0x4E);
+/// Emerald for settled / completed (`#34D399`).
+pub const EMERALD: Color = Color::Rgb(0x34, 0xD3, 0x99);
+/// Rose for dissent, errors and stops (`#FB7185`).
+pub const ROSE: Color = Color::Rgb(0xFB, 0x71, 0x85);
+/// Cyan for tool chips (`#22D3EE`).
+pub const CYAN: Color = Color::Rgb(0x22, 0xD3, 0xEE);
 
 /// One inner-ring council agent, paired to a provider and its accent color.
 pub struct AgentInfo {
@@ -25,14 +31,54 @@ pub struct AgentInfo {
 
 /// The eight speakers, in the app's canonical order, with the Home-page colors.
 pub const AGENTS: [AgentInfo; 8] = [
-    AgentInfo { id: "george", name: "George", provider: Provider::OpenAI, color: Color::Rgb(0x60, 0xA5, 0xFA) },
-    AgentInfo { id: "cathy", name: "Cathy", provider: Provider::Anthropic, color: Color::Rgb(0xFB, 0xBF, 0x24) },
-    AgentInfo { id: "grace", name: "Grace", provider: Provider::Google, color: Color::Rgb(0x34, 0xD3, 0x99) },
-    AgentInfo { id: "douglas", name: "Douglas", provider: Provider::DeepSeek, color: Color::Rgb(0xF8, 0x71, 0x71) },
-    AgentInfo { id: "kate", name: "Kate", provider: Provider::Kimi, color: Color::Rgb(0x2D, 0xD4, 0xBF) },
-    AgentInfo { id: "quinn", name: "Quinn", provider: Provider::Qwen, color: Color::Rgb(0x22, 0xD3, 0xEE) },
-    AgentInfo { id: "mary", name: "Mary", provider: Provider::MiniMax, color: Color::Rgb(0xF4, 0x72, 0xB6) },
-    AgentInfo { id: "zara", name: "Zara", provider: Provider::Zhipu, color: Color::Rgb(0xA7, 0x8B, 0xFA) },
+    AgentInfo {
+        id: "george",
+        name: "George",
+        provider: Provider::OpenAI,
+        color: Color::Rgb(0x60, 0xA5, 0xFA),
+    },
+    AgentInfo {
+        id: "cathy",
+        name: "Cathy",
+        provider: Provider::Anthropic,
+        color: Color::Rgb(0xFB, 0xBF, 0x24),
+    },
+    AgentInfo {
+        id: "grace",
+        name: "Grace",
+        provider: Provider::Google,
+        color: Color::Rgb(0x34, 0xD3, 0x99),
+    },
+    AgentInfo {
+        id: "douglas",
+        name: "Douglas",
+        provider: Provider::DeepSeek,
+        color: Color::Rgb(0xF8, 0x71, 0x71),
+    },
+    AgentInfo {
+        id: "kate",
+        name: "Kate",
+        provider: Provider::Kimi,
+        color: Color::Rgb(0x2D, 0xD4, 0xBF),
+    },
+    AgentInfo {
+        id: "quinn",
+        name: "Quinn",
+        provider: Provider::Qwen,
+        color: Color::Rgb(0x22, 0xD3, 0xEE),
+    },
+    AgentInfo {
+        id: "mary",
+        name: "Mary",
+        provider: Provider::MiniMax,
+        color: Color::Rgb(0xF4, 0x72, 0xB6),
+    },
+    AgentInfo {
+        id: "zara",
+        name: "Zara",
+        provider: Provider::Zhipu,
+        color: Color::Rgb(0xA7, 0x8B, 0xFA),
+    },
 ];
 
 /// Color for a provider's agent node.
@@ -47,19 +93,26 @@ pub fn provider_color(provider: Provider) -> Color {
 /// Color for a transcript line, keyed by agent id (`george`…`zara`) or the
 /// special `user` / `system` / moderator speakers.
 pub fn speaker_color(agent_id: &str) -> Color {
-    AGENTS.iter().find(|a| a.id == agent_id).map(|a| a.color).unwrap_or_else(|| match agent_id {
-        "user" => MUTED,
-        _ => GOLD, // moderator / system
-    })
+    AGENTS
+        .iter()
+        .find(|a| a.id == agent_id)
+        .map(|a| a.color)
+        .unwrap_or_else(|| match agent_id {
+            "user" => MUTED,
+            _ => GOLD, // moderator / system
+        })
 }
 
-/// Eight node positions on the unit circle (radius `r`) for the council mark,
+/// `n` node positions on the unit circle (radius `r`) for the council mark,
 /// slowly rotated by `phase` radians. Returned as `(x, y)` in canvas space.
-pub fn ring_positions(r: f64, phase: f64) -> [(f64, f64); 8] {
-    let mut pts = [(0.0, 0.0); 8];
-    for (i, p) in pts.iter_mut().enumerate() {
-        let angle = -std::f64::consts::FRAC_PI_2 + (i as f64) * std::f64::consts::TAU / 8.0 + phase;
-        *p = (r * angle.cos(), r * angle.sin());
-    }
-    pts
+pub fn ring_positions(n: usize, r: f64, phase: f64) -> Vec<(f64, f64)> {
+    let n = n.max(1);
+    (0..n)
+        .map(|i| {
+            let angle = -std::f64::consts::FRAC_PI_2
+                + (i as f64) * std::f64::consts::TAU / n as f64
+                + phase;
+            (r * angle.cos(), r * angle.sin())
+        })
+        .collect()
 }

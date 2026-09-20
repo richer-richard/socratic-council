@@ -2,7 +2,7 @@
  * Inline fact-check sidecar (wave 2.5).
  *
  * After every inner-agent message the orchestrator fires a cheap verifier
- * model (Haiku 4.5, gpt-5-mini, or Gemini Flash in the default wiring).
+ * model (Haiku 4.5, gpt-5.4-mini, or Gemini Flash in the default wiring).
  * The verifier:
  *   1. Extracts each factual claim in the message,
  *   2. Grades every claim against the existing oracle (DuckDuckGo today,

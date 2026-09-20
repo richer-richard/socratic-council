@@ -4,7 +4,7 @@
 
 # Socratic Council
 
-Socratic Council is a local-first desktop app that runs a sixteen-agent seminar on any topic. You bring provider API keys, type a topic, optionally attach files, and watch eight council members debate in public while eight paired advisors slip private notes to their partners. Live conflict detection, an evolving argument map, fact-check badges, deep-research synthesis, and per-message cost accounting are built in.
+Socratic Council is a local-first desktop app that convenes a council of frontier models to settle a question. You bring provider API keys, type a topic, optionally attach files, and a moderator frames the question, routes the hard parts to the strongest seats and the small parts to the fast ones, runs independent positions and cross-examination rounds with tools until the seats converge, and writes a decision record: the answer, its confidence, the dissent, what changed and why, the evidence, the open questions and the next actions. A document deliverable gets a draft, a critique round and a revision instead. One Rust engine runs the whole protocol for the desktop app and the terminal alike.
 
 The same workstation also ships as a standalone **terminal sibling**: the [`socratic-council` CLI/TUI](cli/README.md), installable with one `cargo install socratic-council` — no Node, no desktop app required, first-class on a headless VPS.
 
@@ -14,22 +14,22 @@ This repo ships source only (no installer downloads). Follow this guide to build
 
 ## Snapshot
 
-| Dimension        | Details                                                                                                                         |
-| ---------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| Product          | Local-first Tauri desktop app + standalone terminal CLI/TUI                                                                     |
-| Stack            | React + TypeScript frontend, Rust backend, pnpm monorepo, Rust CLI crate                                                        |
-| Discussion model | Eight council debaters, eight silent advisors paired one-to-one, optional moderator                                             |
-| Providers        | OpenAI, Anthropic, Google Gemini, DeepSeek, Kimi, Qwen, MiniMax, Z.AI                                                           |
-| Research tools   | File search, web search, claim verification, source-anchored citations                                                          |
-| Outputs          | Searchable transcript, argument map, fact-check badges, conflict graph, peer evaluation, deep research report, exports, bundles |
+| Dimension        | Details                                                                                                                     |
+| ---------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| Product          | Local-first Tauri desktop app + standalone terminal CLI/TUI                                                                 |
+| Stack            | React + TypeScript frontend, Rust backend, pnpm monorepo, Rust CLI crate                                                    |
+| Discussion model | A moderator plus any roster of seats (eight by default, any model per provider), structured rounds, a decision record       |
+| Providers        | OpenAI, Anthropic, Google Gemini, DeepSeek, Kimi, Qwen, MiniMax, Z.AI                                                       |
+| Research tools   | File search, web search, claim verification, source-anchored citations                                                      |
+| Outputs          | Decision record or document, the board (settled points, disagreements, evidence), the rounds, cost ledger, exports, bundles |
 
 | Workflow Surface   | Included                                                                            |
 | ------------------ | ----------------------------------------------------------------------------------- |
-| Live discussion    | Turn-taking responses, secret advisor notes, quotes, reactions, moderator nudges    |
-| Evidence gathering | Attachments, tool results, source-aware follow-up, deep-research reports            |
-| Sense-making       | Argument map, fact-check badges, pairwise conflict graph, peer evaluation scorecard |
+| Live deliberation  | Framing, prep subtasks, parallel positions, cross-examination, revision with votes  |
+| Evidence gathering | Attachments, web search, claim verification, workspace files, a sandboxed shell     |
+| Sense-making       | The board, convergence checks, the decision record with dissent and what changed    |
 | Observability      | Latency, tokens, cost tracking, daily and per-session budgets, redacted diagnostics |
-| Review and sharing | Search, branch points, structured exports, portable `.scbundle` archive             |
+| Review and sharing | Copy the record as Markdown, structured exports, portable `.scbundle` archive       |
 
 ## Experience Map
 
@@ -37,19 +37,19 @@ This repo ships source only (no installer downloads). Follow this guide to build
 
 ## Council Lineup
 
-The eight council debaters speak in public. Each is shadowed by a silent advisor on the same provider that can pass them private notes.
+Eight seats are configured by default, one per provider. Settings lets you rename them, change their model (any model the provider serves, or Auto at a reasoning level), pin a reasoning level per seat, add more seats on any provider, or remove some; seats without a key are skipped. The Quick, Standard and Full presets on the home page convene 3, 4 or all keyed seats.
 
-| Agent     | Advisor | Provider  | Default model                                                  |
-| --------- | ------- | --------- | -------------------------------------------------------------- |
-| George    | Greta   | OpenAI    | GPT-5.5                                                        |
-| Cathy     | Clara   | Anthropic | Claude Opus 4.8                                                |
-| Grace     | Gaia    | Google    | Gemini 3.1 Pro                                                 |
-| Douglas   | Dara    | DeepSeek  | DeepSeek V4 Pro                                                |
-| Kate      | Kira    | Kimi      | Kimi K2.6                                                      |
-| Quinn     | Quincy  | Qwen      | Qwen 3.7 Max                                                   |
-| Mary      | Mila    | MiniMax   | MiniMax M2.7 Highspeed                                         |
-| Zara      | Zoe     | Z.AI      | GLM-5.1                                                        |
-| Moderator |         | Google    | Gemini 3.1 Pro (falls back to whatever provider is configured) |
+| Agent     | Provider  | Default model                                                  |
+| --------- | --------- | -------------------------------------------------------------- |
+| George    | OpenAI    | GPT-6 Astra                                                    |
+| Cathy     | Anthropic | Claude Fable 5.1                                               |
+| Grace     | Google    | Gemini 3.1 Pro                                                 |
+| Douglas   | DeepSeek  | DeepSeek V4 Pro                                                |
+| Kate      | Kimi      | Kimi K3                                                        |
+| Quinn     | Qwen      | Qwen 3.8 Max                                                   |
+| Mary      | MiniMax   | MiniMax M3                                                     |
+| Zara      | Z.AI      | GLM-5.3                                                        |
+| Moderator | Google    | Gemini 3.1 Pro (falls back to whatever provider is configured) |
 
 ## Installation Paths
 
@@ -120,7 +120,7 @@ For the current manual installation guide, see [Build from source (manual instal
   - [Verification checklist](#verification-checklist)
 - [How it works](#how-it-works)
   - [Architecture](#architecture)
-  - [Conversation loop](#conversation-loop)
+  - [Deliberation protocol](#deliberation-protocol)
   - [Export pipeline](#export-pipeline)
 - [First run setup](#first-run-setup)
   - [API keys](#api-keys)
@@ -129,12 +129,10 @@ For the current manual installation guide, see [Build from source (manual instal
   - [Moderator](#moderator)
 - [Using the app](#using-the-app)
   - [Home](#home)
-  - [Chat](#chat)
-  - [Pause, resume, stop](#pause-resume-stop)
-  - [Search](#search)
+  - [Session](#session)
   - [Export](#export)
   - [Logs](#logs)
-- [Tool calling (oracle)](#tool-calling-oracle)
+- [Tools](#tools)
 - [Troubleshooting](#troubleshooting)
 - [Developer workflows](#developer-workflows)
 - [Terminal CLI](#terminal-cli)
@@ -156,15 +154,15 @@ This is the current manual installation guide for the repo. If you do not want t
 | Quick install  | You want the macOS app installed as fast as possible           | `./install.sh`  |
 | Manual install | You want explicit control over dependencies and build commands | Steps 1-7 below |
 
-| Dependency               | Minimum version                  | Why                                                                            |
-| ------------------------ | -------------------------------- | ------------------------------------------------------------------------------ |
-| **Git**                  | any recent                       | Clone the repository                                                           |
-| **Node.js**              | **≥ 22.0.0**                     | Run the frontend toolchain (Vite, TypeScript, build scripts)                   |
-| **pnpm**                 | **9.15.0** (exact, via corepack) | Workspace package manager. The repo's `packageManager` field pins this version |
-| **Rust**                 | **stable ≥ 1.77.2**              | Compile the Tauri v2 native backend                                            |
-| **Tauri v2 system deps** | (per OS, see below)              | WebView, native build tools                                                    |
+| Dependency               | Minimum version                      | Why                                                                            |
+| ------------------------ | ------------------------------------ | ------------------------------------------------------------------------------ |
+| **Git**                  | any recent                           | Clone the repository                                                           |
+| **Node.js**              | **≥ 22.0.0**                         | Run the frontend toolchain (Vite, TypeScript, build scripts)                   |
+| **pnpm**                 | **9.15.0** (exact, via corepack)     | Workspace package manager. The repo's `packageManager` field pins this version |
+| **Rust**                 | **stable ≥ 1.82** (1.88 for the CLI) | Compile the engine crate and the Tauri v2 native backend                       |
+| **Tauri v2 system deps** | (per OS, see below)                  | WebView, native build tools                                                    |
 
-The Tauri CLI (`@tauri-apps/cli ^2.5.0`) is declared as a devDependency and installed automatically by `pnpm install`, so you do **not** install it globally.
+The Tauri CLI (`@tauri-apps/cli ^2.11`) is declared as a devDependency and installed automatically by `pnpm install`, so you do **not** install it globally.
 
 ---
 
@@ -340,7 +338,7 @@ corepack -v
 
 ### Step 3: Install Rust
 
-Tauri v2 compiles a Rust binary as the native backend. You need a **stable** Rust toolchain ≥ 1.77.2.
+Tauri v2 compiles a Rust binary as the native backend. You need a **stable** Rust toolchain ≥ 1.82 (≥ 1.88 to build the terminal CLI).
 
 **macOS / Linux:**
 
@@ -372,10 +370,10 @@ rustup default stable-msvc
 
 ```bash
 rustc -V
-# expected: rustc 1.77.2 (or newer)
+# expected: rustc 1.82.0 (or newer)
 
 cargo -V
-# expected: cargo 1.77.2 (or newer)
+# expected: cargo 1.82.0 (or newer)
 
 rustup show
 # look for: "stable" and your platform triple (e.g. aarch64-apple-darwin, x86_64-pc-windows-msvc)
@@ -423,12 +421,11 @@ pnpm install
 
 This runs pnpm's workspace resolution and installs dependencies for all packages:
 
-| Workspace                   | Path              | What it installs                                                                                                        |
-| --------------------------- | ----------------- | ----------------------------------------------------------------------------------------------------------------------- |
-| `@socratic-council/shared`  | `packages/shared` | Shared types, agent and observer rosters, model registry, default prompts                                               |
-| `@socratic-council/sdk`     | `packages/sdk`    | Provider SDK (OpenAI, Anthropic, Google, DeepSeek, Kimi, Qwen, MiniMax, Z.AI), streaming transport                      |
-| `@socratic-council/core`    | `packages/core`   | Council orchestration: relevance bidding, fairness, conflict, fact-check, argument map, reflection, summarization, cost |
-| `@socratic-council/desktop` | `apps/desktop`    | Tauri v2 + React frontend, Tauri CLI (`@tauri-apps/cli`)                                                                |
+| Workspace                   | Path              | What it installs                                                                                                             |
+| --------------------------- | ----------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `@socratic-council/shared`  | `packages/shared` | Shared types, agent and observer rosters, model registry, default prompts                                                    |
+| `@socratic-council/core`    | `packages/core`   | What stored v2 sessions, bundles and exports still need: argument-map types and export, peer-evaluation and fact-check types |
+| `@socratic-council/desktop` | `apps/desktop`    | Tauri v2 + React frontend, Tauri CLI (`@tauri-apps/cli`)                                                                     |
 
 Verify installation succeeded:
 
@@ -479,7 +476,6 @@ pnpm --filter @socratic-council/desktop tauri:build
 1. Tauri CLI starts (`tauri build`).
 2. Tauri runs the `beforeBuildCommand` from `tauri.conf.json`, which is `pnpm build`. This:
    - Builds `@socratic-council/shared` (TypeScript → JS via tsup)
-   - Builds `@socratic-council/sdk` (TypeScript → JS via tsup)
    - Builds `@socratic-council/core` (TypeScript → JS via tsup)
    - Runs `tsc` type-checking on the desktop frontend
    - Runs `vite build` to produce the optimized frontend bundle in `apps/desktop/dist/`
@@ -524,7 +520,7 @@ pnpm -v
 
 # 4. Rust compiler
 rustc -V
-# ✓ must be 1.77.2 or higher
+# ✓ must be 1.82 or higher (1.88 for the CLI)
 
 # 5. Cargo
 cargo -V
@@ -536,7 +532,7 @@ pnpm --filter @socratic-council/desktop tauri --version
 
 # 7. Workspace packages resolved
 pnpm ls -r --depth 0 2>/dev/null | head -20
-# ✓ should list @socratic-council/shared, sdk, core, desktop
+# ✓ should list @socratic-council/shared, core, desktop
 
 # 8. System libraries (Linux only)
 pkg-config --modversion webkitgtk-4.1
@@ -551,19 +547,19 @@ If any of these fail, revisit the corresponding step above.
 
 ### Architecture
 
-Socratic Council is a pnpm monorepo with a desktop app and three shared TypeScript packages. The Tauri Rust backend gates every outbound HTTP call through an allowlist, body-size limit, and rate limiter, and stores an encryption key that the frontend uses for at-rest secrets, sessions, and attachments.
+Socratic Council is a pnpm monorepo (the desktop app and two shared TypeScript packages) plus a Rust workspace: the `socratic-council-engine` crate, which runs the deliberation and talks to the eight providers, and the `socratic-council` CLI on top of it. The Tauri backend hosts the same engine crate, so provider calls never leave Rust; the webview keeps no network path. A file-backed encryption key protects secrets, sessions and attachments at rest, and the engine writes each session to the same encrypted store the terminal reads.
 
 ![Architecture diagram](docs/assets/architecture-diagram.svg)
 
-### Conversation loop
+### Deliberation protocol
 
-At runtime the app builds context for each turn, scores the eight council members for relevance, dispatches the winner to its provider as a stream, and folds the streamed response back through reflection, conflict detection, fact-checking, and argument-map extraction before the next turn begins. Silent advisors evaluate the public transcript in parallel and slip notes to their paired debater whenever they have something worth saying. When the discussion ends, every council agent independently scores and critiques every other agent on a five-dimension rubric (rigor, evidence, novelty, civility, on-topic); the results are rendered as a heatmap scorecard and an interactive critique graph.
+The moderator reads the topic and writes a plan: the deliverable (decision, analysis, document or review), the exact question, the options, who leads and who supports (hard work to strong models, small tasks to fast ones), a lens per seat so positions diverge, optional prep subtasks, and, when the topic is ambiguous, one clarifying question for you. After a cost estimate, the seats write independent positions in parallel, then cross-examine each other with tools (attachments, web search, claim verification, workspace files, an optional sandboxed shell). A fast utility model rewrites the board after each round and the moderator judges convergence; when the seats stop moving, a revision round collects final positions and votes and the moderator writes the record. Every phase is persisted, so a run you stop early still has its board and rounds.
 
-![Conversation loop diagram](docs/assets/conversation-loop.svg)
+![Deliberation protocol diagram](docs/assets/conversation-loop.svg)
 
 ### Export pipeline
 
-Exports are generated locally from the transcript plus computed artifacts (speaker counts, the cost ledger, the conflict graph, the argument map). The renderer composes one of four document formats or a portable `.scbundle` archive that another Socratic Council install can re-import without any cloud handoff.
+Exports are generated locally: the decision record (or document) first, then every turn in round order with its model and usage, plus the cost ledger. The renderer composes one of four document formats or a portable `.scbundle` archive that another Socratic Council install can re-import without any cloud handoff.
 
 ![Export pipeline diagram](docs/assets/export-pipeline.svg)
 
@@ -597,7 +593,7 @@ Each provider exposes several models in the registry. The Settings screen lets y
 - The default model per provider that all of that provider's agents use
 - A custom model override for any individual agent
 
-If you have not configured a provider, that agent and its paired advisor are skipped at runtime.
+If you have not configured a provider, its seats are skipped at runtime. The Council tab holds the roster, the moderator slot and the utility slot; the Models tab decides what Auto means at each reasoning level; Preferences hold the budget, the protocol (rounds, participants, per-round reasoning levels, whether the moderator may ask you first) and the tool policy.
 
 ### Proxy
 
@@ -605,7 +601,7 @@ If you need a proxy (corporate networks, regions requiring proxy access, etc.), 
 
 ### Moderator
 
-The Moderator is a system-role voice that opens the session, nudges balance and synthesis, intervenes when conflict spikes, prompts an end-of-session ballot, and writes the final summary. By default it runs on Google Gemini 3.1 Pro for grounded, even-handed prose; if you have not configured Google, it falls back to Anthropic, OpenAI, DeepSeek, Kimi, Qwen, MiniMax, or Z.AI in that order. You can toggle the Moderator on or off in Settings.
+The Moderator frames the question, routes the work, judges convergence between rounds and writes the record. By default it runs on Google Gemini on Auto; if you have not configured Google, the engine falls back to the first seated provider. A separate utility slot (a fast model) rewrites the board and summarises tool output between rounds. Both are chosen on the Council tab.
 
 ---
 
@@ -616,40 +612,16 @@ The Moderator is a system-role voice that opens the session, nudges balance and 
 The home screen is your library. From here you can:
 
 - Type a topic (multi-line supported) and start a new discussion (with optional file attachments)
-- Browse recent and archived sessions in the sidebar
+- Browse recent and archived sessions in the sidebar — including debates run in the
+  `socratic-council` terminal CLI, which shares the same encrypted session store (and can
+  continue any session started here)
 - Open or create a Project, which groups related sessions and a shared evidence dossier
 - Import a `.scbundle` archive that someone else exported
 - Open Settings or the global Command Palette (`⌘K` / `Ctrl+K`)
 
-### Chat
+### Session
 
-The chat surface is built around the council circle. The timeline shows:
-
-- Public messages from the eight council debaters, color-coded by provider
-- Secret notes from each silent advisor, visible only against their paired debater
-- Inline quotes and reactions between agents
-- Per-message tokens, latency, and cost (when the provider returns usage)
-- Verification badges next to claims that the fact-check pipeline graded
-- A live argument map panel that grows as the debate produces new claims, premises, and rebuttals
-- A pairwise conflict graph that highlights sustained disagreements
-- A cost budget badge with daily and per-session caps
-
-You can also branch the discussion at any message to fork the conversation, or call an end-of-session vote that asks the council to ballot on a resolution. After voting concludes, a peer evaluation round runs: every council agent independently scores and critiques every other agent across five dimensions (rigor, evidence, novelty, civility, on-topic), producing a heatmap scorecard and an interactive critique graph. You can also generate a deep research report that synthesizes the full discussion into a structured analytical document with inline citations.
-
-### Pause, resume, stop
-
-During a discussion you can:
-
-- Pause to temporarily halt generation
-- Resume to continue from where you paused
-- Stop to end the session early
-
-### Search
-
-Search lets you:
-
-- Find text in the transcript
-- Jump directly to the matching message in the timeline
+The Session page is built around the product of the run. The header shows the phase, the deliverable, the running cost and the estimate; Stop cancels a live run. The decision record sits first: the answer with its confidence, the votes, the dissent and why it did not carry, the options considered, what changed during the run, the assumptions, the evidence, the open questions and the next actions, with a copy-as-Markdown button. Below it, each round lists every seat's turn, streamed as it is written, with the tool calls the seat made and its reasoning on request. The side column holds the plan (question, options, participants, lenses, subtasks), the board (settled points, disagreements, evidence, open questions), the convergence judgements and the cost by seat. When the moderator has a clarifying question, or a seat asks to run a tool under an ask-first policy, the page pauses on a prompt.
 
 ### Export
 
@@ -658,12 +630,12 @@ The app can export a session to four document formats, plus a portable archive o
 | Format      | Best for                         | Notes                                                                                                                          |
 | ----------- | -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
 | Markdown    | Sharing in docs and issues       | Plain text, easiest to diff and review                                                                                         |
-| PDF         | Printing or sending              | Includes the transcript, conflict graph, and summaries                                                                         |
+| PDF         | Printing or sending              | The decision record, then every turn by round, with usage                                                                      |
 | DOCX        | Editing in Word                  | Structured sections, tables, full citations                                                                                    |
 | PPTX        | Slides or executive readouts     | Graphics-first synthesis with key moments highlighted                                                                          |
-| `.scbundle` | Sharing the full session offline | Zip with manifest, transcript, attachments, argument map (JSON + Mermaid). Re-importable into another Socratic Council install |
+| `.scbundle` | Sharing the full session offline | Zip with manifest, transcript, attachments and the engine's plan, board, rounds and record. Re-importable into another install |
 
-The argument map can also be exported on its own as JSON, Mermaid, SVG, or PNG. Deep research reports and the peer evaluation scorecard are included when present. Everything is generated locally; nothing leaves your machine.
+Everything is generated locally; nothing leaves your machine.
 
 ### Logs
 
@@ -671,26 +643,21 @@ The Diagnostics panel surfaces a redacted ring buffer of the most recent provide
 
 ---
 
-## Tool calling (oracle)
+## Tools
 
-Agents can request web-style lookup and verification through a built-in oracle tool. The same directive syntax also covers inline quoting and reactions between agents.
+Seats have hands. Under the session's tool policy (Settings → Preferences → Tools in the app, `--tools` in the CLI) a seat can call, through each provider's native function calling:
 
-What an agent writes inside a message:
+| Tool                                     | What it does                                                                                                                                                                                                                                                                          |
+| ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `web_search`                             | Keyless search: DuckDuckGo and Bing race each other, Wikipedia's search API and DuckDuckGo instant answers follow. Every request pins English and the US region.                                                                                                                      |
+| `verify_claim`                           | A search plus a stance heuristic; thin evidence is topped up from Wikipedia. Returns a verdict and confidence with the sources.                                                                                                                                                       |
+| `search_attachments` / `read_attachment` | Full-text search and ranged reads over the files attached to the session. Attached text never leaves the machine: a query that quotes it is refused.                                                                                                                                  |
+| `read_file` / `write_file`               | Files inside the session workspace only (no absolute paths, no `..`, no symlink escapes; capped sizes).                                                                                                                                                                               |
+| `run_command`                            | Opt-in (`all`). A shell command in the workspace under the macOS sandbox (`sandbox-exec`: no network, no keychain or directory-service reads, writes only inside the workspace) or bubblewrap on Linux; timeout and output cap; an unsandboxed run is marked and the record notes it. |
 
-```text
-@tool(oracle.search, {"query": "..."})
-@tool(oracle.verify, {"claim": "..."})
-@quote(george, "the exact line being responded to")
-@react(cathy, agree)
-```
+Every result is capped, terminal-sanitised, has its directives neutralised and is fenced as untrusted data before a model sees it; raw search listings never reach the board. Outbound queries are short (≤ 200 characters), never credential-shaped, never verbatim attachment text. At most two calls per turn and two tool rounds per turn; the `ask` approval mode makes every call wait for your yes on the Session page or in the TUI. `socratic-council probe --tools` proves the tool-call round trip on every provider.
 
-What you see next in the transcript:
-
-```text
-Tool result (oracle.search): ...
-```
-
-That "Tool result" line is not an error. It is a normal message inserted by the app after the oracle tool returns. Quotes appear as inline blockquotes and reactions render as small badges next to the targeted message.
+**Hand-off.** Every run ends by writing a folder (`<workspace>/handoff`, or `--handoff DIR`): `handoff.md` with the question, the answer, the next steps as a checklist, open questions, dissent and evidence; `record.md`; `document.md` when the deliverable was a document; `board.md`; and `session.json`. Point a person or an agent at it. `socratic-council handoff <session-id>` rebuilds it for any stored session.
 
 ---
 
@@ -879,16 +846,17 @@ cargo install socratic-council
 socratic-council run "Is P = NP?"
 ```
 
-It mirrors the app's three surfaces (Home with the animated council mark, a
-history sidebar, the debate chamber), shares the desktop app's keys and saved
-sessions through a read-only bridge (optional — the CLI is fully self-contained
-with its own encrypted `keys.enc` store), and ports the debate engine:
-moderator with scored verdicts, the eight silent advisors whispering private
-notes, live conflict tracking with a tension board, a per-agent cost ledger
-with budget caps, oracle web/file search over attached files, end-votes,
-reflection, peer-eval scorecards, deep research, per-agent canvases, and a
-turn progress gauge. See [`cli/README.md`](cli/README.md) for keys, flags,
-and keybindings.
+It runs the same engine crate as the desktop app on the same protocol and
+shares the desktop app's keys and saved sessions through a read-only bridge
+(optional; the CLI is fully self-contained with its own encrypted `keys.enc`
+store). The TUI has the same three surfaces as the app: Home with the council
+preset and the deliverable, a Session screen that renders the rounds, the
+board, the convergence judgements and the decision record as the engine emits
+them (and answers the moderator's question and tool approvals), and Settings
+for keys, the roster, the moderator and utility slots, tools, the protocol
+and the budget. Flags add `--seats` for any model per seat, `--deliverable`,
+`--tools`, `--json` for scripts and `--resume`. See
+[`cli/README.md`](cli/README.md) for keys, flags and keybindings.
 
 ---
 
@@ -905,7 +873,8 @@ socratic-council/
 │       │   │   ├── http.rs                     # Streaming HTTP with proxy and cancellation
 │       │   │   ├── allowlist.rs                # Host allowlist, body cap, rate limiter
 │       │   │   ├── vault_file.rs               # File-backed encryption key (DEK) lifecycle
-│       │   │   └── redact.rs                   # Credential and URL userinfo scrubbing
+│       │   │   ├── redact.rs                   # Credential and URL userinfo scrubbing
+│       │   │   └── engine_host.rs              # Hosts the engine crate: start, input, cancel, catalog, scan
 │       │   ├── capabilities/                   # Per-window Tauri ACLs
 │       │   ├── entitlements.plist              # macOS sandbox + hardened runtime
 │       │   ├── Cargo.toml
@@ -913,15 +882,19 @@ socratic-council/
 │       ├── vite.config.ts
 │       └── package.json
 ├── packages/
-│   ├── shared/                                 # Types, agent and observer rosters, model registry
-│   ├── sdk/                                    # Provider SDK + streaming transport
-│   └── core/                                   # Council orchestration (provider-agnostic)
+│   ├── shared/                                 # Types, seats, model registry, engine event types
+│   └── core/                                   # Argument-map and peer-evaluation types kept for stored v2 sessions
+├── engine/                                     # Rust crate socratic-council-engine: the deliberation protocol
+│   └── src/
+│       ├── catalog/                            # Verified per-model contracts and prices; resolver
+│       ├── providers/                          # 8 providers, 4 wire styles, native tool calling, cached usage
+│       ├── tools/                              # Policy, workspace, sandboxed shell, web, attachments
+│       ├── deliberation/                       # Plan, prompts, board, convergence, record, estimate, runner
+│       └── store.rs                            # Session file v2, shared with the desktop app
 ├── cli/                                        # Standalone Rust CLI/TUI (crates.io: socratic-council)
 │   ├── src/
-│   │   ├── engine/                             # Debate engine: moderator, votes, advisors, analysis
-│   │   ├── providers/                          # 8 providers, 4 wire styles, SSE streaming
-│   │   ├── tui/                                # ratatui surfaces: Home, Chat, Settings, sidebar
-│   │   ├── crypto.rs                           # XChaCha20-Poly1305 key store (keys.enc)
+│   │   ├── config.rs                           # [[seats]], [moderator], [utility], [tools], [protocol]
+│   │   ├── tui/                                # ratatui surfaces
 │   │   └── bridge.rs                           # Read-only bridge into the desktop app's vault
 │   └── Cargo.toml
 ├── docs/                                       # Diagrams and the code-signing playbook

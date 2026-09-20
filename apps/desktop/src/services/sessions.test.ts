@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   SessionPersistenceError,
   branchDiscussionSession,
+  importDiscussionSession,
   loadDiscussionSession,
   saveDiscussionSession,
   stabilizeStoredSessions,
@@ -644,5 +645,104 @@ describe("stabilizeStoredSessions (fix 2.3 preserve failing entries)", () => {
     expect(ids).toContain("session_corrupt");
     const corruptEntry = stabilized.find((s) => s.id === "session_corrupt");
     expect(corruptEntry?.loadError).toBe(true);
+  });
+});
+
+describe("engine session data (v3)", () => {
+  beforeEach(() => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    __resetSessionLoadFailureCountForTests();
+    installInMemoryStorage();
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+    delete (globalThis as { window?: unknown }).window;
+  });
+
+  it("lifts the engine's top-level v2 keys into session.engine and maps its statuses", () => {
+    const raw = {
+      id: "eng1",
+      topic: "Rust backend?",
+      title: "Rust backend?",
+      createdAt: 1,
+      updatedAt: 2,
+      lastOpenedAt: 2,
+      archivedAt: null,
+      projectId: null,
+      status: "active",
+      currentTurn: 2,
+      totalTokens: { input: 1, output: 1 },
+      messages: [],
+      errors: [],
+      attachments: [],
+      version: 2,
+      protocol: "rounds",
+      roster: { seats: [{ id: "grace", name: "Grace", provider: "google", model: "auto" }] },
+      plan: {
+        deliverable: "decision",
+        question: "q",
+        options: [],
+        settles: "",
+        participants: [],
+        lenses: {},
+        subtasks: [],
+        rounds: 1,
+        ask_user: null,
+      },
+      corrections: [],
+      estimate: null,
+      board: { settled: ["x"], disagreements: [], evidence: [], open_questions: [], positions: {} },
+      rounds: [
+        {
+          kind: "positions",
+          entries: [
+            {
+              seat: "grace",
+              name: "Grace",
+              model: "g",
+              content: "yes",
+              structured: {},
+              tool_uses: [],
+              usage: { input: 1, output: 1, reasoning: 0, cached_input: 0, cache_write: 0 },
+            },
+          ],
+        },
+        { kind: "bogus" },
+      ],
+      convergences: [],
+      record: null,
+      document: null,
+      costs: {},
+      stoppedEarly: null,
+    };
+    const session = importDiscussionSession(raw);
+    expect(session?.status).toBe("running");
+    expect(session?.engine?.plan?.question).toBe("q");
+    expect(session?.engine?.board?.settled).toEqual(["x"]);
+    expect(session?.engine?.rounds).toHaveLength(1);
+    expect(session?.engine?.seats[0]?.provider).toBe("google");
+    const reloaded = loadDiscussionSession("eng1");
+    expect(reloaded?.engine?.rounds[0]?.entries[0]?.content).toBe("yes");
+    expect(importDiscussionSession({ ...raw, status: "stopped" })?.status).toBe("completed");
+  });
+
+  it("leaves sessions without engine data untouched", () => {
+    const session = importDiscussionSession({
+      id: "plain1",
+      topic: "t",
+      title: "t",
+      createdAt: 1,
+      updatedAt: 1,
+      lastOpenedAt: 1,
+      archivedAt: null,
+      projectId: null,
+      status: "draft",
+      currentTurn: 0,
+      totalTokens: { input: 0, output: 0 },
+      messages: [],
+      errors: [],
+      attachments: [],
+    });
+    expect(session?.engine).toBeUndefined();
   });
 });

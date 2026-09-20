@@ -17,9 +17,12 @@ import { getModelsByProvider, getDefaultModelForProvider } from "../constants/in
 import type { DiscoveredModel, ModelInfo, Provider, ReasoningTier } from "../types/index.js";
 import { AUTO_MODEL } from "../types/index.js";
 
-// Markers that flag a fast / cheap variant rather than a flagship.
+// Markers that flag a fast / cheap variant rather than a flagship. Anchored to
+// id separators: a bare substring match tagged every Gemini model as "mini"
+// (ge-MINI), which cost the 3.1 Pro flagship 900 points and let 3.8 Flash win
+// the high tier. A trailing `x` is allowed for the flashx / airx variants.
 const SPEED_MARKERS =
-  /(mini|flash|lite|nano|turbo|haiku|air|small|fast|instant|highspeed|speed|tiny|micro)/i;
+  /(?:^|[-_.\s])(mini|flash|lite|nano|turbo|haiku|air|small|fast|instant|highspeed|speed|tiny|micro|luna)(?=$|[-_.\s\dx])/i;
 
 // Markers for models that are not general chat models — filtered out of
 // council candidates entirely (image gen, embeddings, audio, moderation…).

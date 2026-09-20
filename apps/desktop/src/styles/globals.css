@@ -4471,7 +4471,9 @@ textarea.workstation-input {
   position: absolute;
   top: calc(100% + 6px);
   left: 0;
-  right: 0;
+  min-width: 100%;
+  width: max-content;
+  max-width: min(420px, 80vw);
   z-index: 65;
   list-style: none;
   margin: 0;
@@ -4508,6 +4510,9 @@ textarea.workstation-input {
   padding: 8px 12px;
   border-radius: 6px;
   font-size: 0.86rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
   cursor: pointer;
   transition:
     background 120ms ease,
@@ -4612,4 +4617,335 @@ textarea.workstation-input {
   background: rgba(245, 197, 66, 0.06);
   border-color: rgba(245, 197, 66, 0.25);
   color: #f5c542;
+}
+
+/* ---------------------------------------------------------------------------
+ * Session page (v3): the deliberation view.
+ * ------------------------------------------------------------------------- */
+.session-layout {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(280px, 1fr);
+  gap: 1rem;
+  padding: 1rem 1.5rem 1.5rem;
+  overflow: hidden;
+}
+@media (max-width: 1100px) {
+  .session-layout {
+    grid-template-columns: minmax(0, 1fr);
+    overflow: auto;
+  }
+}
+.session-main,
+.session-side {
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  padding-right: 0.25rem;
+}
+.session-card {
+  background: var(--panel-bg);
+  border: 1px solid var(--line-soft);
+  border-radius: 20px;
+  padding: 1.1rem 1.25rem;
+  box-shadow: 0 20px 50px rgba(6, 8, 13, 0.35);
+}
+.session-card h4 {
+  margin: 0.9rem 0 0.3rem;
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(245, 197, 66, 0.85);
+}
+.session-card-title {
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(232, 232, 239, 0.7);
+  margin-bottom: 0.5rem;
+}
+.session-card-lead {
+  font-size: 1.05rem;
+  color: var(--ink-900);
+  margin-bottom: 0.4rem;
+}
+.session-muted {
+  font-size: 0.8rem;
+  color: rgba(232, 232, 239, 0.55);
+}
+.session-waiting {
+  padding: 2rem 0;
+  text-align: center;
+  font-family: var(--font-mono);
+}
+.session-list {
+  list-style: disc;
+  padding-left: 1.1rem;
+  font-size: 0.86rem;
+  color: rgba(232, 232, 239, 0.86);
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+.session-corrections {
+  margin-top: 0.6rem;
+  color: #fde68a;
+}
+.session-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin: 0.6rem 0;
+}
+.session-dl div {
+  display: grid;
+  grid-template-columns: 6rem 1fr;
+  gap: 0.5rem;
+  font-size: 0.82rem;
+  margin-bottom: 0.25rem;
+}
+.session-dl dt {
+  font-family: var(--font-mono);
+  color: rgba(245, 197, 66, 0.85);
+}
+.session-errors {
+  border: 1px solid rgba(239, 68, 68, 0.35);
+  background: rgba(239, 68, 68, 0.1);
+  color: #fecaca;
+  border-radius: 12px;
+  padding: 0.75rem 1rem;
+  font-size: 0.85rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+.session-round-title {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: rgba(245, 197, 66, 0.9);
+  margin: 0.25rem 0 0.6rem;
+}
+.session-round-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 0.85rem;
+}
+.seat-card {
+  background: rgba(255, 255, 255, 0.035);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 16px;
+  padding: 0.9rem 1rem;
+  min-width: 0;
+}
+.seat-card.is-live {
+  border-color: rgba(245, 197, 66, 0.35);
+  box-shadow: 0 0 0 1px rgba(245, 197, 66, 0.12) inset;
+}
+.seat-card-head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+  flex-wrap: wrap;
+}
+.seat-card-name {
+  font-weight: 700;
+  font-size: 0.95rem;
+}
+.seat-card-model,
+.seat-card-tokens {
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  color: rgba(232, 232, 239, 0.5);
+}
+.seat-card-tokens {
+  margin-left: auto;
+}
+.seat-card-body {
+  font-size: 0.88rem;
+  line-height: 1.55;
+  color: rgba(232, 232, 239, 0.9);
+  word-break: break-word;
+}
+.seat-card-waiting {
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  color: rgba(232, 232, 239, 0.45);
+}
+.seat-card-thinking {
+  margin-top: 0.6rem;
+  font-size: 0.75rem;
+  color: rgba(232, 232, 239, 0.55);
+}
+.seat-card-thinking pre,
+.tool-chip-output {
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  line-height: 1.45;
+  background: rgba(0, 0, 0, 0.35);
+  border-radius: 10px;
+  padding: 0.6rem 0.75rem;
+  margin-top: 0.4rem;
+  max-height: 16rem;
+  overflow: auto;
+}
+.seat-card-tools {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin-bottom: 0.6rem;
+}
+.tool-chip summary {
+  cursor: pointer;
+  display: flex;
+  gap: 0.5rem;
+  align-items: baseline;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: rgba(232, 232, 239, 0.75);
+  padding: 0.3rem 0.6rem;
+  border-radius: 999px;
+  background: rgba(245, 197, 66, 0.08);
+  border: 1px solid rgba(245, 197, 66, 0.2);
+  list-style: none;
+}
+.tool-chip.is-error summary {
+  background: rgba(239, 68, 68, 0.1);
+  border-color: rgba(239, 68, 68, 0.3);
+}
+.tool-chip-name {
+  color: #f5c542;
+}
+.tool-chip-args {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.pulse-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #f5c542;
+  animation: sc-pulse 1.2s ease-in-out infinite;
+}
+@keyframes sc-pulse {
+  0%,
+  100% {
+    opacity: 0.35;
+    transform: scale(0.85);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+.phase-pill {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 0.3rem 0.6rem;
+  border-radius: 999px;
+  color: #f5c542;
+  border: 1px solid rgba(245, 197, 66, 0.35);
+  background: rgba(245, 197, 66, 0.08);
+}
+.record-card {
+  border-color: rgba(245, 197, 66, 0.35);
+  box-shadow:
+    0 0 0 1px rgba(245, 197, 66, 0.12) inset,
+    0 24px 60px rgba(6, 8, 13, 0.45);
+}
+.record-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+.record-answer {
+  font-size: 1.05rem;
+  line-height: 1.6;
+  color: var(--ink-900);
+  margin: 0.5rem 0;
+}
+.confidence-bar {
+  height: 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+  margin-top: 0.5rem;
+}
+.confidence-bar span {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, #0f766e, #f5c542);
+}
+
+/* Composer launch options (preset, deliverable). */
+.composer-options {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 0.6rem 0 0.2rem;
+}
+.composer-options-label {
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(232, 232, 239, 0.45);
+  margin-right: 0.2rem;
+}
+.composer-options-gap {
+  width: 0.6rem;
+}
+.composer-chip {
+  font-size: 0.74rem;
+  padding: 0.28rem 0.7rem;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: rgba(232, 232, 239, 0.7);
+  background: transparent;
+  transition:
+    color 120ms ease,
+    border-color 120ms ease,
+    background 120ms ease;
+}
+.composer-chip:hover {
+  color: #fff;
+  border-color: rgba(255, 255, 255, 0.3);
+}
+.composer-chip.is-active {
+  color: #f5c542;
+  border-color: rgba(245, 197, 66, 0.55);
+  background: rgba(245, 197, 66, 0.1);
+}
+
+/* Lists inside seat cards and the record keep their markers. */
+.seat-card-body ul,
+.record-answer ul {
+  list-style: disc;
+  padding-left: 1.2rem;
+  margin: 0.4rem 0;
+}
+.seat-card-body ol,
+.record-answer ol {
+  list-style: decimal;
+  padding-left: 1.2rem;
+  margin: 0.4rem 0;
+}
+.seat-card-body p + p,
+.record-answer p + p {
+  margin-top: 0.5rem;
 }

@@ -2,9 +2,12 @@
 //! environment-variable fallback for API keys.
 
 use crate::bridge::DesktopBridge;
+use crate::cost::{BudgetAction, BudgetPolicy};
 use crate::crypto;
+use crate::deliberation::{EngineConfig, ProtocolPolicy};
 use crate::error::{Error, Result};
-use crate::types::{Provider, ReasoningTier, Reflection};
+use crate::tools::ToolPolicy;
+use crate::types::{ModelChoice, ModelRef, Provider, ReasoningTier, Roster, Seat};
 use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -27,7 +30,11 @@ fn auto() -> String {
 
 impl Default for TierSelection {
     fn default() -> Self {
-        Self { low: auto(), medium: auto(), high: auto() }
+        Self {
+            low: auto(),
+            medium: auto(),
+            high: auto(),
+        }
     }
 }
 
@@ -75,22 +82,72 @@ pub struct ProviderConfig {
     pub base_url: Option<String>,
 }
 
+/// One `[[seats]]` entry in config.toml.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct SeatConfig {
+    pub id: String,
+    #[serde(default)]
+    pub name: String,
+    pub provider: String,
+    /// "auto" (flagship), "auto-balanced", "auto-fast", or a model id.
+    #[serde(default = "auto")]
+    pub model: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning: Option<ReasoningTier>,
+}
+
+impl SeatConfig {
+    pub fn from_seat(seat: &Seat) -> SeatConfig {
+        SeatConfig {
+            id: seat.id.clone(),
+            name: seat.name.clone(),
+            provider: seat.provider.slug().to_string(),
+            model: seat.model.label(),
+            reasoning: seat.reasoning,
+        }
+    }
+}
+
+/// A `[moderator]` / `[utility]` entry.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct SlotConfig {
+    pub provider: String,
+    #[serde(default = "auto")]
+    pub model: String,
+}
+
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Config {
     #[serde(default = "default_council_tier")]
     pub council_tier: ReasoningTier,
     #[serde(default = "default_utility_tier")]
     pub utility_tier: ReasoningTier,
-    #[serde(default = "default_max_turns")]
-    pub max_turns: u32,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub proxy: Option<String>,
-    /// The outer advisor circle: paired silent agents that pass private notes.
-    #[serde(default = "default_true")]
-    pub observers_enabled: bool,
-    /// Advisors run every N turns (0 disables; the app's default is 2).
-    #[serde(default = "default_observer_interval")]
-    pub observer_interval: u32,
+    /// The council roster: any model per seat, several seats per provider.
+    /// Empty = the eight named seats on their provider's Auto flagship.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub seats: Vec<SeatConfig>,
+    /// The moderator slot (plans, keeps the board, writes the record).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub moderator: Option<SlotConfig>,
+    /// The utility slot (board rewrites, convergence checks); defaults to the
+    /// moderator's provider on Auto-fast.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub utility: Option<SlotConfig>,
+    /// What seats may do with tools.
+    #[serde(default)]
+    pub tools: ToolPolicy,
+    /// Round caps, tiers and interactivity.
+    #[serde(default)]
+    pub protocol: ProtocolPolicy,
+    /// Where seats read and write files and run commands (default: a
+    /// `workspaces/<session>` folder under the config dir).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace: Option<PathBuf>,
+    /// Where the hand-off folder goes (default: `<workspace>/handoff`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub handoff: Option<PathBuf>,
     /// USD cap per session (0 = unlimited).
     #[serde(default)]
     pub budget_per_session_usd: f64,
@@ -122,25 +179,6 @@ pub struct Config {
     /// already holds. Never serialized.
     #[serde(skip)]
     bridge: DesktopBridge,
-
-    /// Draft→revise reflection mode — a runtime CLI option (`--reflect`), not
-    /// persisted.
-    #[serde(skip)]
-    pub reflection: Reflection,
-
-    /// Whether to synthesize a deep-research report at the close (`--deep-research`).
-    #[serde(skip)]
-    pub deep_research: bool,
-
-    /// Whether the closing peer-evaluation scorecard runs (on by default; one
-    /// completion per agent — `--no-peer-eval` opts out to save cost).
-    #[serde(skip)]
-    pub peer_eval: bool,
-
-    /// Whether the oracle tools (web/file search, verify) are offered to the
-    /// agents — a runtime option (`--no-search` opts out), set by `main`.
-    #[serde(skip)]
-    pub search_enabled: bool,
 }
 
 // Manual Debug so a stray `{config:?}` / `dbg!` / anyhow context can never
@@ -151,7 +189,7 @@ impl std::fmt::Debug for Config {
         f.debug_struct("Config")
             .field("council_tier", &self.council_tier)
             .field("utility_tier", &self.utility_tier)
-            .field("max_turns", &self.max_turns)
+            .field("seats", &self.seats.len())
             .field("has_proxy", &self.proxy.is_some())
             .field("providers", &self.providers.len())
             .field("model_selection", &self.model_selection.len())
@@ -167,15 +205,6 @@ fn default_council_tier() -> ReasoningTier {
 fn default_utility_tier() -> ReasoningTier {
     ReasoningTier::Low
 }
-fn default_max_turns() -> u32 {
-    40
-}
-fn default_true() -> bool {
-    true
-}
-fn default_observer_interval() -> u32 {
-    2
-}
 fn default_budget_action() -> String {
     "warn".to_string()
 }
@@ -185,10 +214,14 @@ impl Default for Config {
         Self {
             council_tier: ReasoningTier::High,
             utility_tier: ReasoningTier::Low,
-            max_turns: 40,
             proxy: None,
-            observers_enabled: true,
-            observer_interval: 2,
+            seats: Vec::new(),
+            moderator: None,
+            utility: None,
+            tools: ToolPolicy::default(),
+            protocol: ProtocolPolicy::default(),
+            workspace: None,
+            handoff: None,
             budget_per_session_usd: 0.0,
             budget_per_day_usd: 0.0,
             budget_action: "warn".to_string(),
@@ -197,10 +230,6 @@ impl Default for Config {
             keys: BTreeMap::new(),
             env_keys: BTreeMap::new(),
             bridge: DesktopBridge::default(),
-            reflection: Reflection::Off,
-            deep_research: false,
-            peer_eval: true,
-            search_enabled: true,
         }
     }
 }
@@ -239,6 +268,10 @@ impl Config {
 
     /// The CLI's own 32-byte data-encryption key (0600). Distinct from — and in
     /// a different directory than — the desktop app's `vault.key`.
+    pub fn cli_dek_path() -> Result<PathBuf> {
+        Self::dek_path()
+    }
+
     fn dek_path() -> Result<PathBuf> {
         Ok(Self::dirs()?.config_dir().join("vault.key"))
     }
@@ -298,7 +331,10 @@ impl Config {
         // win). Best-effort — a failure leaves the CLI on its own config.
         let bridge = DesktopBridge::load();
         for (slug, selection) in bridge.model_selection() {
-            config.model_selection.entry(slug.clone()).or_insert_with(|| selection.clone());
+            config
+                .model_selection
+                .entry(slug.clone())
+                .or_insert_with(|| selection.clone());
         }
         // With no CLI config file, inherit the app's council/utility tier + cap.
         if !path.exists() {
@@ -307,9 +343,6 @@ impl Config {
             }
             if let Some(tier) = bridge.utility_tier() {
                 config.utility_tier = tier;
-            }
-            if let Some(turns) = bridge.max_turns() {
-                config.max_turns = turns;
             }
         }
         config.bridge = bridge;
@@ -335,10 +368,18 @@ impl Config {
     /// DEK or a failed decrypt leaves `keys` empty (the user can re-add a key)
     /// rather than failing the whole `Config::load`.
     fn load_encrypted_keys(&mut self, enc_path: &Path) {
-        let Ok(dek_path) = Self::dek_path() else { return };
-        let Some(dek) = crypto::load_dek(&dek_path) else { return };
-        let Ok(envelope) = std::fs::read_to_string(enc_path) else { return };
-        let Some(plain) = crypto::decrypt_str(&dek, envelope.trim()) else { return };
+        let Ok(dek_path) = Self::dek_path() else {
+            return;
+        };
+        let Some(dek) = crypto::load_dek(&dek_path) else {
+            return;
+        };
+        let Ok(envelope) = std::fs::read_to_string(enc_path) else {
+            return;
+        };
+        let Some(plain) = crypto::decrypt_str(&dek, envelope.trim()) else {
+            return;
+        };
         if let Ok(kf) = toml::from_str::<KeyFile>(&plain) {
             self.keys = kf.keys;
         }
@@ -358,7 +399,9 @@ impl Config {
         // `env_keys`), so the whole map is safe to persist — and a local key is
         // never dropped just because a `<PROVIDER>_API_KEY` env var shares its
         // slug.
-        let kf = KeyFile { keys: self.keys.clone() };
+        let kf = KeyFile {
+            keys: self.keys.clone(),
+        };
         let toml_text = toml::to_string_pretty(&kf).map_err(|e| Error::Config(e.to_string()))?;
         let envelope = crypto::encrypt_str(&dek, &toml_text).map_err(Error::Config)?;
 
@@ -379,7 +422,12 @@ impl Config {
             .get(provider.slug())
             .map(|s| s.as_str())
             .filter(nonempty)
-            .or_else(|| self.keys.get(provider.slug()).map(|s| s.as_str()).filter(nonempty))
+            .or_else(|| {
+                self.keys
+                    .get(provider.slug())
+                    .map(|s| s.as_str())
+                    .filter(nonempty)
+            })
             .or_else(|| self.bridge.api_key(provider))
     }
 
@@ -437,7 +485,10 @@ impl Config {
     }
 
     pub fn configured_providers(&self) -> Vec<Provider> {
-        Provider::ALL.into_iter().filter(|p| self.is_configured(*p)).collect()
+        Provider::ALL
+            .into_iter()
+            .filter(|p| self.is_configured(*p))
+            .collect()
     }
 
     pub fn base_url(&self, provider: Provider) -> String {
@@ -448,26 +499,283 @@ impl Config {
     }
 
     pub fn selection(&self, provider: Provider, tier: ReasoningTier) -> Option<String> {
-        self.model_selection.get(provider.slug()).map(|s| s.get(tier).to_string())
+        self.model_selection
+            .get(provider.slug())
+            .map(|s| s.get(tier).to_string())
     }
 
     pub fn agent_tier(&self) -> ReasoningTier {
         self.council_tier
     }
+
+    /// The budget policy from the flat budget fields.
+    pub fn budget_policy(&self) -> BudgetPolicy {
+        BudgetPolicy {
+            per_session: self.budget_per_session_usd.max(0.0),
+            per_day: self.budget_per_day_usd.max(0.0),
+            action: BudgetAction::parse(&self.budget_action),
+        }
+    }
+
+    /// The configured roster (or the eight named seats), restricted to
+    /// `allowed` providers. Seat ids are unique; a missing name is derived.
+    pub fn roster(&self, allowed: &[Provider]) -> Roster {
+        let base = if self.seats.is_empty() {
+            Roster::default_eight()
+        } else {
+            let mut seen = std::collections::BTreeSet::new();
+            Roster {
+                seats: self
+                    .seats
+                    .iter()
+                    .filter_map(|s| {
+                        let provider = Provider::from_slug(&s.provider)?;
+                        let id = if s.id.trim().is_empty() {
+                            s.provider.clone()
+                        } else {
+                            s.id.trim().to_string()
+                        };
+                        if !seen.insert(id.clone()) {
+                            return None;
+                        }
+                        Some(Seat {
+                            name: if s.name.trim().is_empty() {
+                                display_name_for(&id)
+                            } else {
+                                s.name.clone()
+                            },
+                            id,
+                            provider,
+                            model: ModelChoice::parse(&s.model),
+                            reasoning: s.reasoning,
+                        })
+                    })
+                    .collect(),
+            }
+        };
+        let mut roster = base.with_keys(|p| allowed.contains(&p));
+        // A non-default council tier applies to every seat that has no override.
+        if self.council_tier != ReasoningTier::High {
+            for s in &mut roster.seats {
+                s.reasoning.get_or_insert(self.council_tier);
+            }
+        }
+        roster
+    }
+
+    /// The configured seats, or the default eight materialised so an editor
+    /// can change one of them.
+    pub fn seats_or_default(&self) -> Vec<SeatConfig> {
+        if self.seats.is_empty() {
+            Roster::default_eight()
+                .seats
+                .iter()
+                .map(SeatConfig::from_seat)
+                .collect()
+        } else {
+            self.seats.clone()
+        }
+    }
+
+    /// The moderator slot: the configured one, else Google on Auto (the
+    /// engine falls back to the first keyed provider at run time).
+    pub fn moderator_ref(&self) -> ModelRef {
+        self.moderator
+            .as_ref()
+            .and_then(|m| {
+                Provider::from_slug(&m.provider).map(|p| ModelRef {
+                    provider: p,
+                    model: ModelChoice::parse(&m.model),
+                })
+            })
+            .unwrap_or(ModelRef {
+                provider: Provider::Google,
+                model: ModelChoice::Auto(ReasoningTier::High),
+            })
+    }
+
+    pub fn utility_ref(&self) -> ModelRef {
+        self.utility
+            .as_ref()
+            .and_then(|m| {
+                Provider::from_slug(&m.provider).map(|p| ModelRef {
+                    provider: p,
+                    model: ModelChoice::parse(&m.model),
+                })
+            })
+            .unwrap_or_else(|| ModelRef {
+                provider: self.moderator_ref().provider,
+                model: ModelChoice::Auto(self.utility_tier),
+            })
+    }
+
+    /// The workspace for a session.
+    pub fn workspace_for(&self, session_id: &str) -> PathBuf {
+        match &self.workspace {
+            Some(w) => w.clone(),
+            None => Self::config_dir()
+                .map(|d| d.join("workspaces").join(session_id))
+                .unwrap_or_else(|_| {
+                    std::env::temp_dir()
+                        .join("socratic-council")
+                        .join(session_id)
+                }),
+        }
+    }
+
+    /// Everything the engine needs from this config.
+    pub fn engine_config(&self, session_id: &str) -> EngineConfig {
+        let mut base_urls = std::collections::HashMap::new();
+        let mut selection = std::collections::HashMap::new();
+        for p in Provider::ALL {
+            base_urls.insert(p, self.base_url(p));
+            for tier in ReasoningTier::ALL {
+                if let Some(sel) = self.selection(p, tier) {
+                    selection.insert((p, tier), sel);
+                }
+            }
+        }
+        EngineConfig {
+            base_urls,
+            selection,
+            moderator: self.moderator_ref(),
+            utility: self.utility_ref(),
+            tools: self.tools.clone(),
+            protocol: self.protocol.clone(),
+            budget: self.budget_policy(),
+            workspace: self.workspace_for(session_id),
+            daily_ledger_dir: Self::config_dir().ok(),
+            session_id: Some(session_id.to_string()),
+            handoff_dir: self.handoff.clone(),
+        }
+    }
+}
+
+/// The council presets: how many keyed seats convene.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Preset {
+    /// Three seats.
+    Quick,
+    /// Four seats.
+    #[default]
+    Standard,
+    /// Every keyed seat.
+    Full,
+}
+
+impl Preset {
+    pub const ALL: [Preset; 3] = [Preset::Quick, Preset::Standard, Preset::Full];
+
+    pub fn parse(s: &str) -> Option<Preset> {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "quick" => Some(Preset::Quick),
+            "standard" => Some(Preset::Standard),
+            "full" => Some(Preset::Full),
+            _ => None,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Preset::Quick => "Quick",
+            Preset::Standard => "Standard",
+            Preset::Full => "Full",
+        }
+    }
+
+    /// Seats convened (`None` = everyone).
+    pub fn size(self) -> Option<usize> {
+        match self {
+            Preset::Quick => Some(3),
+            Preset::Standard => Some(4),
+            Preset::Full => None,
+        }
+    }
+
+    pub fn next(self) -> Preset {
+        let i = Preset::ALL.iter().position(|p| *p == self).unwrap_or(0);
+        Preset::ALL[(i + 1) % Preset::ALL.len()]
+    }
+
+    pub fn prev(self) -> Preset {
+        let i = Preset::ALL.iter().position(|p| *p == self).unwrap_or(0);
+        Preset::ALL[(i + Preset::ALL.len() - 1) % Preset::ALL.len()]
+    }
+}
+
+/// The seats a run convenes: the explicit `--seats` roster, else the
+/// configured roster; either way only seats whose provider is allowed and
+/// keyed, in roster order, and (without an explicit roster) cut to the preset.
+pub fn select_roster(
+    config: &Config,
+    allowed: &[Provider],
+    explicit: Option<&Roster>,
+    preset: Preset,
+) -> Roster {
+    let keyed = |p: Provider| allowed.contains(&p) && config.is_configured(p);
+    match explicit {
+        Some(r) => r.clone().with_keys(keyed),
+        None => {
+            let roster = config.roster(allowed).with_keys(keyed);
+            match preset.size() {
+                Some(n) => roster.take(n),
+                None => roster,
+            }
+        }
+    }
+}
+
+/// `--seats openai:gpt-6-astra,anthropic:auto,openai:gpt-5.6-luna`: one seat
+/// per entry, ids `<provider>-<n>`, names from the eight characters (a second
+/// seat on the same provider gets a numbered name).
+pub fn parse_seats_flag(spec: &str) -> Result<Vec<Seat>> {
+    let mut seats = Vec::new();
+    let mut per_provider: BTreeMap<String, usize> = BTreeMap::new();
+    for entry in spec.split(',').map(str::trim).filter(|e| !e.is_empty()) {
+        let (slug, model) = entry.split_once(':').unwrap_or((entry, "auto"));
+        let provider = Provider::from_slug(slug.trim())
+            .ok_or_else(|| Error::Config(format!("unknown provider in --seats: {slug}")))?;
+        let n = per_provider.entry(slug.to_string()).or_insert(0);
+        *n += 1;
+        let base = display_name_for(slug);
+        let (id, name) = if *n == 1 {
+            (slug.to_string(), base)
+        } else {
+            (format!("{slug}-{n}"), format!("{base} {n}"))
+        };
+        seats.push(Seat {
+            id,
+            name,
+            provider,
+            model: ModelChoice::parse(model.trim()),
+            reasoning: None,
+        });
+    }
+    if seats.is_empty() {
+        return Err(Error::Config("--seats names no seats".into()));
+    }
+    Ok(seats)
+}
+
+/// The character name for a provider slug or a default seat id.
+pub fn display_name_for(id: &str) -> String {
+    let key = id.to_ascii_lowercase();
+    crate::types::DEFAULT_SEATS
+        .iter()
+        .find(|(sid, _, p)| *sid == key || p.slug() == key)
+        .map(|(_, name, _)| name.to_string())
+        .unwrap_or_else(|| {
+            let mut c = id.chars();
+            match c.next() {
+                Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
+                None => id.to_string(),
+            }
+        })
 }
 
 /// Default chat/base URL per provider (the value `base_url(...)` falls back to).
 pub fn default_base_url(provider: Provider) -> &'static str {
-    match provider {
-        Provider::OpenAI => "https://api.openai.com",
-        Provider::Anthropic => "https://api.anthropic.com",
-        Provider::Google => "https://generativelanguage.googleapis.com",
-        Provider::DeepSeek => "https://api.deepseek.com",
-        Provider::Kimi => "https://api.moonshot.cn",
-        Provider::Qwen => "https://dashscope.aliyuncs.com/compatible-mode/v1",
-        Provider::MiniMax => "https://api.minimaxi.com/anthropic",
-        Provider::Zhipu => "https://open.bigmodel.cn/api/paas/v4",
-    }
+    provider.default_base_url()
 }
 
 #[cfg(unix)]
@@ -546,30 +854,39 @@ mod tests {
 
     #[test]
     fn new_option_fields_round_trip_and_default() {
-        // Old config files (no new fields) deserialize with the defaults.
-        let old: Config = toml::from_str("max_turns = 24").unwrap();
-        assert_eq!(old.max_turns, 24);
-        assert!(old.observers_enabled);
-        assert_eq!(old.observer_interval, 2);
+        // Old config files (with keys this version no longer knows) still
+        // deserialize, on the defaults.
+        let old: Config = toml::from_str("max_turns = 24\nobservers_enabled = true").unwrap();
         assert_eq!(old.budget_per_session_usd, 0.0);
         assert_eq!(old.budget_action, "warn");
+        assert_eq!(old.protocol.max_rounds, 3);
+        assert!(old.tools.web && !old.tools.shell.enabled);
 
         // New fields persist through a serialize/deserialize round trip.
-        let config = Config {
-            observer_interval: 4,
-            observers_enabled: false,
+        let mut config = Config {
             budget_per_session_usd: 2.5,
             budget_action: "stop".into(),
             proxy: Some("socks5://127.0.0.1:1080".into()),
             ..Default::default()
         };
+        config.protocol.max_rounds = 2;
+        config.tools.shell.enabled = true;
+        config.seats.push(SeatConfig {
+            id: "luna".into(),
+            name: String::new(),
+            provider: "openai".into(),
+            model: "gpt-5.6-luna".into(),
+            reasoning: Some(ReasoningTier::Low),
+        });
         let text = toml::to_string_pretty(&config).unwrap();
         let back: Config = toml::from_str(&text).unwrap();
-        assert!(!back.observers_enabled);
-        assert_eq!(back.observer_interval, 4);
         assert_eq!(back.budget_per_session_usd, 2.5);
         assert_eq!(back.budget_action, "stop");
         assert_eq!(back.proxy.as_deref(), Some("socks5://127.0.0.1:1080"));
+        assert_eq!(back.protocol.max_rounds, 2);
+        assert!(back.tools.shell.enabled);
+        assert_eq!(back.seats, config.seats);
+        assert_eq!(back.budget_policy().action, BudgetAction::Stop);
     }
 
     #[test]
@@ -583,7 +900,10 @@ mod tests {
 
         assert_eq!(config.api_key(Provider::OpenAI), Some("sk-env"));
         assert_eq!(config.key_source(Provider::OpenAI), KeySource::Env);
-        assert_eq!(config.keys.get("openai").map(String::as_str), Some("sk-local"));
+        assert_eq!(
+            config.keys.get("openai").map(String::as_str),
+            Some("sk-local")
+        );
     }
 
     #[test]
@@ -606,5 +926,151 @@ mod tests {
         config.clear_key(Provider::Google);
         assert_eq!(config.api_key(Provider::Google), None);
         assert_eq!(config.key_source(Provider::Google), KeySource::None);
+    }
+
+    #[test]
+    fn config_parses_seats_moderator_tools_protocol() {
+        let toml_text = r#"
+council_tier = "high"
+[[seats]]
+id = "george"
+name = "George"
+provider = "openai"
+model = "auto"
+[[seats]]
+id = "luna"
+provider = "openai"
+model = "gpt-5.6-luna"
+reasoning = "low"
+[[seats]]
+id = "cathy"
+provider = "anthropic"
+[moderator]
+provider = "google"
+model = "auto"
+[utility]
+provider = "google"
+model = "auto-fast"
+[tools]
+web = true
+max_calls_per_turn = 3
+approval = "ask"
+[tools.shell]
+enabled = true
+timeout_secs = 10
+[protocol]
+max_rounds = 2
+interactive = false
+"#;
+        let config: Config = toml::from_str(toml_text).unwrap();
+        let roster = config.roster(&Provider::ALL);
+        assert_eq!(roster.seats.len(), 3);
+        assert_eq!(roster.seats[1].id, "luna");
+        assert_eq!(roster.seats[1].name, "Luna");
+        assert_eq!(
+            roster.seats[1].model,
+            ModelChoice::Id("gpt-5.6-luna".into())
+        );
+        assert_eq!(roster.seats[1].reasoning, Some(ReasoningTier::Low));
+        assert_eq!(
+            roster.seats[2].name, "Cathy",
+            "a known id gets its character name"
+        );
+        assert_eq!(config.moderator_ref().provider, Provider::Google);
+        assert_eq!(
+            config.utility_ref().model,
+            ModelChoice::Auto(ReasoningTier::Low)
+        );
+        assert_eq!(config.tools.max_calls_per_turn, 3);
+        assert_eq!(config.tools.approval, crate::tools::Approval::Ask);
+        assert!(config.tools.shell.enabled);
+        assert_eq!(config.tools.shell.timeout_secs, 10);
+        assert_eq!(config.protocol.max_rounds, 2);
+        assert!(!config.protocol.interactive);
+        // The roster respects the allowed providers.
+        assert_eq!(config.roster(&[Provider::Anthropic]).seats.len(), 1);
+        // Old keys are ignored, not fatal.
+        let legacy: Config = toml::from_str("max_turns = 40\nobservers_enabled = true\n").unwrap();
+        assert!(legacy.seats.is_empty());
+        assert_eq!(legacy.roster(&Provider::ALL).seats.len(), 8);
+    }
+
+    #[test]
+    fn seats_flag_parses_duplicates_and_models() {
+        let seats = parse_seats_flag("openai:gpt-5.6-luna, anthropic:auto ,openai").unwrap();
+        assert_eq!(seats.len(), 3);
+        assert_eq!(
+            (seats[0].id.as_str(), seats[0].name.as_str()),
+            ("openai", "George")
+        );
+        assert_eq!(seats[0].model, ModelChoice::Id("gpt-5.6-luna".into()));
+        assert_eq!(seats[1].model, ModelChoice::Auto(ReasoningTier::High));
+        assert_eq!(
+            (seats[2].id.as_str(), seats[2].name.as_str()),
+            ("openai-2", "George 2")
+        );
+        assert!(parse_seats_flag("nope:auto").is_err());
+        assert!(parse_seats_flag(" , ").is_err());
+    }
+
+    #[test]
+    fn preset_seats_take_keyed_seats_in_roster_order() {
+        let mut config = Config::default();
+        for p in [
+            Provider::Google,
+            Provider::Kimi,
+            Provider::Zhipu,
+            Provider::OpenAI,
+        ] {
+            config.set_key(p, "k".into());
+        }
+        // Standard = the first four keyed seats in roster order; unkeyed
+        // seats (Cathy, Douglas, Quinn, Mary) never take a slot.
+        let r = select_roster(&config, &Provider::ALL, None, Preset::Standard);
+        let ids: Vec<&str> = r.seats.iter().map(|s| s.id.as_str()).collect();
+        assert_eq!(ids, ["george", "grace", "kate", "zara"]);
+        let r = select_roster(&config, &Provider::ALL, None, Preset::Quick);
+        assert_eq!(r.seats.len(), 3);
+        let r = select_roster(&config, &Provider::ALL, None, Preset::Full);
+        assert_eq!(r.seats.len(), 4);
+        // The --providers filter applies before the cut.
+        let r = select_roster(
+            &config,
+            &[Provider::Kimi, Provider::Zhipu],
+            None,
+            Preset::Quick,
+        );
+        let ids: Vec<&str> = r.seats.iter().map(|s| s.id.as_str()).collect();
+        assert_eq!(ids, ["kate", "zara"]);
+        // An explicit roster is never cut, only key-gated.
+        let explicit = parse_seats_flag("openai:auto,openai:gpt-x,google:auto-fast,anthropic:auto")
+            .map(|seats| Roster { seats })
+            .unwrap();
+        let r = select_roster(&config, &Provider::ALL, Some(&explicit), Preset::Quick);
+        let ids: Vec<&str> = r.seats.iter().map(|s| s.id.as_str()).collect();
+        assert_eq!(ids, ["openai", "openai-2", "google"]);
+        assert_eq!(Preset::Standard.next(), Preset::Full);
+        assert_eq!(Preset::Quick.prev(), Preset::Full);
+        assert_eq!(Preset::parse("QUICK"), Some(Preset::Quick));
+    }
+
+    #[test]
+    fn default_roster_take_gives_the_first_seats_in_provider_order() {
+        let config = Config::default();
+        let quick = config.roster(&Provider::ALL).take(3);
+        let ids: Vec<&str> = quick.seats.iter().map(|s| s.id.as_str()).collect();
+        assert_eq!(ids, ["george", "cathy", "grace"]);
+        for s in &quick.seats {
+            assert_eq!(s.model, ModelChoice::Auto(ReasoningTier::High));
+        }
+        let lowered = Config {
+            council_tier: ReasoningTier::Medium,
+            ..Default::default()
+        };
+        assert!(lowered
+            .roster(&Provider::ALL)
+            .seats
+            .iter()
+            .all(|s| s.reasoning == Some(ReasoningTier::Medium)));
     }
 }

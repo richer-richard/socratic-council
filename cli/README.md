@@ -1,26 +1,29 @@
 # socratic-council
 
-A terminal multi-agent debate workstation. Eight AI agents — one each from
-OpenAI, Anthropic, Google, DeepSeek, Moonshot (Kimi), Qwen, MiniMax, and
-Z.AI (Zhipu) — debate any topic, live, in a [ratatui](https://ratatui.rs) TUI.
-Each debater is shadowed by a **silent advisor** on the same provider that
-slips it private tactical notes; the room is scored by a live **conflict
-graph**, billed to a per-agent **cost ledger** with budget caps, and armed
-with **oracle web search + file search** over your attached files.
+A terminal council of AI models that deliberates a question in structured
+rounds and leaves a **decision record** you can act on. Seats from OpenAI,
+Anthropic, Google, DeepSeek, Moonshot (Kimi), Qwen, MiniMax and Z.AI (Zhipu),
+any model per seat, several seats per provider if you like. A **moderator**
+plans the session, routes hard reasoning to strong models and chores to fast
+ones, keeps a **board** of what is settled and what is still disputed, judges
+convergence, and writes the record. Seats have hands: they can search the web,
+verify claims, read and search attached files, keep files in a session
+workspace, and (opt-in) run commands in a sandbox. Everything is metered to a
+per-seat **cost ledger** with an estimate before the run and a hard cap
+during it.
 
-It is the command-line sibling of the Socratic Council desktop app — a faithful
-terminal port of the same workstation: a **Home** view with the animated council
-mark + a topic composer, a collapsible **history** sidebar of saved sessions, and
-the live **debate chamber**. It shares the app's model philosophy (**you never
-hand-bump model ids** — an _Auto_ resolver picks the best model and refreshes by
-scanning each provider's own `/models` endpoint, so a newer flagship like
-`gpt-5.6` is adopted the moment it ships).
+It is the command-line sibling of the Socratic Council desktop app and shares
+its session store, so a session convened in the terminal shows up in the app.
+It shares the app's model philosophy too (**you never hand-bump model ids**: an
+_Auto_ resolver picks the best model and refreshes by scanning each provider's
+own `/models` endpoint), and every model's request contract and price come
+from the provider docs (`docs/provider-contract-sheet.md`).
 
-**It is fully self-contained.** You configure keys right in the terminal — env
-vars, `config set-key`, or directly in the TUI's Settings panel — so it works the
-same on a headless VPS as on a laptop. _If_ you also run the desktop app, the CLI
-will additionally read those keys so you don't re-enter them; that sharing is a
-convenience, never a requirement.
+**It is fully self-contained.** You configure keys right in the terminal (env
+vars, `config set-key`, or the TUI's Settings panel), so it works the same on a
+headless VPS as on a laptop. _If_ you also run the desktop app, the CLI reads
+those keys so you don't re-enter them; that sharing is a convenience, never a
+requirement.
 
 ## Install
 
@@ -53,6 +56,7 @@ export MINIMAX_API_KEY=…     ZHIPU_API_KEY=…
 ```bash
 socratic-council config set-key openai
 socratic-council providers          # see which keys are configured
+socratic-council search "flaky tests prevalence"   # what the seats' web_search returns here
 ```
 
 …or add them **inside the TUI**: press `^P` for Settings, `↑`/`↓` to a provider,
@@ -88,127 +92,199 @@ CLI (no C deps) that skips the bridge entirely (env / key-file / TUI only).
 ## Use
 
 ```bash
-socratic-council                       # prompt for a topic, then open the TUI
-socratic-council run "Is P = NP?"      # start a debate
-socratic-council run "…" --tier high   # reasoning level: low | medium | high
+socratic-council                        # open the TUI (Home view)
+socratic-council run "Should we adopt Rust for the backend?"   # convene the standard council (4 seats)
+socratic-council run "…" --preset quick       # 3 seats; full = all 8
+socratic-council run "…" --seats openai:gpt-6-astra,anthropic:auto,openai:gpt-5.6-luna
 socratic-council run "…" --providers openai,anthropic,google
-socratic-council run "…" --max-turns 24
-socratic-council run "…" --file notes.md --file data.csv  # attach searchable files
-socratic-council run "…" --reflect deep # draft→revise each turn: off | light | deep
-socratic-council run "…" --deep-research # synthesize a research report at the close
-socratic-council run "…" --no-peer-eval # skip the closing scorecard (saves a call/agent)
-socratic-council run "…" --no-observers # silence the advisor circle
-socratic-council run "…" --observer-interval 4  # advisors whisper every 4 turns
+socratic-council run "…" --deliverable decision   # decision | analysis | document | review
+socratic-council run "…" --rounds 2           # cross-examination rounds allowed (1..6)
+socratic-council run "…" --tier medium        # one reasoning tier for every round
+socratic-council run "…" --tools all          # none | safe (default) | all (adds the sandboxed shell)
+socratic-council run "…" --ask-tools          # approve every tool call on stdin (plain mode)
+socratic-council run "…" --interactive        # force the moderator's clarifying question on (else Settings decides)
+socratic-council run "…" --file notes.md --file data.csv  # attach files the seats can search and read
 socratic-council run "…" --budget 2.50 --budget-action stop  # USD cap per session
-socratic-council run "…" --no-search   # disable the oracle tools
+socratic-council run "…" --workspace ./scratch  # where tools read, write and run
+socratic-council run "…" --handoff ./brief      # where the hand-off folder goes (default <workspace>/handoff)
 socratic-council run "…" --proxy socks5://127.0.0.1:1080
-socratic-council run "…" --no-tui      # plain streaming stdout (pipe-friendly)
-socratic-council run "…" --scan        # scan live models before starting
+socratic-council run "…" --no-tui             # plain output: rounds, tool calls, board, record
+socratic-council run "…" --json               # one JSON line per engine event (implies --no-tui)
+socratic-council run "…" --scan               # scan live models before starting
 
-socratic-council models --scan         # list live models per provider
-socratic-council models --provider openai
+socratic-council models --scan                # list live models per provider
+socratic-council probe                        # one tiny live call per provider (keys + contracts)
+socratic-council probe --tools                # plus one native tool-calling request per provider
+socratic-council sessions                     # list stored sessions
+socratic-council handoff <id> --to ./brief    # rebuild a stored session's hand-off folder
+socratic-council run --resume <id>            # reconvene: the old record becomes the planner's notes
 ```
+
+Sessions are stored as encrypted files (one per session) in the desktop
+app's data directory when the app is installed — so a debate started in the
+terminal shows up in the app's history and can be opened there, and the
+app's sessions appear in the TUI sidebar (`Tab`), where `Enter` opens one
+and `r` reconvenes it. Without the app, the same store lives under the CLI's own
+config dir; the terminal never needs the app.
 
 ### TUI
 
 Three surfaces mirror the desktop app:
 
-- **Home** — the animated council mark, a topic composer, and the agent roster.
-  Type a topic and press `Enter` to convene.
-- **History sidebar** (`Tab`) — your saved sessions; `↑`/`↓` to select, `Enter`
-  on an empty composer to open one read-only.
-- **Debate chamber** — the live streaming transcript with a per-speaker roster,
-  a header **progress gauge** (`turn 12/40 ▰▰▰▱▱▱▱▱ · round 2/5 · $0.0123`),
-  advisor whispers (🔒, rendered in the partner's color), and `[Tool]` result
-  blocks. A **Moderator** (its own model) frames the topic, synthesizes
-  periodically, and publishes a final scored verdict (`Consensus` / `Majority`
-  / `Unresolved` + `Score X/10`). Each agent's reasoning is quarantined in a
-  collapsible "Thought for Xs" panel (`t` toggles) — it never leaks into the
-  spoken message. The right pane cycles between the **roster**, the
-  **Tensions** conflict graph (`c` — pairwise scores 0–1, hot pairs ≥ 0.75),
-  and the **Costs** ledger (`$` — per-agent USD, council/advisors/moderator/
-  utility lanes, budget state).
-- **Settings / Models** (`^P`) — manage API keys (add / replace / remove, masked,
-  stored `0600`), see each provider's key source + resolved model — plus the
-  editable **Options** rows: discussion cap, advisor interval, session budget,
-  budget action (warn/stop), and the proxy URL (rendered with credentials
-  redacted).
+- **Home** — the council mark, a topic composer, the **council preset**
+  (`←`/`→`: Quick · 3, Standard · 4, Full — keyed seats in roster order) and
+  the **deliverable** (`^D`: auto, decision, analysis, document, review), and
+  the roster strip (`◆` convenes, `●` keyed, `○` no key). `Enter` convenes.
+- **Sessions sidebar** (`Tab`) — every stored session with its status,
+  deliverable, cost and the record's answer; `↑`/`↓` select, `Enter` opens
+  one read-only, `r` reconvenes it.
+- **Session** — the deliberation as the engine runs it. The header shows the
+  status, the deliverable, the phase trail (`Framing ▸ Prep ▸ Positions ▸
+Cross-examination 1 ▸ …`), the estimate and the running cost. The main
+  column puts the **decision record** first (answer, confidence, votes,
+  dissent, options, assumptions, evidence, open questions, next actions),
+  then the document, then every round with a card per seat — live seats
+  pulse, tool calls show as `⚙` chips with their result, `t` folds the
+  reasoning trace out. The side column has **Plan**, **Board**, **Converge**,
+  **Cost** and **Seats** tabs (`p` `b` `v` `$` `s`). When the moderator asks
+  its clarifying question, or a seat asks to run a tool under `approval =
+"ask"`, an overlay takes the keyboard (`Enter`/`Esc` answer; `y`/`n`
+  approve). `Esc` twice stops a live council; on a finished one `r`
+  reconvenes it (the record becomes the planner's notes) and `e` exports the
+  record and document as Markdown.
+- **Settings** (`^P`) — keys (masked entry, source labels), the **roster**
+  (each seat's `provider:model`, resolved model, class and prices; edit,
+  rename, reasoning override, add, remove, reset), the **moderator** and
+  **utility** slots, **tools** (none / safe / all, approval auto / ask), the
+  **protocol** (cross-examination cap, clarifying question), the **budget**
+  (session and daily caps, warn / stop) and the **proxy** (masked). A model id
+  must exist in the provider's catalog or last scan; the editor refuses a
+  made-up one.
 
-| Key                    | Action                                     |
-| ---------------------- | ------------------------------------------ |
-| `Enter`                | convene a debate (Home) / open a session   |
-| `Tab`                  | toggle the history sidebar                 |
-| `^P`                   | toggle the Settings / Models panel         |
-| `Esc`                  | back to Home (Chat/Settings) / quit (Home) |
-| `q`                    | stop the debate, back to Home (Chat)       |
-| `t`                    | toggle thinking traces                     |
-| `c`                    | toggle the Tensions (conflict) pane        |
-| `$`                    | toggle the Costs (ledger) pane             |
-| `↑`/`↓`, `PgUp`/`PgDn` | scroll the transcript                      |
-| `g`                    | follow the tail                            |
-| `^C`                   | quit from anywhere                         |
+| Key                    | Action                                                       |
+| ---------------------- | ------------------------------------------------------------ |
+| `Enter`                | convene (Home) / open a session (sidebar) / answer (overlay) |
+| `←`/`→`                | council preset (Home) / side tab (Session)                   |
+| `^D`                   | deliverable (Home)                                           |
+| `Tab`                  | toggle the sessions sidebar                                  |
+| `^P`                   | toggle Settings                                              |
+| `Esc`                  | stop a live council (press twice) / back / quit (Home)       |
+| `t`                    | toggle reasoning traces                                      |
+| `p` `b` `v` `$` `s`    | Plan / Board / Converge / Cost / Seats                       |
+| `y` / `n`              | allow / deny a tool call                                     |
+| `r`                    | reconvene a finished session                                 |
+| `e`                    | export the record and document as Markdown                   |
+| `↑`/`↓`, `PgUp`/`PgDn` | scroll                                                       |
+| `g`                    | follow the newest row                                        |
+| `^C`                   | quit from anywhere                                           |
 
-In **Settings** (`^P`): `↑`/`↓` select a provider or option row · `Enter` / `e`
-edit (keys and the proxy are masked) · `d` remove a key / reset an option ·
-`Enter` save · `Esc` cancel / back. Keys you add here are stored locally at
-`keys.enc` (`0600`); options persist to `config.toml`.
+In **Settings**: `↑`/`↓` select · `Enter` edit or toggle · `d` remove a key or
+a seat, or reset a row · `a` add a seat · `n` rename a seat · `r` cycle a
+seat's reasoning · `R` reset the roster · `Esc` cancel / back. Keys go to
+`keys.enc` (`0600`); everything else to `config.toml`.
 
-## The debate
+## The session
 
-Faithful to the desktop app. Agents are told to be concise, challenge weak
-claims, address each other by name, and — critically — **not fabricate facts,
-sources, or quotes**. Each agent's reasoning is quarantined in a collapsible
-"Thought for Xs" panel (`t` toggles) and never leaks into its spoken message, and
-each keeps a private **canvas** (a `@canvas` scratchpad, collapsible, only it
-sees). A **Moderator** (its own model) frames the topic, synthesizes periodically,
-and nudges toward a close. Any agent can append `@end()` once the room converges,
-triggering a **vote** (majority `floor(n/2)+1`) rendered as a tally board. At the
-close the council produces a **peer-review scorecard** (every agent rates every
-other on rigor / evidence / novelty / civility / on-topic) and the Moderator
-publishes a **scored verdict** (`Consensus` / `Majority` / `Unresolved` +
-`Score X/10`). Add `--deep-research` for a synthesized report over the transcript,
-or `--reflect light|deep` to have each agent revise its draft before speaking.
+1. **Framing.** The moderator reads the topic, the roster (each seat's model,
+   class and price) and any attachments, then returns a plan: the deliverable
+   (`decision`, `analysis`, `document` or `review`), the sharpened question,
+   the options, what would settle it, which seats take part as **principals**
+   (they reason in every round) or **support** (they run one bounded chore
+   first), an optional lens per principal so positions diverge, subtasks,
+   and how many rounds to allow. Hard reasoning goes to flagship seats;
+   summaries, lookups and calculations go to fast ones. The engine validates
+   the plan against the roster and your policy, prints an estimate, and can
+   pass one clarifying question back to you (`--interactive`).
+2. **Prep.** Support seats run their subtasks in parallel with tools; the
+   findings land on the board as evidence.
+3. **Positions.** Principals answer independently and in parallel, with no
+   transcript: position, strongest reason, strongest objection to their own
+   view, what would change their mind, confidence.
+4. **Cross-examination.** Every position is visible. Each principal attacks
+   the weakest specific claim it disagrees with, tools allowed; agreement
+   without a new consideration is not accepted. After the round a fast model
+   rewrites the **board** (settled, disputed, evidence, open questions, one
+   line per position) and judges **convergence**: close, another round, or
+   revise.
+5. **Revision.** Each principal restates its position, says what moved it,
+   and votes (an option, or endorse / dissent).
+6. **Record.** The moderator writes the decision record: the answer and its
+   confidence, options considered and why they lost, dissent and why it did
+   not carry, assumptions, evidence, open questions, next actions, and what
+   changed between the first positions and the final ones. For a `document`
+   deliverable it drafts the work product, the principals critique it once,
+   and it revises; for a `review` the record is a findings list.
 
-**The advisor circle.** Every debater has a paired silent advisor on the same
-provider (Greta→George, Clara→Cathy, Gaia→Grace, Dara→Douglas, Kira→Kate,
-Quincy→Quinn, Mila→Mary, Zoe→Zara). Every `--observer-interval` turns
-(default 2) each advisor reads the public record and may slip its partner a
-private <80-word note — injected only into that partner's next context, shown
-to you as a 🔒 whisper. `--no-observers` silences the circle.
+Every phase is written to the session file, so a budget stop or a cancel
+still leaves a record. Seats are told to cut the preamble: one claim per
+paragraph with its reason, name the assumption they reject, and take the
+least obvious defensible position rather than restate the framing.
 
-**Conflict tracking.** After every committed turn the engine re-scores all
-agent pairs with the app's heuristic detector (directed pushback, negated
-back-and-forth on overlapping terms, recency-weighted with a cooldown), and
-when a pair crosses the semantic floor it is confirmed or damped by one NLI
-call on the utility model. Press `c` for the live tension board.
+**Tools.** With `--tools safe` (the default) seats can `web_search`
+(DuckDuckGo and Bing racing, then Wikipedia and DuckDuckGo instant answers,
+every request pinned to English and the US region), `verify_claim` (a search
+plus a stance heuristic, topped up from Wikipedia when evidence is thin),
+`search_attachments`, `read_attachment`, and `read_file` / `write_file`
+inside the session workspace. `--tools all` adds `run_command`: a shell
+command under the macOS sandbox (no network, no keychain or directory-service
+reads, writes only inside the workspace; `git` and `python3` work) or under
+bubblewrap on Linux, with a timeout and an output cap; elsewhere it refuses
+unless `[tools.shell] unsandboxed = true`, and then the record says so.
+Results are capped, scrubbed of directives and fenced as untrusted data. At
+most two calls per turn and two tool rounds per turn; `--ask-tools` makes
+every call wait for your yes. `probe --tools` proves the tool-call round trip
+on every provider.
 
-**Cost ledger + budgets.** Every completion — turns, reflections, ballots,
-advisor notes, moderator calls, peer reviews, NLI checks — is metered with
-real per-1M pricing (unknown models count tokens and show a `≥` lower bound;
-prices are never guessed). `--budget 2.50 --budget-action stop` halts the
-session at the cap (warning at 80%); a rolling per-UTC-day total persists in
-`daily-spend.json`. Press `$` for the ledger; a final table prints in
-`--no-tui` mode.
+**Hand-off.** Every run ends by writing a folder — `<workspace>/handoff` by
+default, `--handoff DIR` to choose — with `handoff.md` (the question, the
+answer, the next steps as a checklist, open questions, dissent, evidence, the
+workspace listing), `record.md`, `document.md` when there is one, `board.md`
+and `session.json`. `socratic-council handoff <session-id> [--to DIR]`
+rebuilds it for any stored session.
 
-**Oracle tools.** Agents may call, on their own line, at most twice per turn:
+**Cost.** Every call is metered with the provider's published prices,
+including prompt-cache hits and writes. Unpriced models count tokens and
+show a `≥` lower bound; prices are never guessed. `--budget 2.50
+--budget-action stop` halts between calls at the cap (warning at 80%) and
+still writes the record; a rolling per-UTC-day total persists in
+`daily-spend.json`.
 
-```text
-@tool(oracle.web_search, {"query":"..."})   # keyless web search (DuckDuckGo → Bing fallback)
-@tool(oracle.file_search, {"query":"..."})  # search the files attached with --file
-@tool(oracle.verify, {"claim":"..."})       # grade one factual claim against the web
+## Seats, models and tiers
+
+A seat is a provider plus a model. The default roster is the eight named
+seats on their provider's Auto flagship; `--preset` takes the first 3, 4 or
+8, `--seats` names any list (`provider:model`, model = `auto`, `auto-fast`,
+or an id), and `[[seats]]` in `config.toml` makes a roster permanent:
+
+```toml
+[[seats]]
+id = "george"
+provider = "openai"
+model = "auto"
+[[seats]]
+id = "luna"
+provider = "openai"
+model = "gpt-5.6-luna"
+reasoning = "low"
+[moderator]
+provider = "google"
+model = "auto"
+[tools]
+approval = "ask"
+[tools.shell]
+enabled = true
+[protocol]
+max_rounds = 2
 ```
 
-Results land in the shared transcript as a `Tool result (…)` message every
-agent sees next turn. `--no-search` disables the tools entirely.
-
-## Reasoning tiers & Auto
-
-Each reasoning tier (`low`/`medium`/`high`) maps to (a) a chosen model per
-provider and (b) the provider's reasoning-effort knob (OpenAI `reasoning.effort`,
-Anthropic's per-model thinking profile, Google `thinkingBudget`, Qwen
-`enable_thinking`, MiniMax `budget_tokens`). Leave a tier on `auto` (the default)
-and the resolver picks the best available model; pin a specific id under
-`[model_selection.<provider>]` in the config file to override.
+Each round runs at a reasoning tier (positions and revision high, cross-
+examination medium, chores and utility calls low, the record high); `--tier`
+sets one tier for all of them and a seat's `reasoning` overrides it. The
+tier maps onto each model's documented knob (OpenAI `reasoning.effort`,
+Claude adaptive thinking + `effort`, Gemini `thinkingLevel`, DeepSeek and
+GLM `thinking` + `reasoning_effort`, Kimi `reasoning_effort`, Qwen
+`enable_thinking`, MiniMax `adaptive`), verified per model in
+`docs/provider-contract-sheet.md`.
 
 ## License
 

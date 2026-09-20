@@ -7,11 +7,13 @@
   "permissions": [
     "core:default",
     "store:default",
-    "http:default",
     "dialog:default",
     "fs:default",
     "opener:default",
-    "opener:allow-open-path",
+    {
+      "identifier": "opener:allow-open-path",
+      "allow": [{ "path": "$DOWNLOAD/**" }, { "path": "$DOCUMENT/SocraticCouncil/**" }]
+    },
     {
       "identifier": "fs:allow-write-text-file",
       "allow": [{ "path": "$DOWNLOAD/**" }, { "path": "$DOCUMENT/SocraticCouncil/**" }]

@@ -1,23 +1,19 @@
 # `socratic-council` — Rust CLI / TUI design
 
-> Status: original design (June 2026), **shipped and since extended through
-> v1.0.0**. A standalone Rust crate publishable to crates.io
-> (`cargo install socratic-council`) that runs the multi-agent debate in the
-> terminal with a ratatui TUI. Reuses the provider endpoint/format knowledge
-> and the reasoning-tier model from the desktop app
-> (`docs/model-flexibility-design.md`) — **no fabricated model ids**.
->
-> **v1.0.0 (June 2026) superseded this document's "out of scope" list.** The
-> shipped crate now also includes: the **advisor circle** (8 paired silent
-> observers, `engine/observer.rs`), **conflict detection + the Tensions pane**
-> (`engine/conflict.rs`, a faithful port of `core/conflict.ts` + the NLI
-> refinement), a **cost ledger with budget caps + daily tracking**
-> (`engine/cost.rs`, real registry pricing only), **oracle web/file search +
-> claim verification** (`engine/oracle.rs`, `search.rs`, `attach.rs`), a
-> header **turn progress gauge**, **editable Settings options** (cap, advisor
-> interval, budget, proxy), and ANSI-sanitized `--no-tui` output. Peer-eval,
-> deep research, reflection, end-votes, and canvases shipped earlier
-> (v0.6–v0.10). Still deferred: argument map, fact-check badges, exports.
+> Status: original design (June 2026), shipped through v1.1.0, and
+> **superseded in September 2026 by the v3 engine** described in
+> `docs/superpowers/specs/2026-09-19-one-engine-structured-deliberation-design.md`.
+> The chat loop, bidding, advisors, conflict scoring, reflection, peer
+> evaluation, canvases and the `@tool` directive protocol are gone. The crate
+> now runs the deliberation protocol (`src/deliberation/`): a moderator plan
+> with routing by model class, independent positions, parallel
+> cross-examination with native tool calling (`src/tools/`), a board and a
+> convergence check between rounds, a revision round with the vote, and a
+> decision record. Models come with verified contracts and prices
+> (`src/catalog/rows.rs`). The TUI still renders the old event vocabulary
+> through `engine::adapt` until its redesign. The sections below describe the
+> original design and are kept for history; where they conflict with the
+> spec, the spec wins.
 
 ## Why Rust + ratatui
 
@@ -30,6 +26,14 @@
   Node toolchain and defeat `cargo install`.
 
 ## Crate layout
+
+**v3:** a root Cargo workspace with two members: `engine/` (package
+`socratic-council-engine`: types, catalog, providers, tools, deliberation,
+cost, store, crypto, attachments, search) and `cli/` (clap entry point,
+config, the desktop bridge and the TUI), one `Cargo.lock` at the root and
+the audit policy in `.cargo/audit.toml`. The desktop app's Tauri backend is
+excluded from the workspace and depends on the engine by path. The layout
+below is the original June 2026 design.
 
 Location: top-level `cli/` (standalone crate; the pnpm workspace ignores
 dirs without a `package.json`, and cargo ignores the JS monorepo).
@@ -103,26 +107,16 @@ Proxy + the same host set are honored, but **no allowlist gate** — the CLI
 is the user's own machine, not a sandboxed renderer. `https://` is still
 enforced for non-loopback.
 
-## Engine
+## Engine (v3)
 
-Port the core scheduler (`Chat.tsx runDiscussion`) in a reduced, dependency-
-light form:
-
-- **Phases**: `Lobby → Discussion → Resolution → Completed`.
-- **Turn selection** (`bidding.rs`): round-robin cycle guarantee + a bid
-  score = base relevance (optional LLM relevance call at the utility tier,
-  else deterministic heuristic) + fairness penalty for recent speakers +
-  cycle bonus. The winning agent streams next.
-- **Moderator**: opening framing, periodic synthesis (every N turns),
-  resolution prompt near the cap, final summary. Runs at the utility tier on
-  whichever provider is configured (Auto-resolved), not a hardcoded id.
-- **Events**: the orchestrator runs on a tokio task and emits
-  `DebateEvent::{TurnStarted, Token, ThinkingToken, TurnEnded, Moderator,
-Phase, Error}` over an `mpsc` channel; the TUI consumes them to animate.
-
-Out of scope for v1 (documented as follow-ups, mirroring core/): observers,
-whispers, peer-eval graph, argument map, fact-check. The trait + event model
-leave room to add them.
+`src/deliberation/mod.rs` drives the protocol as an async state machine that
+emits `DebateEvent`s (serialisable, one JSON line each with `--json`) and
+takes `EngineInput`s (tool approvals, answers, cancel) through an `InputHub`.
+Rounds run seats concurrently with `join_all` under a semaphore. Every phase
+persists a v2 session file (`store.rs`); the flat `messages` array keeps v1
+readers working. `seat_turn.rs` wraps one completion in the tool loop;
+`tools/` holds the registry, policy, workspace, sandboxed shell, web and
+attachment tools; `cost.rs` bills from the catalog rows, cache hits included.
 
 ## TUI
 
@@ -147,19 +141,24 @@ Three-zone layout mirroring the desktop "chamber":
 - Resize-aware via crossterm events; transcript virtualized (only visible
   lines wrapped/rendered).
 
-## CLI surface (clap)
+## CLI surface (clap, v3)
 
 ```
-socratic-council                       # interactive: prompt for a topic, launch TUI
-socratic-council run "Is P=NP?"        # start a debate on a topic
-  --providers openai,anthropic,google  # subset to those with keys (default: all configured)
-  --tier high            # council reasoning tier (low|medium|high)
-  --max-turns 40         # cap (0 = until end-vote)
-  --no-tui               # plain streaming stdout (pipe-friendly)
-  --resume <id>          # reopen a saved transcript
-socratic-council models [--provider openai] [--scan]   # list catalog / scan live
-socratic-council providers                              # show which keys are configured
-socratic-council config path|edit|set-key <provider>   # manage config + keys
+socratic-council                        # open the TUI
+socratic-council run "topic"            # convene the standard council (4 seats)
+  --preset quick|standard|full          # 3 / 4 / 8 seats from the roster
+  --seats openai:gpt-6-astra,anthropic:auto   # explicit seats, any model per seat
+  --providers openai,anthropic,google   # restrict providers
+  --deliverable decision|analysis|document|review
+  --rounds N  --tier low|medium|high    # round cap; one tier for every round
+  --tools none|safe|all  --allow-shell  --ask-tools  --interactive
+  --file PATH  --budget USD  --budget-action warn|stop  --workspace DIR
+  --no-tui  --json  --scan  --resume <id>
+socratic-council models [--provider openai] [--scan]
+socratic-council providers
+socratic-council probe [--tools]
+socratic-council sessions
+socratic-council config path|set-key <provider>
 ```
 
 ## Config & secrets

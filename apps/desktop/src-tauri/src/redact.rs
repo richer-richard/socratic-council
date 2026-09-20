@@ -16,6 +16,21 @@
 
 const REDACTED: &str = "[REDACTED]";
 
+/// Scrub `text` of (1) every exact `secrets` value (the request's own credential
+/// header values — the one set of secrets the broker *knows* verbatim, whatever
+/// their shape) and (2) the pattern-based redactions below. Provider error
+/// bodies sometimes echo the key back ("invalid api key: …"); pattern matching
+/// alone missed MiniMax's JWT-shaped and Zhipu's `id.secret`-shaped keys.
+pub fn redact_with_secrets(text: &str, secrets: &[String]) -> String {
+    let mut out = text.to_string();
+    for s in secrets {
+        if s.len() >= 8 {
+            out = out.replace(s.as_str(), REDACTED);
+        }
+    }
+    redact_urls_in(&out)
+}
+
 /// Remove `user:pass@` userinfo from any `scheme://user:pass@host:port/path`
 /// substrings inside the input. Preserves surrounding text. Idempotent and
 /// safe to call on arbitrary error messages; leaves strings without URLs
@@ -125,6 +140,16 @@ fn match_key_at(bytes: &[u8], i: usize) -> Option<usize> {
         }
     }
 
+    // JWT-shaped tokens (MiniMax keys are JWTs): three base64url segments, the
+    // first starting with `eyJ` (`{"` encoded).
+    if let Some(end) = match_jwt_at(bytes, i) {
+        return Some(end);
+    }
+    // Zhipu / Z.AI keys: 32 hex chars, a dot, then a 16+ char alphanumeric secret.
+    if let Some(end) = match_zhipu_key_at(bytes, i) {
+        return Some(end);
+    }
+
     // Try sk-ant-, sk-proj-, sk-, AIza in priority order.
     let prefixes: &[(&[u8], usize)] = &[
         (b"sk-ant-", 10),
@@ -155,9 +180,85 @@ fn match_key_at(bytes: &[u8], i: usize) -> Option<usize> {
     None
 }
 
+fn run_len(bytes: &[u8], from: usize, pred: fn(u8) -> bool) -> usize {
+    let mut j = from;
+    while j < bytes.len() && pred(bytes[j]) {
+        j += 1;
+    }
+    j - from
+}
+
+fn is_b64url(c: u8) -> bool {
+    c.is_ascii_alphanumeric() || c == b'-' || c == b'_'
+}
+
+/// `eyJ…`.`…`.`…` with every segment ≥ 10 base64url chars.
+fn match_jwt_at(bytes: &[u8], i: usize) -> Option<usize> {
+    if !bytes[i..].starts_with(b"eyJ") {
+        return None;
+    }
+    let mut j = i;
+    for seg in 0..3 {
+        let n = run_len(bytes, j, is_b64url);
+        if n < 10 {
+            return None;
+        }
+        j += n;
+        if seg < 2 {
+            if j >= bytes.len() || bytes[j] != b'.' {
+                return None;
+            }
+            j += 1;
+        }
+    }
+    Some(j)
+}
+
+/// `[0-9a-f]{32}.[A-Za-z0-9]{16,}` (Zhipu / Z.AI API keys).
+fn match_zhipu_key_at(bytes: &[u8], i: usize) -> Option<usize> {
+    let hex = run_len(bytes, i, |c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase());
+    if hex != 32 {
+        return None;
+    }
+    let dot = i + 32;
+    if dot >= bytes.len() || bytes[dot] != b'.' {
+        return None;
+    }
+    let tail = run_len(bytes, dot + 1, |c| c.is_ascii_alphanumeric());
+    if tail < 16 {
+        return None;
+    }
+    Some(dot + 1 + tail)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn redacts_exact_secret_values_of_any_shape() {
+        let key = "weird::shape::key::9f8e7d6c5b4a";
+        let input = format!("provider said: invalid credentials for {key} (retry)");
+        let out = redact_with_secrets(&input, &[key.to_string()]);
+        assert!(!out.contains(key));
+        assert!(out.contains("[REDACTED] (retry)"));
+        // Short values are never treated as secrets (would mangle ordinary text).
+        assert_eq!(redact_with_secrets("ok", &["ok".to_string()]), "ok");
+    }
+
+    #[test]
+    fn redacts_jwt_and_zhipu_shaped_keys() {
+        let jwt = "eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJtaW5pbWF4LXVzZXIifQ.abcdefghijklmnopqrstuvwxyz0123";
+        let out = redact_urls_in(&format!("401 for token {jwt} at minimax"));
+        assert!(!out.contains("eyJzdWIi"), "{out}");
+        assert!(out.contains("[REDACTED] at minimax"));
+        let zhipu = "0123456789abcdef0123456789abcdef.AbCdEfGhIjKlMnOpQrSt";
+        let out = redact_urls_in(&format!("bigmodel rejected {zhipu}."));
+        assert!(!out.contains("AbCdEfGh"), "{out}");
+        // A plain 32-char hex hash without the `.secret` tail is left alone.
+        let hash = "0123456789abcdef0123456789abcdef";
+        assert_eq!(redact_urls_in(hash), hash);
+    }
 
     #[test]
     fn strips_userinfo_from_http_url() {

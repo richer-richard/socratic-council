@@ -61,3 +61,8 @@ Thumbs.db
 
 # Rust CLI build artifacts
 cli/target/
+/target/
+
+# OCR runtime staged by scripts/prepare-ocr-assets.mjs (never committed)
+apps/desktop/public/tesseract/
+apps/desktop/public/tessdata/

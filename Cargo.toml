@@ -1,0 +1,11 @@
+# Rust workspace: the shared engine and the terminal client. The desktop app's
+# Tauri backend (apps/desktop/src-tauri) keeps its own lockfile and is built
+# by the Tauri CLI; it depends on the engine crate by path.
+[workspace]
+members = ["engine", "cli"]
+exclude = ["apps/desktop/src-tauri"]
+resolver = "2"
+
+[profile.release]
+lto = "thin"
+strip = true

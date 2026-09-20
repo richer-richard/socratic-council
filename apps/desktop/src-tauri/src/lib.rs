@@ -3,9 +3,13 @@
 //! This is the Rust backend for the Tauri desktop application.
 //! Handles HTTP requests with proxy support for AI API calls.
 
+#![forbid(unsafe_code)]
+
 mod allowlist;
+mod engine_host;
 mod http;
 mod redact;
+mod session_sync;
 mod vault_file;
 
 #[cfg(debug_assertions)]
@@ -17,8 +21,10 @@ pub fn run() {
     #[allow(unused_mut)]
     let mut builder = tauri::Builder::default()
         .manage(http::RequestRegistry::default())
+        .manage(engine_host::EngineRegistry::default())
         .plugin(tauri_plugin_store::Builder::new().build())
-        .plugin(tauri_plugin_http::init())
+        // No tauri-plugin-http: the webview has NO direct network path. Every
+        // outbound call is brokered by http.rs behind the allowlist.
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_opener::init());
@@ -51,6 +57,15 @@ pub fn run() {
             http::http_cancel,
             vault_file::vault_get_dek,
             vault_file::vault_reset,
+            session_sync::session_sync_list,
+            session_sync::session_sync_read,
+            session_sync::session_sync_write,
+            session_sync::session_sync_delete,
+            engine_host::engine_start,
+            engine_host::engine_input,
+            engine_host::engine_cancel,
+            engine_host::engine_catalog,
+            engine_host::engine_scan,
         ])
         .setup(|_app| {
             #[cfg(debug_assertions)]

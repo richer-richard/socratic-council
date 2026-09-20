@@ -135,6 +135,17 @@ fn create_new_owner_only(path: &Path) -> std::io::Result<fs::File> {
     fs::OpenOptions::new().write(true).create_new(true).open(path)
 }
 
+/// The current DEK as a fixed array, for backend code that seals or unseals
+/// vault files itself (the engine host's session store). Requires the DEK
+/// file to exist: the front end creates it through `vault_get_dek` at boot.
+pub(crate) fn current_dek(app: &tauri::AppHandle) -> Result<[u8; DEK_LEN], String> {
+    let path = resolve_dek_path(app)?;
+    let bytes = read_dek(&path)?;
+    let mut out = [0u8; DEK_LEN];
+    out.copy_from_slice(&bytes);
+    Ok(out)
+}
+
 fn read_dek(path: &Path) -> Result<Vec<u8>, String> {
     let bytes = fs::read(path).map_err(|e| format!("Failed to read DEK file: {}", e))?;
     if bytes.len() != DEK_LEN {

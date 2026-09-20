@@ -37,10 +37,14 @@ const PROVIDER_HOSTS: &[&str] = &[
     "api.minimaxi.com",
     "api.minimax.chat",
     "open.bigmodel.cn",
-    // Oracle / web search
+    // Web search — every backend the engine's `search.rs` can hit (DuckDuckGo
+    // html + instant answers, Bing RSS, Wikipedia's search API), so the broker
+    // and the engine agree on what leaves the machine.
     "api.duckduckgo.com",
     "duckduckgo.com",
     "html.duckduckgo.com",
+    "www.bing.com",
+    "en.wikipedia.org",
 ];
 
 /// Loopback hosts — `http://` is permitted to these, everyone else is `https://` only.
@@ -154,6 +158,13 @@ mod tests {
     fn allowlisted_https_provider_is_accepted() {
         assert!(validate_outbound_url("https://api.openai.com/v1/chat").is_ok());
         assert!(validate_outbound_url("https://api.anthropic.com/v1/messages").is_ok());
+    }
+
+    #[test]
+    fn search_tiers_are_allowlisted() {
+        assert!(validate_outbound_url("https://html.duckduckgo.com/html/?q=x").is_ok());
+        assert!(validate_outbound_url("https://www.bing.com/search?format=rss&q=x").is_ok());
+        assert!(validate_outbound_url("https://en.wikipedia.org/w/api.php?action=query").is_ok());
     }
 
     #[test]

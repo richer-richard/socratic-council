@@ -17,7 +17,11 @@ import type {
   PeerEvalStance,
 } from "@socratic-council/core";
 import { migrateArgGraphV1ToV2 } from "@socratic-council/core";
-import type { AgentId as CouncilAgentId, Message as SharedMessage } from "@socratic-council/shared";
+import type {
+  EngineSessionData,
+  AgentId as CouncilAgentId,
+  Message as SharedMessage,
+} from "@socratic-council/shared";
 
 import type { Provider } from "../stores/config";
 
@@ -311,6 +315,12 @@ export interface DiscussionSession {
    * is referenced from a system message via `peerEvalRoundId`.
    */
   peerEvalRounds?: Record<string, PeerEvalRound>;
+  /**
+   * v3: the deliberation the engine ran for this session (plan, board,
+   * rounds, record, document, costs). Present once the engine has persisted
+   * a phase; sessions from the v2 chat loop have none.
+   */
+  engine?: EngineSessionData;
 }
 
 export interface SessionSummary {
@@ -461,7 +471,93 @@ function normalizeStatus(value: unknown): SessionStatus {
   if (value === "draft" || value === "running" || value === "paused" || value === "completed") {
     return value;
   }
+  // The engine's session file says "active" while it runs and "completed",
+  // "stopped" or "failed" once it ends.
+  if (value === "active") return "running";
+  if (value === "stopped" || value === "failed") return "completed";
   return "draft";
+}
+
+const EMPTY_ENGINE_USAGE = { input: 0, output: 0, reasoning: 0, cached_input: 0, cache_write: 0 };
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+type EngineRound = EngineSessionData["rounds"][number];
+type EngineEntry = EngineRound["entries"][number];
+type EngineSeatRecord = EngineSessionData["seats"][number];
+
+/**
+ * The engine's data on a session. The engine writes it as top-level keys of
+ * its v2 file; the app keeps it under `engine`. Either shape is accepted.
+ * Objects pass through (they are the engine's own serialised structs); only
+ * the containers are checked so a malformed file cannot crash the page.
+ */
+function normalizeEngineData(record: Record<string, unknown>): EngineSessionData | undefined {
+  const source = isObject(record.engine)
+    ? record.engine
+    : record.version === 2 || Array.isArray(record.rounds) || isObject(record.plan)
+      ? record
+      : null;
+  if (!source) return undefined;
+  const arr = (value: unknown): unknown[] => (Array.isArray(value) ? value : []);
+  const str = (value: unknown): string | null => (typeof value === "string" ? value : null);
+  const rounds: EngineRound[] = arr(source.rounds)
+    .filter(
+      (round): round is Record<string, unknown> => isObject(round) && Array.isArray(round.entries),
+    )
+    .map((round) => ({
+      kind: round.kind as EngineRound["kind"],
+      entries: (round.entries as unknown[]).filter(isObject).map((entry): EngineEntry => ({
+        seat: str(entry.seat) ?? "",
+        name: str(entry.name) ?? str(entry.seat) ?? "",
+        model: str(entry.model) ?? "",
+        content: str(entry.content) ?? "",
+        structured: entry.structured ?? null,
+        tool_uses: arr(entry.tool_uses).filter(isObject) as unknown as EngineEntry["tool_uses"],
+        usage: (isObject(entry.usage) ? entry.usage : EMPTY_ENGINE_USAGE) as EngineEntry["usage"],
+      })),
+    }));
+  const board = isObject(source.board) && Array.isArray(source.board.settled) ? source.board : null;
+  const rosterRaw = isObject(source.roster) ? source.roster.seats : source.roster;
+  const seats: EngineSeatRecord[] = arr(Array.isArray(rosterRaw) ? rosterRaw : source.seats)
+    .filter(isObject)
+    .filter((seat) => typeof seat.id === "string" && typeof seat.provider === "string")
+    .map((seat) => ({
+      id: seat.id as string,
+      name: str(seat.name) ?? (seat.id as string),
+      provider: seat.provider as EngineSeatRecord["provider"],
+      model: str(seat.model) ?? "auto",
+      ...(typeof seat.reasoning === "string"
+        ? { reasoning: seat.reasoning as EngineSeatRecord["reasoning"] }
+        : {}),
+    }));
+  const data: EngineSessionData = {
+    plan: (isObject(source.plan) ? source.plan : null) as EngineSessionData["plan"],
+    corrections: arr(source.corrections).filter((c): c is string => typeof c === "string"),
+    estimate: (isObject(source.estimate) ? source.estimate : null) as EngineSessionData["estimate"],
+    board: board as EngineSessionData["board"],
+    rounds,
+    convergences: arr(source.convergences).filter(
+      isObject,
+    ) as unknown as EngineSessionData["convergences"],
+    record: (isObject(source.record) ? source.record : null) as EngineSessionData["record"],
+    document: str(source.document),
+    costs: (isObject(source.costs) ? source.costs : null) as EngineSessionData["costs"],
+    stoppedEarly: str(source.stoppedEarly),
+    seats,
+    handoff:
+      isObject(source.handoff) && typeof source.handoff.dir === "string"
+        ? {
+            dir: source.handoff.dir,
+            files: arr(source.handoff.files).filter((f): f is string => typeof f === "string"),
+          }
+        : null,
+  };
+  const empty =
+    !data.plan && !data.record && !data.document && !data.board && data.rounds.length === 0;
+  return empty ? undefined : data;
 }
 
 function normalizePhase(value: unknown, status: SessionStatus): SessionPhase {
@@ -1763,6 +1859,10 @@ function normalizeDiscussionSession(input: unknown): DiscussionSession | null {
           ),
         }
       : {}),
+    ...(() => {
+      const engine = normalizeEngineData(record as unknown as Record<string, unknown>);
+      return engine ? { engine } : {};
+    })(),
   };
 }
 
@@ -1774,13 +1874,42 @@ function replaceIndexEntry(index: SessionSummary[], summary: SessionSummary): Se
   );
 }
 
+/**
+ * Hooks the shared-store sync layer (services/sessionSync.ts) registers so
+ * this module stays free of any Tauri/IPC dependency. Both are optional.
+ */
+interface SessionHooks {
+  onSaved?: (session: DiscussionSession) => void;
+  onDeleted?: (id: string) => void;
+}
+let sessionHooks: SessionHooks = {};
+
+export function registerSessionHooks(hooks: SessionHooks): void {
+  sessionHooks = hooks;
+}
+
+/**
+ * Persist a session that arrived from the shared store (written by the CLI or
+ * another app instance). Same normalisation + atomic save as
+ * `saveDiscussionSession`, but never re-exported — that would echo it straight
+ * back to the file it came from.
+ */
+export function importDiscussionSession(raw: unknown): DiscussionSession | null {
+  const normalized = normalizeDiscussionSession(raw);
+  if (!normalized) return null;
+  return saveDiscussionSession(normalized, { silent: true });
+}
+
 export function listSessionSummaries(): SessionSummary[] {
   return readIndex().sort(
     (a, b) => Math.max(b.lastOpenedAt, b.updatedAt) - Math.max(a.lastOpenedAt, a.updatedAt),
   );
 }
 
-export function saveDiscussionSession(session: DiscussionSession): DiscussionSession {
+export function saveDiscussionSession(
+  session: DiscussionSession,
+  options: { silent?: boolean } = {},
+): DiscussionSession {
   const storage = getStorage();
   if (!storage) {
     return session;
@@ -1834,6 +1963,14 @@ export function saveDiscussionSession(session: DiscussionSession): DiscussionSes
     );
   }
 
+  if (!options.silent) {
+    try {
+      sessionHooks.onSaved?.(safeSession);
+    } catch (error) {
+      console.warn("[sessions] onSaved hook failed", error);
+    }
+  }
+
   return safeSession;
 }
 
@@ -1876,6 +2013,11 @@ export function deleteDiscussionSession(id: string): boolean {
   try {
     storage.removeItem(createSessionStorageKey(id));
     writeIndex(readIndex().filter((entry) => entry.id !== id));
+    try {
+      sessionHooks.onDeleted?.(id);
+    } catch (error) {
+      console.warn("[sessions] onDeleted hook failed", error);
+    }
     return true;
   } catch (error) {
     console.error("Failed to delete session:", error);

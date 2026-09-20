@@ -1,20 +1,16 @@
-# Socratic Council CLI — TUI design (June 2026)
+# Socratic Council CLI — TUI design (v3, September 2026)
 
-Goal: a ratatui TUI that **looks like the desktop app**, has the **same core
-debate functionality**, and **shares the app's keys + config** so the user never
-re-enters an API key the desktop already holds.
+The terminal client renders the deliberation the shared engine actually runs.
+It has three surfaces — **Home**, the **Session** screen and **Settings** — plus
+a collapsible **sessions** sidebar, and it shares the desktop app's keys and
+session store through the desktop bridge (optional: the CLI is fully
+self-contained with its own encrypted key store).
 
-> **v1.0.0 addendum.** The chamber gained a header progress gauge
-> (`turn 12/40 ▰▰▰▱▱▱▱▱ · round 2/5 · $…`), 🔒 advisor-whisper and ⌕ tool-result
-> turn kinds, and a right pane that cycles roster / **Tensions** (`c`) /
-> **Costs** (`$`). Settings gained an editable **Options** section
-> (discussion cap, advisor interval, session budget, budget action, proxy —
-> proxy values render with userinfo redacted and edit masked). Streamed
-> tokens are control-character-sanitized before they reach the buffer.
-
-This supersedes the v0.1 "plain prompt" TUI (a transcript + roster with no
-visual identity). The new TUI ports the app's three surfaces — Home, the
-history sidebar, and the Chat/debate chamber — plus a Settings/Models overlay.
+This supersedes the June 2026 design (the chat chamber with its transcript,
+votes, peer-evaluation scorecard, canvas and tensions pane). Those surfaces
+rendered a chat loop the engine no longer runs; the v3 engine runs a
+structured protocol (framing → prep → positions → cross-examination → board →
+convergence → revision → record), and the TUI shows exactly that.
 
 ---
 
@@ -82,76 +78,168 @@ A bridge failure is swallowed — the CLI still works from env / its own store.
 
 ---
 
-## 2. Visual language (ported from the app)
+---
 
-- **Palette:** warm near-black bg; gold accent `#F5C542`; muted slate `#94A3B8`;
-  off-white text `#E8E8EF`.
-- **Provider/agent colors:** openai `#60A5FA`, anthropic `#FBBF24`,
-  google `#34D399`, deepseek `#F87171`, kimi `#2DD4BF`, qwen `#22D3EE`,
-  minimax `#F472B6`, zhipu `#A78BFA`.
-- **Agents (inner ring):** George·OpenAI, Cathy·Anthropic, Grace·Google,
-  Douglas·DeepSeek, Kate·Kimi, Quinn·Qwen, Mary·MiniMax, Zara·Z.AI.
-- **Logo (`CouncilMark`):** N nodes evenly placed on a ring, joined by a faint
-  complete graph (every pair), each node its provider color. The TUI renders
-  this with a braille/quadrant canvas and animates a slow pulse; configured
-  providers glow, unconfigured dim.
+## 2. Visual language
 
-## 3. Views & state machine
+- **Palette:** warm near-black background; gold accent `#F5C542`; muted slate
+  `#94A3B8`; off-white text `#E8E8EF`; emerald `#34D399` for settled and
+  completed; rose `#FB7185` for dissent, errors and stops; cyan `#22D3EE` for
+  tool chips (`theme.rs`).
+- **Provider colors:** openai `#60A5FA`, anthropic `#FBBF24`, google `#34D399`,
+  deepseek `#F87171`, kimi `#2DD4BF`, qwen `#22D3EE`, minimax `#F472B6`,
+  zhipu `#A78BFA`. A seat takes its provider's color.
+- **Council mark:** the configured roster's seats on a slowly rotating ring,
+  joined by a faint complete graph; keyed seats glow, unkeyed seats dim.
+- Every string that came from a model or the network passes
+  `sanitize_terminal` before it enters a ratatui buffer (tokens and thinking
+  as they stream, stored content on load, structured fields at render), so no
+  provider output can inject ANSI/OSC escapes into the terminal.
+
+## 3. Views
 
 ```
-enum View { Home, Chat, Settings }
+enum View { Home, Session, Settings }
 ```
 
-- **Home** — animated council-ring logo + "socratic council" wordmark + tagline,
-  a bordered topic composer (Enter → launch debate), and an 8-agent roster strip
-  (colored dot + ✓ when a key is present — local or shared). Left: the history
-  sidebar.
-- **Chat (debate chamber)** — header (topic · turn · tok in/out · phase) with a
-  gold rule; 70/30 body = transcript (agent-colored turn headers, streaming
-  caret `▌`, optional thinking pane) and the live roster (active speaker pulses
-  `●`, shows resolved model + provider). Footer keybindings. Sidebar overlays
-  on toggle.
-- **Settings/Models** — an **interactive key manager** plus council & utility
-  tier, per-provider model selection (auto + resolved preview), live `/models`
-  scan, max-turns. `↑/↓` select a provider; `Enter`/`e` add or replace its key
-  (paste it — rendered as masked bullets, never plaintext); `d` removes a local
-  key; `Enter` saves to `keys.toml` (`0600`) and primes the in-session key cache
-  so the next debate uses it with no keychain prompt. Each row is labelled by key
-  source (`local` / `env` / `shared` / `—`).
+### Home
 
-### Terminal-only / VPS is first-class (v0.3.0)
+The council mark, the wordmark, a topic composer, two chip rows and the
+roster strip.
 
-Sharing the desktop app's keys is a **convenience, not a requirement**. The TUI
-opens even with **zero keys** (`main.rs` passes the _allowed_ provider set — the
-`--providers` filter or all eight — rather than configured-only; only `--no-tui`
-still needs a key up front). A first-run VPS user lands on Home, presses `^P`,
-adds a key in Settings, and convenes immediately — no desktop app, no shell
-round-trip. No UI string frames the app as the place to configure keys. Pasting is
-robust: bracketed paste (`Event::Paste`) plus an event-draining loop so a pasted
-key registers instantly even on terminals without bracketed-paste support.
+- **Council preset** (`←`/`→`): Quick · 3, Standard · 4, Full. The preset
+  takes keyed seats of the allowed providers in roster order and cuts the list
+  (`config::select_roster`); an explicit `--seats` roster is only key-gated.
+  The strip shows how many seats convene (`◆`), which seats are keyed (`●`)
+  and which are not (`○`).
+- **Deliverable** (`^D`): auto (the moderator decides), decision, analysis,
+  document, review.
+- `Enter` convenes; `Tab` opens the sessions sidebar; `^P` opens Settings;
+  `Esc` quits.
 
-**History sidebar** (collapsible, the "history bar"): the decrypted desktop
-session index — same titles/status/turn-counts the app shows — grouped active +
-a collapsible Archived section, plus the CLI's own saved runs. `Tab`/`[` toggles
-it; ↑/↓ select; `Enter` opens a read-only transcript of a past session
-(decrypts the session blob and renders its `messages`).
+A zero-key first run lands on Home, adds a key in Settings and convenes
+without leaving the terminal — the desktop app is never required.
+
+### Session
+
+The engine's event stream, folded by `tui::view::SessionView` (the terminal
+twin of the desktop's `session/reducer.ts`).
+
+- **Header:** the topic; a status pill (running / completed / stopped /
+  cancelled / failed); the deliverable; the phase trail
+  (`Framing ▸ Prep ▸ Positions ▸ Cross-examination 1 ▸ …`); the estimate; the
+  running cost (bold gold when a budget note fired).
+- **Main column** (scrollable, follows the newest row until you scroll up):
+  errors; the **decision record** first when the run reached one (answer,
+  confidence bar, votes, what changed, dissent, options considered,
+  assumptions, evidence, open questions, next actions); the **document** for
+  document deliverables; then every **round** with a card per seat — a live
+  seat pulses and shows a caret, a finished seat shows its usage; a
+  collapsible reasoning trace (`t`); `⚙` tool chips with the call's
+  arguments and the result or error — and the moderator's notes. A session
+  written before v3 renders its flat transcript instead.
+- **Side column** (`p` `b` `v` `$` `s`, or `←`/`→`): **Plan** (deliverable,
+  rounds, question, what it settles, options, participants with roles,
+  lenses, prep subtasks, corrections); **Board** (settled points,
+  disagreements, evidence, open questions, positions); **Converge** (each
+  judgement: close / another round / revise, open disagreements, who moved,
+  why); **Cost** (the estimate, per-seat rows, lanes, total, tokens, caps,
+  the budget note); **Seats** (the convened seats with their resolved model
+  and plan role; the active ones pulse). The column collapses under 90 cells.
+- **Overlays:** when the moderator asks its clarifying question, a prompt
+  takes the keyboard (`Enter` answers, `Esc` plans without an answer, `^U`
+  clears, paste works); when a seat asks to run a tool under an ask-first
+  policy, an approval prompt shows the seat, the tool and its arguments
+  (`y` allow, `n` deny). A question outranks an approval.
+- **Hand-off:** once the engine writes the hand-off folder (the brief with
+  the next steps as a checklist, the record, the document, the board and
+  the session file), a section under the record names the folder and its
+  files.
+- **Keys:** `Esc` stops a live council (twice, to avoid a stray keypress
+  ending a paid run) or returns Home; `r` reconvenes a finished session — its
+  record (or the transcript tail) becomes the planner's notes and a new
+  session is written; `e` exports the record and the document (or the
+  transcript) as Markdown to the Downloads folder; `↑`/`↓`, `PgUp`/`PgDn`,
+  `Home`/`End` scroll; `g` follows.
+
+The engine is the only writer of session files; the TUI never persists a
+session itself. When the engine task ends without a `done` event the screen
+marks the session failed instead of waiting.
+
+### Settings
+
+One scrolling screen; the cursor row stays in view. Every change validates,
+applies to the in-memory config and saves at once (`config.toml`; keys to
+`keys.enc`, 0600).
+
+| Section             | Rows                                                                                                               | Keys                                                                                                                    |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------- |
+| Keys                | one per provider: key source (local / env / shared / —) and the seats it serves                                    | `Enter` paste a key (masked bullets, never plaintext), `d` remove a local key                                           |
+| Council             | one per seat: `provider:model`, the resolved model with its class and prices, a reasoning override; `+ add a seat` | `Enter` edit `provider:model`, `n` rename, `r` cycle reasoning, `a` add, `d` remove, `R` reset to the eight named seats |
+| Moderator & utility | the slot's `provider:model`, resolved model, class, prices                                                         | `Enter` edit, `d` back to the default                                                                                   |
+| Tools & protocol    | tool level (none / safe / all), approval (auto / ask), cross-examination cap (1–6), clarifying question (on / off) | `Enter` cycle or edit, `d` reset                                                                                        |
+| Budget & network    | session cap, daily cap, cap action (warn / stop), proxy (masked while typed, userinfo redacted on screen)          | `Enter` edit or toggle, `d` reset                                                                                       |
+
+A seat's or slot's model is `auto`, `auto-balanced`, `auto-fast` or an id; an
+id must exist in the provider's catalog or its last live scan, otherwise the
+edit is refused with the nearest matches — the editor never lets a made-up id
+through.
+
+### Sessions sidebar
+
+`Tab` toggles it on Home and on the Session screen. Rows come from the shared
+store (newest first) and, for sessions the desktop app never exported, from
+its localStorage index. Each row shows the title, the status, the deliverable
+and cost when the run reached a record, and the record's answer. `Enter`
+opens a session read-only; `r` reconvenes it.
 
 ## 4. Engine integration
 
-The existing async orchestrator (`engine/mod.rs`) is unchanged — it streams
-`DebateEvent`s into an mpsc channel. The TUI owns the channel: submitting a topic
-on Home spawns an `Engine::run` task; `Esc`/`q` cancels via the shared
-`AtomicBool` and returns Home. A `~100ms` tick drives logo/caret animation. The
-`--no-tui` plain streaming path is retained for piping.
+```
+Home ──Enter──▶ App::launch ──▶ Deliberation::run(tx, input_rx)   (tokio task)
+                                     │ DebateEvent            ▲ EngineInput
+                                     ▼                        │
+                              SessionView::apply      question / approval / cancel
+                                     │
+                                     ▼
+                              session::render
+```
+
+`App::launch` resolves the keys once (the moderator may sit on a provider with
+no seat), builds the `EngineConfig` from the CLI config, and spawns the run.
+The event loop drains the channel each frame (70 ms) into `SessionView`,
+redraws only while something changed or a run is live, and forwards
+`EngineInput::UserAnswer`, `ToolDecision` and `Cancel` from the overlays and
+`Esc`. `--resume <id>` opens the stored session and reconvenes it; `--no-tui`
+and `--json` keep the plain streaming path for scripts.
 
 ## 5. Modules
 
 ```
 cli/src/bridge.rs        desktop key/config/session reader (feature: desktop-bridge)
-cli/src/tui/mod.rs       App, event loop, view routing, engine wiring
-cli/src/tui/theme.rs     colors, agent metadata, logo geometry
-cli/src/tui/home.rs      Home + animated logo + composer
-cli/src/tui/sidebar.rs   collapsible history sidebar
-cli/src/tui/chat.rs      debate chamber (transcript + roster + thinking)
-cli/src/tui/settings.rs  providers/models/tiers panel
+cli/src/config.rs        config.toml, keys.enc, the roster, presets, select_roster
+cli/src/engine/mod.rs    text helpers: sanitize_terminal, strip_directives (pre-v3 transcripts)
+cli/src/tui/mod.rs       App, AppContext, the event loop, view routing, launch / reconvene / export
+cli/src/tui/view.rs      SessionView: the pure reducer over DebateEvent; from_stored for session files
+cli/src/tui/session.rs   the Session screen: header, main column, side tabs, overlays
+cli/src/tui/home.rs      Home: council mark, composer, preset and deliverable chips, roster strip
+cli/src/tui/settings.rs  Settings rows, editing and validation, rendering
+cli/src/tui/sidebar.rs   the sessions sidebar
+cli/src/tui/theme.rs     colors, the eight named agents, ring geometry
 ```
+
+## 6. Testing
+
+- `view.rs`: a scripted event stream builds the expected view; a seat that
+  finishes without starting is appended; questions and approvals are pending
+  until answered or done; escape bytes never reach the view; a v2 document
+  and a v1 transcript load.
+- `mod.rs` and `settings.rs`: every view and side tab renders at several
+  sizes (including 1×1) without panicking; the overlays take the keyboard and
+  send the right `EngineInput`; `Esc` needs two presses while live; Home
+  cycles the preset and the deliverable; Settings edits, toggles, adds,
+  removes and resets without touching the disk (persistence is off in tests);
+  the key and proxy buffers render masked; an engine disconnect marks the
+  session failed.
+- A headless drive: run the binary inside `tmux`, send keys with
+  `tmux send-keys`, read the screen with `tmux capture-pane -p`.

@@ -68,9 +68,6 @@ importers:
       '@socratic-council/core':
         specifier: workspace:*
         version: link:../../packages/core
-      '@socratic-council/sdk':
-        specifier: workspace:*
-        version: link:../../packages/sdk
       '@socratic-council/shared':
         specifier: workspace:*
         version: link:../../packages/shared
@@ -195,9 +192,6 @@ importers:
 
   packages/core:
     dependencies:
-      '@socratic-council/sdk':
-        specifier: workspace:*
-        version: link:../sdk
       '@socratic-council/shared':
         specifier: workspace:*
         version: link:../shared
@@ -207,22 +201,6 @@ importers:
         version: 8.5.1(jiti@1.21.7)(postcss@8.5.28)(typescript@5.9.3)
       typescript:
         specifier: ^5.4.0
-        version: 5.9.3
-
-  packages/sdk:
-    dependencies:
-      '@socratic-council/shared':
-        specifier: workspace:*
-        version: link:../shared
-      undici:
-        specifier: ^8.7.0
-        version: 8.10.2
-    devDependencies:
-      tsup:
-        specifier: ^8.3.5
-        version: 8.5.1(jiti@1.21.7)(postcss@8.5.28)(typescript@5.9.3)
-      typescript:
-        specifier: ^5.7.2
         version: 5.9.3
 
   packages/shared:
@@ -3317,10 +3295,6 @@ packages:
 
   undici-types@7.24.6:
     resolution: {integrity: sha512-WRNW+sJgj5OBN4/0JpHFqtqzhpbnV0GuB+OozA9gCL7a993SmU+1JBZCzLNxYsbMfIeDL+lTsphD5jN5N+n0zg==}
-
-  undici@8.10.2:
-    resolution: {integrity: sha512-/y4/bH9YNU5hi9NIrpOuvGXFcxrj3CMrV+/AYpowAYTpHn8gX/XPFjNy766FPoYY0miQhdW977JFWKGNhBdwyQ==}
-    engines: {node: '>=22.19.0'}
 
   unified@11.0.5:
     resolution: {integrity: sha512-xKvGhPWw3k84Qjh8bI3ZeJjqnyadK+GEFtazSfZv/rKeTkTjOJho6mFqh2SM96iIcZokxiOpg78GazTSg8+KHA==}
@@ -7126,8 +7100,6 @@ snapshots:
   undici-types@6.21.0: {}
 
   undici-types@7.24.6: {}
-
-  undici@8.10.2: {}
 
   unified@11.0.5:
     dependencies:

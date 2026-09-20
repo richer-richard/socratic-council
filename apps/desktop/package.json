@@ -1,12 +1,12 @@
 {
   "name": "@socratic-council/desktop",
-  "version": "2.2.1",
+  "version": "3.0.0",
   "description": "Desktop application for Socratic Council - Tauri 2.0 + React",
   "type": "module",
   "private": true,
   "scripts": {
-    "dev": "vite",
-    "build": "pnpm -C ../../packages/shared build && pnpm -C ../../packages/sdk build && pnpm -C ../../packages/core build && tsc && vite build",
+    "dev": "pnpm prepare:ocr && vite",
+    "build": "pnpm prepare:ocr && pnpm -C ../../packages/shared build && pnpm -C ../../packages/core build && tsc && vite build",
     "preview": "vite preview",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
@@ -14,7 +14,8 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint \"src/**/*.{ts,tsx}\"",
     "test": "vitest run --root ../.. --config vitest.config.ts",
-    "clean": "rm -rf dist"
+    "clean": "rm -rf dist",
+    "prepare:ocr": "node ../../scripts/prepare-ocr-assets.mjs"
   },
   "dependencies": {
     "@dagrejs/dagre": "^3.1.1",
@@ -23,7 +24,6 @@
     "@fontsource/manrope": "^5.3.0",
     "@noble/ciphers": "^2.4.0",
     "@socratic-council/core": "workspace:*",
-    "@socratic-council/sdk": "workspace:*",
     "@socratic-council/shared": "workspace:*",
     "@tauri-apps/api": "^2.11.1",
     "@tauri-apps/plugin-dialog": "^2.7.3",
