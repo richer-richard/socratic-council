@@ -448,6 +448,9 @@ mod tests {
         }
     }
 
+    // The system-tree binds are filtered by existence, so the assertion
+    // holds only where `/usr` exists.
+    #[cfg(unix)]
     #[test]
     fn bwrap_args_confine_network_and_writes() {
         let args = bwrap_args(Path::new("/home/u/ws"), "echo hi");

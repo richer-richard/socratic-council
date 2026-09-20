@@ -273,7 +273,10 @@ fn list_workspace(ws: &Path) -> Vec<String> {
             if path.is_dir() {
                 walk(root, &path, out);
             } else if let Ok(rel) = path.strip_prefix(root) {
-                out.push(rel.display().to_string());
+                // `/`-joined on every platform so the brief reads the same
+                // wherever it was written.
+                let parts: Vec<_> = rel.iter().map(|c| c.to_string_lossy()).collect();
+                out.push(parts.join("/"));
             }
         }
     }
