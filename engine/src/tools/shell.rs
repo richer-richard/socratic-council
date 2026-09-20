@@ -9,8 +9,9 @@
 
 use super::policy::ShellPolicy;
 use super::ToolOutput;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
+use std::sync::OnceLock;
 use tokio::io::AsyncReadExt;
 use tokio::process::Command;
 
@@ -37,18 +38,27 @@ pub enum SandboxKind {
 /// temp dir — but never the keychains, the local directory service or the
 /// privacy database; writes only inside the workspace, `/dev/null`, and the
 /// Xcode command shims' cache file (`xcrun_db`, written next to the user's
-/// temp dir, without which `git` and `python3` refuse to start); user and
-/// group lookups and logging through the directory service (no file or
-/// network grant comes with them); no network at all.
+/// temp dir, without which `git` and `python3` refuse to start); reads of
+/// the active Xcode developer directory, where those shims load `libxcrun`
+/// and the real tools from (the Command Line Tools sit under `/Library`,
+/// already readable; a full Xcode sits under `/Applications`, which is not);
+/// user and group lookups and logging through the directory service (no
+/// file or network grant comes with them); no network at all.
 pub fn sandbox_profile(workspace: &Path, tmp: &Path) -> String {
     let ws = workspace.display().to_string().replace('"', "\\\"");
     let tmp = tmp.display().to_string().replace('"', "\\\"");
+    let dev = developer_dir()
+        .map(|d| {
+            let root = developer_read_root(&d).display().to_string();
+            format!(" (subpath \"{}\")", root.replace('"', "\\\""))
+        })
+        .unwrap_or_default();
     format!(
         r#"(version 1)
 (deny default)
 (allow process-exec process-fork signal sysctl-read)
 (allow file-read-metadata)
-(allow file-read* (literal "/") (subpath "/usr") (subpath "/bin") (subpath "/sbin") (subpath "/System") (subpath "/Library") (subpath "/private/etc") (subpath "/private/var/db") (subpath "/dev") (subpath "/opt/homebrew") (subpath "{ws}") (subpath "{tmp}"))
+(allow file-read* (literal "/") (subpath "/usr") (subpath "/bin") (subpath "/sbin") (subpath "/System") (subpath "/Library") (subpath "/private/etc") (subpath "/private/var/db") (subpath "/dev") (subpath "/opt/homebrew") (subpath "{ws}") (subpath "{tmp}"){dev})
 (deny file-read* (subpath "/Library/Keychains") (subpath "/private/var/db/dslocal") (subpath "/Library/Application Support/com.apple.TCC"))
 (allow file-write* (subpath "{ws}") (subpath "{tmp}") (literal "/dev/null"))
 (allow file-read* file-write* (regex #"^/private/tmp/xcrun_db(-[A-Za-z0-9]+)?$") (regex #"^/private/var/folders/[^/]+/[^/]+/T/xcrun_db(-[A-Za-z0-9]+)?$"))
@@ -57,6 +67,50 @@ pub fn sandbox_profile(workspace: &Path, tmp: &Path) -> String {
 (deny network*)
 "#
     )
+}
+
+/// The active Xcode developer directory on macOS, canonical (the sandbox
+/// matches real paths): `DEVELOPER_DIR` when it names a directory, else
+/// what `xcode-select -p` prints. The sandboxed command gets it as
+/// `DEVELOPER_DIR` too, so the shims resolve to exactly the tree the
+/// profile lets them read. Resolved once per process.
+fn developer_dir() -> Option<PathBuf> {
+    static DIR: OnceLock<Option<PathBuf>> = OnceLock::new();
+    DIR.get_or_init(|| developer_dir_from(std::env::var_os("DEVELOPER_DIR").map(PathBuf::from)))
+        .clone()
+}
+
+fn developer_dir_from(env: Option<PathBuf>) -> Option<PathBuf> {
+    if let Some(dir) = env
+        .and_then(|d| d.canonicalize().ok())
+        .filter(|d| d.is_dir())
+    {
+        return Some(dir);
+    }
+    if !cfg!(target_os = "macos") {
+        return None;
+    }
+    let out = std::process::Command::new("/usr/bin/xcode-select")
+        .arg("-p")
+        .stdin(Stdio::null())
+        .stderr(Stdio::null())
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let dir = Path::new(String::from_utf8_lossy(&out.stdout).trim())
+        .canonicalize()
+        .ok()?;
+    dir.is_dir().then_some(dir)
+}
+
+/// What the profile lets the shims read for a developer dir: the whole
+/// Xcode bundle when the dir is its `Contents/Developer` (the tools read
+/// the bundle's plists too), else the dir itself (the Command Line Tools).
+fn developer_read_root(dev: &Path) -> &Path {
+    let contents = dev.parent().filter(|_| dev.ends_with("Contents/Developer"));
+    contents.and_then(Path::parent).unwrap_or(dev)
 }
 
 /// The bubblewrap arguments for a workspace: the system trees read-only, the
@@ -171,8 +225,12 @@ pub async fn run_command(cmd: &str, policy: &ShellPolicy, workspace: &Path) -> T
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
-        .kill_on_drop(true)
-        .process_group(0);
+        .kill_on_drop(true);
+    if let Some(dev) = developer_dir() {
+        command.env("DEVELOPER_DIR", dev);
+    }
+    #[cfg(unix)]
+    command.process_group(0);
 
     let mut child = match command.spawn() {
         Ok(c) => c,
@@ -289,6 +347,7 @@ pub async fn run_command(cmd: &str, policy: &ShellPolicy, workspace: &Path) -> T
 }
 
 /// Kill the whole process group so a shell's children die with it.
+#[cfg(unix)]
 fn kill_group(pid: Option<u32>) {
     if let Some(pid) = pid {
         let _ = std::process::Command::new("/bin/kill")
@@ -298,6 +357,11 @@ fn kill_group(pid: Option<u32>) {
             .status();
     }
 }
+
+/// Without process groups only the child itself is killed (`kill_on_drop`
+/// and `Child::kill` cover that); no sandbox runs here anyway.
+#[cfg(not(unix))]
+fn kill_group(_pid: Option<u32>) {}
 
 #[cfg(test)]
 mod tests {
@@ -340,6 +404,48 @@ mod tests {
         // The two allowances never widen to a whole temp dir.
         assert!(!p.contains("(subpath \"/private/tmp\")"));
         assert!(!p.contains("(subpath \"/private/var/folders\")"));
+        // The Xcode developer dir is readable (a full Xcode lives under
+        // /Applications, outside the system trees) and never writable.
+        if let Some(dev) = developer_dir() {
+            let dev = format!("(subpath \"{}\")", developer_read_root(&dev).display());
+            let reads = p
+                .lines()
+                .find(|l| l.starts_with("(allow file-read* (literal"))
+                .unwrap();
+            let writes = p
+                .lines()
+                .find(|l| l.starts_with("(allow file-write* "))
+                .unwrap();
+            assert!(reads.contains(&dev), "{p}");
+            assert!(!writes.contains(&dev), "{p}");
+        }
+    }
+
+    #[test]
+    fn developer_read_root_is_the_xcode_bundle_or_the_dir_itself() {
+        assert_eq!(
+            developer_read_root(Path::new("/Applications/Xcode_15.4.app/Contents/Developer")),
+            Path::new("/Applications/Xcode_15.4.app")
+        );
+        assert_eq!(
+            developer_read_root(Path::new("/Library/Developer/CommandLineTools")),
+            Path::new("/Library/Developer/CommandLineTools")
+        );
+    }
+
+    #[test]
+    fn developer_dir_prefers_a_valid_override_and_ignores_a_missing_one() {
+        let dir = ws();
+        let canonical = dir.canonicalize().unwrap();
+        assert_eq!(developer_dir_from(Some(dir.clone())), Some(canonical));
+        let missing = developer_dir_from(Some(dir.join("nope")));
+        assert_ne!(missing.as_deref(), Some(dir.join("nope").as_path()));
+        if cfg!(target_os = "macos") {
+            // Falls through to xcode-select, which names a real directory.
+            assert!(missing.map(|d| d.is_dir()).unwrap_or(false));
+        } else {
+            assert!(missing.is_none());
+        }
     }
 
     #[test]
