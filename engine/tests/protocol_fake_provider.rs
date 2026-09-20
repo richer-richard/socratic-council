@@ -318,7 +318,14 @@ async fn whole_protocol_runs_with_a_tool_call_and_writes_a_v2_session() {
             _ => None,
         })
         .expect("a hand-off event");
-    assert!(handoff.0.ends_with("/handoff"), "{}", handoff.0);
+    assert_eq!(
+        std::path::Path::new(&handoff.0)
+            .file_name()
+            .and_then(|n| n.to_str()),
+        Some("handoff"),
+        "{}",
+        handoff.0
+    );
     assert!(
         handoff.1.iter().any(|f| f == "record.md"),
         "{:?}",
