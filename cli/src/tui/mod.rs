@@ -637,8 +637,11 @@ impl App {
                 serde_json::from_value(doc["roster"].clone()).ok(),
             ),
             None => {
-                // The app's localStorage index is the fallback for sessions
-                // the app never exported to the shared store.
+                // Fallback for a session the app never exported to the
+                // shared store. Only pre-Sept-2026 app sessions are still
+                // readable this way: newer blobs live in the app's IndexedDB
+                // (see bridge.rs), so this yields nothing for them and the
+                // empty-view check below reports it.
                 let messages = self
                     .ctx
                     .config

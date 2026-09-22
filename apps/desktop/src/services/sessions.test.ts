@@ -1,9 +1,16 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+  __resetSessionBlobStoreForTests,
+  flushSessionBlobs,
+  initSessionBlobStore,
+} from "./sessionBlobs";
+import {
   SessionPersistenceError,
   branchDiscussionSession,
+  deleteDiscussionSession,
   importDiscussionSession,
+  listSessionSummaries,
   loadDiscussionSession,
   saveDiscussionSession,
   stabilizeStoredSessions,
@@ -765,5 +772,93 @@ describe("engine session data (v3)", () => {
       attachments: [],
     });
     expect(session?.engine).toBeUndefined();
+  });
+});
+
+describe("session blobs once the blob store is initialised", () => {
+  let local: Map<string, string>;
+
+  beforeEach(() => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    local = new Map<string, string>();
+    Object.defineProperty(globalThis, "window", {
+      configurable: true,
+      writable: true,
+      value: {
+        localStorage: {
+          getItem: (k: string) => (local.has(k) ? local.get(k)! : null),
+          setItem: (k: string, v: string) => {
+            local.set(k, v);
+          },
+          removeItem: (k: string) => {
+            local.delete(k);
+          },
+          clear: () => local.clear(),
+          key: (i: number) => Array.from(local.keys())[i] ?? null,
+          get length() {
+            return local.size;
+          },
+        },
+      },
+    });
+  });
+
+  afterEach(() => {
+    __resetSessionBlobStoreForTests();
+    vi.restoreAllMocks();
+    delete (globalThis as { window?: unknown }).window;
+  });
+
+  function backendOver(rows: Map<string, string>) {
+    return {
+      readAll: () => Promise.resolve(new Map(rows)),
+      put: (k: string, v: string) => {
+        rows.set(k, v);
+        return Promise.resolve();
+      },
+      remove: (k: string) => {
+        rows.delete(k);
+        return Promise.resolve();
+      },
+    };
+  }
+
+  it("keeps the blob out of localStorage and still round-trips the session", async () => {
+    const rows = new Map<string, string>();
+    await initSessionBlobStore({ backend: backendOver(rows) });
+
+    const saved = saveDiscussionSession(createSessionFixture());
+    await flushSessionBlobs();
+
+    expect(rows.has("socratic-council-session:session_fixture")).toBe(true);
+    expect(local.has("socratic-council-session:session_fixture")).toBe(false);
+    // Only the small index stays behind in localStorage.
+    expect(local.has("socratic-council-session-index-v1")).toBe(true);
+    expect(loadDiscussionSession(saved.id)?.topic).toBe("Test topic");
+    expect(listSessionSummaries().map((entry) => entry.id)).toEqual(["session_fixture"]);
+  });
+
+  it("saves even when localStorage is full, as long as the index fits", async () => {
+    const rows = new Map<string, string>();
+    await initSessionBlobStore({ backend: backendOver(rows) });
+
+    const saved = saveDiscussionSession(createSessionFixture());
+    await flushSessionBlobs();
+    expect(rows.size).toBe(1);
+    expect(saved.id).toBe("session_fixture");
+  });
+
+  it("deletes the blob from the backend", async () => {
+    const rows = new Map<string, string>();
+    await initSessionBlobStore({ backend: backendOver(rows) });
+
+    saveDiscussionSession(createSessionFixture());
+    await flushSessionBlobs();
+    expect(deleteDiscussionSession("session_fixture")).toBe(true);
+    await flushSessionBlobs();
+
+    expect(rows.size).toBe(0);
+    expect(loadDiscussionSession("session_fixture")).toBeNull();
+    expect(listSessionSummaries()).toEqual([]);
   });
 });

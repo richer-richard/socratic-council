@@ -8,7 +8,15 @@
 //!     `socratic-council-secret:apiKey:<provider>` as `ENC1:` envelopes
 //!     (XChaCha20-Poly1305: `base64(nonce[24] || ciphertext || tag[16])`),
 //!   - a plaintext config blob at `socratic-council-config`,
-//!   - a vault-encrypted session index + per-session blobs.
+//!   - a vault-encrypted session index (still in localStorage).
+//!
+//! Session *blobs* left localStorage in Sept 2026: WebKit caps that store at
+//! 5 MB per app and 21 sessions filled it, so the app moved them to IndexedDB
+//! (`socratic-council-sessions-v1`), whose values use WebKit's own
+//! serialization and are not readable from here. The shared session store on
+//! disk is the supported way to read a session's content — the app exports
+//! every session to it — and `load_session_transcript` below is a fallback
+//! that now only finds blobs a pre-migration app left behind.
 //!
 //! This module reads that store **read-only** and **never logs secret values**.
 //! It mirrors `vault.ts` / `secrets.ts`: an `ENC1:`-prefixed value is decrypted
@@ -357,6 +365,10 @@ mod imp {
         }
 
         /// Decrypt one saved session's transcript on demand (read-only).
+        ///
+        /// Only finds sessions a pre-Sept-2026 app wrote: newer ones keep
+        /// their blob in IndexedDB (see the module header) and are read from
+        /// the shared session store instead.
         pub fn load_session_transcript(&self, id: &str) -> Option<Vec<TranscriptMessage>> {
             let path = self.localstorage_path.as_ref()?;
             let conn = open_localstorage(path)?;
