@@ -524,12 +524,6 @@ body {
   z-index: 0;
 }
 
-.app-header {
-  background: var(--panel-strong);
-  border-bottom: 1px solid var(--line-soft);
-  backdrop-filter: blur(16px);
-}
-
 .panel-card {
   background: var(--panel-bg);
   border: 1px solid var(--line-soft);
@@ -595,12 +589,6 @@ body {
 
 .font-display {
   font-family: var(--font-display);
-}
-
-.divider-vertical {
-  width: 1px;
-  height: 24px;
-  background: var(--line-soft);
 }
 
 .border-line-soft {
@@ -3328,8 +3316,7 @@ details[open] > .deep-research-report-summary .deep-research-report-expand::befo
 
 .workstation-thread-preview,
 .workstation-empty-state,
-.workstation-subtitle,
-.chat-session-topic {
+.workstation-subtitle {
   color: var(--ink-700);
   line-height: 1.6;
 }
@@ -3361,8 +3348,7 @@ details[open] > .deep-research-report-summary .deep-research-report-expand::befo
   gap: 1.25rem;
 }
 
-.workstation-toolbar,
-.chat-workstation-header {
+.workstation-toolbar {
   padding: 1.25rem 1.4rem;
   border-radius: 1.5rem;
   border: 1px solid rgba(255, 255, 255, 0.08);
@@ -3437,15 +3423,6 @@ details[open] > .deep-research-report-summary .deep-research-report-expand::befo
 
 .workstation-new-project-btn:active {
   transform: scale(0.98);
-}
-
-.chat-session-title {
-  font-family: var(--font-mono);
-  font-size: clamp(1.8rem, 3vw, 2.55rem);
-  line-height: 1;
-  font-weight: 700;
-  letter-spacing: -0.03em;
-  color: var(--ink-900);
 }
 /* Moderator notes arrive as text with real line breaks; keep them. */
 .session-moderator-note {
@@ -4046,41 +4023,6 @@ textarea.workstation-input {
   background: rgba(96, 165, 250, 0.16);
 }
 
-.chat-workstation-header {
-  margin: 1rem 1.5rem 0;
-}
-
-.chat-session-hero {
-  display: flex;
-  align-items: center;
-  gap: 1rem;
-}
-
-.chat-session-mark {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 3rem;
-  height: 3rem;
-  border-radius: 1rem;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(255, 255, 255, 0.04);
-}
-
-.chat-meta-stack {
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-  gap: 0.35rem;
-}
-
-.chat-kicker-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.55rem;
-  align-items: center;
-}
-
 .chat-autosave-pill {
   font-family: var(--font-mono);
   display: inline-flex;
@@ -4091,58 +4033,6 @@ textarea.workstation-input {
   background: rgba(255, 255, 255, 0.05);
   border: 1px solid rgba(255, 255, 255, 0.06);
   font-size: 0.75rem;
-}
-
-.chat-session-topic {
-  max-width: 50rem;
-  margin: 0;
-  display: -webkit-box;
-  overflow: hidden;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 3;
-}
-
-.chat-session-topic.is-expanded {
-  display: block;
-  overflow: visible;
-  -webkit-line-clamp: unset;
-}
-
-.chat-session-topic-shell {
-  display: flex;
-  max-width: 50rem;
-  min-width: 0;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 0.45rem;
-}
-
-.chat-session-topic-body {
-  width: 100%;
-  min-width: 0;
-}
-
-.chat-session-topic-body.is-expanded {
-  max-height: 9.8rem;
-  overflow-y: auto;
-  padding-right: 0.35rem;
-}
-
-.chat-session-topic-toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.35rem;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: var(--accent-emerald);
-  font-size: 0.78rem;
-  font-weight: 600;
-}
-
-.chat-session-topic-toggle:hover {
-  color: #99f6e4;
-  text-decoration: underline;
 }
 
 .session-control-button {
@@ -4298,8 +4188,7 @@ textarea.workstation-input {
     padding: 1rem;
   }
 
-  .workstation-toolbar,
-  .chat-workstation-header {
+  .workstation-toolbar {
     padding: 1rem;
   }
 
@@ -4346,10 +4235,6 @@ textarea.workstation-input {
 }
 
 @media (max-width: 720px) {
-  .chat-session-hero {
-    flex-wrap: wrap;
-  }
-
   .workstation-sidebar {
     padding: 1rem;
   }
@@ -4639,6 +4524,7 @@ textarea.workstation-input {
 .session-bar {
   flex-shrink: 0;
   height: 52px;
+  overflow: hidden;
   display: flex;
   align-items: center;
   gap: 0.75rem;
@@ -4751,6 +4637,7 @@ textarea.workstation-input {
 .session-tag-dot {
   width: 5px;
   height: 5px;
+  border-radius: 50%;
   background: currentColor;
   animation: sc-pulse 1.2s ease-in-out infinite;
 }
@@ -4811,9 +4698,23 @@ textarea.workstation-input {
     grid-template-columns: minmax(0, 1fr);
     overflow: auto;
   }
-  .session-side {
+  /* The rails sit under the reading column here. One panel per row would
+     leave most of the width empty, so they run in as many columns as fit.
+     Scoped to the layout because the plain .session-side rule below this
+     block would otherwise win on source order. */
+  .session-layout .session-side {
     border-left: 0;
     border-top: 1px solid rgba(148, 163, 184, 0.18);
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+    align-content: start;
+    column-gap: 2rem;
+  }
+  /* Everything in the bar but the title holds its width, so at the narrow
+     end the two things the rails repeat give way and the buttons stay. */
+  .session-bar-spend-note,
+  .session-tag.is-muted {
+    display: none;
   }
 }
 .session-main {
@@ -5008,11 +4909,12 @@ textarea.workstation-input {
 .seat-row .seat-model {
   flex: 1;
 }
-.seat-row.is-queued {
-  color: rgba(148, 163, 184, 0.45);
-}
-.seat-row.is-queued .seat-state {
-  color: rgba(232, 232, 239, 0.35);
+/* A finished seat with no text is a result worth seeing, not a blank. */
+.seat-empty {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: #f87171;
 }
 .seat-note {
   font-family: var(--font-mono);
@@ -5122,6 +5024,12 @@ textarea.workstation-input {
   flex-direction: column;
   gap: 0.25rem;
 }
+.record-dissent-position {
+  margin: 0;
+  font-size: 0.82rem;
+  line-height: 1.6;
+  color: rgba(232, 232, 239, 0.86);
+}
 .record-dissent-label {
   font-family: var(--font-mono);
   font-size: 0.6rem;
@@ -5191,6 +5099,13 @@ textarea.workstation-input {
 .session-list li {
   display: flex;
   gap: 0.55rem;
+  min-width: 0;
+}
+/* A list row whose second line sits under the first, not beside it. */
+.session-line {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
   min-width: 0;
 }
 .session-list li::before {
@@ -5290,14 +5205,6 @@ textarea.workstation-input {
   text-transform: uppercase;
   color: rgba(232, 232, 239, 0.35);
   padding: 1.5rem 0;
-}
-
-.pulse-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: #f5c542;
-  animation: sc-pulse 1.2s ease-in-out infinite;
 }
 @keyframes sc-pulse {
   0%,
