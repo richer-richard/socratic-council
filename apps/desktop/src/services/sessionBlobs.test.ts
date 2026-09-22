@@ -10,6 +10,12 @@ import {
 } from "./sessionBlobs";
 
 const PREFIX = "socratic-council-session:";
+const UNCONFIRMED = "socratic-council-session-unconfirmed";
+
+function unconfirmedKeys(local: Map<string, string>): string[] {
+  const raw = local.get(UNCONFIRMED);
+  return raw ? (JSON.parse(raw) as string[]) : [];
+}
 
 function memoryBackend(seed: Record<string, string> = {}) {
   const rows = new Map(Object.entries(seed));
@@ -168,5 +174,125 @@ describe("session blob store", () => {
     await flushSessionBlobs();
     expect(getSessionBlobStorage()!.length).toBe(0);
     expect(rows.size).toBe(0);
+  });
+  it("replays a write that never reached the backend", async () => {
+    const local = installLocalStorage();
+    const { backend } = memoryBackend();
+    // The put never settles: the window closes with the write still queued.
+    backend.put = () => new Promise<void>(() => {});
+    await initSessionBlobStore({ backend });
+
+    getSessionBlobStorage()!.setItem(`${PREFIX}live`, "blob-live");
+    expect(local.get(`${PREFIX}live`)).toBe("blob-live");
+    expect(unconfirmedKeys(local)).toEqual([`${PREFIX}live`]);
+
+    // Next boot, against a backend that never got the row.
+    __resetSessionBlobStoreForTests();
+    const next = memoryBackend();
+    const result = await initSessionBlobStore({ backend: next.backend });
+
+    expect(result.recovered).toBe(1);
+    expect(next.rows.get(`${PREFIX}live`)).toBe("blob-live");
+    expect(local.has(`${PREFIX}live`)).toBe(false);
+    expect(local.has(UNCONFIRMED)).toBe(false);
+  });
+
+  it("keeps a session written while the backend was unavailable", async () => {
+    const local = installLocalStorage();
+    await initSessionBlobStore({ backend: null });
+    getSessionBlobStorage()!.setItem(`${PREFIX}offline`, "written-offline");
+    expect(unconfirmedKeys(local)).toEqual([`${PREFIX}offline`]);
+
+    // IndexedDB works again next boot, but its row predates that write.
+    __resetSessionBlobStoreForTests();
+    const { backend, rows } = memoryBackend({ [`${PREFIX}offline`]: "stale-row" });
+    const result = await initSessionBlobStore({ backend });
+
+    expect(result.recovered).toBe(1);
+    expect(rows.get(`${PREFIX}offline`)).toBe("written-offline");
+    expect(getSessionBlobStorage()!.getItem(`${PREFIX}offline`)).toBe("written-offline");
+    expect(local.has(`${PREFIX}offline`)).toBe(false);
+  });
+
+  it("drops the local copy once the write lands", async () => {
+    const local = installLocalStorage();
+    const { backend, rows } = memoryBackend();
+    await initSessionBlobStore({ backend });
+
+    getSessionBlobStorage()!.setItem(`${PREFIX}done`, "blob-done");
+    expect(local.get(`${PREFIX}done`)).toBe("blob-done");
+
+    await flushSessionBlobs();
+    expect(rows.get(`${PREFIX}done`)).toBe("blob-done");
+    expect(local.has(`${PREFIX}done`)).toBe(false);
+    expect(local.has(UNCONFIRMED)).toBe(false);
+  });
+
+  it("an older write completing does not drop the local copy of a newer one", async () => {
+    const local = installLocalStorage();
+    const { backend, rows } = memoryBackend();
+    const gate: { release: (() => void) | null } = { release: null };
+    backend.put = async (key, value) => {
+      rows.set(key, value);
+      if (value === "v2") {
+        await new Promise<void>((resolve) => {
+          gate.release = resolve;
+        });
+      }
+    };
+    await initSessionBlobStore({ backend });
+
+    const storage = getSessionBlobStorage()!;
+    storage.setItem(`${PREFIX}seq`, "v1");
+    storage.setItem(`${PREFIX}seq`, "v2");
+    // Let the first write finish while the second is still in flight.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(local.get(`${PREFIX}seq`)).toBe("v2");
+    expect(unconfirmedKeys(local)).toEqual([`${PREFIX}seq`]);
+
+    gate.release?.();
+    await flushSessionBlobs();
+    expect(rows.get(`${PREFIX}seq`)).toBe("v2");
+    expect(local.has(`${PREFIX}seq`)).toBe(false);
+  });
+
+  it("shares one run between concurrent callers", async () => {
+    installLocalStorage({ [`${PREFIX}a`]: "blob-a" });
+    const { backend, rows } = memoryBackend();
+    const [first, second] = await Promise.all([
+      initSessionBlobStore({ backend }),
+      initSessionBlobStore({ backend }),
+    ]);
+
+    expect(first).toBe(second);
+    expect(first.migrated).toBe(1);
+    expect(rows.size).toBe(1);
+    expect(getSessionBlobStorage()!.getItem(`${PREFIX}a`)).toBe("blob-a");
+  });
+
+  it("moves the whole migration in one batch when the backend offers it", async () => {
+    installLocalStorage({ [`${PREFIX}a`]: "1", [`${PREFIX}b`]: "2" });
+    const { backend, rows } = memoryBackend();
+    const putMany = vi.fn(async (entries: Array<[string, string]>) => {
+      for (const [key, value] of entries) rows.set(key, value);
+    });
+    const result = await initSessionBlobStore({ backend: { ...backend, putMany } });
+
+    expect(putMany).toHaveBeenCalledTimes(1);
+    expect(result.migrated).toBe(2);
+    expect(rows.size).toBe(2);
+  });
+
+  it("falls back to one blob at a time when the batch fails", async () => {
+    const local = installLocalStorage({ [`${PREFIX}a`]: "1", [`${PREFIX}b`]: "2" });
+    const { backend, rows } = memoryBackend();
+    const putMany = vi.fn(async () => {
+      throw new Error("transaction aborted");
+    });
+    const result = await initSessionBlobStore({ backend: { ...backend, putMany } });
+
+    expect(result.migrated).toBe(2);
+    expect(rows.size).toBe(2);
+    expect(local.has(`${PREFIX}a`)).toBe(false);
   });
 });

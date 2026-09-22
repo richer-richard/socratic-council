@@ -139,8 +139,10 @@ export default function App() {
       try {
         const blobs = await initSessionBlobStore();
         if (blobs.migrated > 0) {
+          const pending =
+            blobs.recovered > 0 ? ` (${blobs.recovered} of them a write that had not landed)` : "";
           console.info(
-            `[App] moved ${blobs.migrated} session(s) out of localStorage into the session store`,
+            `[App] moved ${blobs.migrated} session(s) out of localStorage into the session store${pending}`,
           );
         }
       } catch (error) {
@@ -245,7 +247,8 @@ export default function App() {
   // save failure.
   useEffect(() => {
     registerSessionBlobHooks({
-      onPersistError: (_key, error) => setAppError(describeSaveFailure("session", error)),
+      onPersistError: (_key, error) =>
+        setAppError(describeSaveFailure("session", error, "sessions")),
     });
     return () => registerSessionBlobHooks({});
   }, []);
