@@ -533,7 +533,7 @@ body {
 .panel-card {
   background: var(--panel-bg);
   border: 1px solid var(--line-soft);
-  border-radius: 20px;
+  border-radius: 0;
   box-shadow: 0 20px 50px rgba(6, 8, 13, 0.5);
 }
 
@@ -541,7 +541,7 @@ body {
   background: linear-gradient(135deg, var(--accent-emerald), #1f7a62);
   color: #fffaf3;
   padding: 0.65rem 1.4rem;
-  border-radius: 999px;
+  border-radius: 0;
   font-weight: 600;
   transition: all 0.2s ease;
   box-shadow: 0 12px 24px rgba(27, 111, 90, 0.18);
@@ -558,7 +558,7 @@ body {
   color: var(--ink-700);
   border: 1px solid var(--line-soft);
   padding: 0.6rem 1.2rem;
-  border-radius: 999px;
+  border-radius: 0;
   font-weight: 600;
   transition: all 0.2s ease;
 }
@@ -571,7 +571,7 @@ body {
   color: var(--ink-500);
   border: 1px solid transparent;
   padding: 0.6rem 1rem;
-  border-radius: 999px;
+  border-radius: 0;
   transition: all 0.2s ease;
 }
 
@@ -656,7 +656,7 @@ body {
   align-items: center;
   gap: 0.75rem;
   padding: 0.75rem;
-  border-radius: 14px;
+  border-radius: 0;
   border: 1px solid transparent;
   transition: all 0.2s ease;
 }
@@ -681,7 +681,7 @@ body {
   padding: 0.25rem 0.6rem;
   font-size: 0.75rem;
   font-weight: 600;
-  border-radius: 999px;
+  border-radius: 0;
   border: 1px solid var(--line-soft);
   background: rgba(255, 255, 255, 0.08);
   color: var(--ink-700);
@@ -797,7 +797,7 @@ body {
 .modal-content {
   background: var(--panel-strong);
   border: 1px solid var(--line-soft);
-  border-radius: 24px;
+  border-radius: 0;
   box-shadow: 0 30px 70px rgba(32, 49, 66, 0.25);
   max-height: 90vh;
   overflow-y: auto;
@@ -904,7 +904,7 @@ body {
   width: 100%;
   min-width: 0;
   padding: 0.7rem 0.95rem;
-  border-radius: 0.95rem;
+  border-radius: 0;
   font-weight: 700;
   transition:
     transform 0.2s ease,
@@ -971,7 +971,7 @@ body {
   width: 100%;
   background: rgba(15, 23, 42, 0.9);
   border: 1px solid var(--line-soft);
-  border-radius: 16px;
+  border-radius: 0;
   padding: 1rem 1.25rem;
   color: var(--ink-900);
   font-size: 1.05rem;
@@ -2286,7 +2286,7 @@ details[open] > .deep-research-report-summary .deep-research-report-expand::befo
   padding: 0.55rem 0.75rem;
   border-left: 3px solid rgba(148, 163, 184, 0.45);
   background: rgba(255, 255, 255, 0.06);
-  border-radius: 10px;
+  border-radius: 0;
   color: var(--ink-600);
 }
 
@@ -2298,7 +2298,7 @@ details[open] > .deep-research-report-summary .deep-research-report-expand::befo
   background: rgba(15, 23, 42, 0.55);
   border: 1px solid rgba(148, 163, 184, 0.25);
   padding: 0.12rem 0.35rem;
-  border-radius: 8px;
+  border-radius: 0;
 }
 
 .markdown-content pre {
@@ -2306,7 +2306,7 @@ details[open] > .deep-research-report-summary .deep-research-report-expand::befo
   padding: 0.85rem 1rem;
   background: rgba(15, 23, 42, 0.72);
   border: 1px solid rgba(148, 163, 184, 0.25);
-  border-radius: 14px;
+  border-radius: 0;
   overflow: auto;
 }
 
@@ -2323,7 +2323,7 @@ details[open] > .deep-research-report-summary .deep-research-report-expand::befo
   border-collapse: collapse;
   margin: 0.85rem 0;
   overflow: hidden;
-  border-radius: 12px;
+  border-radius: 0;
 }
 
 .markdown-content th,
@@ -3011,7 +3011,7 @@ details[open] > .deep-research-report-summary .deep-research-report-expand::befo
   justify-content: center;
   width: 3rem;
   height: 3rem;
-  border-radius: 1rem;
+  border-radius: 0;
   border: 1px solid rgba(255, 255, 255, 0.08);
   background: rgba(255, 255, 255, 0.04);
 }
@@ -3055,7 +3055,7 @@ details[open] > .deep-research-report-summary .deep-research-report-expand::befo
   align-items: center;
   gap: 0.45rem;
   padding: 0.55rem 0.75rem;
-  border-radius: 999px;
+  border-radius: 0;
   font-family: var(--font-mono);
   font-size: 0.7rem;
   color: var(--ink-700);
@@ -3135,7 +3135,7 @@ details[open] > .deep-research-report-summary .deep-research-report-expand::befo
   gap: 0.5rem;
   width: 100%;
   padding: 0.55rem 0.75rem;
-  border-radius: 0.75rem;
+  border-radius: 0;
   background: rgba(255, 255, 255, 0.04);
   border: 1px solid rgba(255, 255, 255, 0.06);
   color: var(--ink-700);
@@ -3269,7 +3269,7 @@ details[open] > .deep-research-report-summary .deep-research-report-expand::befo
 .workstation-thread-action:focus-visible {
   outline: none;
   box-shadow: 0 0 0 3px rgba(20, 184, 166, 0.22);
-  border-radius: 0.75rem;
+  border-radius: 0;
 }
 
 .workstation-thread-action {
@@ -3281,7 +3281,7 @@ details[open] > .deep-research-report-summary .deep-research-report-expand::befo
   height: 2rem;
   margin-top: -0.2rem;
   border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 999px;
+  border-radius: 0;
   background: rgba(255, 255, 255, 0.04);
   color: var(--ink-500);
   transition:
@@ -3343,7 +3343,7 @@ details[open] > .deep-research-report-summary .deep-research-report-expand::befo
 
 .workstation-empty-state {
   padding: 1rem;
-  border-radius: 1rem;
+  border-radius: 0;
   border: 1px dashed rgba(255, 255, 255, 0.12);
   background: rgba(255, 255, 255, 0.025);
 }
@@ -3415,7 +3415,7 @@ details[open] > .deep-research-report-summary .deep-research-report-expand::befo
   padding: 0.5rem 0.75rem;
   margin-top: 0.25rem;
   border: 1px dashed rgba(255, 255, 255, 0.15);
-  border-radius: 0.75rem;
+  border-radius: 0;
   background: rgba(255, 255, 255, 0.02);
   color: rgba(255, 255, 255, 0.45);
   font-family: var(--font-mono);
@@ -3446,18 +3446,6 @@ details[open] > .deep-research-report-summary .deep-research-report-expand::befo
   font-weight: 700;
   letter-spacing: -0.03em;
   color: var(--ink-900);
-}
-/* On a session the heading is the topic, not the product name: a sentence,
-   so it takes a sentence's size and wraps to at most two lines. */
-.chat-session-title.is-topic {
-  font-size: clamp(1.1rem, 1.7vw, 1.55rem);
-  line-height: 1.3;
-  letter-spacing: -0.01em;
-  max-width: 62ch;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
 }
 /* Moderator notes arrive as text with real line breaks; keep them. */
 .session-moderator-note {
@@ -3497,7 +3485,7 @@ details[open] > .deep-research-report-summary .deep-research-report-expand::befo
 
 .workstation-composer-card,
 .workstation-panel {
-  border-radius: 1.6rem;
+  border-radius: 0;
   border: 1px solid rgba(255, 255, 255, 0.08);
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.03)),
@@ -3581,7 +3569,7 @@ details[open] > .deep-research-report-summary .deep-research-report-expand::befo
   width: 3.2rem;
   min-width: 3.2rem;
   height: 3.2rem;
-  border-radius: 999px;
+  border-radius: 0;
   background: rgba(15, 23, 42, 0.92);
   border: 1px solid rgba(255, 255, 255, 0.08);
   color: var(--ink-700);
@@ -3617,7 +3605,7 @@ details[open] > .deep-research-report-summary .deep-research-report-expand::befo
   flex-direction: column;
   gap: 0.35rem;
   padding: 0.55rem;
-  border-radius: 1.1rem;
+  border-radius: 0;
   border: 1px solid rgba(255, 255, 255, 0.08);
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.03)),
@@ -3632,7 +3620,7 @@ details[open] > .deep-research-report-summary .deep-research-report-expand::befo
   align-items: center;
   gap: 0.7rem;
   padding: 0.7rem 0.8rem;
-  border-radius: 0.9rem;
+  border-radius: 0;
   color: var(--ink-800);
   text-align: left;
   transition:
@@ -3690,7 +3678,7 @@ textarea.workstation-input {
   justify-content: center;
   gap: 0.6rem;
   padding: 0.9rem 1.2rem;
-  border-radius: 1rem;
+  border-radius: 0;
   font-weight: 700;
   color: #f7fff9;
   background: linear-gradient(135deg, #0f766e, #1f9d78, #f59e0b);
@@ -3735,7 +3723,7 @@ textarea.workstation-input {
 .workstation-suggestion-chip {
   font-family: var(--font-mono);
   padding: 0.6rem 0.8rem;
-  border-radius: 999px;
+  border-radius: 0;
   border: 1px solid rgba(255, 255, 255, 0.1);
   background: rgba(255, 255, 255, 0.04);
   color: var(--ink-700);
@@ -3783,7 +3771,7 @@ textarea.workstation-input {
   min-width: 0;
   max-width: min(100%, 18rem);
   padding: 0.55rem 0.7rem;
-  border-radius: 1rem;
+  border-radius: 0;
   border: 1px solid rgba(255, 255, 255, 0.08);
   background: rgba(255, 255, 255, 0.04);
   color: var(--ink-900);
@@ -3806,7 +3794,7 @@ textarea.workstation-input {
   width: 2.35rem;
   height: 2.35rem;
   flex: 0 0 auto;
-  border-radius: 0.8rem;
+  border-radius: 0;
 }
 
 .workstation-attachment-thumb {
@@ -3854,7 +3842,7 @@ textarea.workstation-input {
   width: 1.65rem;
   height: 1.65rem;
   flex: 0 0 auto;
-  border-radius: 999px;
+  border-radius: 0;
   color: var(--ink-500);
   transition:
     background 0.2s ease,
@@ -3871,7 +3859,7 @@ textarea.workstation-input {
   align-items: center;
   gap: 0.75rem;
   padding: 0.9rem 1rem;
-  border-radius: 1rem;
+  border-radius: 0;
   color: #fde68a;
   border: 1px solid rgba(245, 158, 11, 0.26);
   background: rgba(245, 158, 11, 0.08);
@@ -3886,7 +3874,7 @@ textarea.workstation-input {
   margin-top: 1rem;
   min-height: 16rem;
   overflow: hidden;
-  border-radius: 1.2rem;
+  border-radius: 0;
   border: 1px solid rgba(255, 255, 255, 0.08);
   background: rgba(4, 10, 20, 0.82);
 }
@@ -3979,7 +3967,7 @@ textarea.workstation-input {
   align-items: center;
   gap: 0.6rem;
   padding: 0.45rem 0.6rem;
-  border-radius: 6px;
+  border-radius: 0;
   opacity: 0.4;
   transition: opacity 0.15s;
 }
@@ -4031,7 +4019,7 @@ textarea.workstation-input {
   align-items: center;
   gap: 0.35rem;
   padding: 0.3rem 0.6rem;
-  border-radius: 999px;
+  border-radius: 0;
   font-size: 0.7rem;
   font-weight: 700;
   letter-spacing: 0.04em;
@@ -4379,7 +4367,7 @@ textarea.workstation-input {
 .settings-card {
   background: rgba(31, 41, 55, 0.5);
   border: 1px solid transparent;
-  border-radius: 0.75rem;
+  border-radius: 0;
   padding: 1.25rem;
   transition:
     border-color 220ms ease,
@@ -4415,7 +4403,7 @@ textarea.workstation-input {
 .settings-subcard {
   background: rgba(15, 23, 42, 0.55);
   border: 1px solid transparent;
-  border-radius: 0.5rem;
+  border-radius: 0;
   padding: 1rem;
   transition: background 200ms ease;
 }
@@ -4441,7 +4429,7 @@ textarea.workstation-input {
   gap: 12px;
   background: rgba(10, 10, 14, 0.55);
   border: 1px solid rgba(232, 232, 239, 0.12);
-  border-radius: 8px;
+  border-radius: 0;
   color: #f8f8fc;
   padding: 10px 14px;
   font-size: 0.86rem;
@@ -4497,7 +4485,7 @@ textarea.workstation-input {
   border: 1px solid rgba(245, 197, 66, 0.32);
   background: linear-gradient(180deg, rgba(24, 22, 18, 0.96) 0%, rgba(18, 16, 14, 0.98) 100%);
   backdrop-filter: blur(14px);
-  border-radius: 10px;
+  border-radius: 0;
   box-shadow:
     0 24px 60px -12px rgba(0, 0, 0, 0.6),
     0 0 32px rgba(245, 197, 66, 0.1);
@@ -4524,7 +4512,7 @@ textarea.workstation-input {
   border: none;
   color: rgba(232, 232, 239, 0.86);
   padding: 8px 12px;
-  border-radius: 6px;
+  border-radius: 0;
   font-size: 0.86rem;
   white-space: nowrap;
   overflow: hidden;
@@ -4636,196 +4624,401 @@ textarea.workstation-input {
 }
 
 /* ---------------------------------------------------------------------------
- * Session page (v3): the deliberation view.
+ * Session page: the deliberation view, built as an instrument.
+ *
+ * Three rules hold the whole page together:
+ *   1. Structure is square. Rounding is a signal, and a surface that rounds
+ *      everything signals nothing. Only genuinely round things keep a radius.
+ *   2. A label, a hairline and a count replace the card. Nothing floats and
+ *      nothing nests, so the eye has a horizon to scan.
+ *   3. Gold means live and nothing else. Green is settled, red is dissent,
+ *      and a seat colour is identity rather than decoration.
  * ------------------------------------------------------------------------- */
+
+/* The status bar. One line: where you are, what it is doing, what it costs. */
+.session-bar {
+  flex-shrink: 0;
+  height: 52px;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0 1.1rem;
+  background: rgba(9, 13, 19, 0.82);
+  border-bottom: 1px solid rgba(148, 163, 184, 0.18);
+  position: relative;
+  z-index: 10;
+}
+.session-bar-back {
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: rgba(232, 232, 239, 0.55);
+  background: transparent;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.session-bar-back:hover {
+  color: #f5c542;
+}
+.session-bar-div {
+  width: 1px;
+  height: 18px;
+  background: rgba(148, 163, 184, 0.22);
+  flex-shrink: 0;
+}
+.session-bar-mark {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+.session-bar-title {
+  margin: 0;
+  font-size: 0.88rem;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+  color: var(--ink-900);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+.session-bar-tags {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  flex-shrink: 0;
+}
+.session-bar-spend {
+  display: flex;
+  align-items: baseline;
+  gap: 0.35rem;
+  font-family: var(--font-mono);
+  flex-shrink: 0;
+}
+.session-bar-spend-value {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--ink-900);
+}
+.session-bar-spend-value.is-live {
+  color: #f5c542;
+}
+.session-bar-spend-note {
+  font-size: 0.62rem;
+  color: rgba(232, 232, 239, 0.45);
+}
+.session-bar-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-shrink: 0;
+}
+
+/* One tag shape for status, phase and deliverable. */
+.session-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  height: 20px;
+  padding: 0 0.44rem;
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  color: rgba(232, 232, 239, 0.8);
+  font-family: var(--font-mono);
+  font-size: 0.6rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.session-tag.is-live {
+  border-color: rgba(245, 197, 66, 0.5);
+  color: #f5c542;
+}
+.session-tag.is-done {
+  border-color: rgba(52, 211, 153, 0.45);
+  color: #34d399;
+}
+.session-tag.is-stopped {
+  border-color: rgba(248, 113, 113, 0.45);
+  color: #f87171;
+}
+.session-tag.is-muted {
+  color: rgba(232, 232, 239, 0.5);
+}
+.session-tag-dot {
+  width: 5px;
+  height: 5px;
+  background: currentColor;
+  animation: sc-pulse 1.2s ease-in-out infinite;
+}
+
+/* Bar buttons: square, quiet, and never competing with the content. */
+.session-bar-button {
+  height: 24px;
+  padding: 0 0.6rem;
+  background: transparent;
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  color: rgba(232, 232, 239, 0.8);
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  cursor: pointer;
+  white-space: nowrap;
+  transition:
+    border-color 120ms ease,
+    color 120ms ease,
+    background 120ms ease;
+}
+.session-bar-button:hover {
+  border-color: rgba(245, 197, 66, 0.5);
+  color: #f5c542;
+}
+.session-bar-button.is-stop {
+  border-color: rgba(248, 113, 113, 0.45);
+  color: #f87171;
+}
+.session-bar-button.is-stop:hover {
+  background: rgba(248, 113, 113, 0.1);
+  border-color: rgba(248, 113, 113, 0.7);
+  color: #fecaca;
+}
+.session-bar-button.is-primary {
+  background: #f5c542;
+  border-color: #f5c542;
+  color: #0a0e13;
+  font-weight: 600;
+}
+.session-bar-button.is-primary:hover {
+  background: #ffd970;
+  border-color: #ffd970;
+  color: #0a0e13;
+}
+
+/* Two columns, each scrolling on its own, with a rule between them. */
 .session-layout {
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-template-columns: minmax(0, 2fr) minmax(280px, 1fr);
-  gap: 1rem;
-  padding: 1rem 1.5rem 1.5rem;
+  grid-template-columns: minmax(0, 1fr) 372px;
   overflow: hidden;
 }
-@media (max-width: 1100px) {
+@media (max-width: 1180px) {
   .session-layout {
     grid-template-columns: minmax(0, 1fr);
     overflow: auto;
   }
+  .session-side {
+    border-left: 0;
+    border-top: 1px solid rgba(148, 163, 184, 0.18);
+  }
 }
-.session-main,
+.session-main {
+  min-height: 0;
+  min-width: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1.6rem;
+  padding: 1.4rem 1.8rem 2.5rem;
+}
 .session-side {
   min-height: 0;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 1rem;
-  padding-right: 0.25rem;
+  gap: 1.5rem;
+  padding: 1.4rem 1.25rem 2.5rem;
+  border-left: 1px solid rgba(148, 163, 184, 0.18);
+  background: rgba(9, 13, 19, 0.45);
 }
-.session-card {
-  background: var(--panel-bg);
-  border: 1px solid var(--line-soft);
-  border-radius: 20px;
-  padding: 1.1rem 1.25rem;
-  box-shadow: 0 20px 50px rgba(6, 8, 13, 0.35);
-}
-.session-card h4 {
-  margin: 0.9rem 0 0.3rem;
-  font-family: var(--font-mono);
-  font-size: 0.68rem;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: rgba(245, 197, 66, 0.85);
-}
-.session-card-title {
-  font-family: var(--font-mono);
-  font-size: 0.78rem;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: rgba(232, 232, 239, 0.7);
-  margin-bottom: 0.5rem;
-}
-.session-card-lead {
-  font-size: 1.05rem;
-  color: var(--ink-900);
-  margin-bottom: 0.4rem;
-}
-.session-muted {
-  font-size: 0.8rem;
-  color: rgba(232, 232, 239, 0.55);
-}
-.session-waiting {
-  padding: 2rem 0;
-  text-align: center;
-  font-family: var(--font-mono);
-}
-.session-list {
-  list-style: disc;
-  padding-left: 1.1rem;
-  font-size: 0.86rem;
-  color: rgba(232, 232, 239, 0.86);
-  display: flex;
-  flex-direction: column;
-  gap: 0.3rem;
-}
-.session-corrections {
-  margin-top: 0.6rem;
-  color: #fde68a;
-}
-.session-chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.4rem;
-  margin: 0.6rem 0;
-}
-.session-dl div {
-  display: grid;
-  grid-template-columns: 6rem 1fr;
-  gap: 0.5rem;
-  font-size: 0.82rem;
-  margin-bottom: 0.25rem;
-}
-.session-dl dt {
-  font-family: var(--font-mono);
-  color: rgba(245, 197, 66, 0.85);
-}
-.session-errors {
-  border: 1px solid rgba(239, 68, 68, 0.35);
-  background: rgba(239, 68, 68, 0.1);
-  color: #fecaca;
-  border-radius: 12px;
-  padding: 0.75rem 1rem;
-  font-size: 0.85rem;
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-}
-.session-round-title {
-  font-family: var(--font-mono);
-  font-size: 0.72rem;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  color: rgba(245, 197, 66, 0.9);
-  margin: 0.25rem 0 0.6rem;
-}
-.session-round-grid {
-  display: grid;
-  /* auto-FIT, not auto-fill: empty tracks collapse, so a round with one seat
-     spans the column instead of sitting in a third of it beside two voids. */
-  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
-  /* Cards size to their own content; without this every card in a row grows
-     to the tallest, so one finished essay leaves two near-empty boxes. */
-  align-items: start;
-  gap: 0.85rem;
-}
-.seat-card {
-  background: rgba(255, 255, 255, 0.035);
-  border: 1px solid rgba(255, 255, 255, 0.07);
-  border-radius: 16px;
-  padding: 0.9rem 1rem;
-  min-width: 0;
-}
-.seat-card.is-live {
-  border-color: rgba(245, 197, 66, 0.35);
-  box-shadow: 0 0 0 1px rgba(245, 197, 66, 0.12) inset;
-}
-.seat-card-head {
+
+/* The section rule. This is what replaced the card. */
+.session-rule {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
-  margin-bottom: 0.5rem;
-  flex-wrap: wrap;
+  gap: 0.7rem;
 }
-.seat-card-name {
-  font-weight: 700;
-  font-size: 0.95rem;
-}
-.seat-card-model,
-.seat-card-tokens {
+.session-rule-label {
   font-family: var(--font-mono);
-  font-size: 0.68rem;
-  color: rgba(232, 232, 239, 0.5);
+  font-size: 0.62rem;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: rgba(232, 232, 239, 0.6);
+  white-space: nowrap;
 }
-.seat-card-tokens {
-  margin-left: auto;
+.session-rule-line {
+  flex: 1;
+  height: 1px;
+  background: rgba(148, 163, 184, 0.16);
+}
+.session-rule-meta {
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  letter-spacing: 0.06em;
+  color: rgba(232, 232, 239, 0.38);
+  white-space: nowrap;
+}
+.session-rule.is-live .session-rule-label {
+  color: #f5c542;
+}
+.session-rule.is-live .session-rule-line {
+  background: rgba(245, 197, 66, 0.22);
+}
+.session-rule.is-record .session-rule-label {
+  color: #f5c542;
+}
+.session-rule.is-record .session-rule-line {
+  background: rgba(245, 197, 66, 0.22);
+}
+
+/* A round: its rule, then the seats that have spoken, then the ones working. */
+.session-round {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+.session-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+/* A seat that has produced text reads as prose, at a measure that suits it. */
+.seat-block {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  min-width: 0;
+}
+.seat-head {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+  min-width: 0;
+}
+.seat-bar {
+  width: 2px;
+  height: 13px;
+  background: currentColor;
+  flex-shrink: 0;
+  align-self: center;
+}
+.seat-name {
+  font-family: var(--font-mono);
+  font-size: 0.76rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: currentColor;
+  white-space: nowrap;
+}
+.seat-model {
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  color: rgba(232, 232, 239, 0.42);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+.seat-head-gap {
+  flex: 1;
+}
+.seat-meta {
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  color: rgba(232, 232, 239, 0.38);
+  white-space: nowrap;
+}
+.seat-state {
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #f5c542;
+  white-space: nowrap;
 }
 .seat-card-body {
-  font-size: 0.88rem;
-  line-height: 1.55;
-  color: rgba(232, 232, 239, 0.9);
+  font-size: 0.92rem;
+  line-height: 1.68;
+  color: rgba(232, 232, 239, 0.88);
   word-break: break-word;
-  /* Cap the measure, not the card: prose stays readable when a card is wide. */
-  max-width: 68ch;
-}
-.seat-card-waiting {
-  font-family: var(--font-mono);
-  font-size: 0.78rem;
-  color: rgba(232, 232, 239, 0.45);
+  max-width: 74ch;
 }
 .seat-card-thinking {
-  margin-top: 0.6rem;
-  font-size: 0.75rem;
-  color: rgba(232, 232, 239, 0.55);
+  font-size: 0.72rem;
+  color: rgba(232, 232, 239, 0.45);
+}
+.seat-card-thinking summary {
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  cursor: pointer;
+  color: rgba(232, 232, 239, 0.38);
+  list-style: none;
+}
+.seat-card-thinking summary:hover {
+  color: rgba(232, 232, 239, 0.6);
 }
 .seat-card-thinking pre,
 .tool-chip-output {
   white-space: pre-wrap;
   word-break: break-word;
   font-family: var(--font-mono);
-  font-size: 0.72rem;
-  line-height: 1.45;
-  background: rgba(0, 0, 0, 0.35);
-  border-radius: 10px;
+  font-size: 0.7rem;
+  line-height: 1.5;
+  background: rgba(0, 0, 0, 0.32);
+  border-left: 2px solid rgba(148, 163, 184, 0.2);
   padding: 0.6rem 0.75rem;
   margin-top: 0.4rem;
-  max-height: 16rem;
+  max-height: 18rem;
   overflow: auto;
 }
+
+/* A seat still working is a row, not a card the size of an essay. */
+.seat-rows {
+  display: flex;
+  flex-direction: column;
+}
+.seat-row {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  padding: 0.6rem 0;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.1);
+  min-width: 0;
+}
+.seat-row .seat-name {
+  min-width: 5.5rem;
+}
+.seat-row .seat-model {
+  flex: 1;
+}
+.seat-row.is-queued {
+  color: rgba(148, 163, 184, 0.45);
+}
+.seat-row.is-queued .seat-state {
+  color: rgba(232, 232, 239, 0.35);
+}
+.seat-note {
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  letter-spacing: 0.04em;
+  color: rgba(232, 232, 239, 0.3);
+  margin: 0;
+}
+
+/* Tool calls sit under the seat that made them. */
 .seat-card-tools {
   display: flex;
   flex-direction: column;
-  gap: 0.35rem;
-  margin-bottom: 0.6rem;
+  gap: 0.3rem;
 }
 .tool-chip summary {
   cursor: pointer;
@@ -4833,20 +5026,25 @@ textarea.workstation-input {
   gap: 0.5rem;
   align-items: baseline;
   font-family: var(--font-mono);
-  font-size: 0.72rem;
-  color: rgba(232, 232, 239, 0.75);
-  padding: 0.3rem 0.6rem;
-  border-radius: 999px;
-  background: rgba(245, 197, 66, 0.08);
-  border: 1px solid rgba(245, 197, 66, 0.2);
+  font-size: 0.66rem;
+  color: rgba(232, 232, 239, 0.6);
+  padding: 0.25rem 0.5rem;
+  background: rgba(245, 197, 66, 0.05);
+  border: 1px solid rgba(245, 197, 66, 0.18);
   list-style: none;
+  min-width: 0;
+}
+.tool-chip summary:hover {
+  border-color: rgba(245, 197, 66, 0.4);
 }
 .tool-chip.is-error summary {
-  background: rgba(239, 68, 68, 0.1);
+  background: rgba(239, 68, 68, 0.08);
   border-color: rgba(239, 68, 68, 0.3);
 }
 .tool-chip-name {
   color: #f5c542;
+  font-weight: 600;
+  white-space: nowrap;
 }
 .tool-chip-args {
   overflow: hidden;
@@ -4854,9 +5052,238 @@ textarea.workstation-input {
   white-space: nowrap;
   min-width: 0;
 }
+
+/* The record leads the page, because it is what the session was for. */
+.record-block {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+.record-answer {
+  font-size: 1rem;
+  line-height: 1.7;
+  color: var(--ink-900);
+  max-width: 74ch;
+}
+.record-question {
+  font-size: 0.82rem;
+  line-height: 1.55;
+  color: rgba(232, 232, 239, 0.5);
+  max-width: 74ch;
+  margin: 0;
+}
+.record-confidence {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  max-width: 74ch;
+}
+.record-confidence-label {
+  font-family: var(--font-mono);
+  font-size: 0.6rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: rgba(232, 232, 239, 0.38);
+  white-space: nowrap;
+}
+.confidence-bar {
+  flex: 1;
+  height: 5px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+.confidence-bar span {
+  display: block;
+  height: 100%;
+  background: #34d399;
+}
+.record-confidence-value {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: #34d399;
+}
+.record-dissent {
+  border-left: 2px solid rgba(248, 113, 113, 0.5);
+  padding: 0.1rem 0 0.1rem 0.75rem;
+  max-width: 74ch;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+.record-dissent-label {
+  font-family: var(--font-mono);
+  font-size: 0.6rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #f87171;
+}
+
+/* Rail panels are the same rule plus content, never a box. */
+.session-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  min-width: 0;
+}
+.session-sublabel {
+  font-family: var(--font-mono);
+  font-size: 0.6rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: rgba(232, 232, 239, 0.38);
+}
+.session-lead {
+  font-size: 0.86rem;
+  line-height: 1.5;
+  color: rgba(232, 232, 239, 0.92);
+  margin: 0;
+}
+.session-muted {
+  font-size: 0.75rem;
+  line-height: 1.55;
+  color: rgba(232, 232, 239, 0.48);
+  margin: 0;
+}
+.session-metric {
+  font-family: var(--font-mono);
+  font-size: 1.35rem;
+  font-weight: 600;
+  color: var(--ink-900);
+}
+.session-meter {
+  height: 4px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+.session-meter span {
+  display: block;
+  height: 100%;
+  background: #f5c542;
+}
+.session-meter.is-done span {
+  background: #34d399;
+}
+
+/* Marked lists: a hairline marker instead of a bullet. */
+.session-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  font-size: 0.78rem;
+  line-height: 1.5;
+  color: rgba(232, 232, 239, 0.82);
+}
+.session-list li {
+  display: flex;
+  gap: 0.55rem;
+  min-width: 0;
+}
+.session-list li::before {
+  content: "";
+  width: 2px;
+  flex-shrink: 0;
+  background: rgba(148, 163, 184, 0.35);
+}
+.session-list.is-settled li::before {
+  background: rgba(52, 211, 153, 0.5);
+}
+.session-list.is-open li::before {
+  background: rgba(248, 113, 113, 0.5);
+}
+.session-corrections {
+  color: #fde68a;
+}
+.session-corrections li::before {
+  background: rgba(253, 230, 138, 0.5);
+}
+.session-source {
+  color: rgba(232, 232, 239, 0.4);
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+}
+
+.session-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+.session-chip {
+  display: inline-flex;
+  align-items: center;
+  height: 19px;
+  padding: 0 0.42rem;
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  color: rgba(232, 232, 239, 0.7);
+  font-family: var(--font-mono);
+  font-size: 0.6rem;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+}
+.session-chip.is-principal {
+  border-color: rgba(245, 197, 66, 0.4);
+  color: #f5c542;
+}
+.session-chip.is-agree {
+  border-color: rgba(52, 211, 153, 0.4);
+  color: #34d399;
+}
+.session-chip.is-against {
+  border-color: rgba(248, 113, 113, 0.4);
+  color: #f87171;
+}
+
+.session-dl {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin: 0;
+}
+.session-dl div {
+  display: flex;
+  gap: 0.6rem;
+  min-width: 0;
+}
+.session-dl dt {
+  font-family: var(--font-mono);
+  font-size: 0.64rem;
+  color: rgba(245, 197, 66, 0.8);
+  width: 4.2rem;
+  flex-shrink: 0;
+}
+.session-dl dd {
+  margin: 0;
+  font-size: 0.75rem;
+  line-height: 1.45;
+  color: rgba(232, 232, 239, 0.62);
+  min-width: 0;
+}
+
+.session-errors {
+  border-left: 2px solid rgba(239, 68, 68, 0.6);
+  background: rgba(239, 68, 68, 0.07);
+  color: #fecaca;
+  padding: 0.6rem 0.85rem;
+  font-size: 0.8rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+.session-waiting {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: rgba(232, 232, 239, 0.35);
+  padding: 1.5rem 0;
+}
+
 .pulse-dot {
-  width: 8px;
-  height: 8px;
+  width: 7px;
+  height: 7px;
   border-radius: 50%;
   background: #f5c542;
   animation: sc-pulse 1.2s ease-in-out infinite;
@@ -4864,83 +5291,41 @@ textarea.workstation-input {
 @keyframes sc-pulse {
   0%,
   100% {
-    opacity: 0.35;
-    transform: scale(0.85);
+    opacity: 0.3;
+    transform: scale(0.8);
   }
   50% {
     opacity: 1;
     transform: scale(1);
   }
 }
-.phase-pill {
-  font-family: var(--font-mono);
-  font-size: 0.7rem;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  padding: 0.3rem 0.6rem;
-  border-radius: 999px;
-  color: #f5c542;
-  border: 1px solid rgba(245, 197, 66, 0.35);
-  background: rgba(245, 197, 66, 0.08);
-}
-.record-card {
-  border-color: rgba(245, 197, 66, 0.35);
-  box-shadow:
-    0 0 0 1px rgba(245, 197, 66, 0.12) inset,
-    0 24px 60px rgba(6, 8, 13, 0.45);
-}
-.record-card-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
-}
-.record-answer {
-  font-size: 1.05rem;
-  line-height: 1.6;
-  color: var(--ink-900);
-  margin: 0.5rem 0;
-  /* The record is the product; it gets a reading measure too. */
-  max-width: 68ch;
-}
-.confidence-bar {
-  height: 6px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.08);
-  overflow: hidden;
-  margin-top: 0.5rem;
-}
-.confidence-bar span {
-  display: block;
-  height: 100%;
-  background: linear-gradient(90deg, #0f766e, #f5c542);
-}
 
-/* Composer launch options (preset, deliverable). */
+/* Composer launch options on the home page. */
 .composer-options {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 0.4rem;
+  gap: 0.35rem;
   margin: 0.6rem 0 0.2rem;
 }
 .composer-options-label {
   font-family: var(--font-mono);
-  font-size: 0.66rem;
-  letter-spacing: 0.08em;
+  font-size: 0.6rem;
+  letter-spacing: 0.14em;
   text-transform: uppercase;
-  color: rgba(232, 232, 239, 0.45);
-  margin-right: 0.2rem;
+  color: rgba(232, 232, 239, 0.4);
+  margin-right: 0.15rem;
 }
 .composer-options-gap {
-  width: 0.6rem;
+  width: 0.75rem;
 }
 .composer-chip {
-  font-size: 0.74rem;
-  padding: 0.28rem 0.7rem;
-  border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  color: rgba(232, 232, 239, 0.7);
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  letter-spacing: 0.04em;
+  padding: 0.26rem 0.6rem;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  color: rgba(232, 232, 239, 0.65);
   background: transparent;
   transition:
     color 120ms ease,
@@ -4949,28 +5334,28 @@ textarea.workstation-input {
 }
 .composer-chip:hover {
   color: #fff;
-  border-color: rgba(255, 255, 255, 0.3);
+  border-color: rgba(255, 255, 255, 0.32);
 }
 .composer-chip.is-active {
   color: #f5c542;
   border-color: rgba(245, 197, 66, 0.55);
-  background: rgba(245, 197, 66, 0.1);
+  background: rgba(245, 197, 66, 0.08);
 }
 
-/* Lists inside seat cards and the record keep their markers. */
+/* Prose inside a seat block and the record. */
 .seat-card-body ul,
 .record-answer ul {
   list-style: disc;
-  padding-left: 1.2rem;
+  padding-left: 1.1rem;
   margin: 0.4rem 0;
 }
 .seat-card-body ol,
 .record-answer ol {
   list-style: decimal;
-  padding-left: 1.2rem;
+  padding-left: 1.1rem;
   margin: 0.4rem 0;
 }
 .seat-card-body p + p,
 .record-answer p + p {
-  margin-top: 0.5rem;
+  margin-top: 0.7rem;
 }
