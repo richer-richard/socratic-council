@@ -405,8 +405,20 @@ export default function App() {
   const handleOpenSession = useCallback(
     (sessionId: string) => {
       const session = touchDiscussionSession(sessionId) ?? loadDiscussionSession(sessionId);
-      if (!session) return;
+      if (!session) {
+        // The row came out of the index, so the session is listed but its
+        // stored contents did not come back: a blob the store cannot find,
+        // or one it cannot decrypt. Returning quietly leaves a row that
+        // does nothing when clicked and no way to tell why.
+        console.error("[App] session is in the index but did not load:", sessionId);
+        setAppError(
+          "That session is listed but its contents could not be read from the local store. " +
+            "Nothing has been deleted.",
+        );
+        return;
+      }
 
+      setAppError(null);
       setActiveSession(session);
       refreshAll();
       setState((prev) => ({
