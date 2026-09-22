@@ -397,7 +397,7 @@ async fn a_budget_stop_after_the_plan_still_writes_a_record() {
     }
     assert!(events
         .iter()
-        .any(|e| matches!(e, DebateEvent::Moderator { text } if text.contains("⚠"))));
+        .any(|e| matches!(e, DebateEvent::Moderator { text, .. } if text.contains("⚠"))));
     let positions = events
         .iter()
         .filter(|e| {

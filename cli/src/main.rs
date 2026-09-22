@@ -764,7 +764,7 @@ async fn run_plain(
                     clean(&convergence.why)
                 );
             }
-            DebateEvent::Moderator { text } => println!("\n[Moderator] {}", clean(&text)),
+            DebateEvent::Moderator { text, .. } => println!("\n[Moderator] {}", clean(&text)),
             DebateEvent::Record { record: r } => {
                 println!("\n{}", clean(&record::to_markdown(&r, &names, None)));
             }

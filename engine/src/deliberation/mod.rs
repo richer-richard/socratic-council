@@ -229,6 +229,18 @@ pub struct RoundLog {
 // Events in, events out
 // ---------------------------------------------------------------------------
 
+/// What a moderator note is for. The framing note restates the plan for the
+/// transcript, so a surface that already shows the plan can skip it without
+/// having to recognise the wording.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ModeratorNoteKind {
+    /// The plan as prose: deliverable, question, options, seats, lenses.
+    Framing,
+    /// Anything the moderator says as the run goes along.
+    Note,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "event", rename_all = "snake_case")]
 pub enum DebateEvent {
@@ -287,6 +299,7 @@ pub enum DebateEvent {
         convergence: Convergence,
     },
     Moderator {
+        kind: ModeratorNoteKind,
         text: String,
     },
     Record {
@@ -705,6 +718,7 @@ impl Deliberation {
                     snap.note = Some(msg.clone());
                     send(DebateEvent::Cost { snapshot: snap });
                     send(DebateEvent::Moderator {
+                        kind: ModeratorNoteKind::Note,
                         text: format!("⚠ {msg}"),
                     });
                     hub.stop();
@@ -811,6 +825,7 @@ impl Deliberation {
             corrections: state.corrections.clone(),
         });
         send(DebateEvent::Moderator {
+            kind: ModeratorNoteKind::Framing,
             text: this.framing_text(&plan, &names),
         });
 
@@ -1515,7 +1530,10 @@ impl Deliberation {
                         settle(&ledger, &mut state, &hub);
                         if !parsed.is_empty() {
                             let note = critique_summary(&parsed);
-                            send(DebateEvent::Moderator { text: note.clone() });
+                            send(DebateEvent::Moderator {
+                                kind: ModeratorNoteKind::Note,
+                                text: note.clone(),
+                            });
                             this.push_system_message(&mut state, "Moderator", &note);
                         }
                         if revision_needed(&parsed) && !hub.is_stopped() {

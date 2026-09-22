@@ -31,6 +31,7 @@ import {
   type SeatTurnView,
   type SessionView,
 } from "../session/reducer";
+import { roundLayout } from "../session/roundLayout";
 import { PROVIDER_INFO, isProvider } from "../stores/config";
 
 interface SessionProps {
@@ -146,7 +147,7 @@ function SeatBlock({ turn }: { turn: SeatTurnView }) {
       {turn.text ? (
         <Markdown content={turn.text} className="markdown-content seat-card-body" />
       ) : (
-        <p className="session-muted">Nothing came back.</p>
+        <p className="seat-empty">No reply came back.</p>
       )}
       {turn.thinking && (
         <details className="seat-card-thinking">
@@ -161,14 +162,11 @@ function SeatBlock({ turn }: { turn: SeatTurnView }) {
 /** A seat with nothing to show yet stays one line until it speaks. */
 function SeatRow({ turn }: { turn: SeatTurnView }) {
   return (
-    <div
-      className={`seat-row ${seatColor(turn.provider)}${turn.done ? " is-queued" : ""}`}
-      data-seat={turn.seatId}
-    >
+    <div className={`seat-row ${seatColor(turn.provider)}`} data-seat={turn.seatId}>
       <span className="seat-bar" />
       <span className="seat-name">{turn.name}</span>
       <span className="seat-model">{turn.model}</span>
-      <span className="seat-state">{turn.done ? "no reply" : "thinking"}</span>
+      <span className="seat-state">thinking</span>
     </div>
   );
 }
@@ -176,35 +174,37 @@ function SeatRow({ turn }: { turn: SeatTurnView }) {
 /**
  * One round. Seats that have written read as prose at a measure that suits
  * them; the ones still working stay as rows underneath, so a status never
- * takes the space of an essay.
+ * takes the space of an essay. A seat that finished without text is a
+ * result too, so it reads as one rather than passing for a seat that has
+ * not run yet.
+ *
+ * Keys come from the seat's place in the round, not from its place in one
+ * of these two lists, so a seat starting to write does not renumber the
+ * ones after it and throw away their open reasoning panels.
  */
 function RoundSection({ round }: { round: RoundView }) {
-  const spoken = round.entries.filter((turn) => turn.text.trim().length > 0);
-  const quiet = round.entries.filter((turn) => turn.text.trim().length === 0);
-  const working = quiet.filter((turn) => !turn.done).length;
+  const { written, working, live } = roundLayout(round.entries);
   const seats = round.entries.length;
   return (
     <section className="session-round" data-round={round.key}>
       <SectionRule
         label={round.label}
-        tone={working > 0 ? "live" : undefined}
+        tone={live > 0 ? "live" : undefined}
         meta={
-          working > 0
-            ? `${working} of ${seats} writing`
-            : `${seats} ${seats === 1 ? "seat" : "seats"}`
+          live > 0 ? `${live} of ${seats} writing` : `${seats} ${seats === 1 ? "seat" : "seats"}`
         }
       />
-      {spoken.length > 0 && (
+      {written.length > 0 && (
         <div className="session-stack">
-          {spoken.map((turn, i) => (
-            <SeatBlock key={`${turn.seatId}-${i}`} turn={turn} />
+          {written.map(({ turn, index }) => (
+            <SeatBlock key={`${turn.seatId}-${index}`} turn={turn} />
           ))}
         </div>
       )}
-      {quiet.length > 0 && (
+      {working.length > 0 && (
         <div className="seat-rows">
-          {quiet.map((turn, i) => (
-            <SeatRow key={`${turn.seatId}-quiet-${i}`} turn={turn} />
+          {working.map(({ turn, index }) => (
+            <SeatRow key={`${turn.seatId}-${index}`} turn={turn} />
           ))}
         </div>
       )}
@@ -348,10 +348,12 @@ function ConvergencePanel({ items }: { items: EngineConvergence[] }) {
       <ul className="session-list">
         {items.map((c, i) => (
           <li key={i}>
-            <span>
-              <strong>Round {i + 1}</strong> {c.recommend.replace("_", " ")} with{" "}
-              {c.open_disagreements} open
-              {c.moved.length > 0 ? `, moved: ${c.moved.join(", ")}` : ""}
+            <span className="session-line">
+              <span>
+                <strong>Round {i + 1}</strong> {c.recommend.replace("_", " ")} with{" "}
+                {c.open_disagreements} open
+                {c.moved.length > 0 ? `, moved: ${c.moved.join(", ")}` : ""}
+              </span>
               <span className="session-muted">{c.why}</span>
             </span>
           </li>
@@ -445,9 +447,8 @@ function RecordBlock({ record }: { record: EngineDecisionRecord }) {
       {record.dissent.map((d, i) => (
         <div key={i} className="record-dissent">
           <span className="record-dissent-label">Dissent · {d.seat}</span>
-          <p className="session-muted">
-            {d.position} Not carried because {d.why_not_carried}
-          </p>
+          <p className="record-dissent-position">{d.position}</p>
+          <p className="session-muted">Not carried because {d.why_not_carried}</p>
         </div>
       ))}
       {record.options_considered.length > 0 && (
@@ -627,10 +628,7 @@ export function Session({ session, live, onNavigate, onCancel, onAnswer, onDecid
    * keep the notes that carry new information: budget warnings, critique
    * summaries. `framing_text` in the engine always opens with "Deliverable:".
    */
-  const moderatorNotes = useMemo(
-    () => (view?.moderatorNotes ?? []).filter((n) => !n.startsWith("Deliverable:")),
-    [view?.moderatorNotes],
-  );
+  const moderatorNotes = view?.moderatorNotes ?? [];
   const cost = view?.cost?.total_usd ?? session.engine?.costs?.total_usd ?? null;
 
   return (

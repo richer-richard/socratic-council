@@ -42,7 +42,13 @@ describe("engine run store", () => {
   it("folds dispatched events and fires onFinished on done", () => {
     const onFinished = vi.fn();
     __dispatchForTests("s2", { event: "phase", name: "Framing" }, { onFinished });
-    __dispatchForTests("s2", { event: "moderator", text: "note" }, { onFinished });
+    __dispatchForTests("s2", { event: "moderator", kind: "note", text: "note" }, { onFinished });
+    // The framing note is the plan as prose, which the plan rail already shows.
+    __dispatchForTests(
+      "s2",
+      { event: "moderator", kind: "framing", text: "Deliverable: decision" },
+      { onFinished },
+    );
     expect(__peekForTests("s2")?.moderatorNotes).toEqual(["note"]);
     expect(onFinished).not.toHaveBeenCalled();
     __dispatchForTests("s2", { event: "done", session_id: "s2" }, { onFinished });

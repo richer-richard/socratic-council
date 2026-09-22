@@ -1160,7 +1160,7 @@ mod tests {
     use super::*;
     use crate::deliberation::{
         Board, Convergence, DecisionRecord, Disagreement, Dissent, Estimate, Evidence,
-        OptionConsidered, Participant, Plan, Recommend, RoundKind, SeatRole,
+        ModeratorNoteKind, OptionConsidered, Participant, Plan, Recommend, RoundKind, SeatRole,
     };
     use crate::types::{CostSnapshot, ToolCall, Usage};
     use ratatui::backend::TestBackend;
@@ -1311,6 +1311,7 @@ mod tests {
             },
         });
         view.apply(DebateEvent::Moderator {
+            kind: ModeratorNoteKind::Note,
             text: "Keep to the question.".into(),
         });
         view.apply(DebateEvent::Record {
@@ -1668,6 +1669,7 @@ mod tests {
         app.view = View::Session;
         ev_tx
             .send(DebateEvent::Moderator {
+                kind: ModeratorNoteKind::Note,
                 text: "last word".into(),
             })
             .unwrap();

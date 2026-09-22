@@ -250,7 +250,7 @@ impl SessionView {
             }
             DebateEvent::Board { board } => self.board = Some(board),
             DebateEvent::Convergence { convergence } => self.convergences.push(convergence),
-            DebateEvent::Moderator { text } => self.moderator_notes.push(scrub(&text)),
+            DebateEvent::Moderator { text, .. } => self.moderator_notes.push(scrub(&text)),
             DebateEvent::Record { record } => self.record = Some(record),
             DebateEvent::Document { markdown } => self.document = Some(scrub(&markdown)),
             DebateEvent::Cost { snapshot } => self.cost = Some(snapshot),
@@ -433,7 +433,7 @@ fn scrub_value(v: &mut serde_json::Value) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::deliberation::{Recommend, RoundKind};
+    use crate::deliberation::{ModeratorNoteKind, Recommend, RoundKind};
     use serde_json::json;
 
     fn started(seat: &str, round: RoundKind) -> DebateEvent {
@@ -565,6 +565,7 @@ mod tests {
             },
         });
         v.apply(DebateEvent::Moderator {
+            kind: ModeratorNoteKind::Note,
             text: "note".into(),
         });
         v.apply(DebateEvent::Record { record: record() });
@@ -699,6 +700,7 @@ mod tests {
             text: "safe\x1b]52;c;SGVsbG8=\x07text".into(),
         });
         v.apply(DebateEvent::Moderator {
+            kind: ModeratorNoteKind::Note,
             text: "note\x1b[31m".into(),
         });
         v.apply(DebateEvent::Error {
