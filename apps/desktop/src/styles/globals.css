@@ -4825,6 +4825,14 @@ textarea.workstation-input {
   gap: 1.6rem;
   padding: 1.4rem 1.8rem 2.5rem;
 }
+/* The column is as wide as the text it holds, centred in whatever room is
+   left. Rules and prose then end together instead of the rules running on
+   past a short paragraph, which is what made the page look half empty. */
+.session-main > * {
+  width: 100%;
+  max-width: 88ch;
+  margin-inline: auto;
+}
 .session-side {
   min-height: 0;
   overflow-y: auto;
@@ -4948,7 +4956,7 @@ textarea.workstation-input {
   line-height: 1.68;
   color: rgba(232, 232, 239, 0.88);
   word-break: break-word;
-  max-width: 74ch;
+  max-width: 78ch;
 }
 .seat-card-thinking {
   font-size: 0.72rem;
@@ -5018,6 +5026,8 @@ textarea.workstation-input {
 .seat-card-tools {
   display: flex;
   flex-direction: column;
+  /* A chip is as wide as its own text, not as wide as the column. */
+  align-items: flex-start;
   gap: 0.3rem;
 }
 .tool-chip summary {
@@ -5033,6 +5043,7 @@ textarea.workstation-input {
   border: 1px solid rgba(245, 197, 66, 0.18);
   list-style: none;
   min-width: 0;
+  max-width: 100%;
 }
 .tool-chip summary:hover {
   border-color: rgba(245, 197, 66, 0.4);
@@ -5063,7 +5074,7 @@ textarea.workstation-input {
   font-size: 1rem;
   line-height: 1.7;
   color: var(--ink-900);
-  max-width: 74ch;
+  max-width: 78ch;
 }
 .record-question {
   font-size: 0.82rem;
