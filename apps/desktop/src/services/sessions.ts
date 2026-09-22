@@ -33,6 +33,8 @@ import {
   type ComposerAttachment,
   type SessionAttachment,
 } from "./attachments";
+import { getSessionBlobStorage, type SessionBlobStorage } from "./sessionBlobs";
+import { describeSaveFailure } from "./storageErrors";
 import { decryptString, encryptString, isEnvelopedCiphertext } from "./vault";
 
 const SESSION_INDEX_KEY = "socratic-council-session-index-v1";
@@ -408,12 +410,29 @@ function getStorage(): Storage | null {
 }
 
 /**
+ * Where session blobs live. IndexedDB once `initSessionBlobStore()` has run,
+ * `localStorage` before that (and wherever IndexedDB is unavailable) — see
+ * `services/sessionBlobs.ts` for why the big blobs left localStorage. The
+ * index itself stays in localStorage via `getStorage()`.
+ */
+function getBlobStorage(): SessionBlobStorage | null {
+  return getSessionBlobStorage();
+}
+
+/** The reads and writes the vault helpers below need — `localStorage` and
+ * the blob store both satisfy it. */
+interface SecureStore {
+  getItem(key: string): string | null;
+  setItem(key: string, value: string): void;
+}
+
+/**
  * Read an item from localStorage, transparently decrypting if the value is
  * stored as a vault envelope. Legacy plaintext values are returned as-is so
  * sessions saved before encryption still load. Malformed ciphertexts return
  * null (treated as absent — caller can decide how to handle).
  */
-function readSecureItem(storage: Storage, key: string): string | null {
+function readSecureItem(storage: SecureStore, key: string): string | null {
   const raw = storage.getItem(key);
   if (raw == null) return null;
   if (!isEnvelopedCiphertext(raw)) return raw;
@@ -431,7 +450,7 @@ function readSecureItem(storage: Storage, key: string): string | null {
  * unchanged — data is still persisted, just not encrypted yet. The next save
  * after `initVault()` completes will encrypt it.
  */
-function writeSecureItem(storage: Storage, key: string, value: string): void {
+function writeSecureItem(storage: SecureStore, key: string, value: string): void {
   storage.setItem(key, encryptString(value));
 }
 
@@ -1641,7 +1660,7 @@ export async function branchDiscussionSession(
 // individual `socratic-council-session:*` keys. Without this, a vault
 // quarantine made every session disappear from the home sidebar even
 // though the blobs were still on disk.
-function reconstructIndexFromSessionKeys(storage: Storage): SessionSummary[] {
+function reconstructIndexFromSessionKeys(storage: SessionBlobStorage): SessionSummary[] {
   const summaries: SessionSummary[] = [];
   for (let i = 0; i < storage.length; i += 1) {
     const key = storage.key(i);
@@ -1683,19 +1702,31 @@ function readIndex(): SessionSummary[] {
   // individual session keys so the user doesn't lose visibility on their
   // sessions after a vault quarantine.
   const rawOnDisk = storage.getItem(SESSION_INDEX_KEY);
-  if (rawOnDisk == null) return [];
+  if (rawOnDisk == null) {
+    // The index lives in localStorage and the blobs in IndexedDB, so an
+    // absent index no longer proves there are no sessions: WebKit can evict
+    // the small store while the blobs survive. Scan them before concluding
+    // the user has none, and the next save writes the index back.
+    const recovered = reconstructIndexFromBlobs();
+    if (recovered.length > 0) {
+      console.warn(
+        `[sessions] the session index was missing; recovered ${recovered.length} session(s) from the blob store`,
+      );
+    }
+    return recovered;
+  }
 
   try {
     const raw = readSecureItem(storage, SESSION_INDEX_KEY);
     if (!raw) {
       sessionLoadFailureCount += 1;
-      return reconstructIndexFromSessionKeys(storage);
+      return reconstructIndexFromBlobs();
     }
 
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) {
       sessionLoadFailureCount += 1;
-      return reconstructIndexFromSessionKeys(storage);
+      return reconstructIndexFromBlobs();
     }
 
     return parsed
@@ -1719,8 +1750,13 @@ function readIndex(): SessionSummary[] {
   } catch (error) {
     console.error("Failed to read session index:", error);
     sessionLoadFailureCount += 1;
-    return reconstructIndexFromSessionKeys(storage);
+    return reconstructIndexFromBlobs();
   }
+}
+
+function reconstructIndexFromBlobs(): SessionSummary[] {
+  const blobs = getBlobStorage();
+  return blobs ? reconstructIndexFromSessionKeys(blobs) : [];
 }
 
 function writeIndex(index: SessionSummary[]): void {
@@ -1910,8 +1946,8 @@ export function saveDiscussionSession(
   session: DiscussionSession,
   options: { silent?: boolean } = {},
 ): DiscussionSession {
-  const storage = getStorage();
-  if (!storage) {
+  const blobs = getBlobStorage();
+  if (!blobs) {
     return session;
   }
 
@@ -1943,7 +1979,7 @@ export function saveDiscussionSession(
   const sessionKey = createSessionStorageKey(safeSession.id);
   let blobWritten = false;
   try {
-    writeSecureItem(storage, sessionKey, JSON.stringify(safeSession));
+    writeSecureItem(blobs, sessionKey, JSON.stringify(safeSession));
     blobWritten = true;
     writeIndex(replaceIndexEntry(readIndex(), buildSummary(safeSession)));
   } catch (error) {
@@ -1951,16 +1987,13 @@ export function saveDiscussionSession(
     // If removeItem itself throws we still surface the original error.
     if (blobWritten) {
       try {
-        storage.removeItem(sessionKey);
+        blobs.removeItem(sessionKey);
       } catch (removeError) {
         console.warn("[sessions] Rollback removeItem failed", removeError);
       }
     }
     console.error("Failed to save session:", error);
-    throw new SessionPersistenceError(
-      "Failed to save the session locally. Free up browser storage space and try again.",
-      error,
-    );
+    throw new SessionPersistenceError(describeSaveFailure("session", error), error);
   }
 
   if (!options.silent) {
@@ -1975,17 +2008,17 @@ export function saveDiscussionSession(
 }
 
 export function loadDiscussionSession(id: string): DiscussionSession | null {
-  const storage = getStorage();
-  if (!storage) return null;
+  const blobs = getBlobStorage();
+  if (!blobs) return null;
 
   const rawKey = createSessionStorageKey(id);
   try {
-    const raw = readSecureItem(storage, rawKey);
+    const raw = readSecureItem(blobs, rawKey);
     if (raw == null) {
-      // Distinguish "decrypt failed" (raw item is non-null on disk but
+      // Distinguish "decrypt failed" (raw item is non-null in the store but
       // readSecureItem returned null) from "key absent". The cheaper
       // signal we have is checking the underlying storage directly.
-      const onDisk = storage.getItem(rawKey);
+      const onDisk = blobs.getItem(rawKey);
       if (onDisk != null) {
         sessionLoadFailureCount += 1;
       }
@@ -2007,11 +2040,11 @@ export function loadDiscussionSession(id: string): DiscussionSession | null {
 }
 
 export function deleteDiscussionSession(id: string): boolean {
-  const storage = getStorage();
-  if (!storage) return false;
+  const blobs = getBlobStorage();
+  if (!blobs) return false;
 
   try {
-    storage.removeItem(createSessionStorageKey(id));
+    blobs.removeItem(createSessionStorageKey(id));
     writeIndex(readIndex().filter((entry) => entry.id !== id));
     try {
       sessionHooks.onDeleted?.(id);

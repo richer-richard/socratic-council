@@ -2,6 +2,7 @@ import type { AttachmentKind } from "./attachments";
 import { aliasAttachmentRecordToProject, deleteProjectAttachmentBlobs } from "./attachments";
 import type { SessionSummary } from "./sessions";
 import { listSessionSummaries } from "./sessions";
+import { describeSaveFailure } from "./storageErrors";
 import { decryptString, encryptString, isEnvelopedCiphertext } from "./vault";
 
 const PROJECT_INDEX_KEY = "socratic-council-project-index-v1";
@@ -257,10 +258,7 @@ export function saveProject(project: Project): Project {
     );
   } catch (error) {
     console.error("Failed to save project:", error);
-    throw new ProjectPersistenceError(
-      "Failed to save the project locally. Free up browser storage space and try again.",
-      error,
-    );
+    throw new ProjectPersistenceError(describeSaveFailure("project", error), error);
   }
 
   return normalized;

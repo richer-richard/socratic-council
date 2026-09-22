@@ -1,9 +1,16 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+  __resetSessionBlobStoreForTests,
+  flushSessionBlobs,
+  initSessionBlobStore,
+} from "./sessionBlobs";
+import {
   SessionPersistenceError,
   branchDiscussionSession,
+  deleteDiscussionSession,
   importDiscussionSession,
+  listSessionSummaries,
   loadDiscussionSession,
   saveDiscussionSession,
   stabilizeStoredSessions,
@@ -126,11 +133,11 @@ describe("saveDiscussionSession (fix 2.5 atomicity)", () => {
     delete (globalThis as { window?: unknown }).window;
   });
 
-  it("throws a SessionPersistenceError when local storage writes fail", () => {
+  function installThrowingStorage(failure: unknown) {
     const storage = {
       getItem: vi.fn().mockReturnValue(null),
       setItem: vi.fn(() => {
-        throw new Error("quota exceeded");
+        throw failure;
       }),
       removeItem: vi.fn(),
       clear: vi.fn(),
@@ -142,6 +149,27 @@ describe("saveDiscussionSession (fix 2.5 atomicity)", () => {
       writable: true,
       value: { localStorage: storage },
     });
+  }
+
+  it("reports a full store (not a browser) when the platform quota is hit", () => {
+    installThrowingStorage(
+      Object.assign(new Error("quota exceeded"), { name: "QuotaExceededError" }),
+    );
+
+    try {
+      saveDiscussionSession(createSessionFixture());
+      throw new Error("Expected saveDiscussionSession to throw");
+    } catch (error) {
+      expect(error).toBeInstanceOf(SessionPersistenceError);
+      const message = (error as Error).message;
+      expect(message).toContain("store is full");
+      expect(message).toContain("delete older sessions");
+      expect(message).not.toMatch(/browser/i);
+    }
+  });
+
+  it("reports the real reason when a write fails for another reason", () => {
+    installThrowingStorage(new Error("SecurityError: The operation is insecure."));
 
     try {
       saveDiscussionSession(createSessionFixture());
@@ -150,7 +178,7 @@ describe("saveDiscussionSession (fix 2.5 atomicity)", () => {
       expect(error).toBeInstanceOf(SessionPersistenceError);
       expect(error).toHaveProperty(
         "message",
-        "Failed to save the session locally. Free up browser storage space and try again.",
+        "Failed to save the session locally: SecurityError: The operation is insecure.",
       );
     }
   });
@@ -158,14 +186,12 @@ describe("saveDiscussionSession (fix 2.5 atomicity)", () => {
   it("rolls back the session blob when index write fails (fix 2.5)", () => {
     const writes: Array<[string, string]> = [];
     const removes: string[] = [];
-    let setCount = 0;
     const storage = {
       getItem: () => null,
       setItem: (k: string, v: string) => {
-        setCount += 1;
-        // Fail on the second setItem (the index write); the first is the
-        // session blob and should be rolled back.
-        if (setCount === 2) {
+        // The index write fails; the session blob that went in first should
+        // be rolled back.
+        if (k === "socratic-council-session-index-v1") {
           throw new Error("quota exceeded on index");
         }
         writes.push([k, v]);
@@ -188,8 +214,9 @@ describe("saveDiscussionSession (fix 2.5 atomicity)", () => {
     expect(() => saveDiscussionSession(createSessionFixture())).toThrow(SessionPersistenceError);
 
     // The session blob was written, then rolled back.
-    expect(writes).toHaveLength(1);
-    expect(writes[0]![0]).toBe("socratic-council-session:session_fixture");
+    const blobWrites = writes.filter(([key]) => key.startsWith("socratic-council-session:"));
+    expect(blobWrites).toHaveLength(1);
+    expect(blobWrites[0]![0]).toBe("socratic-council-session:session_fixture");
     expect(removes).toContain("socratic-council-session:session_fixture");
   });
 });
@@ -744,5 +771,108 @@ describe("engine session data (v3)", () => {
       attachments: [],
     });
     expect(session?.engine).toBeUndefined();
+  });
+});
+
+describe("session blobs once the blob store is initialised", () => {
+  let local: Map<string, string>;
+
+  beforeEach(() => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    local = new Map<string, string>();
+    Object.defineProperty(globalThis, "window", {
+      configurable: true,
+      writable: true,
+      value: {
+        localStorage: {
+          getItem: (k: string) => (local.has(k) ? local.get(k)! : null),
+          setItem: (k: string, v: string) => {
+            local.set(k, v);
+          },
+          removeItem: (k: string) => {
+            local.delete(k);
+          },
+          clear: () => local.clear(),
+          key: (i: number) => Array.from(local.keys())[i] ?? null,
+          get length() {
+            return local.size;
+          },
+        },
+      },
+    });
+  });
+
+  afterEach(() => {
+    __resetSessionBlobStoreForTests();
+    vi.restoreAllMocks();
+    delete (globalThis as { window?: unknown }).window;
+  });
+
+  function backendOver(rows: Map<string, string>) {
+    return {
+      readAll: () => Promise.resolve(new Map(rows)),
+      put: (k: string, v: string) => {
+        rows.set(k, v);
+        return Promise.resolve();
+      },
+      remove: (k: string) => {
+        rows.delete(k);
+        return Promise.resolve();
+      },
+    };
+  }
+
+  it("keeps the blob out of localStorage and still round-trips the session", async () => {
+    const rows = new Map<string, string>();
+    await initSessionBlobStore({ backend: backendOver(rows) });
+
+    const saved = saveDiscussionSession(createSessionFixture());
+    await flushSessionBlobs();
+
+    expect(rows.has("socratic-council-session:session_fixture")).toBe(true);
+    expect(local.has("socratic-council-session:session_fixture")).toBe(false);
+    // Only the small index stays behind in localStorage.
+    expect(local.has("socratic-council-session-index-v1")).toBe(true);
+    expect(loadDiscussionSession(saved.id)?.topic).toBe("Test topic");
+    expect(listSessionSummaries().map((entry) => entry.id)).toEqual(["session_fixture"]);
+  });
+
+  it("saves even when localStorage is full, as long as the index fits", async () => {
+    const rows = new Map<string, string>();
+    await initSessionBlobStore({ backend: backendOver(rows) });
+
+    const saved = saveDiscussionSession(createSessionFixture());
+    await flushSessionBlobs();
+    expect(rows.size).toBe(1);
+    expect(saved.id).toBe("session_fixture");
+  });
+
+  it("recovers the sessions when the index is gone but the blobs are not", async () => {
+    const rows = new Map<string, string>();
+    await initSessionBlobStore({ backend: backendOver(rows) });
+
+    saveDiscussionSession(createSessionFixture());
+    await flushSessionBlobs();
+
+    // The two stores can now be lost independently: WebKit evicts the small
+    // localStorage while IndexedDB survives.
+    local.delete("socratic-council-session-index-v1");
+
+    expect(listSessionSummaries().map((entry) => entry.id)).toEqual(["session_fixture"]);
+    expect(loadDiscussionSession("session_fixture")?.topic).toBe("Test topic");
+  });
+
+  it("deletes the blob from the backend", async () => {
+    const rows = new Map<string, string>();
+    await initSessionBlobStore({ backend: backendOver(rows) });
+
+    saveDiscussionSession(createSessionFixture());
+    await flushSessionBlobs();
+    expect(deleteDiscussionSession("session_fixture")).toBe(true);
+    await flushSessionBlobs();
+
+    expect(rows.size).toBe(0);
+    expect(loadDiscussionSession("session_fixture")).toBeNull();
+    expect(listSessionSummaries()).toEqual([]);
   });
 });

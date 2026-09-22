@@ -28,6 +28,7 @@ import {
   type Project,
 } from "./services/projects";
 import { secretsGet } from "./services/secrets";
+import { initSessionBlobStore, registerSessionBlobHooks } from "./services/sessionBlobs";
 import {
   archiveDiscussionSession,
   createDiscussionSession,
@@ -40,6 +41,7 @@ import {
   type DiscussionSession,
 } from "./services/sessions";
 import { importEngineSession, importSharedSessions } from "./services/sessionSync";
+import { describeSaveFailure } from "./services/storageErrors";
 import {
   getDecryptFailureCount,
   getQuarantinePath,
@@ -127,6 +129,24 @@ export default function App() {
         await initVault();
       } catch (error) {
         console.error("[App] initVault failed:", error);
+      }
+      if (cancelled) return;
+
+      // Session blobs live in IndexedDB, not in the WebView's 5 MB
+      // localStorage (services/sessionBlobs.ts). Hydrate that store — and
+      // move any blob still in localStorage across — before anything reads
+      // or writes a session.
+      try {
+        const blobs = await initSessionBlobStore();
+        if (blobs.migrated > 0) {
+          const pending =
+            blobs.recovered > 0 ? ` (${blobs.recovered} of them a write that had not landed)` : "";
+          console.info(
+            `[App] moved ${blobs.migrated} session(s) out of localStorage into the session store${pending}`,
+          );
+        }
+      } catch (error) {
+        console.error("[App] session store init failed:", error);
       }
       if (cancelled) return;
 
@@ -220,6 +240,18 @@ export default function App() {
   const [activeProject, setActiveProject] = useState<Project | null>(null);
   const [appError, setAppError] = useState<string | null>(null);
   const liveView = useEngineRun(state.currentSessionId);
+
+  // A session blob reaches IndexedDB on a background queue, so a write that
+  // fails there would otherwise be invisible: the app would show the session
+  // as saved while nothing had been persisted. Surface it like any other
+  // save failure.
+  useEffect(() => {
+    registerSessionBlobHooks({
+      onPersistError: (_key, error) =>
+        setAppError(describeSaveFailure("session", error, "sessions")),
+    });
+    return () => registerSessionBlobHooks({});
+  }, []);
 
   const refreshAll = useCallback(() => {
     setSessions(listSessionSummaries());
@@ -334,9 +366,7 @@ export default function App() {
       } catch (error) {
         console.error("Failed to create session:", error);
         setAppError(
-          error instanceof Error
-            ? error.message
-            : "Failed to create the session locally. Free up browser storage and try again.",
+          error instanceof Error ? error.message : "Failed to create the session locally.",
         );
       }
     },
@@ -421,9 +451,7 @@ export default function App() {
       } catch (error) {
         console.error("Failed to create project:", error);
         setAppError(
-          error instanceof Error
-            ? error.message
-            : "Failed to create the project locally. Free up browser storage and try again.",
+          error instanceof Error ? error.message : "Failed to create the project locally.",
         );
       }
     },
