@@ -35,6 +35,27 @@ describe("describeSaveFailure", () => {
     expect(text).not.toMatch(/browser/i);
   });
 
+  it("points at the disk, not the 5 MB cap, when the session store is full", () => {
+    const text = describeSaveFailure(
+      "session",
+      Object.assign(new Error("quota exceeded"), { name: "QuotaExceededError" }),
+      "sessions",
+    );
+    expect(text).toContain("session store is full");
+    expect(text).toContain("disk");
+    expect(text).not.toContain("5 MB");
+    expect(text).not.toMatch(/browser/i);
+  });
+
+  it("tells a project to clear projects, not sessions", () => {
+    const text = describeSaveFailure(
+      "project",
+      Object.assign(new Error("quota exceeded"), { name: "QuotaExceededError" }),
+    );
+    expect(text).toContain("Delete projects");
+    expect(text).not.toContain("sessions in the sidebar");
+  });
+
   it("carries the real reason for any other failure and does not blame space", () => {
     const text = describeSaveFailure("project", new Error("vault: cannot decrypt, DEK not loaded"));
     expect(text).toBe("Failed to save the project locally: vault: cannot decrypt, DEK not loaded");
