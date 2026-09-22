@@ -158,6 +158,12 @@ export interface EngineDecisionRecord {
 
 export type EngineRoundKind = "prep" | "positions" | { cross: number } | "revision" | "critique";
 
+/**
+ * What a moderator note is for. "framing" is the plan restated as prose, so a
+ * surface that already shows the plan can skip it without matching wording.
+ */
+export type EngineModeratorNoteKind = "framing" | "note";
+
 export interface EngineToolCall {
   id: string;
   name: string;
@@ -199,7 +205,7 @@ export type EngineEvent =
     }
   | { event: "board"; board: EngineBoard }
   | { event: "convergence"; convergence: EngineConvergence }
-  | { event: "moderator"; text: string }
+  | { event: "moderator"; kind: EngineModeratorNoteKind; text: string }
   | { event: "record"; record: EngineDecisionRecord }
   | { event: "document"; markdown: string }
   | { event: "cost"; snapshot: EngineCostSnapshot }

@@ -31,6 +31,7 @@ import {
   type SeatTurnView,
   type SessionView,
 } from "../session/reducer";
+import { roundLayout } from "../session/roundLayout";
 import { PROVIDER_INFO, isProvider } from "../stores/config";
 
 interface SessionProps {
@@ -96,16 +97,44 @@ function ToolChip({ use }: { use: EngineToolUse }) {
   );
 }
 
-function SeatCard({ turn }: { turn: SeatTurnView }) {
+/** A rule with a label, a hairline and an optional count. Replaces the card. */
+function SectionRule({
+  label,
+  meta,
+  tone,
+}: {
+  label: string;
+  meta?: string;
+  tone?: "live" | "record";
+}) {
+  return (
+    <div className={`session-rule${tone ? ` is-${tone}` : ""}`}>
+      <span className="session-rule-label">{label}</span>
+      <span className="session-rule-line" />
+      {meta ? <span className="session-rule-meta">{meta}</span> : null}
+    </div>
+  );
+}
+
+/**
+ * A seat that has produced text. The provider colour goes on the header, and
+ * the bar and the name inherit it, so one class carries the seat's identity.
+ */
+function SeatBlock({ turn }: { turn: SeatTurnView }) {
   const tokens = turn.usage ? turn.usage.input + turn.usage.output + turn.usage.reasoning : 0;
   return (
-    <article className={`seat-card ${turn.done ? "" : "is-live"}`} data-seat={turn.seatId}>
-      <header className="seat-card-head">
-        <span className={`seat-card-name ${seatColor(turn.provider)}`}>{turn.name}</span>
-        {turn.model && <span className="seat-card-model">{turn.model}</span>}
-        {!turn.done && <span className="pulse-dot" aria-label="generating" />}
-        {turn.done && tokens > 0 && (
-          <span className="seat-card-tokens">{tokens.toLocaleString()} tok</span>
+    <article className="seat-block" data-seat={turn.seatId}>
+      <header className={`seat-head ${seatColor(turn.provider)}`}>
+        <span className="seat-bar" />
+        <span className="seat-name">{turn.name}</span>
+        {turn.model && <span className="seat-model">{turn.model}</span>}
+        <span className="seat-head-gap" />
+        {turn.done ? (
+          tokens > 0 ? (
+            <span className="seat-meta">{tokens.toLocaleString()} tok</span>
+          ) : null
+        ) : (
+          <span className="seat-state">writing</span>
         )}
       </header>
       {turn.toolUses.length > 0 && (
@@ -118,7 +147,7 @@ function SeatCard({ turn }: { turn: SeatTurnView }) {
       {turn.text ? (
         <Markdown content={turn.text} className="markdown-content seat-card-body" />
       ) : (
-        <p className="seat-card-waiting">{turn.done ? "No reply." : "Thinking…"}</p>
+        <p className="seat-empty">No reply came back.</p>
       )}
       {turn.thinking && (
         <details className="seat-card-thinking">
@@ -130,24 +159,65 @@ function SeatCard({ turn }: { turn: SeatTurnView }) {
   );
 }
 
+/** A seat with nothing to show yet stays one line until it speaks. */
+function SeatRow({ turn }: { turn: SeatTurnView }) {
+  return (
+    <div className={`seat-row ${seatColor(turn.provider)}`} data-seat={turn.seatId}>
+      <span className="seat-bar" />
+      <span className="seat-name">{turn.name}</span>
+      <span className="seat-model">{turn.model}</span>
+      <span className="seat-state">thinking</span>
+    </div>
+  );
+}
+
+/**
+ * One round. Seats that have written read as prose at a measure that suits
+ * them; the ones still working stay as rows underneath, so a status never
+ * takes the space of an essay. A seat that finished without text is a
+ * result too, so it reads as one rather than passing for a seat that has
+ * not run yet.
+ *
+ * Keys come from the seat's place in the round, not from its place in one
+ * of these two lists, so a seat starting to write does not renumber the
+ * ones after it and throw away their open reasoning panels.
+ */
 function RoundSection({ round }: { round: RoundView }) {
+  const { written, working, live } = roundLayout(round.entries);
+  const seats = round.entries.length;
   return (
     <section className="session-round" data-round={round.key}>
-      <h3 className="session-round-title">{round.label}</h3>
-      <div className="session-round-grid">
-        {round.entries.map((turn, i) => (
-          <SeatCard key={`${turn.seatId}-${i}`} turn={turn} />
-        ))}
-      </div>
+      <SectionRule
+        label={round.label}
+        tone={live > 0 ? "live" : undefined}
+        meta={
+          live > 0 ? `${live} of ${seats} writing` : `${seats} ${seats === 1 ? "seat" : "seats"}`
+        }
+      />
+      {written.length > 0 && (
+        <div className="session-stack">
+          {written.map(({ turn, index }) => (
+            <SeatBlock key={`${turn.seatId}-${index}`} turn={turn} />
+          ))}
+        </div>
+      )}
+      {working.length > 0 && (
+        <div className="seat-rows">
+          {working.map(({ turn, index }) => (
+            <SeatRow key={`${turn.seatId}-${index}`} turn={turn} />
+          ))}
+        </div>
+      )}
     </section>
   );
 }
 
-function PlanCard({ plan, corrections }: { plan: EnginePlan; corrections: string[] }) {
+function PlanPanel({ plan, corrections }: { plan: EnginePlan; corrections: string[] }) {
+  const lenses = Object.entries(plan.lenses);
   return (
-    <section className="session-card">
-      <h3 className="session-card-title">Plan</h3>
-      <p className="session-card-lead">{plan.question}</p>
+    <section className="session-panel">
+      <SectionRule label="Plan" meta={`${plan.participants.length} seats`} />
+      <p className="session-lead">{plan.question}</p>
       {plan.options.length > 0 && (
         <ul className="session-list">
           {plan.options.map((o) => (
@@ -155,21 +225,21 @@ function PlanCard({ plan, corrections }: { plan: EnginePlan; corrections: string
           ))}
         </ul>
       )}
-      {plan.settles && <p className="session-muted">Settles: {plan.settles}</p>}
+      {plan.settles && <p className="session-muted">Settled by {plan.settles}</p>}
       <div className="session-chips">
         {plan.participants.map((p) => (
           <span
             key={p.seat}
-            className={`badge ${p.role === "principal" ? "badge-info" : ""}`}
+            className={`session-chip${p.role === "principal" ? " is-principal" : ""}`}
             title={p.reason}
           >
             {p.seat} · {p.role}
           </span>
         ))}
       </div>
-      {Object.keys(plan.lenses).length > 0 && (
+      {lenses.length > 0 && (
         <dl className="session-dl">
-          {Object.entries(plan.lenses).map(([seat, lens]) => (
+          {lenses.map(([seat, lens]) => (
             <div key={seat}>
               <dt>{seat}</dt>
               <dd>{lens}</dd>
@@ -178,13 +248,18 @@ function PlanCard({ plan, corrections }: { plan: EnginePlan; corrections: string
         </dl>
       )}
       {plan.subtasks.length > 0 && (
-        <ul className="session-list">
-          {plan.subtasks.map((t, i) => (
-            <li key={i}>
-              <strong>{t.seat}</strong>: {t.task}
-            </li>
-          ))}
-        </ul>
+        <>
+          <span className="session-sublabel">Subtasks</span>
+          <ul className="session-list">
+            {plan.subtasks.map((t, i) => (
+              <li key={i}>
+                <span>
+                  <strong>{t.seat}</strong> {t.task}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </>
       )}
       <p className="session-muted">
         {plan.rounds} cross-examination round{plan.rounds === 1 ? "" : "s"} planned
@@ -200,20 +275,23 @@ function PlanCard({ plan, corrections }: { plan: EnginePlan; corrections: string
   );
 }
 
-function BoardCard({ board }: { board: EngineBoard }) {
+function BoardPanel({ board }: { board: EngineBoard }) {
   const empty =
     board.settled.length === 0 &&
     board.disagreements.length === 0 &&
     board.evidence.length === 0 &&
     board.open_questions.length === 0;
   return (
-    <section className="session-card">
-      <h3 className="session-card-title">Board</h3>
+    <section className="session-panel">
+      <SectionRule
+        label="Board"
+        meta={board.evidence.length > 0 ? `${board.evidence.length} evidence` : undefined}
+      />
       {empty && <p className="session-muted">Nothing on the board yet.</p>}
       {board.settled.length > 0 && (
         <>
-          <h4>Settled</h4>
-          <ul className="session-list">
+          <span className="session-sublabel">Settled</span>
+          <ul className="session-list is-settled">
             {board.settled.map((s, i) => (
               <li key={i}>{s}</li>
             ))}
@@ -222,11 +300,13 @@ function BoardCard({ board }: { board: EngineBoard }) {
       )}
       {board.disagreements.length > 0 && (
         <>
-          <h4>Disagreements</h4>
-          <ul className="session-list">
+          <span className="session-sublabel">Disagreements</span>
+          <ul className="session-list is-open">
             {board.disagreements.map((d, i) => (
               <li key={i}>
-                <strong>{d.between.join(" vs ")}</strong>: {d.about}
+                <span>
+                  <strong>{d.between.join(" vs ")}</strong> {d.about}
+                </span>
               </li>
             ))}
           </ul>
@@ -234,13 +314,13 @@ function BoardCard({ board }: { board: EngineBoard }) {
       )}
       {board.evidence.length > 0 && (
         <>
-          <h4>Evidence</h4>
-          <ul className="session-list">
+          <span className="session-sublabel">Evidence</span>
+          <ul className="session-list is-settled">
             {board.evidence.map((e, i) => (
               <li key={i}>
-                {e.claim}{" "}
-                <span className="session-muted">
-                  — {e.source} ({e.by})
+                <span>
+                  {e.claim} <span className="session-source">{e.source}</span>{" "}
+                  <span className="session-source">({e.by})</span>
                 </span>
               </li>
             ))}
@@ -249,8 +329,8 @@ function BoardCard({ board }: { board: EngineBoard }) {
       )}
       {board.open_questions.length > 0 && (
         <>
-          <h4>Open questions</h4>
-          <ul className="session-list">
+          <span className="session-sublabel">Open</span>
+          <ul className="session-list is-open">
             {board.open_questions.map((q, i) => (
               <li key={i}>{q}</li>
             ))}
@@ -261,16 +341,21 @@ function BoardCard({ board }: { board: EngineBoard }) {
   );
 }
 
-function ConvergenceCard({ items }: { items: EngineConvergence[] }) {
+function ConvergencePanel({ items }: { items: EngineConvergence[] }) {
   return (
-    <section className="session-card">
-      <h3 className="session-card-title">Convergence</h3>
+    <section className="session-panel">
+      <SectionRule label="Convergence" meta={`${items.length} judged`} />
       <ul className="session-list">
         {items.map((c, i) => (
           <li key={i}>
-            <strong>Round {i + 1}:</strong> {c.recommend.replace("_", " ")} · {c.open_disagreements}{" "}
-            open{c.moved.length > 0 ? ` · moved: ${c.moved.join(", ")}` : ""}
-            <div className="session-muted">{c.why}</div>
+            <span className="session-line">
+              <span>
+                <strong>Round {i + 1}</strong> {c.recommend.replace("_", " ")} with{" "}
+                {c.open_disagreements} open
+                {c.moved.length > 0 ? `, moved: ${c.moved.join(", ")}` : ""}
+              </span>
+              <span className="session-muted">{c.why}</span>
+            </span>
           </li>
         ))}
       </ul>
@@ -278,91 +363,103 @@ function ConvergenceCard({ items }: { items: EngineConvergence[] }) {
   );
 }
 
-function CostCard({
+function CostPanel({
   cost,
   estimate,
+  running,
 }: {
   cost: EngineCostSnapshot | null;
   estimate: EngineEstimate | null;
+  running: boolean;
 }) {
+  const spent = cost?.total_usd ?? 0;
+  const ceiling = estimate?.usd_high ?? 0;
+  const filled = ceiling > 0 ? Math.min(100, Math.round((spent / ceiling) * 100)) : 0;
   return (
-    <section className="session-card">
-      <h3 className="session-card-title">Cost</h3>
+    <section className="session-panel">
+      <SectionRule label="Cost" meta={estimate ? `${estimate.calls} calls` : undefined} />
+      <div className="session-metric">
+        {usd(spent)}
+        {cost && !cost.all_priced && <span className="session-muted"> plus unpriced</span>}
+      </div>
       {estimate && (
-        <p className="session-muted">
-          Estimated {usd(estimate.usd_low)} to {usd(estimate.usd_high)} over {estimate.calls} calls
-          {estimate.unpriced_seats.length > 0
-            ? ` (unpriced: ${estimate.unpriced_seats.join(", ")})`
-            : ""}
-        </p>
+        <>
+          <div className={`session-meter${running ? "" : " is-done"}`}>
+            <span style={{ width: `${filled}%` }} />
+          </div>
+          <p className="session-muted">
+            Estimated {usd(estimate.usd_low)} to {usd(estimate.usd_high)}
+            {estimate.unpriced_seats.length > 0
+              ? `, unpriced: ${estimate.unpriced_seats.join(", ")}`
+              : ""}
+          </p>
+        </>
       )}
       {cost ? (
-        <>
-          <p className="session-card-lead">
-            {usd(cost.total_usd)}
-            {!cost.all_priced && <span className="session-muted"> + unpriced</span>}
-          </p>
-          <ul className="session-list">
-            {cost.rows.map((row) => (
-              <li key={`${row.agent_id}-${row.lane}`}>
-                {row.name} <span className="session-muted">({row.lane})</span> ·{" "}
+        <ul className="session-list">
+          {cost.rows.map((row) => (
+            <li key={`${row.agent_id}-${row.lane}`}>
+              <span>
+                {row.name} <span className="session-source">{row.lane}</span>{" "}
                 {row.priced ? usd(row.usd) : "unpriced"}
-              </li>
-            ))}
-          </ul>
-          {cost.note && <p className="session-muted">{cost.note}</p>}
-        </>
+              </span>
+            </li>
+          ))}
+        </ul>
       ) : (
-        <p className="session-muted">No spend recorded yet.</p>
+        <p className="session-muted">Nothing spent yet.</p>
       )}
+      {cost?.note && <p className="session-muted">{cost.note}</p>}
     </section>
   );
 }
 
-function RecordCard({ record }: { record: EngineDecisionRecord }) {
+/** The record leads the page, because it is what the session was for. */
+function RecordBlock({ record }: { record: EngineDecisionRecord }) {
   const confidence = Math.round(Math.max(0, Math.min(1, record.confidence)) * 100);
   const votes = Object.entries(record.votes);
   return (
-    <section className="session-card record-card" data-testid="decision-record">
-      <header className="record-card-head">
-        <h3 className="session-card-title">{record.deliverable} record</h3>
-        <CopyButton text={recordToMarkdown(record)} label="Copy as Markdown" />
-      </header>
-      <p className="session-muted">{record.question}</p>
+    <section className="record-block" data-testid="decision-record">
+      <SectionRule label={`${record.deliverable} record`} tone="record" />
+      <p className="record-question">{record.question}</p>
       <Markdown content={record.answer} className="markdown-content record-answer" />
-      <div className="confidence-bar" title={`Confidence ${confidence}%`}>
-        <span style={{ width: `${confidence}%` }} />
+      <div className="record-confidence">
+        <span className="record-confidence-label">Confidence</span>
+        <div className="confidence-bar">
+          <span style={{ width: `${confidence}%` }} />
+        </div>
+        <span className="record-confidence-value">{confidence}%</span>
       </div>
-      <p className="session-muted">Confidence {confidence}%</p>
       {votes.length > 0 && (
         <div className="session-chips">
           {votes.map(([seat, vote]) => (
-            <span key={seat} className="badge">
-              {seat}: {vote}
+            <span
+              key={seat}
+              className={`session-chip${
+                vote === "agree" ? " is-agree" : vote === "against" ? " is-against" : ""
+              }`}
+            >
+              {seat} {vote}
             </span>
           ))}
         </div>
       )}
-      {record.dissent.length > 0 && (
-        <>
-          <h4>Dissent</h4>
-          <ul className="session-list">
-            {record.dissent.map((d, i) => (
-              <li key={i}>
-                <strong>{d.seat}</strong>: {d.position}{" "}
-                <span className="session-muted">— {d.why_not_carried}</span>
-              </li>
-            ))}
-          </ul>
-        </>
-      )}
+      {record.dissent.map((d, i) => (
+        <div key={i} className="record-dissent">
+          <span className="record-dissent-label">Dissent · {d.seat}</span>
+          <p className="record-dissent-position">{d.position}</p>
+          <p className="session-muted">Not carried because {d.why_not_carried}</p>
+        </div>
+      ))}
       {record.options_considered.length > 0 && (
         <>
-          <h4>Options considered</h4>
+          <span className="session-sublabel">Options considered</span>
           <ul className="session-list">
             {record.options_considered.map((o, i) => (
               <li key={i}>
-                <strong>{o.option}</strong>: {o.why_not}
+                <span>
+                  <strong>{o.option}</strong> {o.why_not}
+                </span>
               </li>
             ))}
           </ul>
@@ -370,13 +467,13 @@ function RecordCard({ record }: { record: EngineDecisionRecord }) {
       )}
       {record.what_changed && (
         <>
-          <h4>What changed</h4>
-          <p>{record.what_changed}</p>
+          <span className="session-sublabel">What changed</span>
+          <p className="session-muted">{record.what_changed}</p>
         </>
       )}
       {record.assumptions.length > 0 && (
         <>
-          <h4>Assumptions</h4>
+          <span className="session-sublabel">Assumptions</span>
           <ul className="session-list">
             {record.assumptions.map((a, i) => (
               <li key={i}>{a}</li>
@@ -386,13 +483,13 @@ function RecordCard({ record }: { record: EngineDecisionRecord }) {
       )}
       {record.evidence.length > 0 && (
         <>
-          <h4>Evidence</h4>
-          <ul className="session-list">
+          <span className="session-sublabel">Evidence</span>
+          <ul className="session-list is-settled">
             {record.evidence.map((e, i) => (
               <li key={i}>
-                {e.claim}{" "}
-                <span className="session-muted">
-                  — {e.source} ({e.by})
+                <span>
+                  {e.claim} <span className="session-source">{e.source}</span>{" "}
+                  <span className="session-source">({e.by})</span>
                 </span>
               </li>
             ))}
@@ -401,8 +498,8 @@ function RecordCard({ record }: { record: EngineDecisionRecord }) {
       )}
       {record.open_questions.length > 0 && (
         <>
-          <h4>Open questions</h4>
-          <ul className="session-list">
+          <span className="session-sublabel">Open questions</span>
+          <ul className="session-list is-open">
             {record.open_questions.map((q, i) => (
               <li key={i}>{q}</li>
             ))}
@@ -411,7 +508,7 @@ function RecordCard({ record }: { record: EngineDecisionRecord }) {
       )}
       {record.next_actions.length > 0 && (
         <>
-          <h4>Next actions</h4>
+          <span className="session-sublabel">Next actions</span>
           <ul className="session-list">
             {record.next_actions.map((a, i) => (
               <li key={i}>{a}</li>
@@ -493,14 +590,13 @@ export function exportMessagesFor(
 function LegacyTranscript({ session }: { session: DiscussionSession }) {
   return (
     <section className="session-round">
-      <h3 className="session-round-title">Transcript</h3>
-      <div className="session-round-grid">
+      <SectionRule label="Transcript" meta={`${session.messages.length} turns`} />
+      <div className="session-stack">
         {session.messages.map((m) => (
-          <article key={m.id} className="seat-card">
-            <header className="seat-card-head">
-              <span className={`seat-card-name ${seatColor(m.agentId)}`}>
-                {m.displayName ?? m.agentId}
-              </span>
+          <article key={m.id} className="seat-block">
+            <header className={`seat-head ${seatColor(m.agentId)}`}>
+              <span className="seat-bar" />
+              <span className="seat-name">{m.displayName ?? m.agentId}</span>
             </header>
             <Markdown content={m.content} className="markdown-content seat-card-body" />
           </article>
@@ -532,60 +628,70 @@ export function Session({ session, live, onNavigate, onCancel, onAnswer, onDecid
    * keep the notes that carry new information: budget warnings, critique
    * summaries. `framing_text` in the engine always opens with "Deliverable:".
    */
-  const moderatorNotes = useMemo(
-    () => (view?.moderatorNotes ?? []).filter((n) => !n.startsWith("Deliverable:")),
-    [view?.moderatorNotes],
-  );
+  const moderatorNotes = view?.moderatorNotes ?? [];
   const cost = view?.cost?.total_usd ?? session.engine?.costs?.total_usd ?? null;
 
   return (
     <div className="app-shell flex flex-col h-screen" data-session-id={session.id}>
       <div className="ambient-canvas" aria-hidden="true" />
-      <div className="app-header px-6 py-4 relative z-10 chat-workstation-header">
-        <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
-          <div className="chat-session-hero">
-            <button onClick={() => onNavigate("home")} className="button-ghost">
-              &larr; Workstation
-            </button>
-            <div className="divider-vertical"></div>
-            <div className="chat-session-mark">
-              <CouncilMark size={34} />
-            </div>
-            <div className="chat-meta-stack">
-              <div className="chat-kicker-row">
-                <span
-                  className={`session-status session-status-${running ? "running" : "completed"}`}
-                >
-                  {status}
-                </span>
-                {view?.phase && <span className="phase-pill">{view.phase}</span>}
-                {deliverable && <span className="badge badge-info">{deliverable}</span>}
-                {cost != null && <span className="badge">{usd(cost)}</span>}
-                {view?.estimate && running && (
-                  <span className="badge" title="Estimate before the run">
-                    est. {usd(view.estimate.usd_low)}–{usd(view.estimate.usd_high)}
-                  </span>
-                )}
-              </div>
-              <h1 className="chat-session-title is-topic" title={session.topic}>
-                {session.topic}
-              </h1>
-            </div>
-          </div>
-          <div className="flex items-center gap-2">
-            {running && (
-              <button type="button" className="button-ghost" onClick={() => onCancel(session.id)}>
-                Stop
-              </button>
+      <div className="session-bar">
+        <button type="button" className="session-bar-back" onClick={() => onNavigate("home")}>
+          &larr; Workstation
+        </button>
+        <span className="session-bar-div" />
+        <span className="session-bar-mark">
+          <CouncilMark size={18} />
+        </span>
+        <h1 className="session-bar-title" title={session.topic}>
+          {session.topic}
+        </h1>
+        <div className="session-bar-tags">
+          <span
+            className={`session-tag ${
+              running ? "is-live" : status === "completed" ? "is-done" : "is-stopped"
+            }`}
+          >
+            {running && <span className="session-tag-dot" />}
+            {status}
+          </span>
+          {view?.phase && <span className="session-tag">{view.phase}</span>}
+          {deliverable && <span className="session-tag is-muted">{deliverable}</span>}
+        </div>
+        <span className="session-bar-div" />
+        {cost != null && (
+          <div className="session-bar-spend">
+            <span className={`session-bar-spend-value${running ? " is-live" : ""}`}>
+              {usd(cost)}
+            </span>
+            {view?.estimate && running && (
+              <span className="session-bar-spend-note">
+                of {usd(view.estimate.usd_low)} to {usd(view.estimate.usd_high)}
+              </span>
             )}
-            {view?.record && (
-              <CopyButton text={recordToMarkdown(view.record)} label="Copy record" />
+            {view?.estimate && !running && (
+              <span className="session-bar-spend-note">{view.estimate.calls} calls</span>
             )}
-            {view?.document && <CopyButton text={view.document} label="Copy document" />}
-            <button type="button" className="button-ghost" onClick={() => setShowExport(true)}>
-              Export
-            </button>
           </div>
+        )}
+        <div className="session-bar-actions">
+          {running && (
+            <button
+              type="button"
+              className="session-bar-button is-stop"
+              onClick={() => onCancel(session.id)}
+            >
+              Stop
+            </button>
+          )}
+          {view?.record && <CopyButton text={recordToMarkdown(view.record)} label="Copy record" />}
+          {view?.document && <CopyButton text={view.document} label="Copy document" />}
+          <button
+            type="button"
+            className="session-bar-button is-primary"
+            onClick={() => setShowExport(true)}
+          >
+            Export
+          </button>
         </div>
       </div>
 
@@ -599,31 +705,28 @@ export function Session({ session, live, onNavigate, onCancel, onAnswer, onDecid
               ))}
             </div>
           ) : null}
-          {view?.record && <RecordCard record={view.record} />}
+          {view?.record && <RecordBlock record={view.record} />}
           {view?.document && (
-            <section className="session-card record-card">
-              <header className="record-card-head">
-                <h3 className="session-card-title">Document</h3>
-                <CopyButton text={view.document} label="Copy as Markdown" />
-              </header>
+            <section className="record-block">
+              <SectionRule label="Document" tone="record" />
               <Markdown content={view.document} className="markdown-content record-answer" />
             </section>
           )}
           {view && view.rounds.length === 0 && !view.done && (
-            <p className="session-muted session-waiting">
-              {view.phase ? `${view.phase}…` : "Convening the council…"}
+            <p className="session-waiting">
+              {view.phase ? `${view.phase} in progress` : "Convening the council"}
             </p>
           )}
           {view?.rounds.map((round) => (
             <RoundSection key={round.key} round={round} />
           ))}
           {moderatorNotes.length > 0 && (
-            <section className="session-card">
-              <h3 className="session-card-title">Moderator</h3>
+            <section className="session-panel">
+              <SectionRule label="Moderator" />
               <ul className="session-list">
                 {moderatorNotes.map((n, i) => (
-                  <li key={i} className="session-moderator-note">
-                    {n}
+                  <li key={i}>
+                    <span className="session-moderator-note">{n}</span>
                   </li>
                 ))}
               </ul>
@@ -632,13 +735,13 @@ export function Session({ session, live, onNavigate, onCancel, onAnswer, onDecid
         </main>
         {view && (
           <aside className="session-side">
-            {view.plan && <PlanCard plan={view.plan} corrections={view.corrections} />}
-            {view.board && <BoardCard board={view.board} />}
-            {view.convergences.length > 0 && <ConvergenceCard items={view.convergences} />}
-            <CostCard cost={view.cost} estimate={view.estimate} />
+            {view.plan && <PlanPanel plan={view.plan} corrections={view.corrections} />}
+            {view.board && <BoardPanel board={view.board} />}
+            {view.convergences.length > 0 && <ConvergencePanel items={view.convergences} />}
+            <CostPanel cost={view.cost} estimate={view.estimate} running={running} />
             {view.handoff && (
-              <section className="session-card">
-                <h3 className="session-card-title">Hand-off</h3>
+              <section className="session-panel">
+                <SectionRule label="Hand-off" meta={`${view.handoff.files.length} files`} />
                 <p className="session-muted" title={view.handoff.dir}>
                   {view.handoff.dir}
                 </p>

@@ -238,6 +238,10 @@ export function applyEvent(state: SessionView, event: EngineEvent): SessionView 
     case "convergence":
       return { ...state, convergences: [...state.convergences, event.convergence] };
     case "moderator":
+      // The framing note is the plan written out as prose. The plan rail
+      // already carries every part of it, so showing it here would print the
+      // same thing twice.
+      if (event.kind === "framing") return state;
       return { ...state, moderatorNotes: [...state.moderatorNotes, event.text] };
     case "record":
       return { ...state, record: event.record };
