@@ -33,6 +33,7 @@ import {
   type ComposerAttachment,
   type SessionAttachment,
 } from "./attachments";
+import { describeSaveFailure } from "./storageErrors";
 import { decryptString, encryptString, isEnvelopedCiphertext } from "./vault";
 
 const SESSION_INDEX_KEY = "socratic-council-session-index-v1";
@@ -1957,10 +1958,7 @@ export function saveDiscussionSession(
       }
     }
     console.error("Failed to save session:", error);
-    throw new SessionPersistenceError(
-      "Failed to save the session locally. Free up browser storage space and try again.",
-      error,
-    );
+    throw new SessionPersistenceError(describeSaveFailure("session", error), error);
   }
 
   if (!options.silent) {

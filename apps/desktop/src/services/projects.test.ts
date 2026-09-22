@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+  ProjectPersistenceError,
   addDossierEntry,
   archiveProject,
   createProject,
@@ -118,5 +119,62 @@ describe("project CRUD round-trip", () => {
     const saved = saveProject(project);
     expect(saved.id).toBe("minimal");
     expect(loadProject("minimal")?.name).toBe("minimal");
+  });
+});
+
+describe("saveProject persistence errors", () => {
+  beforeEach(() => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+    delete (globalThis as { window?: unknown }).window;
+  });
+
+  function installThrowingStorage(failure: unknown) {
+    Object.defineProperty(globalThis, "window", {
+      configurable: true,
+      writable: true,
+      value: {
+        localStorage: {
+          getItem: () => null,
+          setItem: () => {
+            throw failure;
+          },
+          removeItem: () => undefined,
+          clear: () => undefined,
+          key: () => null,
+          length: 0,
+        },
+      },
+    });
+  }
+
+  function failureOf(fn: () => unknown): Error {
+    try {
+      fn();
+    } catch (error) {
+      return error as Error;
+    }
+    throw new Error("Expected the call to throw");
+  }
+
+  it("reports a full store (not a browser) when the platform quota is hit", () => {
+    installThrowingStorage(
+      Object.assign(new Error("quota exceeded"), { name: "QuotaExceededError" }),
+    );
+    const error = failureOf(() => createProject("Quota test"));
+    expect(error).toBeInstanceOf(ProjectPersistenceError);
+    expect(error.message).toContain("store is full");
+    expect(error.message).not.toMatch(/browser/i);
+  });
+
+  it("reports the real reason when a write fails for another reason", () => {
+    installThrowingStorage(new Error("SecurityError: The operation is insecure."));
+    const error = failureOf(() => createProject("Other failure"));
+    expect(error).toBeInstanceOf(ProjectPersistenceError);
+    expect(error.message).toBe(
+      "Failed to save the project locally: SecurityError: The operation is insecure.",
+    );
   });
 });

@@ -334,9 +334,7 @@ export default function App() {
       } catch (error) {
         console.error("Failed to create session:", error);
         setAppError(
-          error instanceof Error
-            ? error.message
-            : "Failed to create the session locally. Free up browser storage and try again.",
+          error instanceof Error ? error.message : "Failed to create the session locally.",
         );
       }
     },
@@ -421,9 +419,7 @@ export default function App() {
       } catch (error) {
         console.error("Failed to create project:", error);
         setAppError(
-          error instanceof Error
-            ? error.message
-            : "Failed to create the project locally. Free up browser storage and try again.",
+          error instanceof Error ? error.message : "Failed to create the project locally.",
         );
       }
     },

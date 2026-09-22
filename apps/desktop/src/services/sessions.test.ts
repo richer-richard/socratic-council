@@ -126,11 +126,11 @@ describe("saveDiscussionSession (fix 2.5 atomicity)", () => {
     delete (globalThis as { window?: unknown }).window;
   });
 
-  it("throws a SessionPersistenceError when local storage writes fail", () => {
+  function installThrowingStorage(failure: unknown) {
     const storage = {
       getItem: vi.fn().mockReturnValue(null),
       setItem: vi.fn(() => {
-        throw new Error("quota exceeded");
+        throw failure;
       }),
       removeItem: vi.fn(),
       clear: vi.fn(),
@@ -142,6 +142,27 @@ describe("saveDiscussionSession (fix 2.5 atomicity)", () => {
       writable: true,
       value: { localStorage: storage },
     });
+  }
+
+  it("reports a full store (not a browser) when the platform quota is hit", () => {
+    installThrowingStorage(
+      Object.assign(new Error("quota exceeded"), { name: "QuotaExceededError" }),
+    );
+
+    try {
+      saveDiscussionSession(createSessionFixture());
+      throw new Error("Expected saveDiscussionSession to throw");
+    } catch (error) {
+      expect(error).toBeInstanceOf(SessionPersistenceError);
+      const message = (error as Error).message;
+      expect(message).toContain("store is full");
+      expect(message).toContain("delete older sessions");
+      expect(message).not.toMatch(/browser/i);
+    }
+  });
+
+  it("reports the real reason when a write fails for another reason", () => {
+    installThrowingStorage(new Error("SecurityError: The operation is insecure."));
 
     try {
       saveDiscussionSession(createSessionFixture());
@@ -150,7 +171,7 @@ describe("saveDiscussionSession (fix 2.5 atomicity)", () => {
       expect(error).toBeInstanceOf(SessionPersistenceError);
       expect(error).toHaveProperty(
         "message",
-        "Failed to save the session locally. Free up browser storage space and try again.",
+        "Failed to save the session locally: SecurityError: The operation is insecure.",
       );
     }
   });
