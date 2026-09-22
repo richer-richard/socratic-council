@@ -526,6 +526,16 @@ export function Session({ session, live, onNavigate, onCancel, onAnswer, onDecid
         ? "completed"
         : session.status;
   const deliverable = view?.plan?.deliverable ?? view?.record?.deliverable ?? null;
+  /**
+   * The engine's opening moderator note is the framing text, which restates
+   * the plan the Plan card already renders as structure. Drop that one and
+   * keep the notes that carry new information: budget warnings, critique
+   * summaries. `framing_text` in the engine always opens with "Deliverable:".
+   */
+  const moderatorNotes = useMemo(
+    () => (view?.moderatorNotes ?? []).filter((n) => !n.startsWith("Deliverable:")),
+    [view?.moderatorNotes],
+  );
   const cost = view?.cost?.total_usd ?? session.engine?.costs?.total_usd ?? null;
 
   return (
@@ -557,8 +567,9 @@ export function Session({ session, live, onNavigate, onCancel, onAnswer, onDecid
                   </span>
                 )}
               </div>
-              <h1 className="chat-session-title">Socratic Council</h1>
-              <p className="chat-session-topic is-expanded">{session.topic}</p>
+              <h1 className="chat-session-title is-topic" title={session.topic}>
+                {session.topic}
+              </h1>
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -606,16 +617,18 @@ export function Session({ session, live, onNavigate, onCancel, onAnswer, onDecid
           {view?.rounds.map((round) => (
             <RoundSection key={round.key} round={round} />
           ))}
-          {view?.moderatorNotes.length ? (
+          {moderatorNotes.length > 0 && (
             <section className="session-card">
               <h3 className="session-card-title">Moderator</h3>
               <ul className="session-list">
-                {view.moderatorNotes.map((n, i) => (
-                  <li key={i}>{n}</li>
+                {moderatorNotes.map((n, i) => (
+                  <li key={i} className="session-moderator-note">
+                    {n}
+                  </li>
                 ))}
               </ul>
             </section>
-          ) : null}
+          )}
         </main>
         {view && (
           <aside className="session-side">

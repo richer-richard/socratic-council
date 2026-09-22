@@ -3447,6 +3447,22 @@ details[open] > .deep-research-report-summary .deep-research-report-expand::befo
   letter-spacing: -0.03em;
   color: var(--ink-900);
 }
+/* On a session the heading is the topic, not the product name: a sentence,
+   so it takes a sentence's size and wraps to at most two lines. */
+.chat-session-title.is-topic {
+  font-size: clamp(1.1rem, 1.7vw, 1.55rem);
+  line-height: 1.3;
+  letter-spacing: -0.01em;
+  max-width: 62ch;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+/* Moderator notes arrive as text with real line breaks; keep them. */
+.session-moderator-note {
+  white-space: pre-line;
+}
 
 .workstation-toolbar-badges {
   display: flex;
@@ -4734,7 +4750,12 @@ textarea.workstation-input {
 }
 .session-round-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  /* auto-FIT, not auto-fill: empty tracks collapse, so a round with one seat
+     spans the column instead of sitting in a third of it beside two voids. */
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  /* Cards size to their own content; without this every card in a row grows
+     to the tallest, so one finished essay leaves two near-empty boxes. */
+  align-items: start;
   gap: 0.85rem;
 }
 .seat-card {
@@ -4773,6 +4794,8 @@ textarea.workstation-input {
   line-height: 1.55;
   color: rgba(232, 232, 239, 0.9);
   word-break: break-word;
+  /* Cap the measure, not the card: prose stays readable when a card is wide. */
+  max-width: 68ch;
 }
 .seat-card-waiting {
   font-family: var(--font-mono);
@@ -4877,6 +4900,8 @@ textarea.workstation-input {
   line-height: 1.6;
   color: var(--ink-900);
   margin: 0.5rem 0;
+  /* The record is the product; it gets a reading measure too. */
+  max-width: 68ch;
 }
 .confidence-bar {
   height: 6px;
