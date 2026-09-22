@@ -186,14 +186,12 @@ describe("saveDiscussionSession (fix 2.5 atomicity)", () => {
   it("rolls back the session blob when index write fails (fix 2.5)", () => {
     const writes: Array<[string, string]> = [];
     const removes: string[] = [];
-    let setCount = 0;
     const storage = {
       getItem: () => null,
       setItem: (k: string, v: string) => {
-        setCount += 1;
-        // Fail on the second setItem (the index write); the first is the
-        // session blob and should be rolled back.
-        if (setCount === 2) {
+        // The index write fails; the session blob that went in first should
+        // be rolled back.
+        if (k === "socratic-council-session-index-v1") {
           throw new Error("quota exceeded on index");
         }
         writes.push([k, v]);
@@ -216,8 +214,9 @@ describe("saveDiscussionSession (fix 2.5 atomicity)", () => {
     expect(() => saveDiscussionSession(createSessionFixture())).toThrow(SessionPersistenceError);
 
     // The session blob was written, then rolled back.
-    expect(writes).toHaveLength(1);
-    expect(writes[0]![0]).toBe("socratic-council-session:session_fixture");
+    const blobWrites = writes.filter(([key]) => key.startsWith("socratic-council-session:"));
+    expect(blobWrites).toHaveLength(1);
+    expect(blobWrites[0]![0]).toBe("socratic-council-session:session_fixture");
     expect(removes).toContain("socratic-council-session:session_fixture");
   });
 });
@@ -846,6 +845,21 @@ describe("session blobs once the blob store is initialised", () => {
     await flushSessionBlobs();
     expect(rows.size).toBe(1);
     expect(saved.id).toBe("session_fixture");
+  });
+
+  it("recovers the sessions when the index is gone but the blobs are not", async () => {
+    const rows = new Map<string, string>();
+    await initSessionBlobStore({ backend: backendOver(rows) });
+
+    saveDiscussionSession(createSessionFixture());
+    await flushSessionBlobs();
+
+    // The two stores can now be lost independently: WebKit evicts the small
+    // localStorage while IndexedDB survives.
+    local.delete("socratic-council-session-index-v1");
+
+    expect(listSessionSummaries().map((entry) => entry.id)).toEqual(["session_fixture"]);
+    expect(loadDiscussionSession("session_fixture")?.topic).toBe("Test topic");
   });
 
   it("deletes the blob from the backend", async () => {

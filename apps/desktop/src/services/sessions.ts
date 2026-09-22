@@ -1702,7 +1702,19 @@ function readIndex(): SessionSummary[] {
   // individual session keys so the user doesn't lose visibility on their
   // sessions after a vault quarantine.
   const rawOnDisk = storage.getItem(SESSION_INDEX_KEY);
-  if (rawOnDisk == null) return [];
+  if (rawOnDisk == null) {
+    // The index lives in localStorage and the blobs in IndexedDB, so an
+    // absent index no longer proves there are no sessions: WebKit can evict
+    // the small store while the blobs survive. Scan them before concluding
+    // the user has none, and the next save writes the index back.
+    const recovered = reconstructIndexFromBlobs();
+    if (recovered.length > 0) {
+      console.warn(
+        `[sessions] the session index was missing; recovered ${recovered.length} session(s) from the blob store`,
+      );
+    }
+    return recovered;
+  }
 
   try {
     const raw = readSecureItem(storage, SESSION_INDEX_KEY);
