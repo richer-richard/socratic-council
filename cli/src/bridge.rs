@@ -16,7 +16,9 @@
 //! serialization and are not readable from here. The shared session store on
 //! disk is the supported way to read a session's content — the app exports
 //! every session to it — and `load_session_transcript` below is a fallback
-//! that now only finds blobs a pre-migration app left behind.
+//! that finds a blob only when a pre-migration app left it behind, or when
+//! the app kept a copy there because its IndexedDB write had not landed yet
+//! (`socratic-council-session-unconfirmed` lists those).
 //!
 //! This module reads that store **read-only** and **never logs secret values**.
 //! It mirrors `vault.ts` / `secrets.ts`: an `ENC1:`-prefixed value is decrypted
