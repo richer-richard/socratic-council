@@ -281,41 +281,84 @@ impl DailyLedger {
     pub fn load(config_dir: &Path) -> DailyLedger {
         let path = config_dir.join("daily-spend.json");
         let today = daily_key(now_unix());
-        let mut ledger = DailyLedger {
+        let total_usd = read_day_total(&path, &today);
+        DailyLedger {
             path,
-            day: today.clone(),
-            total_usd: 0.0,
-        };
-        if let Ok(text) = std::fs::read_to_string(&ledger.path) {
-            if let Ok(v) = serde_json::from_str::<serde_json::Value>(&text) {
-                let day = v.get("day").and_then(|d| d.as_str()).unwrap_or_default();
-                let total = v.get("total_usd").and_then(|t| t.as_f64()).unwrap_or(0.0);
-                if day == today && total.is_finite() && total >= 0.0 {
-                    ledger.total_usd = total;
-                }
-            }
+            day: today,
+            total_usd,
         }
-        ledger
     }
 
     /// Add a positive cost delta and persist. Rolls over automatically if the
     /// UTC day changed while the session ran.
+    ///
+    /// The delta goes on top of what is on disk *now*, not on top of what this
+    /// process read when it started. The day's spend is shared: the app and the
+    /// terminal both write this file, and a run that loaded at zero and then
+    /// wrote its own running total would erase whatever the other one spent
+    /// meanwhile, leaving the per-day cap looking at less than was really spent.
+    /// Re-reading per add narrows that to the one call. The write is a temp file
+    /// and a rename, owner-only, so a crash mid-write cannot leave a half-written
+    /// figure where the cap will read it.
     pub fn add(&mut self, delta_usd: f64) {
         if !(delta_usd.is_finite() && delta_usd > 0.0) {
             return;
         }
-        let today = daily_key(now_unix());
-        if today != self.day {
-            self.day = today;
-            self.total_usd = 0.0;
-        }
-        self.total_usd += delta_usd;
+        self.day = daily_key(now_unix());
+        self.total_usd = read_day_total(&self.path, &self.day) + delta_usd;
         let body = serde_json::json!({ "day": self.day, "total_usd": self.total_usd });
         if let Some(parent) = self.path.parent() {
             let _ = std::fs::create_dir_all(parent);
         }
-        let _ = std::fs::write(&self.path, body.to_string());
+        let _ = write_atomic(&self.path, &body.to_string());
     }
+}
+
+/// What the file says was spent on `day`, or 0 when it is missing, unreadable,
+/// half-written, negative, or from another day.
+fn read_day_total(path: &Path, day: &str) -> f64 {
+    let Ok(text) = std::fs::read_to_string(path) else {
+        return 0.0;
+    };
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(&text) else {
+        return 0.0;
+    };
+    if v.get("day").and_then(|d| d.as_str()) != Some(day) {
+        return 0.0;
+    }
+    match v.get("total_usd").and_then(|t| t.as_f64()) {
+        Some(total) if total.is_finite() && total >= 0.0 => total,
+        _ => 0.0,
+    }
+}
+
+/// Owner-only temp file, then a rename over `path`.
+fn write_atomic(path: &Path, body: &str) -> std::io::Result<()> {
+    use std::io::Write as _;
+    let tmp = path.with_extension("json.tmp");
+    let _ = std::fs::remove_file(&tmp);
+    let mut file = open_owner_only(&tmp)?;
+    file.write_all(body.as_bytes())?;
+    file.sync_all()?;
+    std::fs::rename(&tmp, path).inspect_err(|_| {
+        let _ = std::fs::remove_file(&tmp);
+    })
+}
+
+#[cfg(unix)]
+fn open_owner_only(path: &Path) -> std::io::Result<std::fs::File> {
+    use std::os::unix::fs::OpenOptionsExt;
+    std::fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .mode(0o600)
+        .open(path)
+}
+
+#[cfg(not(unix))]
+fn open_owner_only(path: &Path) -> std::io::Result<std::fs::File> {
+    std::fs::File::create(path)
 }
 
 #[cfg(test)]
@@ -496,6 +539,69 @@ mod tests {
         ledger.add(f64::NAN);
         let reloaded = DailyLedger::load(&dir);
         assert!((reloaded.total_usd - 2.0).abs() < 1e-9);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    fn ledger_dir(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "sc-cost-{tag}-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+        let _ = std::fs::create_dir_all(&dir);
+        dir
+    }
+
+    /// Two ledgers open at once — the desktop app and the terminal — must not
+    /// erase each other's spend. Without the per-add re-read the second writer
+    /// persists its own running total and the day looks like 0.75 instead of 2.
+    #[test]
+    fn two_open_ledgers_do_not_lose_each_others_spend() {
+        let dir = ledger_dir("share");
+        let mut app = DailyLedger::load(&dir);
+        let mut cli = DailyLedger::load(&dir);
+        app.add(1.25);
+        cli.add(0.75);
+        assert!((cli.total_usd - 2.0).abs() < 1e-9, "{}", cli.total_usd);
+        assert!((DailyLedger::load(&dir).total_usd - 2.0).abs() < 1e-9);
+        // And the one that wrote first still sees the day's real total on its
+        // next add, so the per-day cap is judged against the whole day.
+        app.add(0.5);
+        assert!((app.total_usd - 2.5).abs() < 1e-9, "{}", app.total_usd);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_half_written_or_stale_ledger_reads_as_zero() {
+        let dir = ledger_dir("corrupt");
+        let path = dir.join("daily-spend.json");
+        std::fs::write(&path, "{\"day\": \"2026-09-2").unwrap();
+        assert_eq!(DailyLedger::load(&dir).total_usd, 0.0);
+        std::fs::write(&path, "{\"day\":\"1999-01-01\",\"total_usd\":9.0}").unwrap();
+        assert_eq!(DailyLedger::load(&dir).total_usd, 0.0);
+        std::fs::write(&path, "{\"day\":\"1999-01-01\",\"total_usd\":-3.0}").unwrap();
+        assert_eq!(DailyLedger::load(&dir).total_usd, 0.0);
+        // A fresh add starts the day over rather than inheriting the stale figure.
+        let mut ledger = DailyLedger::load(&dir);
+        ledger.add(0.25);
+        assert!((ledger.total_usd - 0.25).abs() < 1e-9);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_ledger_file_is_owner_only_and_leaves_no_temp_behind() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = ledger_dir("perms");
+        let mut ledger = DailyLedger::load(&dir);
+        ledger.add(0.5);
+        let path = dir.join("daily-spend.json");
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600);
+        assert!(!dir.join("daily-spend.json.tmp").exists());
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

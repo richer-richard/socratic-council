@@ -5,6 +5,7 @@ import {
   BUNDLE_SCHEMA_VERSION,
   exportBundle,
   importBundleSession,
+  isStoreSafeSessionId,
   parseBundle,
   type BundleAttachment,
 } from "./bundle";
@@ -291,6 +292,37 @@ describe("bundle — import re-mints attachment ids (F10 security fix)", () => {
     // The original (attacker-known) id must survive NOWHERE in the saved session —
     // that is exactly what prevents the IndexedDB blob-clobber.
     expect(JSON.stringify(saved)).not.toContain("att_orig_1");
+  });
+
+  it("re-mints a session id the shared store would refuse", () => {
+    // The Rust side names sessions `sessions/<id>.json` and takes only
+    // [A-Za-z0-9_-]. A bundle carries whatever id its author put there, so an
+    // id with a path segment, a dot or 121 characters has to be replaced, or
+    // the session imports and then never reaches the terminal.
+    for (const bad of ["../../etc/passwd", "a/b", "id.with.dots", "sp ace", "", "x".repeat(121)]) {
+      vi.mocked(loadDiscussionSession).mockReturnValueOnce(null);
+      const parsed = roundTrip();
+      parsed.session.id = bad;
+      const saved = importBundleSession(parsed);
+      expect(isStoreSafeSessionId(saved.id), `${bad} -> ${saved.id}`).toBe(true);
+      expect(saved.id).not.toBe(bad);
+    }
+  });
+
+  it("keeps a store-safe id, and the collision suffix stays within the limit", () => {
+    vi.mocked(loadDiscussionSession).mockReturnValueOnce(null);
+    const kept = importBundleSession(roundTrip());
+    expect(kept.id).toBe("session_test_1");
+
+    vi.mocked(loadDiscussionSession).mockReturnValueOnce({
+      id: "x".repeat(120),
+    } as unknown as DiscussionSession);
+    const parsed = roundTrip();
+    parsed.session.id = "x".repeat(120);
+    const saved = importBundleSession(parsed);
+    expect(isStoreSafeSessionId(saved.id)).toBe(true);
+    expect(saved.id.length).toBeLessThanOrEqual(120);
+    expect(saved.id).toContain("_imp_");
   });
 
   it("re-mints the session id too when the id already exists locally", () => {
