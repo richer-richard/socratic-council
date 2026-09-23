@@ -134,24 +134,30 @@ Three surfaces mirror the desktop app:
 - **Home** — the council mark, a topic composer, the **council preset**
   (`←`/`→`: Quick · 3, Standard · 4, Full — keyed seats in roster order) and
   the **deliverable** (`^D`: auto, decision, analysis, document, review), and
-  the roster strip (`◆` convenes, `●` keyed, `○` no key). `Enter` convenes.
+  the **Council Rack**: the moderator and utility chairs, then every seat
+  (`●` sits in this council, `○` keyed but not sitting, `·` no key). On a
+  narrow terminal the rack folds under the composer. `Enter` convenes.
 - **Sessions sidebar** (`Tab`) — every stored session with its status,
   deliverable, cost and the record's answer; `↑`/`↓` select, `Enter` opens
   one read-only, `r` reconvenes it.
-- **Session** — the deliberation as the engine runs it. The header shows the
-  status, the deliverable, the phase trail (`Framing ▸ Prep ▸ Positions ▸
-Cross-examination 1 ▸ …`), the estimate and the running cost. The main
-  column puts the **decision record** first (answer, confidence, votes,
-  dissent, options, assumptions, evidence, open questions, next actions),
-  then the document, then every round with a card per seat — live seats
-  pulse, tool calls show as `⚙` chips with their result, `t` folds the
-  reasoning trace out. The side column has **Plan**, **Board**, **Converge**,
-  **Cost** and **Seats** tabs (`p` `b` `v` `$` `s`). When the moderator asks
-  its clarifying question, or a seat asks to run a tool under `approval =
-"ask"`, an overlay takes the keyboard (`Enter`/`Esc` answer; `y`/`n`
-  approve). `Esc` twice stops a live council; on a finished one `r`
-  reconvenes it (the record becomes the planner's notes) and `e` exports the
-  record and document as Markdown.
+- **Session** — two pages, as in the desktop app. **Summary** is the report:
+  the decision record (answer, confidence, votes, dissent, options,
+  assumptions, evidence, open questions, next actions), how the debate went,
+  the document when there is one, and the analysis panel, whose four views
+  `1` to `4` pick: the score matrix, the vote and convergence, the critique
+  graph (`[` and `]` step through the seats) and the argument map.
+  **Transcript** is every round with a turn per seat. Live seats pulse, tool
+  calls show as chips with their result, and `T` folds the reasoning traces
+  out. `t` switches pages. A live run opens on the transcript and turns to the
+  summary once the record lands. The header shows the topic, the status, the
+  deliverable, the spend and the phase trail (`Framing ▸ Prep ▸ Positions ▸
+Cross-examination 1 ▸ …`). On a wide terminal a side column has **Plan**,
+  **Board**, **Converge**, **Cost** and **Seats** tabs (`p` `b` `v` `$` `s`).
+  When the moderator asks its clarifying question, or a seat asks to run a
+  tool under `approval = "ask"`, an overlay takes the keyboard (`Enter`/`Esc`
+  answer, `y`/`n` approve). `Esc` twice stops a live council. On a finished
+  one `r` reconvenes it (the record becomes the planner's notes) and `e`
+  exports the record and document as Markdown. `?` lists every key.
 - **Settings** (`^P`) — keys (masked entry, source labels), the **roster**
   (each seat's `provider:model`, resolved model, class and prices; edit,
   rename, reasoning override, add, remove, reset), the **moderator** and
@@ -169,7 +175,11 @@ Cross-examination 1 ▸ …`), the estimate and the running cost. The main
 | `Tab`                  | toggle the sessions sidebar                                  |
 | `^P`                   | toggle Settings                                              |
 | `Esc`                  | stop a live council (press twice) / back / quit (Home)       |
-| `t`                    | toggle reasoning traces                                      |
+| `t`                    | switch between Summary and Transcript                        |
+| `T`                    | toggle reasoning traces                                      |
+| `1`–`4`                | analysis view: Scores / Vote / Critique / Map                |
+| `[` / `]`              | step the critique graph through the seats                    |
+| `?`                    | every key for the screen you are on                          |
 | `p` `b` `v` `$` `s`    | Plan / Board / Converge / Cost / Seats                       |
 | `y` / `n`              | allow / deny a tool call                                     |
 | `r`                    | reconvene a finished session                                 |

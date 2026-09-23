@@ -12,6 +12,7 @@
 //! fall back to what the protocol records anyway (turns, words, evidence,
 //! tools, votes, convergence) when it did not, saying which of the two it is.
 
+use super::theme::{hanging, truncate};
 use super::{theme, SeatCard};
 use crate::deliberation::review::{
     ArgGraph, ArgNode, ArgNodeKind, ArgRelation, PeerEval, PeerStance,
@@ -171,11 +172,13 @@ pub fn seat_metrics(v: &SessionView, seats: &[SeatCard]) -> Vec<SeatMetric> {
                 .filter(|t| t.seat_id == id)
                 .collect();
             SeatMetric {
+                // A blank vote is no vote, as the desktop counts it.
                 vote: v
                     .record
                     .as_ref()
                     .and_then(|r| r.votes.get(&id))
-                    .map(|v| clean(v)),
+                    .map(|v| clean(v).trim().to_string())
+                    .filter(|v| !v.is_empty()),
                 moved: moved.iter().any(|m| is(m)),
                 dissented: dissent.iter().any(|d| is(d)),
                 evidence: evidence.iter().filter(|b| is(b)).count(),
@@ -271,35 +274,6 @@ fn pad(n: usize) -> Span<'static> {
     Span::raw(" ".repeat(n))
 }
 
-/// `text` wrapped to `width`, the first row after `lead` and the rest indented
-/// to line up under it. A label and its value, the way a printed form sets
-/// them, rather than continuation lines snapping back to the margin.
-pub fn hanging(
-    lead: Vec<Span<'static>>,
-    text: &str,
-    text_style: Style,
-    width: usize,
-) -> Vec<Line<'static>> {
-    let indent: usize = lead.iter().map(|s| s.content.width()).sum();
-    let room = width.saturating_sub(indent).max(12);
-    let mut out = Vec::new();
-    let rows = textwrap::wrap(text, room);
-    if rows.is_empty() {
-        out.push(Line::from(lead));
-        return out;
-    }
-    for (i, row) in rows.iter().enumerate() {
-        let mut spans = if i == 0 {
-            lead.clone()
-        } else {
-            vec![pad(indent)]
-        };
-        spans.push(Span::styled(row.to_string(), text_style));
-        out.push(Line::from(spans));
-    }
-    out
-}
-
 /// A quiet note: muted prose, wrapped with a two-space margin.
 fn note(text: &str, width: usize) -> Vec<Line<'static>> {
     hanging(vec![pad(2)], text, style(theme::MUTED), width)
@@ -313,8 +287,16 @@ fn buffer_lines(buf: &Buffer, left: usize) -> Vec<Line<'static>> {
             let mut spans = vec![pad(left)];
             let mut run = String::new();
             let mut run_style = Style::default();
+            // The cell after a wide glyph is blanked by the buffer and hidden
+            // on screen. Reading it back would push the rest of the row right.
+            let mut hidden = 0;
             for x in area.left()..area.right() {
+                if hidden > 0 {
+                    hidden -= 1;
+                    continue;
+                }
                 let cell = &buf[(x, y)];
+                hidden = cell.symbol().width().saturating_sub(1);
                 let st = Style::default()
                     .fg(cell.fg)
                     .bg(cell.bg)
@@ -421,9 +403,8 @@ fn grid(
         .unwrap_or(8)
         .max(8);
     let room = width.saturating_sub(rank_w + name_w);
-    // Tiles widen to share the room when every column fits, so the grid
-    // fills the column instead of leaving a block of nothing to its right.
-    // Capped: past 18 cells a tile stops reading as a tile.
+    // Tiles widen to share the room when every column fits. Capped: past 18
+    // cells a tile stops reading as a tile.
     let col_w = if room / columns.len() > col_w {
         (room / columns.len()).min(18)
     } else {
@@ -604,19 +585,18 @@ fn vote(ctx: &Ctx, width: usize) -> Vec<Line<'static>> {
         // The winning bloc in gold, the rest stepping down, so the bar reads
         // as one decision rather than a stack of peers.
         let mut spans = vec![pad(2)];
-        let mut used = 0;
-        for (i, (_, seats)) in blocs.iter().enumerate() {
-            let last = i + 1 == blocs.len();
-            let len = if last {
-                bar_w - used
-            } else {
-                ((seats.len() as f32 / total as f32) * bar_w as f32).round() as usize
-            };
-            used += len;
+        let sizes: Vec<usize> = blocs.iter().map(|(_, s)| s.len()).collect();
+        for (i, len) in segment_widths(&sizes, bar_w).into_iter().enumerate() {
+            // Floored, so a sixth or seventh bloc is still a visible segment
+            // rather than a bar drawn in the background colour.
             let color = if i == 0 {
                 theme::GOLD
             } else {
-                theme::blend(theme::BG, theme::MUTED, 0.55 - (i as f32) * 0.12)
+                theme::blend(
+                    theme::BG,
+                    theme::MUTED,
+                    (0.55 - (i as f32) * 0.12).max(0.22),
+                )
             };
             spans.push(Span::styled(
                 "█".repeat(len.saturating_sub(1)),
@@ -653,9 +633,8 @@ fn vote(ctx: &Ctx, width: usize) -> Vec<Line<'static>> {
             .max()
             .unwrap_or(10)
             .clamp(10, 28);
-        // Label, open count, who moved and the verdict are fixed; the track
-        // takes whatever is left, so it fills the row instead of sitting as a
-        // short bar in a wide one.
+        // Label, open count, who moved and the verdict are fixed width. The
+        // track takes whatever is left.
         let fixed = 2 + 10 + 2 + 12 + moved_w + 2 + 13;
         let track = width.saturating_sub(fixed).max(6);
         for (i, c) in rounds.iter().enumerate() {
@@ -695,6 +674,28 @@ fn vote(ctx: &Ctx, width: usize) -> Vec<Line<'static>> {
     out
 }
 
+/// The vote bar's segment widths: in proportion to each bloc, summing to
+/// exactly `bar_w`, and at least two cells each (one of bar, one of gap) when
+/// there is room, so a single seat's bloc never rounds away to nothing.
+fn segment_widths(sizes: &[usize], bar_w: usize) -> Vec<usize> {
+    let total: usize = sizes.iter().sum();
+    if total == 0 {
+        return vec![0; sizes.len()];
+    }
+    let floor = if bar_w >= 2 * sizes.len() { 2 } else { 0 };
+    let spare = bar_w - floor * sizes.len();
+    let mut out = Vec::with_capacity(sizes.len());
+    let (mut acc, mut placed) = (0, 0);
+    for size in sizes {
+        acc += size;
+        // Rounding the running total, not each share, keeps the sum exact.
+        let end = ((acc as f64 / total as f64) * spare as f64).round() as usize;
+        out.push(floor + end - placed);
+        placed = end;
+    }
+    out
+}
+
 fn moved_label(c: &crate::deliberation::Convergence) -> String {
     if c.moved.is_empty() {
         "no one moved".into()
@@ -716,21 +717,6 @@ fn verdict(r: Recommend) -> &'static str {
         Recommend::AnotherRound => "another round",
         Recommend::Revise => "revise",
     }
-}
-
-fn truncate(s: &str, max: usize) -> String {
-    if s.width() <= max {
-        return s.to_string();
-    }
-    let mut out = String::new();
-    for ch in s.chars() {
-        if out.width() + 2 > max {
-            break;
-        }
-        out.push(ch);
-    }
-    out.push('…');
-    out
 }
 
 // ---------------------------------------------------------------------------
@@ -826,6 +812,8 @@ fn critique(ctx: &Ctx, width: usize) -> Vec<Line<'static>> {
                 Some(s) => format!("{} {}", ctx.name(id), s.overall_average.round() as u32),
                 None => format!("{} not rated", ctx.name(id)),
             };
+            // A label never runs past the canvas, however long the name.
+            let label = truncate(&label, cols as usize - 2);
             (x, y, color, rated, label)
         })
         .collect();
@@ -877,7 +865,7 @@ fn critique(ctx: &Ctx, width: usize) -> Vec<Line<'static>> {
                 // Above the ring's middle the label sits above its node, below
                 // it underneath; either way it is centred on the node.
                 let ly = if *y > cy { y + 8.0 } else { y - 7.0 };
-                let lx = (x - label_w / 2.0).clamp(0.0, dw - label_w);
+                let lx = (x - label_w / 2.0).min(dw - label_w).max(0.0);
                 c.print(
                     lx,
                     ly,
@@ -1510,6 +1498,70 @@ mod tests {
         let ctx = Ctx::new(&v, &seats, None);
         let out = text(&lines(AnalysisView::Map, &ctx, 80));
         assert!(out.contains("(above)"), "{out}");
+    }
+
+    #[test]
+    fn a_seat_name_wider_than_the_canvas_is_cut_and_wide_glyphs_read_back_true() {
+        let (mut v, _) = base();
+        v.peer_eval = Some(peer());
+        let seats = vec![
+            seat("a", "Extraordinarily Long Seat Name, the Third"),
+            seat("b", "精神分析学者の席精神分析学者の席精神分析学"),
+            seat("c", "Cara"),
+        ];
+        let ctx = Ctx::new(&v, &seats, None);
+        for width in 34..=80 {
+            let out = lines(AnalysisView::Critique, &ctx, width);
+            let cols = width.saturating_sub(4).clamp(30, 72);
+            let rows = (cols / 3).clamp(12, 20);
+            let left = width.saturating_sub(cols) / 2;
+            // Every canvas row is exactly the canvas wide: a wide glyph is
+            // read back once, not with the blank cell it hides.
+            for line in &out[..rows] {
+                assert_eq!(line.width(), left + cols, "at {width}: {line:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn the_vote_bar_splits_exactly_however_many_blocs() {
+        for (n, bar) in [(12, 42), (16, 72), (3, 10), (7, 5), (1, 42)] {
+            let widths = segment_widths(&vec![1; n], bar);
+            assert_eq!(widths.iter().sum::<usize>(), bar, "{n} blocs in {bar}");
+            if bar >= 2 * n {
+                assert!(widths.iter().all(|w| *w >= 2), "{widths:?}");
+            }
+        }
+        assert_eq!(segment_widths(&[3, 1], 40), vec![29, 11]);
+    }
+
+    #[test]
+    fn many_distinct_votes_draw_every_bloc_visibly() {
+        let (mut v, _) = base();
+        let ids: Vec<String> = (0..12).map(|i| format!("s{i}")).collect();
+        let seats: Vec<SeatCard> = ids.iter().map(|id| seat(id, id)).collect();
+        let votes: Vec<(&str, &str)> = ids.iter().map(|id| (id.as_str(), id.as_str())).collect();
+        v.record = Some(record(&votes));
+        let ctx = Ctx::new(&v, &seats, None);
+        // The reported case: twelve blocs on a 50-column terminal.
+        let _ = lines(AnalysisView::Vote, &ctx, 46);
+        let out = lines(AnalysisView::Vote, &ctx, 80);
+        let segments: Vec<_> = out[0]
+            .spans
+            .iter()
+            .filter(|s| s.content.contains('█'))
+            .collect();
+        assert_eq!(segments.len(), 12);
+        assert!(segments.iter().all(|s| s.style.fg != Some(theme::BG)));
+    }
+
+    #[test]
+    fn a_blank_vote_is_no_vote() {
+        let (mut v, seats) = base();
+        v.record = Some(record(&[("a", "yes "), ("b", "  "), ("c", "")]));
+        let m = seat_metrics(&v, &seats);
+        assert_eq!(m[1].vote, None);
+        assert_eq!(vote_split(&m), vec![("yes".to_string(), vec![0])]);
     }
 
     #[test]

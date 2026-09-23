@@ -28,12 +28,14 @@ use std::collections::BTreeMap;
 use unicode_width::UnicodeWidthStr;
 
 /// Below this the screen says so instead of drawing something unreadable.
-const MIN_W: u16 = 50;
+/// Small enough for an 80-column terminal with the sessions sidebar open.
+const MIN_W: u16 = 40;
 const MIN_H: u16 = 14;
 /// The rail only earns its column when the main one keeps a readable measure.
 const RAIL_AT: u16 = 118;
-/// Prose wraps no wider than this, however wide the terminal: a paragraph set
-/// across 200 columns is not a paragraph anyone reads.
+/// The reading column is no wider than this, however wide the terminal, and
+/// sits centred in the space it has: a paragraph set across 200 columns is not
+/// a paragraph anyone reads.
 const MEASURE: usize = 100;
 
 pub fn render(f: &mut Frame, area: Rect, app: &mut App) {
@@ -110,7 +112,7 @@ fn render_header(f: &mut Frame, area: Rect, s: &SessionScreen, page: SessionPage
     } else {
         "●"
     };
-    let mut facts = vec![
+    let status_spans = vec![
         Span::styled(format!("{dot} "), Style::default().fg(status_color)),
         Span::styled(
             status,
@@ -119,16 +121,16 @@ fn render_header(f: &mut Frame, area: Rect, s: &SessionScreen, page: SessionPage
                 .add_modifier(Modifier::BOLD),
         ),
     ];
-    if let Some(d) = s.view.deliverable() {
-        facts.push(Span::styled(
+    let deliverable = s.view.deliverable().map(|d| {
+        vec![Span::styled(
             format!("   {}", d.label()),
             Style::default().fg(theme::MUTED),
-        ));
-    }
-    if let Some(c) = &s.view.cost {
+        )]
+    });
+    let spend = s.view.cost.as_ref().map(|c| {
         let approx = if c.all_priced { "" } else { "≥" };
-        facts.push(Span::styled(
-            format!("   {approx}${:.2}", c.total_usd),
+        vec![Span::styled(
+            format!("   {approx}{}", theme::usd(c.total_usd)),
             Style::default()
                 .fg(if live || c.note.is_some() {
                     theme::GOLD
@@ -136,18 +138,47 @@ fn render_header(f: &mut Frame, area: Rect, s: &SessionScreen, page: SessionPage
                     theme::TEXT
                 })
                 .add_modifier(Modifier::BOLD),
-        ));
-    }
-    match (&s.view.estimate, live) {
-        (Some(e), true) => facts.push(Span::styled(
-            format!(" of ${:.2}–${:.2}", e.usd_low, e.usd_high),
+        )]
+    });
+    let estimate = match (&s.view.estimate, live) {
+        (Some(e), true) => Some(vec![Span::styled(
+            format!(" of {}–{}", theme::usd(e.usd_low), theme::usd(e.usd_high)),
             Style::default().fg(theme::DIM),
-        )),
-        (Some(e), false) => facts.push(Span::styled(
+        )]),
+        (Some(e), false) => Some(vec![Span::styled(
             format!(" · {} calls", e.calls),
             Style::default().fg(theme::DIM),
-        )),
-        _ => {}
+        )]),
+        _ => None,
+    };
+    // The topic keeps some room: on a narrow terminal the facts give way
+    // first, the estimate, then the deliverable, then the spend. The status
+    // always stays.
+    let width_of = |g: &Option<Vec<Span>>| -> usize {
+        g.iter().flatten().map(|s| s.content.width()).sum::<usize>()
+    };
+    let room = (area.width as usize).saturating_sub(24);
+    let (mut deliverable, mut spend, mut estimate) = (deliverable, spend, estimate);
+    let status_w: usize = status_spans
+        .iter()
+        .map(|s| s.content.width())
+        .sum::<usize>()
+        + 1;
+    let total = |d: &Option<Vec<Span>>, sp: &Option<Vec<Span>>, e: &Option<Vec<Span>>| {
+        status_w + width_of(d) + width_of(sp) + width_of(e)
+    };
+    if total(&deliverable, &spend, &estimate) > room {
+        estimate = None;
+    }
+    if total(&deliverable, &spend, &estimate) > room {
+        deliverable = None;
+    }
+    if total(&deliverable, &spend, &estimate) > room {
+        spend = None;
+    }
+    let mut facts = status_spans;
+    for group in [deliverable, spend, estimate].into_iter().flatten() {
+        facts.extend(group);
     }
     facts.push(Span::raw(" "));
     let facts_w: usize = facts.iter().map(|s| s.content.width()).sum();
@@ -158,7 +189,7 @@ fn render_header(f: &mut Frame, area: Rect, s: &SessionScreen, page: SessionPage
         Paragraph::new(Line::from(vec![
             Span::styled(" ◆ ", Style::default().fg(theme::GOLD)),
             Span::styled(
-                truncate(&clean(&s.topic), topic_room),
+                theme::truncate(&clean(&s.topic), topic_room),
                 Style::default()
                     .fg(theme::TEXT)
                     .add_modifier(Modifier::BOLD),
@@ -272,11 +303,14 @@ fn render_footer(f: &mut Frame, area: Rect, s: &SessionScreen, page: SessionPage
 // ---------------------------------------------------------------------------
 
 fn render_main(f: &mut Frame, area: Rect, s: &mut SessionScreen, page: SessionPage, frame: u64) {
-    // Two columns of margin each side instead of a frame.
+    // Two columns of margin each side instead of a frame, and the reading
+    // column centred in what is left once it reaches the measure.
+    let room = area.width.saturating_sub(4);
+    let measure = room.min(MEASURE as u16);
     let inner = Rect {
-        x: area.x + 2,
+        x: area.x + 2 + (room - measure) / 2,
         y: area.y + 1,
-        width: area.width.saturating_sub(4),
+        width: measure,
         height: area.height.saturating_sub(1),
     };
     let width = inner.width as usize;
@@ -285,8 +319,9 @@ fn render_main(f: &mut Frame, area: Rect, s: &mut SessionScreen, page: SessionPa
         SessionPage::Transcript => transcript_lines(s, width, frame),
     };
 
-    // Every line is pre-wrapped to `width`, so the row count is the line
+    // Every line is wrapped to `width` here, so the row count is the line
     // count and the scroll clamp reaches the last row exactly.
+    let lines = theme::fit(lines, width);
     let total = u16::try_from(lines.len()).unwrap_or(u16::MAX);
     let max_off = total.saturating_sub(inner.height);
     let scroll = if s.follow && page == SessionPage::Transcript {
@@ -346,7 +381,7 @@ fn prose(text: &str, style: Style, width: usize, indent: usize) -> Vec<Line<'sta
 /// A labelled value: the label in its own column, the value wrapping under
 /// itself rather than back to the margin.
 fn field(label: &str, value: &str, value_style: Style, width: usize) -> Vec<Line<'static>> {
-    analysis::hanging(
+    theme::hanging(
         vec![Span::styled(
             format!("{label:<14}"),
             Style::default().fg(theme::MUTED),
@@ -368,7 +403,7 @@ fn field_list(label: &str, items: &[String], width: usize) -> Vec<Line<'static>>
             ),
             Span::styled("• ", Style::default().fg(theme::DIM)),
         ];
-        out.extend(analysis::hanging(
+        out.extend(theme::hanging(
             lead,
             item,
             Style::default().fg(theme::TEXT),
@@ -381,56 +416,44 @@ fn field_list(label: &str, items: &[String], width: usize) -> Vec<Line<'static>>
 fn summary_lines(s: &SessionScreen, width: usize) -> Vec<Line<'static>> {
     let names = s.names();
     let v = &s.view;
-    let mut lines: Vec<Line<'static>> = Vec::new();
+    let mut lines = error_lines(v, width);
 
-    for e in &v.errors {
-        lines.extend(analysis::hanging(
-            vec![Span::styled("⚠ ", Style::default().fg(theme::ROSE))],
-            &clean(e),
-            Style::default().fg(theme::ROSE),
-            width,
-        ));
-    }
-    if !v.errors.is_empty() {
-        lines.push(Line::from(""));
-    }
-
-    let Some(r) = &v.record else {
-        // Nothing to report yet: say where the run is and point at the page
-        // that has something on it.
-        let phase = v.phase.as_deref().unwrap_or("Convening");
+    if let Some(r) = &v.record {
+        push_record(&mut lines, r, &names, &s.seats, width);
+        if !r.how_it_went.trim().is_empty() {
+            lines.push(rule("How the debate went", "", theme::GOLD, width));
+            lines.push(Line::from(""));
+            lines.extend(prose(
+                &r.how_it_went,
+                Style::default().fg(theme::TEXT),
+                width,
+                0,
+            ));
+            lines.push(Line::from(""));
+        }
+    } else {
+        // No record: say why, and point at the page that has something on it.
         lines.push(rule("Decision record", "", theme::GOLD, width));
         lines.push(Line::from(""));
         lines.extend(prose(
-            &format!(
-                "{phase}. The record is written once the council has debated and voted. Press t to follow the debate as it happens."
-            ),
+            &no_record(s),
             Style::default().fg(theme::MUTED),
             width,
             0,
         ));
-        return lines;
-    };
-
-    push_record(&mut lines, r, &names, &s.seats, width);
-
-    if !r.how_it_went.trim().is_empty() {
-        lines.push(rule("How the debate went", "", theme::GOLD, width));
-        lines.push(Line::from(""));
-        lines.extend(prose(
-            &r.how_it_went,
-            Style::default().fg(theme::TEXT),
-            width,
-            0,
-        ));
         lines.push(Line::from(""));
     }
 
+    // A draft arrives before the critique and the record, so it shows as soon
+    // as it exists rather than waiting on either.
     if let Some(d) = &v.document {
         lines.push(rule("Document", "", theme::GOLD, width));
         lines.push(Line::from(""));
         lines.extend(prose(d, Style::default().fg(theme::TEXT), width, 0));
         lines.push(Line::from(""));
+    }
+    if v.record.is_none() {
+        return lines;
     }
 
     // The analysis panel: one view at a time, picked from a numbered row.
@@ -464,30 +487,84 @@ fn summary_lines(s: &SessionScreen, width: usize) -> Vec<Line<'static>> {
         lines.push(Line::from(""));
     }
 
+    push_transcript_link(&mut lines, s);
+    lines
+}
+
+/// Why the summary has no record: still being written, or never will be.
+fn no_record(s: &SessionScreen) -> String {
+    let v = &s.view;
     let turns: usize = v.rounds.iter().map(|r| r.entries.len()).sum();
-    if turns > 0 || !v.legacy.is_empty() {
-        lines.push(Line::from(vec![
-            key("t"),
-            Span::styled(
-                if s.is_live() {
-                    "  Follow the debate as it happens"
-                } else {
-                    "  Read the full transcript"
-                },
-                Style::default().fg(theme::TEXT),
-            ),
-            Span::styled(
-                format!("   {} rounds, {turns} turns", v.rounds.len()),
-                Style::default().fg(theme::DIM),
-            ),
-        ]));
+    let read = if turns > 0 || !v.legacy.is_empty() {
+        " Press t to read what was said."
+    } else {
+        ""
+    };
+    if s.is_live() {
+        let phase = v.phase.as_deref().unwrap_or("Convening");
+        return format!(
+            "{phase}. The record is written once the council has debated and voted. Press t to follow the debate as it happens."
+        );
+    }
+    if !v.legacy.is_empty() {
+        return format!(
+            "This session is from before the council wrote decision records, so there is only a transcript.{read}"
+        );
+    }
+    let how = match s.status().0 {
+        "failed" => "The run failed before the council wrote a record.",
+        "cancelled" => "The run was cancelled before the council wrote a record.",
+        "stopped" => "The run stopped before the council wrote a record.",
+        "completed" => "The run finished without a decision record.",
+        _ => "The run ended before the council wrote a record.",
+    };
+    format!("{how}{read}")
+}
+
+/// Errors from the run, first on either page: a seat that came back empty or
+/// a provider that refused is never left for the reader to infer.
+fn error_lines(v: &SessionView, width: usize) -> Vec<Line<'static>> {
+    let mut lines = Vec::new();
+    for e in &v.errors {
+        lines.extend(theme::hanging(
+            vec![Span::styled("⚠ ", Style::default().fg(theme::ROSE))],
+            &clean(e),
+            Style::default().fg(theme::ROSE),
+            width,
+        ));
+    }
+    if !lines.is_empty() {
+        lines.push(Line::from(""));
     }
     lines
 }
 
+fn push_transcript_link(lines: &mut Vec<Line<'static>>, s: &SessionScreen) {
+    let v = &s.view;
+    let turns: usize = v.rounds.iter().map(|r| r.entries.len()).sum();
+    if turns == 0 && v.legacy.is_empty() {
+        return;
+    }
+    lines.push(Line::from(vec![
+        key("t"),
+        Span::styled(
+            if s.is_live() {
+                "  Follow the debate as it happens"
+            } else {
+                "  Read the full transcript"
+            },
+            Style::default().fg(theme::TEXT),
+        ),
+        Span::styled(
+            format!("   {} rounds, {turns} turns", v.rounds.len()),
+            Style::default().fg(theme::DIM),
+        ),
+    ]));
+}
+
 fn transcript_lines(s: &SessionScreen, width: usize, frame: u64) -> Vec<Line<'static>> {
     let v = &s.view;
-    let mut lines: Vec<Line<'static>> = Vec::new();
+    let mut lines = error_lines(v, width);
     for round in &v.rounds {
         push_round(&mut lines, round, s, frame, width);
     }
@@ -509,11 +586,15 @@ fn transcript_lines(s: &SessionScreen, width: usize, frame: u64) -> Vec<Line<'st
     if !v.legacy.is_empty() {
         push_legacy(&mut lines, &v.legacy, s.show_thinking, width);
     }
-    if lines.is_empty() {
-        let phase = v.phase.as_deref().unwrap_or("Convening");
-        let dots = ".".repeat(((frame / 6) % 4) as usize);
+    if v.rounds.is_empty() && v.moderator_notes.is_empty() && v.legacy.is_empty() {
+        let text = if s.is_live() {
+            let phase = v.phase.as_deref().unwrap_or("Convening");
+            format!("{phase}{}", ".".repeat(((frame / 6) % 4) as usize))
+        } else {
+            "This session recorded no turns.".to_string()
+        };
         lines.push(Line::from(Span::styled(
-            format!("{phase}{dots}"),
+            text,
             Style::default().fg(theme::DIM),
         )));
     }
@@ -630,13 +711,16 @@ fn push_turn(
     for u in &t.tool_uses {
         let args = compact_args(&u.call.arguments);
         let (tail, tail_color) = match &u.error {
-            Some(e) => (format!("failed: {}", truncate(&clean(e), 60)), theme::ROSE),
+            Some(e) => (
+                format!("failed: {}", theme::truncate(&clean(e), 60)),
+                theme::ROSE,
+            ),
             None => (
-                truncate(&clean(&u.output.replace('\n', " ")), 60),
+                theme::truncate(&clean(&u.output.replace('\n', " ")), 60),
                 theme::DIM,
             ),
         };
-        lines.extend(analysis::hanging(
+        lines.extend(theme::hanging(
             vec![
                 Span::raw("  "),
                 Span::styled(
@@ -673,11 +757,11 @@ fn compact_args(args: &serde_json::Value) -> String {
                     Some(s) => s.to_string(),
                     None => v.to_string(),
                 };
-                format!("{k}={}", truncate(&clean(&shown), 40))
+                format!("{k}={}", theme::truncate(&clean(&shown), 40))
             })
             .collect::<Vec<_>>()
             .join(" "),
-        None => truncate(&clean(&args.to_string()), 60),
+        None => theme::truncate(&clean(&args.to_string()), 60),
     }
 }
 
@@ -760,7 +844,7 @@ fn push_record(
                 Style::default().fg(color(id)).add_modifier(Modifier::BOLD),
             ),
         ];
-        lines.extend(analysis::hanging(
+        lines.extend(theme::hanging(
             lead,
             &clean(vote),
             Style::default().fg(theme::TEXT),
@@ -780,7 +864,7 @@ fn push_record(
                     .add_modifier(Modifier::BOLD),
             ),
         ];
-        lines.extend(analysis::hanging(
+        lines.extend(theme::hanging(
             lead,
             &format!(
                 "{}. Not carried because {}",
@@ -922,7 +1006,7 @@ fn render_side(f: &mut Frame, area: Rect, s: &SessionScreen, frame: u64) {
         SideTab::Cost => cost_lines(s.view.cost.as_ref(), &s.view, width),
         SideTab::Seats => seat_lines(&s.seats, &s.view, frame),
     };
-    f.render_widget(Paragraph::new(lines), rows[1]);
+    f.render_widget(Paragraph::new(theme::fit(lines, width)), rows[1]);
 }
 
 fn plan_lines(
@@ -969,7 +1053,7 @@ fn plan_lines(
                 Span::styled(role.to_string(), Style::default().fg(theme::DIM)),
             ]));
             if !part.reason.trim().is_empty() {
-                lines.extend(analysis::hanging(
+                lines.extend(theme::hanging(
                     vec![Span::raw("   ")],
                     &clean(&part.reason),
                     Style::default().fg(theme::MUTED),
@@ -1054,7 +1138,7 @@ fn board_lines(board: Option<&Board>, names: &Names, width: usize) -> Vec<Line<'
     if !b.positions.is_empty() {
         lines.push(heading("positions"));
         for (seat, pos) in &b.positions {
-            lines.extend(analysis::hanging(
+            lines.extend(theme::hanging(
                 vec![Span::styled(
                     format!(" {} ", name(seat)),
                     Style::default()
@@ -1122,8 +1206,10 @@ fn cost_lines(cost: Option<&CostSnapshot>, v: &SessionView, width: usize) -> Vec
         lines.extend(kv(
             "estimate",
             &format!(
-                "${:.2}–${:.2} over {} calls",
-                e.usd_low, e.usd_high, e.calls
+                "{}–{} over {} calls",
+                theme::usd(e.usd_low),
+                theme::usd(e.usd_high),
+                e.calls
             ),
             theme::MUTED,
             width,
@@ -1147,7 +1233,7 @@ fn cost_lines(cost: Option<&CostSnapshot>, v: &SessionView, width: usize) -> Vec
     for row in snap.rows.iter().take(12) {
         lines.push(Line::from(vec![
             Span::styled(
-                format!(" {:<9}", truncate(&row.name, 9)),
+                format!(" {:<9}", theme::truncate(&row.name, 9)),
                 Style::default().fg(theme::speaker_color(&row.agent_id)),
             ),
             Span::styled(
@@ -1258,7 +1344,7 @@ fn seat_lines(seats: &[SeatCard], v: &SessionView, frame: u64) -> Vec<Line<'stat
             let mut spans = vec![
                 Span::styled(marker, Style::default().fg(c.color)),
                 Span::styled(
-                    format!("{:<9}", truncate(&c.name, 9)),
+                    format!("{:<9}", theme::truncate(&c.name, 9)),
                     if active {
                         Style::default().fg(c.color).add_modifier(Modifier::BOLD)
                     } else {
@@ -1266,7 +1352,7 @@ fn seat_lines(seats: &[SeatCard], v: &SessionView, frame: u64) -> Vec<Line<'stat
                     },
                 ),
                 Span::styled(
-                    truncate(
+                    theme::truncate(
                         if c.model.is_empty() {
                             c.provider.map(|p| p.slug()).unwrap_or("")
                         } else {
@@ -1378,7 +1464,7 @@ fn render_approval(f: &mut Frame, area: Rect, who: &str, tool: &str, args: &str)
                     .add_modifier(Modifier::BOLD),
             ),
             Span::styled(
-                truncate(&clean(args), 200),
+                theme::truncate(&clean(args), 200),
                 Style::default().fg(theme::MUTED),
             ),
         ]),
@@ -1498,7 +1584,7 @@ fn heading(text: &str) -> Line<'static> {
 
 /// A bullet whose wrapped rows hang under its text, not under the dot.
 fn bullet(text: &str, color: Color, width: usize) -> Vec<Line<'static>> {
-    analysis::hanging(
+    theme::hanging(
         vec![Span::styled("  • ", Style::default().fg(theme::DIM))],
         text,
         Style::default().fg(color),
@@ -1508,7 +1594,7 @@ fn bullet(text: &str, color: Color, width: usize) -> Vec<Line<'static>> {
 
 /// A label and a value in the rail, the value hanging in its own column.
 fn kv(label: &str, value: &str, color: Color, width: usize) -> Vec<Line<'static>> {
-    analysis::hanging(
+    theme::hanging(
         vec![Span::styled(
             format!(" {label:<12}"),
             Style::default().fg(theme::MUTED),
@@ -1536,15 +1622,5 @@ fn compact(n: u64) -> String {
         format!("{:.1}k", n as f64 / 1_000.0)
     } else {
         n.to_string()
-    }
-}
-
-fn truncate(s: &str, max: usize) -> String {
-    if s.chars().count() <= max {
-        s.to_string()
-    } else {
-        let mut out: String = s.chars().take(max.saturating_sub(1)).collect();
-        out.push('…');
-        out
     }
 }

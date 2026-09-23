@@ -120,7 +120,9 @@ Laid out like the desktop workstation: the council mark, the wordmark, the
 composer and the launch options in the middle, and the **Council Rack** on the
 right with the two chairs (moderator and utility, provider and model) above a
 rule, then one line per seat. Under 110 columns the rack folds under the
-options as a grid, chairs first.
+options as a grid, chairs first, then the keyed count and, with no key yet,
+how to add one. A roster too long for the grid ends with a row that says how
+many seats it left out.
 
 - **Council preset** (`←`/`→`): Quick · 3, Standard · 4, Full. The preset
   takes keyed seats of the allowed providers in roster order and cuts the list
@@ -146,7 +148,10 @@ two pages, switched with `t`:
   then what changed, options, assumptions, evidence, open questions and next
   actions in a label column with hanging values. Then **How the debate went**
   (the moderator's account of the argument), the **document** for document
-  deliverables, and the **analysis** panel, then the hand-off folder.
+  deliverables, and the **analysis** panel, then the hand-off folder. Errors
+  from the run lead both pages. Without a record the summary says why (still
+  running, failed, cancelled, stopped, or from before v3), and a document
+  draft shows as soon as it arrives rather than waiting for the record.
 - **Transcript** is every round: a rule per round with its seat count, each
   turn under its seat's colour bar and name with the model and token count,
   tool chips with arguments and result, the reasoning trace folded behind
@@ -156,8 +161,11 @@ two pages, switched with `t`:
 A live run opens on the transcript, since there is nothing to summarise yet,
 and turns to the summary once the record lands, unless a page was picked with
 `t`. Each page opens where it is read from: the summary at the top, a live
-transcript following the newest turn. Prose wraps at 100 columns however wide
-the terminal.
+transcript following the newest turn. The reading column is at most 100
+columns wide and centred in the space it has. Every row is fitted to that
+width, so a label column that runs long on a narrow terminal carries on to the
+next row rather than being clipped, and a lead too wide to leave room beside
+it puts its text underneath.
 
 **Analysis** (`tui/analysis.rs`, the four desktop views, `1` to `4`):
 
@@ -166,7 +174,8 @@ the terminal.
   to fill the width and drop from the right when it is narrow, Overall always
   kept. Without peer scores the same grid shows turns, words, evidence and
   tools, and says why: review off, still running, or ran with no usable reply.
-- **Vote:** the final vote as a bar (winning bloc in gold), the blocs listed
+- **Vote:** the final vote as a bar (winning bloc in gold, every bloc at
+  least one visible cell, a blank vote not counted), the blocs listed
   with their seats, then one row per convergence judgement with a track for
   the open disagreements, who moved and the verdict.
 - **Critique:** who rated whom, drawn on a braille canvas into an off-screen
@@ -196,7 +205,8 @@ the terminal.
   planner's notes and a new, paid session is written); `e` exports the record
   and the document as Markdown to Downloads. The footer shows the keys for the
   page you are on, cut to the width.
-- **Too small:** under 50×14 the screen says so and names the size it needs.
+- **Too small:** under 40×14 the screen says so and names the size it needs.
+  That fits an 80-column terminal with the sessions sidebar open.
 - **Resize:** a resize marks the frame dirty, so a static screen (a saved
   session, Settings) re-lays out at once instead of on the next key.
 

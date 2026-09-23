@@ -910,7 +910,10 @@ fn render_rows(f: &mut Frame, area: Rect, app: &App) {
                     if keyed { "● " } else { "○ " },
                     Style::default().fg(if keyed { color } else { theme::DIM }),
                 ),
-                Span::styled(format!("{:<10}", truncate(&seat.name, 10)), name_style(row)),
+                Span::styled(
+                    format!("{:<10}", theme::truncate(&seat.name, 10)),
+                    name_style(row),
+                ),
                 Span::styled(
                     format!("{}:{}", seat.provider, seat.model),
                     Style::default().fg(theme::MUTED),
@@ -1199,16 +1202,6 @@ fn key(label: &str) -> Span<'_> {
             .fg(theme::GOLD)
             .add_modifier(Modifier::BOLD),
     )
-}
-
-fn truncate(s: &str, max: usize) -> String {
-    if s.chars().count() <= max {
-        s.to_string()
-    } else {
-        let mut out: String = s.chars().take(max.saturating_sub(1)).collect();
-        out.push('…');
-        out
-    }
 }
 
 #[cfg(test)]

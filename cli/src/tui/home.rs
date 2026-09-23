@@ -32,7 +32,12 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
     } else {
         Layout::horizontal([Constraint::Percentage(100)]).split(rows[0])
     };
-    let rack_rows = if wide { 0 } else { 5 };
+    let folded = if wide {
+        Vec::new()
+    } else {
+        folded_rack_lines(app, cols[0].width.saturating_sub(4) as usize)
+    };
+    let rack_rows = folded.len() as u16;
     let center = Layout::vertical([
         Constraint::Min(4),            // the mark takes what is left
         Constraint::Length(3),         // wordmark + tagline
@@ -53,7 +58,7 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
     if wide {
         render_rack(f, cols[1], app);
     } else {
-        render_rack_folded(f, center[4], app);
+        f.render_widget(Paragraph::new(folded), center[4]);
     }
 }
 
@@ -338,7 +343,7 @@ fn render_rack(f: &mut Frame, area: Rect, app: &App) {
                     .add_modifier(Modifier::BOLD),
             ),
             Span::styled(
-                truncate(
+                theme::truncate(
                     &format!("{} · {}", slot.provider.slug(), slot_model(&slot.model)),
                     w.saturating_sub(13),
                 ),
@@ -369,7 +374,7 @@ fn render_rack(f: &mut Frame, area: Rect, app: &App) {
                 Style::default().fg(if keyed { hue } else { theme::DIM }),
             ),
             Span::styled(
-                format!("{:<11}", truncate(&seat.name, 10)),
+                format!("{:<11}", theme::truncate(&seat.name, 10)),
                 if sitting {
                     Style::default().fg(hue).add_modifier(Modifier::BOLD)
                 } else if keyed {
@@ -379,7 +384,7 @@ fn render_rack(f: &mut Frame, area: Rect, app: &App) {
                 },
             ),
             Span::styled(
-                truncate(
+                theme::truncate(
                     &format!("{} · {}", seat.provider.slug(), seat.model.label()),
                     w.saturating_sub(13),
                 ),
@@ -401,7 +406,7 @@ fn render_rack(f: &mut Frame, area: Rect, app: &App) {
     ]));
     if configured == 0 {
         lines.push(Line::from(""));
-        lines.extend(super::analysis::hanging(
+        lines.extend(theme::hanging(
             vec![],
             "No keys yet. Press ^P to add one here, no desktop app needed.",
             Style::default().fg(theme::GOLD),
@@ -416,13 +421,12 @@ fn render_rack(f: &mut Frame, area: Rect, app: &App) {
     f.render_widget(Paragraph::new(lines), inner);
 }
 
-/// The rack on a narrow terminal: the chairs on one row, then the seats in as
-/// many columns as fit, each cell a fixed width so nothing wraps mid-seat.
-fn render_rack_folded(f: &mut Frame, area: Rect, app: &App) {
-    if area.height == 0 {
-        return;
-    }
-    let w = area.width as usize;
+/// The rack on a narrow terminal: the chairs on one row, the seats in as many
+/// columns as fit, each cell a fixed width so nothing wraps mid-seat, then the
+/// count, and how to add a key when there is none. A long roster stops after
+/// a few rows and says how many seats it left out.
+fn folded_rack_lines(app: &App, width: usize) -> Vec<Line<'static>> {
+    const SEAT_ROWS: usize = 3;
     let mut lines = Vec::new();
     let mut chair_spans = Vec::new();
     for (label, slot) in chairs(app) {
@@ -451,10 +455,17 @@ fn render_rack_folded(f: &mut Frame, area: Rect, app: &App) {
         .max()
         .unwrap_or(10)
         .max(12);
-    let per_row = (w / cell).max(1);
-    for chunk in roster.seats.chunks(per_row) {
+    let per_row = (width / cell).max(1);
+    let rows: Vec<_> = roster.seats.chunks(per_row).collect();
+    // When the roster runs long, the last row it has room for says so.
+    let shown = if rows.len() > SEAT_ROWS {
+        SEAT_ROWS - 1
+    } else {
+        rows.len()
+    };
+    for chunk in &rows[..shown] {
         let mut spans = Vec::new();
-        for seat in chunk {
+        for seat in *chunk {
             let keyed = app.ctx.config.is_configured(seat.provider);
             let sitting = convened.seats.iter().any(|s| s.id == seat.id);
             let hue = theme::provider_color(seat.provider);
@@ -479,22 +490,33 @@ fn render_rack_folded(f: &mut Frame, area: Rect, app: &App) {
         }
         lines.push(Line::from(spans));
     }
-    f.render_widget(Paragraph::new(lines), area);
-}
-
-fn truncate(s: &str, max: usize) -> String {
-    if s.width() <= max {
-        return s.to_string();
+    let left_out: usize = rows[shown..].iter().map(|c| c.len()).sum();
+    if left_out > 0 {
+        lines.push(Line::from(Span::styled(
+            format!("  and {left_out} more seats, all of them in Settings (^P)"),
+            Style::default().fg(theme::DIM),
+        )));
     }
-    let mut out = String::new();
-    for ch in s.chars() {
-        if out.width() + 2 > max {
-            break;
-        }
-        out.push(ch);
+    let configured = app.configured_count();
+    lines.push(Line::from(vec![
+        Span::styled(
+            format!("{configured}/{} keyed", Provider::ALL.len()),
+            Style::default().fg(theme::MUTED),
+        ),
+        Span::styled(
+            format!(" · {} sit", convened.seats.len()),
+            Style::default().fg(theme::DIM),
+        ),
+    ]));
+    if configured == 0 {
+        lines.extend(theme::hanging(
+            vec![],
+            "No keys yet. Press ^P to add one here, no desktop app needed.",
+            Style::default().fg(theme::GOLD),
+            width,
+        ));
     }
-    out.push('…');
-    out
+    theme::fit(lines, width)
 }
 
 fn render_footer(f: &mut Frame, area: Rect) {

@@ -1543,6 +1543,52 @@ mod tests {
     }
 
     #[test]
+    fn errors_show_on_the_transcript_and_the_sidebar_leaves_the_session_room() {
+        let mut app = test_app();
+        app.view = View::Session;
+        app.session = Some(sample_screen());
+        app.session.as_mut().unwrap().ui.page = Some(SessionPage::Transcript);
+        let text = render_at(&mut app, 140, 50);
+        assert!(text.contains("Kate came back empty."), "{text}");
+        // An 80-column terminal with the sessions sidebar open still has room
+        // for the session.
+        app.sidebar_open = true;
+        let text = render_at(&mut app, 80, 24);
+        assert!(!text.contains("too small"), "{text}");
+        assert!(text.contains("Summary") && text.contains("Transcript"));
+    }
+
+    #[test]
+    fn the_summary_without_a_record_says_why_and_shows_the_draft() {
+        let mut app = test_app();
+        app.view = View::Session;
+        let mut screen = sample_screen();
+        screen.view.record = None;
+        screen.view.document = Some("A draft worth reading.".into());
+        screen.view.done = true;
+        screen.view.stopped_early = Some("failed".into());
+        screen.ui.page = Some(SessionPage::Summary);
+        app.session = Some(screen);
+        let text = render_at(&mut app, 140, 50);
+        assert!(
+            text.contains("The run failed before the council wrote a record."),
+            "{text}"
+        );
+        assert!(text.contains("A draft worth reading."));
+        assert!(!text.contains("Convening"));
+        // A session from before v3 says that instead.
+        let s = app.session.as_mut().unwrap();
+        s.view = SessionView::from_stored(&json!({
+            "messages": [{"agentId": "george", "content": "An old turn."}]
+        }));
+        let text = render_at(&mut app, 140, 50);
+        assert!(
+            text.contains("from before the council wrote decision records"),
+            "{text}"
+        );
+    }
+
+    #[test]
     fn overlays_render_and_take_the_keyboard() {
         let mut app = test_app();
         app.view = View::Session;
@@ -1705,9 +1751,24 @@ mod tests {
         assert!(text.contains("COUNCIL RACK"));
         assert!(text.contains("Moderator") && text.contains("Utility"));
         assert!(text.contains("0/8 keyed"));
-        // Folded under the options on a narrow terminal, chairs still first.
+        // Folded under the options on a narrow terminal, chairs still first,
+        // and a first run still learns how to add a key.
         let narrow = render_at(&mut app, 80, 24);
         assert!(narrow.contains("Moderator"));
+        assert!(narrow.contains("0/8 keyed"), "{narrow}");
+        assert!(narrow.contains("No keys yet"), "{narrow}");
+        // A roster too long for the folded grid says how many it left out.
+        app.ctx.config.seats = (0..20)
+            .map(|i| crate::config::SeatConfig {
+                id: format!("seat{i}"),
+                name: format!("Seat {i}"),
+                provider: "openai".into(),
+                model: "auto".into(),
+                reasoning: None,
+            })
+            .collect();
+        let narrow = render_at(&mut app, 80, 30);
+        assert!(narrow.contains("and 8 more seats"), "{narrow}");
     }
 
     #[test]
