@@ -269,6 +269,27 @@ its localStorage index. Each row shows the title, the status, the deliverable
 and cost when the run reached a record, and the record's answer. `Enter`
 opens a session read-only, and so does a click on its row; `r` reconvenes it.
 
+### Deleting a session
+
+`Del` on Home, with the sidebar open and the composer empty, asks about the
+highlighted session; `/delete <session title>` asks about the one that name
+picks out, and refuses a name that fits more than one rather than guessing.
+The confirm box names what is going and says it goes from the desktop app
+too. `Enter` deletes, `Esc` keeps it. A session the council is still sitting
+on is refused until the run stops, and a row that only the app holds says so
+rather than pretending.
+
+The store is shared, and the app keeps its own copy of every session and
+pushes back anything the store is missing, so a file simply removed here
+would be written straight back on the app's next sync. Deleting therefore
+leaves a **marker** in the file's place (`SessionStore::tombstone`): the same
+sealed `<id>.json` with the session gone, which the app reads as "this one
+was deleted" and answers by dropping its own copy
+(`services/sessionSync.ts`). Markers are swept up after 30 days, and
+`load`, `list` and the sidebar all look straight through them. The app's own
+delete goes the other way and removes the file: nothing else holds a second
+copy on that side.
+
 ### Settings clicks
 
 A click on a switch (tools, approval, the clarifying question, review, the

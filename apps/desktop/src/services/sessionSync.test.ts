@@ -163,4 +163,46 @@ describe("shared session store sync", () => {
     // The delete hook is fire-and-forget (dynamic import + invoke).
     await vi.waitFor(() => expect(files.has("sc-3")).toBe(false));
   });
+
+  it("honours a delete the terminal made, and does not push the session back", async () => {
+    files.set("sc-4", {
+      envelope: encryptString(JSON.stringify(cliSession("sc-4", 5000, "about to go"))),
+      modified_ms: 10,
+    });
+    expect((await importSharedSessions()).imported).toBe(1);
+    expect(listSessionSummaries().map((s) => s.id)).toEqual(["sc-4"]);
+
+    // What `SessionStore::tombstone` leaves behind.
+    files.set("sc-4", {
+      envelope: encryptString(
+        JSON.stringify({ id: "sc-4", deleted: true, deletedAt: 6000, deletedBy: "cli" }),
+      ),
+      modified_ms: 20,
+    });
+
+    const synced = await importSharedSessions();
+    expect(synced.deleted).toEqual(["sc-4"]);
+    expect(synced.imported).toBe(0);
+    expect(listSessionSummaries()).toEqual([]);
+    expect(loadDiscussionSession("sc-4")).toBeNull();
+    // The marker stays: it is the only record that this session went, and the
+    // terminal sweeps it up itself.
+    expect(files.has("sc-4")).toBe(true);
+    // And the session is never written back over the marker.
+    expect(files.get("sc-4")?.modified_ms).toBe(20);
+
+    const again = await importSharedSessions();
+    expect(again.deleted).toEqual([]);
+    expect(again.exported).toBe(0);
+    expect(files.get("sc-4")?.modified_ms).toBe(20);
+  });
+
+  it("does not treat an ordinary session as deleted", async () => {
+    const alive = { ...cliSession("sc-5", 5000, "still here"), deleted: false };
+    files.set("sc-5", { envelope: encryptString(JSON.stringify(alive)), modified_ms: 10 });
+    const synced = await importSharedSessions();
+    expect(synced.deleted).toEqual([]);
+    expect(synced.imported).toBe(1);
+    expect(loadDiscussionSession("sc-5")?.messages[1]?.content).toBe("still here");
+  });
 });

@@ -867,6 +867,24 @@ export function Home({
         onOpenSession(pick.id);
         return;
       }
+      case "delete": {
+        // The same sheet a row's own menu opens, so a typed delete and a
+        // clicked one ask the same question. A name that fits more than one
+        // session is refused rather than guessed: this one does not come back.
+        const want = arg.trim().toLowerCase();
+        const title = (s: SessionSummary) => (s.title || s.topic).toLowerCase();
+        const containing = recentSessions.filter((s) => title(s).includes(want));
+        const pick =
+          recentSessions.find((s) => title(s) === want) ??
+          (containing.length === 1 ? containing[0] : undefined);
+        if (!pick) {
+          return containing.length > 1
+            ? `More than one session matches "${arg}". Use its full title.`
+            : `No saved session is called "${arg}".`;
+        }
+        setPendingSessionAction(pick);
+        return;
+      }
       case "settings":
         setSettingsTab(undefined);
         setShowSettings(true);

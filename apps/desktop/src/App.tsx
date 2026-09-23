@@ -172,7 +172,10 @@ export default function App() {
       // app-only sessions out so the terminal can see them). Best-effort.
       try {
         const synced = await importSharedSessions();
-        if (!cancelled && (synced.imported > 0 || synced.exported > 0)) {
+        if (
+          !cancelled &&
+          (synced.imported > 0 || synced.exported > 0 || synced.deleted.length > 0)
+        ) {
           setSessions(listSessionSummaries());
         }
       } catch (error) {
@@ -194,23 +197,6 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, []);
-
-  // Re-sync with the shared session store whenever the window regains focus
-  // (the user may have just finished a debate in the terminal). Throttled so
-  // rapid focus flips don't hammer the disk.
-  useEffect(() => {
-    let last = 0;
-    const onFocus = () => {
-      const now = Date.now();
-      if (now - last < 5000) return;
-      last = now;
-      void importSharedSessions().then((synced) => {
-        if (synced.imported > 0 || synced.exported > 0) setSessions(listSessionSummaries());
-      });
-    };
-    window.addEventListener("focus", onFocus);
-    return () => window.removeEventListener("focus", onFocus);
   }, []);
 
   // Register a baseline command set — other pages can register additional
@@ -256,6 +242,35 @@ export default function App() {
    */
   const [launch, setLaunch] = useState<SessionLaunchOptions>(DEFAULT_LAUNCH);
   const liveView = useEngineRun(state.currentSessionId);
+
+  // Re-sync with the shared session store whenever the window regains focus
+  // (the user may have just finished a debate in the terminal). Throttled so
+  // rapid focus flips don't hammer the disk. It sits below `activeSession`
+  // because a session the terminal deleted while this window was away must not
+  // stay open on a page that can no longer load it.
+  useEffect(() => {
+    let last = 0;
+    const onFocus = () => {
+      const now = Date.now();
+      if (now - last < 5000) return;
+      last = now;
+      void importSharedSessions().then((synced) => {
+        if (synced.imported > 0 || synced.exported > 0 || synced.deleted.length > 0) {
+          setSessions(listSessionSummaries());
+        }
+        if (synced.deleted.length === 0) return;
+        const gone = new Set(synced.deleted);
+        setActiveSession((current) => (current && gone.has(current.id) ? null : current));
+        setState((current) =>
+          current.currentSessionId && gone.has(current.currentSessionId)
+            ? { ...current, currentPage: "home", currentSessionId: null }
+            : current,
+        );
+      });
+    };
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, []);
 
   // A session blob reaches IndexedDB on a background queue, so a write that
   // fails there would otherwise be invisible: the app would show the session

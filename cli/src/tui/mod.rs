@@ -34,7 +34,7 @@ use ratatui::backend::CrosstermBackend;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Clear, Paragraph};
+use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
 use ratatui::{Frame, Terminal};
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
@@ -319,8 +319,11 @@ fn merge_session_rows(
                 .collect()
         })
         .unwrap_or_default();
+    // The app's own index still names a session the store has a marker for,
+    // so a deleted row would walk back in through the bridge.
+    let deleted = store.map(SessionStore::tombstoned_ids).unwrap_or_default();
     for r in bridge_rows {
-        if !rows.iter().any(|x| x.id == r.id) {
+        if !deleted.contains(&r.id) && !rows.iter().any(|x| x.id == r.id) {
             rows.push(r);
         }
     }
@@ -394,6 +397,16 @@ pub struct App {
     copy_pending: Option<Selection>,
     /// Selected text waiting to go to the clipboard after this frame.
     clipboard_out: Option<String>,
+    /// The session a confirm box is asking about deleting.
+    pending_delete: Option<PendingDelete>,
+}
+
+/// A delete waiting on the confirm box. Deleting a session takes it from the
+/// desktop app too, so it is never a single keypress.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PendingDelete {
+    pub id: String,
+    pub title: String,
 }
 
 /// A drag selection. It stays inside the block it started in, the way a
@@ -519,6 +532,7 @@ impl App {
             selection: None,
             copy_pending: None,
             clipboard_out: None,
+            pending_delete: None,
             ctx,
         }
     }
@@ -716,6 +730,11 @@ impl App {
                 .collect()
         };
         self.sessions = merge_session_rows(self.store.as_ref(), bridge_rows);
+        // The directory is open anyway: drop the markers that have outlived
+        // their purpose.
+        if let Some(store) = self.store.as_ref() {
+            store.prune_tombstones();
+        }
     }
 
     /// Re-read the store (a run just ended, or the app wrote something).
@@ -930,6 +949,86 @@ impl App {
         self.open_session(&row.id, Some(&row.title));
     }
 
+    /// Ask before deleting the highlighted session.
+    fn ask_delete_selected(&mut self) {
+        let Some(row) = self.sessions.get(self.sidebar_sel).cloned() else {
+            return;
+        };
+        self.ask_delete(&row.id, &row.title);
+    }
+
+    /// Put the confirm box up for one session, or say why it cannot go.
+    fn ask_delete(&mut self, id: &str, title: &str) {
+        if self
+            .session
+            .as_ref()
+            .is_some_and(|s| s.session_id == id && s.is_live())
+        {
+            self.toast("The council is still sitting on that one. Stop it first.");
+            return;
+        }
+        let Some(store) = self.store.as_ref() else {
+            self.toast("No session store to delete from.");
+            return;
+        };
+        if !store.holds(id) {
+            self.toast("That session is the desktop app's own. Delete it there.");
+            return;
+        }
+        self.pending_delete = Some(PendingDelete {
+            id: id.to_string(),
+            title: title.to_string(),
+        });
+    }
+
+    /// Delete the session the confirm box is about. It goes from the terminal
+    /// and from the desktop app: one store, one copy.
+    fn confirm_delete(&mut self) {
+        let Some(pending) = self.pending_delete.take() else {
+            return;
+        };
+        let Some(store) = self.store.as_ref() else {
+            return;
+        };
+        match store.tombstone(&pending.id) {
+            Ok(()) => {
+                if self
+                    .session
+                    .as_ref()
+                    .is_some_and(|s| s.session_id == pending.id)
+                {
+                    self.session = None;
+                    self.view = View::Home;
+                }
+                self.refresh_sessions();
+                let title = theme::truncate(&pending.title, 40);
+                self.toast(format!("Deleted \"{title}\"."));
+            }
+            Err(e) => self.toast(format!("Could not delete it: {e}")),
+        }
+    }
+
+    /// The session a `/delete <title>` names: the one whose title matches, or
+    /// nothing when the name fits more than one and none of them exactly.
+    fn session_by_title(&self, name: &str) -> Option<SessionRow> {
+        let name = name.trim().to_lowercase();
+        if name.is_empty() {
+            return None;
+        }
+        self.sessions
+            .iter()
+            .find(|r| r.title.to_lowercase() == name)
+            .or_else(|| {
+                let mut hits = self
+                    .sessions
+                    .iter()
+                    .filter(|r| r.title.to_lowercase().contains(&name));
+                let first = hits.next()?;
+                hits.next().is_none().then_some(first)
+            })
+            .cloned()
+    }
+
     /// Open a stored session by id. Returns false when it could not be read.
     fn open_session(&mut self, id: &str, title: Option<&str>) -> bool {
         let stored = self.store.as_ref().and_then(|s| s.load(id));
@@ -1076,6 +1175,18 @@ impl App {
             }
             return false;
         }
+        // The delete confirm owns the keyboard while it is up: no key reaches
+        // the composer or the sidebar under it.
+        if self.pending_delete.is_some() {
+            match key.code {
+                KeyCode::Enter | KeyCode::Char('d') | KeyCode::Char('D') => self.confirm_delete(),
+                KeyCode::Esc | KeyCode::Char('n') | KeyCode::Char('N') => {
+                    self.pending_delete = None;
+                }
+                _ => {}
+            }
+            return false;
+        }
         // Ctrl-P toggles Settings from anywhere and returns to wherever you
         // were (a live Session included), not unconditionally Home.
         if key.code == KeyCode::Char('p') && key.modifiers.contains(KeyModifiers::CONTROL) {
@@ -1128,6 +1239,12 @@ impl App {
             KeyCode::Down if self.sidebar_open => {
                 let max = self.sessions.len().saturating_sub(1);
                 self.sidebar_sel = (self.sidebar_sel + 1).min(max);
+            }
+            // Delete asks about the highlighted session, under the same gate
+            // Enter uses to open one, so it never eats a keystroke meant for
+            // the composer.
+            KeyCode::Delete if self.sidebar_open && self.composer.is_empty() => {
+                self.ask_delete_selected();
             }
             KeyCode::Left => self.launch.preset = self.launch.preset.prev(),
             KeyCode::Right => self.launch.preset = self.launch.preset.next(),
@@ -1311,6 +1428,7 @@ impl App {
                 });
             }
             "open" => self.open_titled(arg),
+            "delete" => self.delete_titled(arg),
             "sessions" => self.toggle_sidebar(),
             "settings" => {
                 self.prev_view = self.view;
@@ -1375,6 +1493,37 @@ impl App {
             Some(i) => {
                 self.sidebar_sel = i;
                 self.open_selected_session();
+            }
+            None => self.toast(format!("No saved session is called {typed:?}.")),
+        }
+    }
+
+    /// `/delete <title>`: put the confirm box up for the session that name
+    /// picks out. A name that fits more than one is refused rather than
+    /// guessed, because this one does not come back.
+    fn delete_titled(&mut self, typed: &str) {
+        self.ensure_sessions();
+        match self.session_by_title(typed) {
+            Some(row) => {
+                if let Some(i) = self.sessions.iter().position(|r| r.id == row.id) {
+                    self.sidebar_sel = i;
+                }
+                self.ask_delete(&row.id, &row.title);
+            }
+            None if self
+                .sessions
+                .iter()
+                .filter(|r| {
+                    r.title
+                        .to_lowercase()
+                        .contains(&typed.trim().to_lowercase())
+                })
+                .count()
+                > 1 =>
+            {
+                self.toast(format!(
+                    "More than one session matches {typed:?}. Use its full title."
+                ))
             }
             None => self.toast(format!("No saved session is called {typed:?}.")),
         }
@@ -1838,6 +1987,10 @@ fn render(f: &mut Frame, app: &mut App) {
         View::Settings => settings::render(f, main_area, app),
     }
 
+    if let Some(pending) = app.pending_delete.clone() {
+        let rect = render_delete_confirm(f, area, &pending);
+        app.hit(rect, Click::Nothing);
+    }
     if app.help {
         let rect = render_help(f, area, app.view);
         app.hit(rect, Click::Nothing);
@@ -2187,6 +2340,7 @@ fn render_help(f: &mut Frame, area: Rect, view: View) -> Rect {
                 row("← →", "council size"),
                 row("^D", "deliverable"),
                 row("Tab", "sessions, ↑ ↓ and Enter to open one"),
+                row("Del", "delete the highlighted session, after a confirm"),
                 row("^P", "settings"),
                 row("Esc Esc", "clear what you typed"),
             ]);
@@ -2232,6 +2386,68 @@ fn render_help(f: &mut Frame, area: Rect, view: View) -> Rect {
         ),
         rect,
     );
+    rect
+}
+
+/// The box that asks before a session goes. It names what is being deleted and
+/// says where it goes from, because the store is shared with the desktop app.
+fn render_delete_confirm(f: &mut Frame, area: Rect, pending: &PendingDelete) -> Rect {
+    if area.width < 24 || area.height < 8 {
+        return Rect::default();
+    }
+    let width = 66.min(area.width.saturating_sub(2));
+    let height = 9.min(area.height.saturating_sub(1));
+    let rect = Rect {
+        x: area.x + (area.width.saturating_sub(width)) / 2,
+        y: area.y + (area.height.saturating_sub(height)) / 2,
+        width,
+        height,
+    };
+    f.render_widget(Clear, rect);
+    let key = |k: &str| {
+        Span::styled(
+            k.to_string(),
+            Style::default()
+                .fg(theme::GOLD)
+                .add_modifier(Modifier::BOLD),
+        )
+    };
+    let lines = vec![
+        Line::from(Span::styled(
+            "Delete this session?",
+            Style::default().fg(theme::MUTED),
+        )),
+        Line::from(Span::styled(
+            theme::truncate(&pending.title, width.saturating_sub(4) as usize),
+            Style::default()
+                .fg(theme::TEXT)
+                .add_modifier(Modifier::BOLD),
+        )),
+        Line::from(""),
+        Line::from(Span::styled(
+            "The record, the rounds and the cost go with it, here and in the desktop app. This cannot be undone.",
+            Style::default().fg(theme::MUTED),
+        )),
+        Line::from(""),
+        Line::from(vec![
+            key("Enter"),
+            Span::styled(" delete   ", Style::default().fg(theme::MUTED)),
+            key("Esc"),
+            Span::styled(" keep it", Style::default().fg(theme::MUTED)),
+        ]),
+    ];
+    let para = Paragraph::new(lines).wrap(Wrap { trim: false }).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(theme::ROSE))
+            .title(Span::styled(
+                " Delete ",
+                Style::default()
+                    .fg(theme::ROSE)
+                    .add_modifier(Modifier::BOLD),
+            )),
+    );
+    f.render_widget(para, rect);
     rect
 }
 
@@ -2502,6 +2718,186 @@ mod tests {
 
     fn press(app: &mut App, code: KeyCode) {
         app.handle_key(KeyEvent::new(code, KeyModifiers::NONE));
+    }
+
+    /// An app with its own store holding `titles`, sidebar open, list loaded.
+    fn app_with_sessions(titles: &[&str]) -> App {
+        static N: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let n = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let dir = std::env::temp_dir().join(format!(
+            "sc-tui-del-{}-{}-{n}",
+            std::process::id(),
+            store::now_ms()
+        ));
+        let store = SessionStore::at(dir, [7u8; 32], store::StoreLocation::CliOwn);
+        for (i, title) in titles.iter().enumerate() {
+            let mut doc = store::build_session_json(
+                &format!("sc-del-{i}"),
+                title,
+                1_700_000_000_000,
+                &[store::StoredMessage {
+                    agent_id: "george".into(),
+                    display_name: "George".into(),
+                    content: "a turn".into(),
+                    thinking: String::new(),
+                    model: "m".into(),
+                    at_ms: 1_700_000_000_001,
+                }],
+                "completed",
+                1,
+                Usage::default(),
+            );
+            doc["title"] = json!(title);
+            store.save(&doc).unwrap();
+        }
+        let mut app = test_app();
+        app.store = Some(store);
+        app.sidebar_open = true;
+        app.ensure_sessions();
+        app
+    }
+
+    fn titles_of(app: &App) -> Vec<String> {
+        app.sessions.iter().map(|r| r.title.clone()).collect()
+    }
+
+    #[test]
+    fn delete_asks_first_and_then_takes_the_session() {
+        let mut app = app_with_sessions(&["Mars base", "Pricing"]);
+        assert_eq!(titles_of(&app).len(), 2);
+
+        // Esc backs out and nothing goes.
+        press(&mut app, KeyCode::Delete);
+        assert!(app.pending_delete.is_some(), "the confirm comes up first");
+        let text = render_at(&mut app, 100, 30);
+        assert!(text.contains("Delete this session?"), "{text}");
+        press(&mut app, KeyCode::Esc);
+        assert!(app.pending_delete.is_none());
+        assert_eq!(titles_of(&app).len(), 2, "Esc keeps it");
+
+        // Enter on the confirm takes it, and it stays gone across a reload.
+        let going = app.sessions[app.sidebar_sel].id.clone();
+        press(&mut app, KeyCode::Delete);
+        press(&mut app, KeyCode::Enter);
+        assert!(app.pending_delete.is_none());
+        assert_eq!(app.sessions.len(), 1);
+        assert!(!app.sessions.iter().any(|r| r.id == going));
+        app.sessions_loaded = false;
+        app.ensure_sessions();
+        assert_eq!(app.sessions.len(), 1);
+
+        // The file stays as a marker so the desktop app drops its copy too.
+        let store = app.store.as_ref().unwrap();
+        assert!(store.holds(&going), "the marker stays where the app looks");
+        assert!(store.load(&going).is_none());
+        let _ = std::fs::remove_dir_all(app.store.as_ref().unwrap().dir());
+    }
+
+    #[test]
+    fn the_confirm_owns_the_keyboard_and_delete_needs_an_empty_composer() {
+        let mut app = app_with_sessions(&["Mars base"]);
+        // A composer with something in it keeps Delete to itself.
+        app.composer = "a topic".into();
+        press(&mut app, KeyCode::Delete);
+        assert!(app.pending_delete.is_none());
+        app.composer.clear();
+
+        // While the confirm is up nothing types into the composer.
+        press(&mut app, KeyCode::Delete);
+        press(&mut app, KeyCode::Char('x'));
+        assert_eq!(app.composer, "", "keys do not reach what is under it");
+        assert!(app.pending_delete.is_some(), "an unrelated key is ignored");
+        press(&mut app, KeyCode::Char('d'));
+        assert!(app.pending_delete.is_none());
+        assert!(app.sessions.is_empty());
+        let _ = std::fs::remove_dir_all(app.store.as_ref().unwrap().dir());
+    }
+
+    #[test]
+    fn delete_by_title_needs_one_match_and_refuses_a_live_run() {
+        let mut app = app_with_sessions(&["Mars base staffing", "Mars base power", "Pricing"]);
+        app.run_command("delete", "nothing like this");
+        assert!(app.pending_delete.is_none());
+        assert!(app.toast.as_deref().unwrap().contains("No saved session"));
+
+        // Two titles contain "mars base": refuse rather than pick one.
+        app.run_command("delete", "mars base");
+        assert!(app.pending_delete.is_none());
+        assert!(
+            app.toast.as_deref().unwrap().contains("More than one"),
+            "{:?}",
+            app.toast
+        );
+
+        // The full title is unambiguous.
+        app.run_command("delete", "Mars base power");
+        assert_eq!(
+            app.pending_delete.as_ref().map(|p| p.title.as_str()),
+            Some("Mars base power")
+        );
+        press(&mut app, KeyCode::Enter);
+        let mut left = titles_of(&app);
+        left.sort();
+        assert_eq!(left, ["Mars base staffing", "Pricing"]);
+
+        let _ = std::fs::remove_dir_all(app.store.as_ref().unwrap().dir());
+    }
+
+    /// A session the council is still sitting on is never deleted: it is being
+    /// written to, and the marker would land under the run.
+    #[tokio::test]
+    async fn a_live_session_is_never_deleted() {
+        let mut app = app_with_sessions(&["Mars base staffing"]);
+        let live = app.sessions[0].id.clone();
+        let (_events, rx) = tokio::sync::mpsc::unbounded_channel();
+        let (input, _inputs) = tokio::sync::mpsc::unbounded_channel();
+        let mut screen = sample_screen();
+        screen.session_id = live.clone();
+        screen.read_only = false;
+        screen.view.done = false;
+        screen.engine = Some(EngineHandle {
+            rx,
+            input,
+            handle: tokio::spawn(async {}),
+        });
+        app.session = Some(screen);
+        assert!(app.session.as_ref().unwrap().is_live());
+
+        app.ask_delete(&live, "Mars base staffing");
+        assert!(app.pending_delete.is_none());
+        assert!(
+            app.toast.as_deref().unwrap().contains("still sitting"),
+            "{:?}",
+            app.toast
+        );
+        assert_eq!(app.sessions.len(), 1, "it is still there");
+
+        // Once it is no longer live the same session deletes, and the screen
+        // showing it goes back Home rather than staying on a session that is
+        // gone.
+        app.session.as_mut().unwrap().engine = None;
+        app.view = View::Session;
+        app.ask_delete(&live, "Mars base staffing");
+        assert!(app.pending_delete.is_some());
+        app.confirm_delete();
+        assert!(app.sessions.is_empty());
+        assert!(app.session.is_none());
+        assert_eq!(app.view, View::Home);
+        let _ = std::fs::remove_dir_all(app.store.as_ref().unwrap().dir());
+    }
+
+    /// A row that only the desktop app holds cannot be deleted from here.
+    #[test]
+    fn a_row_the_store_does_not_hold_says_so() {
+        let mut app = app_with_sessions(&["Mars base"]);
+        app.ask_delete("sc-not-in-the-store", "Somewhere else");
+        assert!(app.pending_delete.is_none());
+        assert!(
+            app.toast.as_deref().unwrap().contains("desktop app's own"),
+            "{:?}",
+            app.toast
+        );
+        let _ = std::fs::remove_dir_all(app.store.as_ref().unwrap().dir());
     }
 
     #[test]
