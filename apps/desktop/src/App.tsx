@@ -8,6 +8,7 @@ import { Home } from "./pages/Home";
 import { ProjectDetail } from "./pages/ProjectDetail";
 import { Session } from "./pages/Session";
 import { Settings } from "./pages/Settings";
+import { Transcript } from "./pages/Transcript";
 import { loadSessionAttachmentDocuments, type ComposerAttachment } from "./services/attachments";
 import {
   DEFAULT_LAUNCH,
@@ -69,7 +70,7 @@ function readProxyPassword(): string | undefined {
   }
 }
 
-export type Page = "home" | "settings" | "chat" | "project";
+export type Page = "home" | "settings" | "chat" | "transcript" | "project";
 
 export interface AppState {
   currentPage: Page;
@@ -315,7 +316,10 @@ export default function App() {
 
   const navigate = useCallback(
     (page: Page, sessionId?: string) => {
-      if (page === "chat") {
+      // Both session surfaces need the session loaded, so they take the same
+      // path: the transcript is a second view of the same thing, not a
+      // separate destination that could be reached without one.
+      if (page === "chat" || page === "transcript") {
         const targetSessionId = sessionId ?? state.currentSessionId;
         if (!targetSessionId) return;
 
@@ -326,7 +330,7 @@ export default function App() {
         setActiveSession(nextSession);
         refreshAll();
         setState((prev) => ({
-          currentPage: "chat",
+          currentPage: page,
           currentSessionId: nextSession.id,
           currentProjectId: nextSession.projectId ?? prev.currentProjectId,
         }));
@@ -403,7 +407,12 @@ export default function App() {
 
         return {
           ...current,
-          currentPage: current.currentPage === "chat" ? "home" : current.currentPage,
+          // The transcript points at the same session, so it has to fall back
+          // too, or deleting the session leaves an empty page behind.
+          currentPage:
+            current.currentPage === "chat" || current.currentPage === "transcript"
+              ? "home"
+              : current.currentPage,
           currentSessionId: null,
         };
       });
@@ -640,6 +649,16 @@ export default function App() {
               onCancel={(id) => void cancelEngineRun(id)}
               onAnswer={answerEngineQuestion}
               onDecide={decideEngineTool}
+            />
+          </ErrorBoundary>
+        )}
+        {state.currentPage === "transcript" && activeSession && (
+          <ErrorBoundary label="transcript">
+            <Transcript
+              key={`${activeSession.id}-transcript`}
+              session={activeSession}
+              live={liveView}
+              onNavigate={navigate}
             />
           </ErrorBoundary>
         )}
