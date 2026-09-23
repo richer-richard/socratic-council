@@ -62,6 +62,12 @@ export interface EngineProtocolPolicy {
   interactive: boolean;
   tiers: EngineRoundTiers;
   concurrency: number;
+  /**
+   * Run the review pass after the record: peer evaluation and the argument
+   * map. Off means the session still finishes and the summary still renders
+   * from the metrics the protocol produces anyway.
+   */
+  review: boolean;
 }
 
 export type EngineDeliverable = "decision" | "analysis" | "document" | "review";
@@ -152,8 +158,110 @@ export interface EngineDecisionRecord {
   open_questions: string[];
   next_actions: string[];
   what_changed: string;
+  /**
+   * How the debate actually went, in prose: who pushed on whom, where it
+   * stuck, what settled it. `what_changed` is the before-and-after in two
+   * sentences; this is the account of the argument that produced it. Empty
+   * on a session written before the review pass existed.
+   */
+  how_it_went: string;
   votes: Record<string, string>;
   cost: EngineCostSnapshot | null;
+}
+
+/* -------------------------------------------------------------------------
+ * The review pass: what the council thought of itself, and the shape of the
+ * argument it made. Both are absent when the pass was turned off, and every
+ * surface that reads them falls back to the metrics the protocol produces
+ * anyway (votes, convergence, cost), which cost nothing to compute.
+ * ---------------------------------------------------------------------- */
+
+/** The rubric. Every dimension is 0 to 100. */
+export interface EnginePeerScores {
+  rigor: number;
+  evidence: number;
+  novelty: number;
+  civility: number;
+  on_topic: number;
+}
+
+export type EnginePeerStance = "agree" | "disagree" | "mixed";
+
+/** One evaluator's verdict on one target seat. */
+export interface EnginePeerCritique {
+  evaluator: string;
+  target: string;
+  scores: EnginePeerScores;
+  /** The evaluator's holistic 0 to 100, not an average of the rubric. */
+  overall: number;
+  stance: EnginePeerStance;
+  critique: string;
+}
+
+/** What one seat received, across every evaluator who scored it. */
+export interface EnginePeerSummary {
+  average: EnginePeerScores;
+  overall_average: number;
+  /** 1 is highest. 0 means the seat was never rated. */
+  rank: number;
+  reviews_received: number;
+  /** The opening sentence of the harshest critique this seat received. */
+  standout: string | null;
+}
+
+export interface EnginePeerEval {
+  /** Seat ids in display order: the matrix and the graph both index on this. */
+  seats: string[];
+  critiques: EnginePeerCritique[];
+  per_seat: Record<string, EnginePeerSummary>;
+  /** Evaluators whose reply did not parse. Shown, never hidden. */
+  failed: string[];
+}
+
+export type EngineArgNodeKind =
+  | "claim"
+  | "premise"
+  | "evidence"
+  | "rebuttal"
+  | "concession"
+  | "question"
+  | "assumption"
+  | "definition"
+  | "proposal";
+
+export type EngineArgRelation =
+  | "supports"
+  | "rebuts"
+  | "concedes"
+  | "restates"
+  | "refines"
+  | "agrees"
+  | "contradicts"
+  | "depends_on"
+  | "answers"
+  | "addresses";
+
+export interface EngineArgNode {
+  id: string;
+  kind: EngineArgNodeKind;
+  text: string;
+  /** Every seat that asserted this, in the order they first did. */
+  by: string[];
+  /** The round it first appeared in, 0 for positions. */
+  round: number;
+}
+
+export interface EngineArgEdge {
+  id: string;
+  from: string;
+  to: string;
+  relation: EngineArgRelation;
+  rationale: string;
+}
+
+export interface EngineArgGraph {
+  nodes: EngineArgNode[];
+  edges: EngineArgEdge[];
 }
 
 export type EngineRoundKind = "prep" | "positions" | { cross: number } | "revision" | "critique";
@@ -207,6 +315,8 @@ export type EngineEvent =
   | { event: "convergence"; convergence: EngineConvergence }
   | { event: "moderator"; kind: EngineModeratorNoteKind; text: string }
   | { event: "record"; record: EngineDecisionRecord }
+  | { event: "peer_eval_ready"; peer_eval: EnginePeerEval }
+  | { event: "arg_map"; graph: EngineArgGraph }
   | { event: "document"; markdown: string }
   | { event: "cost"; snapshot: EngineCostSnapshot }
   | { event: "error"; message: string }
@@ -250,6 +360,9 @@ export interface EngineSessionData {
   convergences: EngineConvergence[];
   record: EngineDecisionRecord | null;
   document: string | null;
+  /** The review pass, when it ran. Absent on a session that turned it off. */
+  peerEval?: EnginePeerEval | null;
+  argGraph?: EngineArgGraph | null;
   costs: EngineCostSnapshot | null;
   stoppedEarly: string | null;
   /** The roster the run was started with (for names and provider colours). */
@@ -337,6 +450,7 @@ export const DEFAULT_ENGINE_PROTOCOL: EngineProtocolPolicy = {
     record: "high",
   },
   concurrency: 4,
+  review: true,
 };
 
 export const DEFAULT_ENGINE_SEATS: EngineSeat[] = [

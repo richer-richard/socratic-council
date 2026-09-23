@@ -1318,7 +1318,7 @@ mod tests {
             text: "Keep to the question.".into(),
         });
         view.apply(DebateEvent::Record {
-            record: DecisionRecord {
+            record: Box::new(DecisionRecord {
                 deliverable: Deliverable::Decision,
                 question: "Should we colonize Mars?".into(),
                 answer: "Later, after a cheaper launch cadence.".into(),
@@ -1341,11 +1341,12 @@ mod tests {
                 open_questions: vec!["who pays".into()],
                 next_actions: vec!["price a cadence".into()],
                 what_changed: "Cathy moved.".into(),
+                how_it_went: "George pushed cost, Cathy conceded the cadence point.".into(),
                 votes: [("cathy".to_string(), "Later".to_string())]
                     .into_iter()
                     .collect(),
                 cost: None,
-            },
+            }),
         });
         view.apply(DebateEvent::Cost {
             snapshot: CostSnapshot {

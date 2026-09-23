@@ -12,12 +12,14 @@ pub mod parse;
 pub mod plan;
 pub mod prompts;
 pub mod record;
+pub mod review;
 pub mod seat_turn;
 
 pub use board::{Board, Disagreement, Evidence};
 pub use estimate::Estimate;
 pub use plan::{Deliverable, Participant, Plan, ProtocolPolicy, RoundTiers, SeatRole, Subtask};
 pub use record::{DecisionRecord, Dissent, OptionConsidered};
+pub use review::{ArgGraph, PeerEval};
 pub use seat_turn::{SeatSpec, ToolUseRecord};
 
 use crate::attach::{context_summary, Attachment};
@@ -298,12 +300,20 @@ pub enum DebateEvent {
     Convergence {
         convergence: Convergence,
     },
+    PeerEvalReady {
+        peer_eval: PeerEval,
+    },
+    ArgMap {
+        graph: ArgGraph,
+    },
     Moderator {
         kind: ModeratorNoteKind,
         text: String,
     },
     Record {
-        record: DecisionRecord,
+        /// Boxed: this is by far the largest event, and every `Token` event in
+        /// the stream would otherwise be padded to its size on the channel.
+        record: Box<DecisionRecord>,
     },
     Document {
         markdown: String,
@@ -518,6 +528,8 @@ struct RunState {
     rounds: Vec<RoundLog>,
     record: Option<DecisionRecord>,
     document: Option<String>,
+    peer_eval: Option<PeerEval>,
+    arg_graph: Option<ArgGraph>,
     messages: Vec<StoredMessage>,
     stopped_early: Option<String>,
 }
@@ -850,7 +862,14 @@ impl Deliberation {
             .as_ref()
             .map(|u| model_row(u.provider, &u.model).pricing)
             .unwrap_or(mod_price);
-        let est = estimate::estimate(&plan, &priced, &mod_price, &util_price, &tiers);
+        let est = estimate::estimate(
+            &plan,
+            &priced,
+            &mod_price,
+            &util_price,
+            &tiers,
+            this.config.protocol.review,
+        );
         send(DebateEvent::Estimate {
             estimate: est.clone(),
         });
@@ -1562,10 +1581,141 @@ impl Deliberation {
             }
         }
 
+        // ---- Review ----------------------------------------------------------
+        // Deliberately after the record: a review that is cancelled, times out
+        // or comes back as junk still leaves a finished session behind. Both
+        // passes run on the utility slot, so a flagship seat's price stays on
+        // arguing rather than on grading.
+        if this.config.protocol.review && !hub.is_stopped() && principals.len() > 1 {
+            if let Some(u) = &utility {
+                send(DebateEvent::Phase {
+                    name: "Review".into(),
+                });
+                let ids: Vec<String> = principals.iter().map(|s| s.id.clone()).collect();
+
+                // Peer evaluation: one call per evaluator, each grading every
+                // other seat, rather than one call per pair.
+                let transcript = this.review_transcript(&state, &names);
+                // `&Mutex<_>` is Copy, so hoisting the borrow lets each async
+                // block take its own copy instead of the closure moving the
+                // ledger into the first one.
+                let ledger_ref = &ledger;
+                let graded = join_all(principals.iter().map(|seat| {
+                    let sem = sem.clone();
+                    let others: Vec<(String, String)> = principals
+                        .iter()
+                        .filter(|o| o.id != seat.id)
+                        .map(|o| (o.id.clone(), o.name.clone()))
+                        .collect();
+                    let system = prompts::peer_eval_system(&seat.name);
+                    let user = prompts::peer_eval_user(&plan.question, &others, &transcript);
+                    async move {
+                        let _permit = sem.acquire().await;
+                        let out = this
+                            .moderator_call(
+                                u,
+                                &system,
+                                &user,
+                                tiers.utility,
+                                4000,
+                                ledger_ref,
+                                "utility",
+                            )
+                            .await;
+                        (seat.id.clone(), out)
+                    }
+                }))
+                .await;
+
+                let mut critiques = Vec::new();
+                let mut failed = Vec::new();
+                for (seat_id, out) in graded {
+                    let parsed = out
+                        .as_deref()
+                        .map(|text| review::parse_peer_eval(text, &seat_id, &ids))
+                        .unwrap_or_default();
+                    // An evaluator that returned nothing usable is named, not
+                    // dropped: a matrix with a quietly missing row reads as a
+                    // seat nobody bothered to rate.
+                    if parsed.is_empty() {
+                        failed.push(seat_id);
+                    } else {
+                        critiques.extend(parsed);
+                    }
+                }
+                if !critiques.is_empty() {
+                    let peer_eval = PeerEval {
+                        seats: ids.clone(),
+                        per_seat: review::summarize(&ids, &critiques),
+                        critiques,
+                        failed,
+                    };
+                    send(DebateEvent::PeerEvalReady {
+                        peer_eval: peer_eval.clone(),
+                    });
+                    state.peer_eval = Some(peer_eval);
+                }
+                settle(&ledger, &mut state, &hub);
+
+                // Argument map: one extraction per round, merged. A round is a
+                // coherent unit and the merge folds the same claim worded two
+                // ways into one node, so this costs about as many calls as the
+                // debate had rounds instead of one per turn.
+                if !hub.is_stopped() {
+                    let mut graph = ArgGraph::default();
+                    for (index, log) in state.rounds.iter().enumerate() {
+                        if hub.is_stopped() {
+                            break;
+                        }
+                        if log.entries.is_empty() {
+                            continue;
+                        }
+                        let round_text = log
+                            .entries
+                            .iter()
+                            .map(|e| format!("[{}]\n{}", e.seat, truncate(&e.content, 1600)))
+                            .collect::<Vec<_>>()
+                            .join("\n\n");
+                        let known: Vec<String> =
+                            graph.nodes.iter().map(|n| n.text.clone()).collect();
+                        let user = prompts::argmap_user(
+                            &plan.question,
+                            &log.kind.label(),
+                            &round_text,
+                            &known,
+                        );
+                        let Some(out) = this
+                            .moderator_call(
+                                u,
+                                &prompts::argmap_system(),
+                                &user,
+                                tiers.utility,
+                                4000,
+                                &ledger,
+                                "utility",
+                            )
+                            .await
+                        else {
+                            continue;
+                        };
+                        let fragments = review::parse_fragments(&out);
+                        review::merge_fragments(&mut graph, &fragments, index as u8);
+                    }
+                    if !graph.nodes.is_empty() {
+                        send(DebateEvent::ArgMap {
+                            graph: graph.clone(),
+                        });
+                        state.arg_graph = Some(graph);
+                    }
+                    settle(&ledger, &mut state, &hub);
+                }
+            }
+        }
+
         // ---- Close -----------------------------------------------------------
         record.cost = ledger.lock().ok().map(|l| l.snapshot());
         send(DebateEvent::Record {
-            record: record.clone(),
+            record: Box::new(record.clone()),
         });
         let md = record::to_markdown(&record, &names, state.document.as_deref());
         this.push_system_message(&mut state, "Moderator", &md);
@@ -1850,6 +2000,7 @@ impl Deliberation {
             open_questions: state.board.open_questions.clone(),
             next_actions: Vec::new(),
             what_changed: String::new(),
+            how_it_went: String::new(),
             votes: BTreeMap::new(),
             cost: None,
         }
@@ -1897,6 +2048,26 @@ impl Deliberation {
 
     /// The session document, format v2: the flat `messages` every v1 reader
     /// lists and opens, plus the plan, board, rounds, record and costs.
+    /// The debate as a reviewer reads it: every seat turn in order, each one
+    /// capped so eight evaluators reading the whole thing still fit inside a
+    /// cheap model's context window.
+    fn review_transcript(&self, state: &RunState, names: &BTreeMap<String, String>) -> String {
+        let mut out = String::new();
+        for log in &state.rounds {
+            out.push_str(&format!("\n## {}\n\n", log.kind.label()));
+            for e in &log.entries {
+                let name = names.get(&e.seat).cloned().unwrap_or_else(|| e.seat.clone());
+                out.push_str(&format!(
+                    "[{} | {}]\n{}\n\n",
+                    e.seat,
+                    name,
+                    truncate(&e.content, 1400)
+                ));
+            }
+        }
+        out.trim().to_string()
+    }
+
     fn session_json(
         &self,
         id: &str,
@@ -1937,6 +2108,8 @@ impl Deliberation {
         doc["convergences"] = serde_json::to_value(&state.convergences).unwrap_or(json!([]));
         doc["record"] = serde_json::to_value(&state.record).unwrap_or(Value::Null);
         doc["document"] = serde_json::to_value(&state.document).unwrap_or(Value::Null);
+        doc["peerEval"] = serde_json::to_value(&state.peer_eval).unwrap_or(Value::Null);
+        doc["argGraph"] = serde_json::to_value(&state.arg_graph).unwrap_or(Value::Null);
         doc["costs"] = serde_json::to_value(&snapshot).unwrap_or(json!({}));
         doc["stoppedEarly"] = json!(state.stopped_early);
         doc["workspace"] = json!(self.config.workspace.display().to_string());

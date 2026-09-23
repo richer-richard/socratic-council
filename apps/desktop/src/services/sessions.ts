@@ -563,6 +563,15 @@ function normalizeEngineData(record: Record<string, unknown>): EngineSessionData
     ) as unknown as EngineSessionData["convergences"],
     record: (isObject(source.record) ? source.record : null) as EngineSessionData["record"],
     document: str(source.document),
+    // The review pass. Absent when it was turned off, so `null` is a normal
+    // value here rather than a fault. Both are checked for the one container
+    // shape the surfaces index on, and otherwise passed through whole.
+    peerEval: (isObject(source.peerEval) && Array.isArray(source.peerEval.seats)
+      ? source.peerEval
+      : null) as EngineSessionData["peerEval"],
+    argGraph: (isObject(source.argGraph) && Array.isArray(source.argGraph.nodes)
+      ? source.argGraph
+      : null) as EngineSessionData["argGraph"],
     costs: (isObject(source.costs) ? source.costs : null) as EngineSessionData["costs"],
     stoppedEarly: str(source.stoppedEarly),
     seats,
@@ -2069,6 +2078,39 @@ export async function deleteDiscussionSessionWithAttachments(id: string): Promis
   }
 
   return true;
+}
+
+/**
+ * Delete every session: the blob, its index entry, its attachments and the
+ * file in the shared engine store the CLI reads.
+ *
+ * Deliberately one call to `deleteDiscussionSessionWithAttachments` per
+ * session rather than clearing the stores wholesale. It is slower, and it is
+ * the only version that cannot leave an orphan behind: a wholesale wipe of one
+ * store would strand whatever the others still hold. Returns what it removed
+ * and what it could not, because a partial delete the user is not told about
+ * is worse than a failed one.
+ */
+export async function deleteAllDiscussionSessions(): Promise<{
+  deleted: number;
+  failed: string[];
+}> {
+  const ids = readIndex().map((entry) => entry.id);
+  const failed: string[] = [];
+  let deleted = 0;
+  for (const id of ids) {
+    try {
+      if (await deleteDiscussionSessionWithAttachments(id)) {
+        deleted += 1;
+      } else {
+        failed.push(id);
+      }
+    } catch (error) {
+      console.error("Failed to delete session during a bulk delete:", id, error);
+      failed.push(id);
+    }
+  }
+  return { deleted, failed };
 }
 
 function updateArchivedState(id: string, archivedAt: number | null): DiscussionSession | null {

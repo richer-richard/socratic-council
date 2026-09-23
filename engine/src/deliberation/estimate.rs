@@ -43,6 +43,7 @@ pub fn estimate(
     moderator: &Pricing,
     utility: &Pricing,
     tiers: &super::plan::RoundTiers,
+    review: bool,
 ) -> Estimate {
     let principals: Vec<&PricedSeat> = seats
         .iter()
@@ -144,6 +145,19 @@ pub fn estimate(
             tiers.record,
         );
     }
+    // Review: one peer-evaluation call per principal, then one argument-map
+    // extraction per round the debate logged (positions, each cross round, and
+    // the revision). Both run on the utility slot, and both read the whole
+    // transcript, which is what makes their input large and their output small.
+    if review && principals.len() > 1 {
+        let transcript = base_input + 1400.0 * n * (plan.rounds.max(1) as f64 + 2.0);
+        for s in &principals {
+            add(utility, &s.id, transcript, 800.0, tiers.utility);
+        }
+        for _ in 0..(plan.rounds.max(1) as u32 + 2) {
+            add(utility, "utility", base_input + 1600.0 * n, 700.0, tiers.utility);
+        }
+    }
     Estimate {
         calls,
         usd_low: usd,
@@ -177,11 +191,28 @@ mod tests {
             &Pricing::usd(1.0, 0.1, 5.0),
             &Pricing::usd(0.1, 0.01, 0.4),
             &RoundTiers::default(),
+            false,
         );
         // 1 plan + 4 positions + (4 cross + 2 utility) + 4 revision + 1 record = 16
         assert_eq!(e.calls, 16);
         assert!(e.usd_low > 0.0 && e.usd_high > e.usd_low);
         assert!(e.unpriced_seats.is_empty());
+
+        // The review pass is the same run plus one peer evaluation per
+        // principal and one argument-map extraction per logged round.
+        let reviewed = estimate(
+            &plan,
+            &seats,
+            &Pricing::usd(1.0, 0.1, 5.0),
+            &Pricing::usd(0.1, 0.01, 0.4),
+            &RoundTiers::default(),
+            true,
+        );
+        assert_eq!(reviewed.calls, 16 + 4 + 3);
+        // Both passes are on the cheap utility price, so the review is a small
+        // fraction of the bill rather than a second debate's worth.
+        assert!(reviewed.usd_low > e.usd_low);
+        assert!(reviewed.usd_low < e.usd_low * 1.5);
     }
 
     #[test]
@@ -218,6 +249,7 @@ mod tests {
             &Pricing::usd(1.0, 0.1, 5.0),
             &Pricing::usd(0.1, 0.01, 0.4),
             &RoundTiers::default(),
+            false,
         );
         assert_eq!(e.unpriced_seats, vec!["cathy"]);
         // 1 + 2 + (2 + 2) + 2 + 1 + document (1 + 2 + 1) = 14

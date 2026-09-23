@@ -307,12 +307,18 @@ export function ProtocolCard({
           onChange={(concurrency) => onChange({ concurrency })}
         />
       </div>
-      <div className="mb-4">
+      <div className="mb-4 space-y-3">
         <Toggle
           label="Let the moderator ask me first"
           hint="When the framing is ambiguous, the run pauses for one clarifying question"
           checked={protocol.interactive}
           onChange={(interactive) => onChange({ interactive })}
+        />
+        <Toggle
+          label="Review the council afterwards"
+          hint="Every seat scores the others and the argument gets mapped, on the utility model. Adds one call per seat plus one per round. Off still gives you the vote and the convergence chart."
+          checked={protocol.review}
+          onChange={(review) => onChange({ review })}
         />
       </div>
       <div>

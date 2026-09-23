@@ -771,6 +771,37 @@ async fn run_plain(
             DebateEvent::Document { markdown } => {
                 println!("\n── Document ──\n{}", clean(&markdown));
             }
+            DebateEvent::PeerEvalReady { peer_eval } => {
+                println!("\n── How the council rated itself ──");
+                let mut ranked: Vec<_> = peer_eval.per_seat.iter().collect();
+                ranked.sort_by_key(|(_, s)| if s.rank == 0 { u32::MAX } else { s.rank });
+                for (seat, summary) in ranked {
+                    if summary.reviews_received == 0 {
+                        continue;
+                    }
+                    println!(
+                        "{}. {:<10} {:>5.1}  rigor {:>3}  evidence {:>3}  novelty {:>3}  civility {:>3}  on-topic {:>3}",
+                        summary.rank,
+                        clean(&names.get(seat).cloned().unwrap_or_else(|| seat.clone())),
+                        summary.overall_average,
+                        summary.average.rigor,
+                        summary.average.evidence,
+                        summary.average.novelty,
+                        summary.average.civility,
+                        summary.average.on_topic,
+                    );
+                }
+                if !peer_eval.failed.is_empty() {
+                    println!("Did not return a usable review: {}", peer_eval.failed.join(", "));
+                }
+            }
+            DebateEvent::ArgMap { graph } => {
+                println!(
+                    "\nArgument map: {} points, {} links",
+                    graph.nodes.len(),
+                    graph.edges.len()
+                );
+            }
             DebateEvent::Cost { snapshot } => {
                 if let Some(note) = &snapshot.note {
                     println!("[budget] {}", clean(note));
