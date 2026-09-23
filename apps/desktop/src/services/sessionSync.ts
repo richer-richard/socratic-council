@@ -13,6 +13,7 @@
  */
 
 import {
+  deleteDiscussionSessionWithAttachments,
   importDiscussionSession,
   listSessionSummaries,
   loadDiscussionSession,
@@ -27,6 +28,28 @@ const EXPORT_DEBOUNCE_MS = 750;
 interface SharedEntry {
   id: string;
   modified_ms: number;
+}
+
+/**
+ * The marker the terminal leaves where a session was, instead of removing the
+ * file. It has to: the loop at the bottom of `importSharedSessions` pushes back
+ * anything the app holds that the store is missing, so a deleted file would be
+ * written straight back on the next sync. Seeing the marker, the app drops its
+ * own copy and the delete sticks on both sides. The engine writes it in
+ * `store.rs` (`SessionStore::tombstone`) and sweeps it up after 30 days.
+ *
+ * The app's own delete goes the other way and removes the file: nothing else
+ * holds a second copy on that side, so there is nothing to tell.
+ */
+interface SharedTombstone {
+  deleted: true;
+  deletedAt?: number;
+}
+
+function isTombstone(
+  value: Record<string, unknown>,
+): value is SharedTombstone & Record<string, unknown> {
+  return value.deleted === true;
 }
 
 function isTauri(): boolean {
@@ -161,8 +184,17 @@ export async function deleteSharedSession(id: string): Promise<boolean> {
  * Pull sessions the other surface wrote. Returns how many were imported and
  * how many local-only sessions were pushed to the shared store.
  */
-export async function importSharedSessions(): Promise<{ imported: number; exported: number }> {
-  const result = { imported: 0, exported: 0 };
+export async function importSharedSessions(): Promise<{
+  imported: number;
+  exported: number;
+  /** Ids the terminal deleted, so a caller showing one of them can close it. */
+  deleted: string[];
+}> {
+  const result: { imported: number; exported: number; deleted: string[] } = {
+    imported: 0,
+    exported: 0,
+    deleted: [],
+  };
   if (!isTauri() || !isVaultReady()) return result;
 
   let entries: SharedEntry[];
@@ -184,6 +216,20 @@ export async function importSharedSessions(): Promise<{ imported: number; export
       const parsed = JSON.parse(decryptString(envelope)) as Record<string, unknown> & {
         updatedAt?: number;
       };
+      // Deleted in the terminal: drop our copy too, and leave the marker where
+      // it is so it is not read as a session we are missing and pushed back.
+      // `notify: false` keeps the delete hook from removing the marker, which
+      // is the only record that this session went.
+      if (isTombstone(parsed)) {
+        local.delete(entry.id);
+        if (await deleteDiscussionSessionWithAttachments(entry.id, { notify: false })) {
+          result.deleted.push(entry.id);
+          // Only now: a delete that failed should be tried again next sync
+          // rather than marked as handled.
+          markSeen(entry.id, entry.modified_ms);
+        }
+        continue;
+      }
       const ours = local.get(entry.id);
       // Only take it when it is newer than what we hold (or new to us), and
       // never let it override what the app owns (project, attachments…).

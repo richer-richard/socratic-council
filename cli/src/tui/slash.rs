@@ -85,6 +85,14 @@ pub const COMMANDS: &[Command] = &[
         session: false,
     },
     Command {
+        name: "delete",
+        aliases: &[],
+        arg: Arg::Session,
+        about: "delete a saved session, here and in the app",
+        home: true,
+        session: false,
+    },
+    Command {
         name: "sessions",
         aliases: &[],
         arg: Arg::None,
@@ -468,6 +476,7 @@ mod tests {
                 "/deliverable ",
                 "/review ",
                 "/open ",
+                "/delete ",
                 "/sessions",
                 "/settings",
                 "/help",

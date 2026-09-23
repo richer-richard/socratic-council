@@ -141,7 +141,8 @@ Three surfaces mirror the desktop app:
   command instead of a topic (see [Commands](#commands)).
 - **Sessions sidebar** (`Tab`) — every stored session with its status,
   deliverable, cost and the record's answer; `↑`/`↓` select, `Enter` opens
-  one read-only, `r` reconvenes it.
+  one read-only, `r` reconvenes it, `Del` deletes it after a confirm. The
+  store is shared, so a session deleted here goes from the desktop app too.
 - **Session** — two pages, as in the desktop app. **Summary** is the report:
   the decision record (answer, confidence, votes, dissent, options,
   assumptions, evidence, open questions, next actions), how the debate went,
@@ -175,6 +176,7 @@ Cross-examination 1 ▸ …`). On a wide terminal a side column has **Plan**,
 | `←`/`→`                | council preset (Home) / side tab (Session)                     |
 | `^D`                   | deliverable (Home)                                             |
 | `Tab`                  | toggle the sessions sidebar                                    |
+| `Del`                  | delete the highlighted session (Home, after a confirm)         |
 | `^P`                   | toggle Settings                                                |
 | `Esc`                  | stop a live council (press twice) / back / clear (Home, twice) |
 | `t`                    | switch between Summary and Transcript                          |
@@ -210,6 +212,7 @@ command is never sent to the council as a topic.
 | `/deliverable auto\|decision\|analysis\|document\|review` | Home    | what the council leaves you              |
 | `/review on\|off`                                         | Home    | peer review after the record             |
 | `/open <session title>`                                   | Home    | open a saved session                     |
+| `/delete <session title>`                                 | Home    | delete a saved session, after a confirm  |
 | `/sessions`                                               | Home    | show or hide the sessions list           |
 | `/summary`, `/transcript`                                 | Session | switch page                              |
 | `/export`                                                 | Session | the record and document as Markdown      |

@@ -70,6 +70,15 @@ pub struct StoredMessage {
     pub at_ms: u64,
 }
 
+/// How long a deletion marker stays before it is swept up. Long enough that
+/// the other surface is certain to have opened at least once and honoured it.
+pub const TOMBSTONE_TTL_MS: u64 = 30 * 24 * 60 * 60 * 1000;
+
+/// Whether a stored file is a deletion marker rather than a session.
+pub fn is_tombstone(v: &Value) -> bool {
+    v["deleted"].as_bool() == Some(true)
+}
+
 /// Ids are used as file names: keep them to a safe alphabet.
 pub fn valid_id(id: &str) -> bool {
     !id.is_empty()
@@ -128,19 +137,100 @@ impl SessionStore {
         })
     }
 
-    /// Read + unseal one session. `None` when absent, unreadable, or sealed
-    /// under a different key.
+    /// Read + unseal one session. `None` when absent, unreadable, sealed under
+    /// a different key, or deleted (a tombstone is not a session).
     pub fn load(&self, id: &str) -> Option<Value> {
+        self.load_raw(id).filter(|v| !is_tombstone(v))
+    }
+
+    /// The file as it is, tombstone included. For the store's own bookkeeping.
+    fn load_raw(&self, id: &str) -> Option<Value> {
         let path = self.path_for(id)?;
         let envelope = std::fs::read_to_string(path).ok()?;
         let json = crypto::decrypt_str(&self.dek, envelope.trim())?;
         serde_json::from_str(&json).ok()
     }
 
+    /// Remove the file outright. The desktop app uses this: it holds the only
+    /// other copy of a session, so once both are gone nothing can bring it
+    /// back. From the terminal use [`SessionStore::tombstone`] instead.
     pub fn delete(&self, id: &str) -> bool {
         self.path_for(id)
             .map(|p| std::fs::remove_file(p).is_ok())
             .unwrap_or(false)
+    }
+
+    /// Delete a session from the terminal by leaving a marker in its place.
+    ///
+    /// The desktop app keeps its own copy of every session and pushes back to
+    /// this store anything it holds that the store is missing, so a file simply
+    /// removed here comes straight back on the app's next sync. The marker is
+    /// the same sealed `<id>.json` with the session's content gone, and the app
+    /// reads it as "this one was deleted" and drops its own copy. It is swept
+    /// up after [`TOMBSTONE_TTL_MS`], which leaves the app plenty of launches
+    /// to have seen it.
+    pub fn tombstone(&self, id: &str) -> Result<(), String> {
+        if !valid_id(id) {
+            return Err("invalid session id".into());
+        }
+        self.save(&json!({
+            "id": id,
+            "deleted": true,
+            "deletedAt": now_ms(),
+            "deletedBy": "cli",
+            // `updatedAt` is how the app decides what is newer, so a marker has
+            // to look newer than the copy it is retiring.
+            "updatedAt": now_ms(),
+        }))
+    }
+
+    /// The ids this store holds a deletion marker for. The terminal's sessions
+    /// list also draws on the desktop app's own index, which still names a
+    /// session the marker has retired.
+    pub fn tombstoned_ids(&self) -> std::collections::BTreeSet<String> {
+        let Ok(entries) = std::fs::read_dir(&self.dir) else {
+            return std::collections::BTreeSet::new();
+        };
+        entries
+            .flatten()
+            .filter_map(|e| {
+                let name = e.file_name().to_string_lossy().into_owned();
+                let id = name.strip_suffix(".json")?.to_string();
+                if !valid_id(&id) {
+                    return None;
+                }
+                is_tombstone(&self.load_raw(&id)?).then_some(id)
+            })
+            .collect()
+    }
+
+    /// Whether this store holds a session file for `id` at all, marker or not.
+    /// A row the terminal shows that has no file here came from the app's own
+    /// index, and only the app can delete it.
+    pub fn holds(&self, id: &str) -> bool {
+        self.path_for(id).is_some_and(|p| p.exists())
+    }
+
+    /// Drop markers older than [`TOMBSTONE_TTL_MS`]. Returns how many went.
+    pub fn prune_tombstones(&self) -> usize {
+        let Ok(entries) = std::fs::read_dir(&self.dir) else {
+            return 0;
+        };
+        let cutoff = now_ms().saturating_sub(TOMBSTONE_TTL_MS);
+        entries
+            .flatten()
+            .filter_map(|e| {
+                let name = e.file_name().to_string_lossy().into_owned();
+                let id = name.strip_suffix(".json")?.to_string();
+                if !valid_id(&id) {
+                    return None;
+                }
+                let v = self.load_raw(&id)?;
+                let at = v["deletedAt"].as_u64().unwrap_or(0);
+                (is_tombstone(&v) && at < cutoff).then_some(id)
+            })
+            .filter(|id| self.delete(id))
+            .count()
     }
 
     /// Every readable session, newest first. Files sealed under another key
@@ -479,5 +569,64 @@ mod tests {
         assert_eq!(summary.total_usd, 0.25);
         assert_eq!(summary.stopped_early.as_deref(), Some("budget"));
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    fn stored(store: &SessionStore, id: &str) -> Value {
+        let session = build_session_json(id, "t", 1, &[], "completed", 0, Usage::default());
+        store.save(&session).unwrap();
+        session
+    }
+
+    #[test]
+    fn a_tombstone_hides_the_session_but_keeps_the_file() {
+        let store = temp_store();
+        stored(&store, "sc-tomb-1");
+        stored(&store, "sc-tomb-2");
+        assert_eq!(store.list().len(), 2);
+
+        store.tombstone("sc-tomb-1").unwrap();
+        // Gone as far as anything reading sessions is concerned.
+        assert!(store.load("sc-tomb-1").is_none());
+        let list = store.list();
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].id, "sc-tomb-2");
+
+        // The file is still there, and still sealed, so the app can read it and
+        // drop its own copy instead of writing the session back.
+        let path = store.dir().join("sc-tomb-1.json");
+        assert!(path.exists(), "the marker has to stay where the app looks");
+        let raw = std::fs::read_to_string(&path).unwrap();
+        assert!(raw.starts_with("ENC1:"));
+        let marker = store.load_raw("sc-tomb-1").unwrap();
+        assert!(is_tombstone(&marker));
+        assert!(marker["deletedAt"].as_u64().unwrap() > 0);
+        assert_eq!(marker["deletedBy"], "cli");
+        // The topic never survives a delete.
+        assert!(marker["topic"].is_null() && marker["messages"].is_null());
+
+        assert!(store.tombstone("../etc/passwd").is_err());
+        let _ = std::fs::remove_dir_all(store.dir());
+    }
+
+    #[test]
+    fn markers_are_swept_up_once_they_are_old_enough() {
+        let store = temp_store();
+        stored(&store, "sc-old");
+        stored(&store, "sc-new");
+        stored(&store, "sc-live");
+        store.tombstone("sc-old").unwrap();
+        store.tombstone("sc-new").unwrap();
+
+        // Age the first one past the window.
+        let mut old = store.load_raw("sc-old").unwrap();
+        old["deletedAt"] = json!(now_ms() - TOMBSTONE_TTL_MS - 1);
+        store.save(&old).unwrap();
+
+        assert_eq!(store.prune_tombstones(), 1);
+        assert!(!store.dir().join("sc-old.json").exists());
+        assert!(store.dir().join("sc-new.json").exists());
+        assert!(store.dir().join("sc-live.json").exists());
+        assert_eq!(store.list().len(), 1, "the live session is untouched");
+        let _ = std::fs::remove_dir_all(store.dir());
     }
 }

@@ -14,6 +14,7 @@ describe("suggestSlash", () => {
       "/deliverable ",
       "/review ",
       "/open ",
+      "/delete ",
       "/settings",
       "/help",
       "/quit",

@@ -60,6 +60,14 @@ export const SLASH_COMMANDS: readonly SlashCommand[] = [
     session: false,
   },
   {
+    name: "delete",
+    aliases: [],
+    arg: { kind: "session" },
+    about: "delete a saved session, here and in the terminal",
+    home: true,
+    session: false,
+  },
+  {
     name: "summary",
     aliases: [],
     arg: NONE,
