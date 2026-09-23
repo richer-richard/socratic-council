@@ -324,6 +324,41 @@ export default function App() {
     [finishRun],
   );
 
+  /**
+   * Open a stored session on `page`. Every route into a session goes through
+   * here, so one that is listed but will not load reports it once, wherever it
+   * was opened from.
+   *
+   * The index and the blobs can disagree: the blobs moved to IndexedDB, so a
+   * build that predates that move reads localStorage, finds none, and lists
+   * every session without being able to open any of them. Returning quietly
+   * left the click doing nothing at all, with no way to tell that from a dead
+   * button and no hint that nothing had been lost.
+   */
+  const openSessionOn = useCallback(
+    (page: "chat" | "transcript", sessionId: string): boolean => {
+      const session = touchDiscussionSession(sessionId) ?? loadDiscussionSession(sessionId);
+      if (!session) {
+        console.error("[App] session is in the index but did not load:", sessionId);
+        setAppError(
+          "That session is listed but its contents could not be read from the local store. " +
+            "Nothing has been deleted.",
+        );
+        return false;
+      }
+      setAppError(null);
+      setActiveSession(session);
+      refreshAll();
+      setState((prev) => ({
+        currentPage: page,
+        currentSessionId: session.id,
+        currentProjectId: session.projectId ?? prev.currentProjectId,
+      }));
+      return true;
+    },
+    [refreshAll],
+  );
+
   const navigate = useCallback(
     (page: Page, sessionId?: string) => {
       // Both session surfaces need the session loaded, so they take the same
@@ -332,18 +367,7 @@ export default function App() {
       if (page === "chat" || page === "transcript") {
         const targetSessionId = sessionId ?? state.currentSessionId;
         if (!targetSessionId) return;
-
-        const nextSession =
-          touchDiscussionSession(targetSessionId) ?? loadDiscussionSession(targetSessionId);
-        if (!nextSession) return;
-
-        setActiveSession(nextSession);
-        refreshAll();
-        setState((prev) => ({
-          currentPage: page,
-          currentSessionId: nextSession.id,
-          currentProjectId: nextSession.projectId ?? prev.currentProjectId,
-        }));
+        openSessionOn(page, targetSessionId);
         return;
       }
 
@@ -353,7 +377,7 @@ export default function App() {
         currentSessionId: sessionId ?? prev.currentSessionId,
       }));
     },
-    [state.currentSessionId, refreshAll],
+    [state.currentSessionId, openSessionOn],
   );
 
   const handleCreateSession = useCallback(
@@ -404,30 +428,9 @@ export default function App() {
 
   const handleOpenSession = useCallback(
     (sessionId: string) => {
-      const session = touchDiscussionSession(sessionId) ?? loadDiscussionSession(sessionId);
-      if (!session) {
-        // The row came out of the index, so the session is listed but its
-        // stored contents did not come back: a blob the store cannot find,
-        // or one it cannot decrypt. Returning quietly leaves a row that
-        // does nothing when clicked and no way to tell why.
-        console.error("[App] session is in the index but did not load:", sessionId);
-        setAppError(
-          "That session is listed but its contents could not be read from the local store. " +
-            "Nothing has been deleted.",
-        );
-        return;
-      }
-
-      setAppError(null);
-      setActiveSession(session);
-      refreshAll();
-      setState((prev) => ({
-        currentPage: "chat",
-        currentSessionId: session.id,
-        currentProjectId: session.projectId ?? prev.currentProjectId,
-      }));
+      openSessionOn("chat", sessionId);
     },
-    [refreshAll],
+    [openSessionOn],
   );
 
   const handleDeleteSession = useCallback(
@@ -641,8 +644,19 @@ export default function App() {
       <div className="h-screen flex flex-col bg-gray-900">
         <AmbientStars />
         {appError ? (
-          <div className="border-b border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200">
-            {appError}
+          <div className="border-b border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200 flex items-start gap-3">
+            {/* Dismissible, like the notice below it. When every session fails
+                to open there is no successful open left to clear this, so
+                without the button the strip eats a row of the frame for good. */}
+            <div style={{ flex: 1 }}>{appError}</div>
+            <button
+              type="button"
+              onClick={() => setAppError(null)}
+              className="text-red-200 hover:text-red-50"
+              style={{ background: "none", border: "none", cursor: "pointer" }}
+            >
+              Dismiss
+            </button>
           </div>
         ) : null}
         {vaultRecoveryNotice ? (
