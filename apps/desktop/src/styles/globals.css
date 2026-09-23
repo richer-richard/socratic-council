@@ -4048,6 +4048,18 @@ textarea.workstation-input::placeholder {
   flex: 1;
 }
 
+/* The hero turns slowly clockwise, one turn in 36 seconds, the same pace as
+   the terminal's mark. Turning the whole drawing keeps it on its own layer. */
+.council-circle-orbit {
+  animation: sc-spin 36s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .council-circle-orbit {
+    animation: none;
+  }
+}
+
 .session-status {
   font-family: var(--font-mono);
   text-transform: lowercase;

@@ -1723,6 +1723,34 @@ mod tests {
     }
 
     #[test]
+    fn the_home_mark_turns_and_comes_back_after_a_full_turn() {
+        let mut app = test_app();
+        app.view = View::Home;
+        // The top rows at 120x40 hold the mark and the rack's chairs, and
+        // nothing else there moves.
+        let mark = |app: &mut App| -> Vec<String> {
+            let mut terminal = Terminal::new(TestBackend::new(120, 40)).unwrap();
+            terminal.draw(|f| render(f, app)).unwrap();
+            let buf = terminal.backend().buffer();
+            (0..24)
+                .map(|y| (0..120).map(|x| buf[(x, y)].symbol()).collect())
+                .collect()
+        };
+        app.frame = 0;
+        let start = mark(&mut app);
+        assert!(
+            start
+                .iter()
+                .any(|row| row.chars().any(|c| ('\u{2801}'..='\u{28ff}').contains(&c))),
+            "the mark is drawn"
+        );
+        app.frame = 32;
+        assert_ne!(mark(&mut app), start, "the mark moves from frame to frame");
+        app.frame = home::TURN_FRAMES;
+        assert_eq!(mark(&mut app), start, "a full turn lands where it began");
+    }
+
+    #[test]
     fn home_keys_cycle_preset_and_deliverable() {
         let mut app = test_app();
         assert_eq!(app.launch.preset, Preset::Standard);
