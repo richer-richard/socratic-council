@@ -270,11 +270,18 @@ export function importBundleSession(parsed: ParsedBundle): DiscussionSession {
     ),
   };
 
-  const existing = loadDiscussionSession(remapped.id);
+  // An id that the shared store will not take is replaced before anything is
+  // saved under it. The bundle comes from somewhere else, and its id travels
+  // inside it; the Rust side names sessions `sessions/<id>.json` and refuses
+  // anything outside this alphabet (`session_sync.rs` `valid_id`). Left alone,
+  // such a session saves locally, lists in the app, and then silently never
+  // reaches the terminal, with the refusal only in a console warning.
+  const baseId = isStoreSafeSessionId(remapped.id) ? remapped.id : newImportedSessionId();
+  const existing = loadDiscussionSession(baseId);
   const sessionToSave: DiscussionSession = existing
     ? {
         ...remapped,
-        id: `${remapped.id}_imp_${Date.now().toString(36)}`,
+        id: withImportSuffix(baseId),
         title: `${remapped.title} (imported)`,
         createdAt: remapped.createdAt,
         updatedAt: Date.now(),
@@ -282,11 +289,32 @@ export function importBundleSession(parsed: ParsedBundle): DiscussionSession {
       }
     : {
         ...remapped,
+        id: baseId,
         updatedAt: Date.now(),
         lastOpenedAt: Date.now(),
       };
 
   return saveDiscussionSession(sessionToSave);
+}
+
+/**
+ * Whether an id can be a file name in the shared session store the terminal
+ * reads. The same rule as `src-tauri/src/session_sync.rs` `valid_id` and the
+ * engine's `store::valid_id`.
+ */
+export function isStoreSafeSessionId(id: unknown): id is string {
+  return typeof id === "string" && /^[A-Za-z0-9_-]{1,120}$/.test(id);
+}
+
+/** Fresh, store-safe id for a bundle whose own id cannot be used. */
+function newImportedSessionId(): string {
+  return `session_imp_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
+}
+
+/** The id an import takes when one with that id is already here, still ≤ 120. */
+function withImportSuffix(id: string): string {
+  const suffix = `_imp_${Date.now().toString(36)}`;
+  return `${id.slice(0, 120 - suffix.length)}${suffix}`;
 }
 
 /** Fresh, collision-resistant attachment id for an imported blob. */

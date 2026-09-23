@@ -22,9 +22,10 @@ pub fn run() {
     let mut builder = tauri::Builder::default()
         .manage(http::RequestRegistry::default())
         .manage(engine_host::EngineRegistry::default())
-        .plugin(tauri_plugin_store::Builder::new().build())
         // No tauri-plugin-http: the webview has NO direct network path. Every
         // outbound call is brokered by http.rs behind the allowlist.
+        // No tauri-plugin-store either: nothing in the front end imports it,
+        // and config, secrets and the session index all ride the vault.
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_opener::init());
@@ -77,4 +78,65 @@ pub fn run() {
         })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::Value;
+
+    /// The capability file is the app's whole permission surface, and it is easy
+    /// to widen by reaching for a plugin's `default` set. Two of those grant far
+    /// more than this app calls: `fs:default` carries
+    /// `read-app-specific-dirs-recursive`, which lets the webview read the app
+    /// data directory — `vault.key` and every sealed session file with it — and
+    /// `opener:default` carries an unscoped reveal-in-dir. The front end calls
+    /// `writeFile` and `openPath` and nothing else, both under a path scope.
+    #[test]
+    fn the_capability_file_grants_only_what_the_front_end_calls() {
+        let raw = include_str!("../capabilities/default.json");
+        let cap: Value = serde_json::from_str(raw).expect("capabilities/default.json is JSON");
+        let permissions = cap["permissions"].as_array().expect("permissions is a list");
+
+        let mut plain: Vec<&str> = Vec::new();
+        for entry in permissions {
+            match entry {
+                Value::String(id) => plain.push(id),
+                Value::Object(scoped) => {
+                    let id = scoped["identifier"].as_str().expect("scoped identifier");
+                    assert!(
+                        scoped.get("allow").and_then(|a| a.as_array()).is_some_and(|a| !a.is_empty()),
+                        "{id} takes a path and must carry an allow scope"
+                    );
+                    // A path-taking permission is only ever granted under a scope.
+                    assert!(
+                        id.starts_with("fs:") || id.starts_with("opener:"),
+                        "unexpected scoped permission {id}"
+                    );
+                }
+                other => panic!("unexpected permission entry: {other}"),
+            }
+        }
+
+        // `core:default` is the IPC itself; every other plugin default set pulls
+        // in commands nothing calls.
+        for id in &plain {
+            assert!(
+                *id == "core:default" || !id.ends_with(":default"),
+                "{id} is a plugin default set — name the commands instead"
+            );
+        }
+        // Nothing may read through the fs plugin: the DEK and the sealed
+        // sessions live where those permissions would reach.
+        for entry in permissions {
+            let id = match entry {
+                Value::String(id) => id.as_str(),
+                Value::Object(o) => o["identifier"].as_str().unwrap_or(""),
+                _ => "",
+            };
+            assert!(
+                !(id.starts_with("fs:") && id.contains("read")),
+                "{id} would let the webview read the app data directory"
+            );
+        }
+    }
 }

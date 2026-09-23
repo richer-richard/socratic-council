@@ -476,7 +476,12 @@ pub async fn http_request_stream(
                     }
                 }
                 Err(e) => {
-                    let error_msg = format!("Stream error: {}", e);
+                    // Scrub before it is emitted, not only on the way out: the
+                    // event carries the message straight to the webview and the
+                    // log ring buffer, and every other error path here already
+                    // redacts first.
+                    let error_msg =
+                        redact_with_secrets(&format!("Stream error: {}", e), &secrets);
                     emit_stream_event(&app, &request_id, String::new(), true, Some(error_msg.clone()));
                     return Err(error_msg);
                 }

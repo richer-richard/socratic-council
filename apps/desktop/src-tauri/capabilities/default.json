@@ -4,13 +4,22 @@
   "description": "Default capabilities for Socratic Council",
   "local": true,
   "windows": ["main"],
+  "comment": [
+    "Only the commands the front end actually calls, and every path-taking one scoped.",
+    "The plugins' `default` sets are deliberately not used: `fs:default` carries",
+    "`read-app-specific-dirs-recursive`, which would let the webview read the app data",
+    "directory, vault.key and every sealed session file included; `opener:default` adds an",
+    "unscoped reveal-in-dir; `dialog:default` adds open. The webview is handed the DEK at",
+    "boot anyway, so this is depth, not the only thing standing in the way.",
+    "The calls, and nothing else: invoke + listen (core), getCurrentWindow().close()",
+    "(services/appWindow.ts), save() (services/conversationExport.ts), writeFile() (same),",
+    "openPath() (components/ConversationExport.tsx). `src/lib.rs` has the test that keeps",
+    "this list from drifting back to the default sets."
+  ],
   "permissions": [
     "core:default",
     "core:window:allow-close",
-    "store:default",
-    "dialog:default",
-    "fs:default",
-    "opener:default",
+    "dialog:allow-save",
     {
       "identifier": "opener:allow-open-path",
       "allow": [{ "path": "$DOWNLOAD/**" }, { "path": "$DOCUMENT/SocraticCouncil/**" }]
