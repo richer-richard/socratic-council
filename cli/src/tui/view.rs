@@ -9,8 +9,8 @@
 //! whose flat transcript becomes `legacy`.
 
 use crate::deliberation::{
-    Board, Convergence, DebateEvent, DecisionRecord, Deliverable, Estimate, Plan, RoundKind,
-    RoundLog, ToolUseRecord,
+    ArgGraph, Board, Convergence, DebateEvent, DecisionRecord, Deliverable, Estimate, PeerEval,
+    Plan, RoundKind, RoundLog, ToolUseRecord,
 };
 use crate::engine::{sanitize_terminal, strip_directives};
 use crate::store::{messages_from_json, StoredMessage};
@@ -74,6 +74,9 @@ pub struct SessionView {
     pub moderator_notes: Vec<String>,
     pub record: Option<DecisionRecord>,
     pub document: Option<String>,
+    /// The review pass, when it ran. Absent on a session that turned it off.
+    pub peer_eval: Option<PeerEval>,
+    pub arg_graph: Option<ArgGraph>,
     pub cost: Option<CostSnapshot>,
     pub errors: Vec<String>,
     pub pending_question: Option<PendingQuestion>,
@@ -251,7 +254,9 @@ impl SessionView {
             DebateEvent::Board { board } => self.board = Some(board),
             DebateEvent::Convergence { convergence } => self.convergences.push(convergence),
             DebateEvent::Moderator { text, .. } => self.moderator_notes.push(scrub(&text)),
-            DebateEvent::Record { record } => self.record = Some(record),
+            DebateEvent::Record { record } => self.record = Some(*record),
+            DebateEvent::PeerEvalReady { peer_eval } => self.peer_eval = Some(peer_eval),
+            DebateEvent::ArgMap { graph } => self.arg_graph = Some(graph),
             DebateEvent::Document { markdown } => self.document = Some(scrub(&markdown)),
             DebateEvent::Cost { snapshot } => self.cost = Some(snapshot),
             DebateEvent::Error { message } => self.errors.push(scrub(&message)),
@@ -346,6 +351,11 @@ impl SessionView {
         view.convergences = serde_json::from_value(doc["convergences"].clone()).unwrap_or_default();
         view.record = serde_json::from_value(doc["record"].clone()).ok();
         view.document = doc["document"].as_str().map(scrub);
+        // Absent on a session that ran with the review pass off, which is a
+        // setting rather than a fault: both stay None and the surfaces fall
+        // back to what votes and convergence already say.
+        view.peer_eval = serde_json::from_value(doc["peerEval"].clone()).ok();
+        view.arg_graph = serde_json::from_value(doc["argGraph"].clone()).ok();
         view.cost = serde_json::from_value::<CostSnapshot>(doc["costs"].clone())
             .ok()
             .filter(|_| doc["costs"].is_object());
@@ -483,6 +493,7 @@ mod tests {
             open_questions: vec![],
             next_actions: vec!["do".into()],
             what_changed: "nothing".into(),
+            how_it_went: "George pushed on cost; Cathy moved.".into(),
             votes: BTreeMap::new(),
             cost: None,
         }
@@ -523,6 +534,7 @@ mod tests {
                 usd_low: 0.1,
                 usd_high: 0.3,
                 unpriced_seats: vec![],
+                review: true,
             },
         });
         v.apply(started("a", RoundKind::Positions));
@@ -568,7 +580,9 @@ mod tests {
             kind: ModeratorNoteKind::Note,
             text: "note".into(),
         });
-        v.apply(DebateEvent::Record { record: record() });
+        v.apply(DebateEvent::Record {
+            record: Box::new(record()),
+        });
         v.apply(DebateEvent::Cost {
             snapshot: CostSnapshot {
                 total_usd: 0.12,

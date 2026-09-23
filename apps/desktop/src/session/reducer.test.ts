@@ -117,6 +117,7 @@ const STREAM: EngineEvent[] = [
       open_questions: [],
       next_actions: [],
       what_changed: "b moved",
+      how_it_went: "a pressed on evidence, b conceded the timeline.",
       votes: { a: "Yes", b: "Yes" },
       cost: null,
     },

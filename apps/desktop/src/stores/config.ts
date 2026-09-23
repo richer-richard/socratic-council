@@ -451,6 +451,7 @@ function sanitizeProtocol(input: unknown): EngineProtocolPolicy {
       record: sanitizeReasoningTier(tiers.record, d.tiers.record),
     },
     concurrency: clampInt(r.concurrency, POLICY_LIMITS.concurrency, d.concurrency),
+    review: safeBoolean(r.review, d.review),
   };
 }
 

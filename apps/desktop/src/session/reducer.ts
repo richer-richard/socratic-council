@@ -11,10 +11,12 @@ import {
   type EngineBoard,
   type EngineConvergence,
   type EngineCostSnapshot,
+  type EngineArgGraph,
   type EngineDecisionRecord,
   type EngineEstimate,
   type EngineEvent,
   type EngineHandoff,
+  type EnginePeerEval,
   type EnginePlan,
   type EngineProvider,
   type EngineRoundKind,
@@ -59,6 +61,9 @@ export interface SessionView {
   moderatorNotes: string[];
   record: EngineDecisionRecord | null;
   document: string | null;
+  /** The review pass, when it ran. Null when it was turned off or failed. */
+  peerEval: EnginePeerEval | null;
+  argGraph: EngineArgGraph | null;
   cost: EngineCostSnapshot | null;
   errors: string[];
   pendingQuestion: { id: string; question: string } | null;
@@ -85,6 +90,8 @@ export function initialSessionView(): SessionView {
     moderatorNotes: [],
     record: null,
     document: null,
+    peerEval: null,
+    argGraph: null,
     cost: null,
     errors: [],
     pendingQuestion: null,
@@ -247,6 +254,10 @@ export function applyEvent(state: SessionView, event: EngineEvent): SessionView 
       return { ...state, record: event.record };
     case "document":
       return { ...state, document: event.markdown };
+    case "peer_eval_ready":
+      return { ...state, peerEval: event.peer_eval };
+    case "arg_map":
+      return { ...state, argGraph: event.graph };
     case "cost":
       return { ...state, cost: event.snapshot };
     case "error":
@@ -303,6 +314,8 @@ export function viewFromStored(data: EngineSessionData): SessionView {
     convergences: data.convergences,
     record: data.record,
     document: data.document,
+    peerEval: data.peerEval ?? null,
+    argGraph: data.argGraph ?? null,
     cost: data.costs,
     done: true,
     stoppedEarly: data.stoppedEarly,

@@ -347,6 +347,7 @@ pub fn parse_record(raw: &str) -> Option<DecisionRecord> {
         open_questions: list(&v, "open_questions"),
         next_actions: list(&v, "next_actions"),
         what_changed: s(&v, "what_changed"),
+        how_it_went: s(&v, "how_it_went"),
         votes: BTreeMap::new(),
         cost: None,
     })

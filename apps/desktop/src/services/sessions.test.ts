@@ -8,7 +8,9 @@ import {
 import {
   SessionPersistenceError,
   branchDiscussionSession,
+  deleteAllDiscussionSessions,
   deleteDiscussionSession,
+  describeBulkDelete,
   importDiscussionSession,
   listSessionSummaries,
   loadDiscussionSession,
@@ -751,6 +753,103 @@ describe("engine session data (v3)", () => {
     const reloaded = loadDiscussionSession("eng1");
     expect(reloaded?.engine?.rounds[0]?.entries[0]?.content).toBe("yes");
     expect(importDiscussionSession({ ...raw, status: "stopped" })?.status).toBe("completed");
+  });
+
+  it("carries the review pass through a save and a reload", () => {
+    // normalizeEngineData rebuilds the engine object field by field, and once
+    // dropped both of these on every save without anything failing.
+    const raw = {
+      id: "rev1",
+      topic: "t",
+      title: "t",
+      createdAt: 1,
+      updatedAt: 1,
+      lastOpenedAt: 1,
+      archivedAt: null,
+      projectId: null,
+      status: "completed",
+      currentTurn: 1,
+      totalTokens: { input: 0, output: 0 },
+      messages: [],
+      errors: [],
+      attachments: [],
+      version: 2,
+      plan: {
+        deliverable: "decision",
+        question: "q",
+        options: [],
+        settles: "",
+        participants: [],
+        lenses: {},
+        subtasks: [],
+        rounds: 1,
+        ask_user: null,
+      },
+      rounds: [],
+      record: null,
+      peerEval: { seats: ["a", "b"], critiques: [], per_seat: {}, failed: ["b"] },
+      argGraph: {
+        nodes: [{ id: "n1", kind: "claim", text: "x", by: ["a"], round: 0 }],
+        edges: [],
+        missing: ["Revision"],
+      },
+    };
+    importDiscussionSession(raw);
+    const reloaded = loadDiscussionSession("rev1");
+    expect(reloaded?.engine?.peerEval?.failed).toEqual(["b"]);
+    expect(reloaded?.engine?.argGraph?.nodes).toHaveLength(1);
+    expect(reloaded?.engine?.argGraph?.missing).toEqual(["Revision"]);
+    // A malformed container is dropped rather than passed through.
+    importDiscussionSession({ ...raw, id: "rev2", peerEval: { seats: "a" }, argGraph: [] });
+    expect(loadDiscussionSession("rev2")?.engine?.peerEval).toBeNull();
+    expect(loadDiscussionSession("rev2")?.engine?.argGraph).toBeNull();
+  });
+
+  it("bulk-deletes all but live runs and counts a shared copy it could not remove", async () => {
+    for (const id of ["s1", "s2", "s3"]) {
+      importDiscussionSession({
+        id,
+        topic: id,
+        title: id,
+        createdAt: 1,
+        updatedAt: 1,
+        lastOpenedAt: 1,
+        archivedAt: null,
+        projectId: null,
+        status: "completed",
+        currentTurn: 0,
+        totalTokens: { input: 0, output: 0 },
+        messages: [],
+        errors: [],
+        attachments: [],
+      });
+    }
+    const shared: string[] = [];
+    const result = await deleteAllDiscussionSessions({
+      skip: new Set(["s2"]),
+      deleteShared: async (id) => {
+        shared.push(id);
+        return id !== "s3";
+      },
+    });
+    expect(result).toEqual({ deleted: 2, failed: [], skipped: ["s2"], sharedFailed: ["s3"] });
+    // The running one is untouched, locally and in the shared store.
+    expect(shared).not.toContain("s2");
+    expect(listSessionSummaries().map((s) => s.id)).toEqual(["s2"]);
+  });
+
+  it("reports a bulk delete as exactly what it did", () => {
+    expect(describeBulkDelete({ deleted: 0, failed: [], skipped: [], sharedFailed: [] })).toBe(
+      "There was nothing to delete.",
+    );
+    expect(describeBulkDelete({ deleted: 1, failed: [], skipped: [], sharedFailed: [] })).toBe(
+      "Deleted 1 session.",
+    );
+    expect(
+      describeBulkDelete({ deleted: 30, failed: ["x"], skipped: ["y", "z"], sharedFailed: ["w"] }),
+    ).toBe(
+      "Deleted 30 sessions. Kept 2 still running, they are in the list. 1 could not be removed and is still listed. The command line still has 1 of them, because its copy could not be removed.",
+    );
   });
 
   it("leaves sessions without engine data untouched", () => {

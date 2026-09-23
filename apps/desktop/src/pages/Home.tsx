@@ -1,4 +1,4 @@
-import { getModelInfo } from "@socratic-council/shared";
+import { AUTO_MODEL, getModelInfo } from "@socratic-council/shared";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { BundleImportButton } from "../components/BundleActions";
@@ -16,7 +16,7 @@ import {
 } from "../services/attachments";
 import { DEFAULT_LAUNCH, type SessionLaunchOptions } from "../services/engine";
 import type { ProjectSummary } from "../services/projects";
-import type { SessionSummary, SessionStatus } from "../services/sessions";
+import type { BulkDeleteResult, SessionSummary, SessionStatus } from "../services/sessions";
 import { useConfig, getShuffledTopics, LOCKED_MODELS, type Provider } from "../stores/config";
 
 interface HomeProps {
@@ -31,6 +31,8 @@ interface HomeProps {
     launch?: SessionLaunchOptions,
   ) => void | Promise<void>;
   onDeleteSession: (sessionId: string) => void | Promise<void>;
+  /** Delete every stored session except runs in flight, and say what happened. */
+  onDeleteAllSessions: () => Promise<BulkDeleteResult>;
   onOpenSession: (sessionId: string) => void;
   onRestoreSession: (sessionId: string) => void;
   onCreateProject: (name: string, description?: string) => void;
@@ -69,6 +71,22 @@ function getModelDisplayName(provider: Provider): string {
   return (
     MODEL_DISPLAY_OVERRIDES[provider] ?? getModelInfo(LOCKED_MODELS[provider])?.name ?? provider
   );
+}
+
+/**
+ * The moderator and utility chairs are configured like seats but never sat in
+ * one, so the rack has to name their model itself. The auto choices keep
+ * their own names rather than a resolved model id: the engine picks per run,
+ * and a name pinned here would go stale the moment a provider ships a model.
+ */
+const AUTO_SLOT_LABELS: Record<string, string> = {
+  [AUTO_MODEL]: "Auto",
+  "auto-balanced": "Auto, balanced",
+  "auto-fast": "Auto, fast",
+};
+
+function slotModelLabel(model: string): string {
+  return AUTO_SLOT_LABELS[model] ?? getModelInfo(model)?.name ?? model;
 }
 
 const AGENT_COLORS: Record<string, string> = {
@@ -729,6 +747,7 @@ export function Home({
   onArchiveSession,
   onCreateSession,
   onDeleteSession,
+  onDeleteAllSessions,
   onOpenSession,
   onRestoreSession,
   onCreateProject,
@@ -740,6 +759,9 @@ export function Home({
 }: HomeProps) {
   const [topic, setTopic] = useState("");
   const [showSettings, setShowSettings] = useState(false);
+  // Which tab the settings modal opens on. Set by the deep links in the rack;
+  // cleared by the plain Settings button so it keeps landing on API Keys.
+  const [settingsTab, setSettingsTab] = useState<"council" | undefined>(undefined);
   const [showApiWarning, setShowApiWarning] = useState(false);
   /** "?" affordance next to the council circle. Opens a small popup
    *  explaining the inner / outer ring system to first-run users. */
@@ -1061,6 +1083,7 @@ export function Home({
     const onWindowKeyDown = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key === ",") {
         event.preventDefault();
+        setSettingsTab(undefined);
         setShowSettings(true);
         return;
       }
@@ -1150,7 +1173,10 @@ export function Home({
         <div className="workstation-sidebar-actions">
           <button
             type="button"
-            onClick={() => setShowSettings(true)}
+            onClick={() => {
+              setSettingsTab(undefined);
+              setShowSettings(true);
+            }}
             className="workstation-sidebar-button"
             style={{ fontFamily: "var(--font-mono)" }}
           >
@@ -1641,7 +1667,7 @@ export function Home({
                       void handleStart();
                     }
                   }}
-                  placeholder="What should the council pressure-test next? Shift+Enter for a new line."
+                  placeholder="What should the council pressure-test next?"
                   className="elegant-input workstation-input"
                 />
                 <button
@@ -1718,8 +1744,8 @@ export function Home({
                 ))}
               </div>
               <div className="workstation-input-help" style={{ fontFamily: "var(--font-mono)" }}>
-                Upload images, PDFs, DOCX, code, text, and other files. Large non-image files are
-                compacted locally.
+                Enter sends, Shift+Enter adds a new line. Upload images, PDFs, DOCX, code, text, and
+                other files. Large non-image files are compacted locally.
               </div>
 
               {composerAttachments.length > 0 && (
@@ -1803,7 +1829,10 @@ export function Home({
                   <div>Configure at least one provider before opening a new council session.</div>
                   <button
                     type="button"
-                    onClick={() => setShowSettings(true)}
+                    onClick={() => {
+                      setSettingsTab(undefined);
+                      setShowSettings(true);
+                    }}
                     className="workstation-inline-link"
                   >
                     Open settings
@@ -1826,6 +1855,32 @@ export function Home({
               style={{ fontFamily: "var(--font-mono)", marginBottom: "0.6rem" }}
             >
               Council Rack
+            </div>
+            {/* The two chairs nobody sits in. Both are configurable and both were
+                invisible here, so the only way to find them was to already know
+                they lived under Settings > Council. */}
+            <div className="workstation-chair-list">
+              {(
+                [
+                  { key: "moderator", label: "Moderator", slot: config.moderator },
+                  { key: "utility", label: "Utility", slot: config.utility },
+                ] as const
+              ).map(({ key, label, slot }) => (
+                <button
+                  key={key}
+                  type="button"
+                  className="workstation-chair-row"
+                  onClick={() => {
+                    setSettingsTab("council");
+                    setShowSettings(true);
+                  }}
+                  title={`Change the ${label.toLowerCase()} model`}
+                >
+                  <ProviderIcon provider={slot.provider} size={16} />
+                  <span className="workstation-chair-label">{label}</span>
+                  <span className="workstation-chair-model">{slotModelLabel(slot.model)}</span>
+                </button>
+              ))}
             </div>
             <div className="workstation-agent-list">
               {AGENT_CARDS.map((agent) => {
@@ -1867,6 +1922,9 @@ export function Home({
 
       <ConfigModal
         isOpen={showSettings}
+        initialTab={settingsTab}
+        sessionCount={sessions.length}
+        onDeleteAllSessions={onDeleteAllSessions}
         onClose={() => setShowSettings(false)}
         config={config}
         proxy={getProxy()}

@@ -2,8 +2,12 @@
  * The Session page: one deliberation, live or stored. The engine's event
  * stream (folded by `session/reducer.ts`) drives it while a run is in
  * flight; afterwards the same view is rebuilt from the session file the
- * engine persisted. The product is the decision record (or the document);
- * the rounds are there to audit it.
+ * engine persisted.
+ *
+ * This page is the summary: the record, how the debate went, and the panel of
+ * analyses. The seat turns are a page of their own, one click away, because a
+ * report and a transcript answer different questions and stacking them left no
+ * way to tell which one you were looking at.
  */
 
 import type {
@@ -13,26 +17,22 @@ import type {
   EngineDecisionRecord,
   EngineEstimate,
   EnginePlan,
-  EngineToolUse,
 } from "@socratic-council/shared";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 
 import type { Page } from "../App";
 import { ChamberSurface } from "../components/ChamberSurface";
 import { ConversationExport } from "../components/ConversationExport";
 import { CouncilMark } from "../components/CouncilMark";
 import { Markdown } from "../components/Markdown";
+import { ReviewPanel, type ReviewStatus } from "../components/session/ReviewPanel";
+import { RunPrompts } from "../components/session/RunPrompts";
+import { CopyButton, LegacyTranscript, SectionRule, usd } from "../components/session/Transcript";
 import type { ConversationExportMessage } from "../services/conversationExport";
 import type { DiscussionSession } from "../services/sessions";
+import { sessionMetrics } from "../session/metrics";
 import { recordToMarkdown } from "../session/recordMarkdown";
-import {
-  viewFromStored,
-  type RoundView,
-  type SeatTurnView,
-  type SessionView,
-} from "../session/reducer";
-import { roundLayout } from "../session/roundLayout";
-import { PROVIDER_INFO, isProvider } from "../stores/config";
+import { viewFromStored, type SessionView } from "../session/reducer";
 
 interface SessionProps {
   session: DiscussionSession;
@@ -42,174 +42,6 @@ interface SessionProps {
   onCancel: (sessionId: string) => void;
   onAnswer: (sessionId: string, questionId: string, text: string) => Promise<void> | void;
   onDecide: (sessionId: string, approvalId: string, allow: boolean) => Promise<void> | void;
-}
-
-const usd = (n: number) => `$${n.toFixed(n >= 10 ? 1 : 2)}`;
-
-function seatColor(provider: string | null): string {
-  return provider && isProvider(provider) ? PROVIDER_INFO[provider].color : "text-gray-200";
-}
-
-async function copyText(text: string): Promise<boolean> {
-  try {
-    await navigator.clipboard.writeText(text);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function CopyButton({ text, label }: { text: string; label: string }) {
-  const [copied, setCopied] = useState(false);
-  useEffect(() => {
-    if (!copied) return;
-    const t = setTimeout(() => setCopied(false), 1600);
-    return () => clearTimeout(t);
-  }, [copied]);
-  return (
-    <button
-      type="button"
-      className="button-ghost text-xs"
-      onClick={() => void copyText(text).then((ok) => setCopied(ok))}
-    >
-      {copied ? "Copied" : label}
-    </button>
-  );
-}
-
-function ToolChip({ use }: { use: EngineToolUse }) {
-  const args = Object.entries(use.call.arguments ?? {})
-    .map(([k, v]) => `${k}=${typeof v === "string" ? v : JSON.stringify(v)}`)
-    .join(" ");
-  const output = use.error ?? use.output;
-  return (
-    <details className={`tool-chip ${use.error ? "is-error" : ""}`}>
-      <summary>
-        <span className="tool-chip-name">{use.call.name}</span>
-        <span className="tool-chip-args" title={args}>
-          {args}
-        </span>
-      </summary>
-      <pre className="tool-chip-output">
-        {output.length > 1200 ? `${output.slice(0, 1200)}\n…` : output}
-      </pre>
-    </details>
-  );
-}
-
-/** A rule with a label, a hairline and an optional count. Replaces the card. */
-function SectionRule({
-  label,
-  meta,
-  tone,
-}: {
-  label: string;
-  meta?: string;
-  tone?: "live" | "record";
-}) {
-  return (
-    <div className={`session-rule${tone ? ` is-${tone}` : ""}`}>
-      <span className="session-rule-label">{label}</span>
-      <span className="session-rule-line" />
-      {meta ? <span className="session-rule-meta">{meta}</span> : null}
-    </div>
-  );
-}
-
-/**
- * A seat that has produced text. The provider colour goes on the header, and
- * the bar and the name inherit it, so one class carries the seat's identity.
- */
-function SeatBlock({ turn }: { turn: SeatTurnView }) {
-  const tokens = turn.usage ? turn.usage.input + turn.usage.output + turn.usage.reasoning : 0;
-  return (
-    <article className="seat-block" data-seat={turn.seatId}>
-      <header className={`seat-head ${seatColor(turn.provider)}`}>
-        <span className="seat-bar" />
-        <span className="seat-name">{turn.name}</span>
-        {turn.model && <span className="seat-model">{turn.model}</span>}
-        <span className="seat-head-gap" />
-        {turn.done ? (
-          tokens > 0 ? (
-            <span className="seat-meta">{tokens.toLocaleString()} tok</span>
-          ) : null
-        ) : (
-          <span className="seat-state">writing</span>
-        )}
-      </header>
-      {turn.toolUses.length > 0 && (
-        <div className="seat-card-tools">
-          {turn.toolUses.map((use, i) => (
-            <ToolChip key={`${use.call.id}-${i}`} use={use} />
-          ))}
-        </div>
-      )}
-      {turn.text ? (
-        <Markdown content={turn.text} className="markdown-content seat-card-body" />
-      ) : (
-        <p className="seat-empty">No reply came back.</p>
-      )}
-      {turn.thinking && (
-        <details className="seat-card-thinking">
-          <summary>Reasoning</summary>
-          <pre>{turn.thinking}</pre>
-        </details>
-      )}
-    </article>
-  );
-}
-
-/** A seat with nothing to show yet stays one line until it speaks. */
-function SeatRow({ turn }: { turn: SeatTurnView }) {
-  return (
-    <div className={`seat-row ${seatColor(turn.provider)}`} data-seat={turn.seatId}>
-      <span className="seat-bar" />
-      <span className="seat-name">{turn.name}</span>
-      <span className="seat-model">{turn.model}</span>
-      <span className="seat-state">thinking</span>
-    </div>
-  );
-}
-
-/**
- * One round. Seats that have written read as prose at a measure that suits
- * them; the ones still working stay as rows underneath, so a status never
- * takes the space of an essay. A seat that finished without text is a
- * result too, so it reads as one rather than passing for a seat that has
- * not run yet.
- *
- * Keys come from the seat's place in the round, not from its place in one
- * of these two lists, so a seat starting to write does not renumber the
- * ones after it and throw away their open reasoning panels.
- */
-function RoundSection({ round }: { round: RoundView }) {
-  const { written, working, live } = roundLayout(round.entries);
-  const seats = round.entries.length;
-  return (
-    <section className="session-round" data-round={round.key}>
-      <SectionRule
-        label={round.label}
-        tone={live > 0 ? "live" : undefined}
-        meta={
-          live > 0 ? `${live} of ${seats} writing` : `${seats} ${seats === 1 ? "seat" : "seats"}`
-        }
-      />
-      {written.length > 0 && (
-        <div className="session-stack">
-          {written.map(({ turn, index }) => (
-            <SeatBlock key={`${turn.seatId}-${index}`} turn={turn} />
-          ))}
-        </div>
-      )}
-      {working.length > 0 && (
-        <div className="seat-rows">
-          {working.map(({ turn, index }) => (
-            <SeatRow key={`${turn.seatId}-${index}`} turn={turn} />
-          ))}
-        </div>
-      )}
-    </section>
-  );
 }
 
 function PlanPanel({ plan, corrections }: { plan: EnginePlan; corrections: string[] }) {
@@ -587,32 +419,61 @@ export function exportMessagesFor(
   return out;
 }
 
-function LegacyTranscript({ session }: { session: DiscussionSession }) {
-  return (
-    <section className="session-round">
-      <SectionRule label="Transcript" meta={`${session.messages.length} turns`} />
-      <div className="session-stack">
-        {session.messages.map((m) => (
-          <article key={m.id} className="seat-block">
-            <header className={`seat-head ${seatColor(m.agentId)}`}>
-              <span className="seat-bar" />
-              <span className="seat-name">{m.displayName ?? m.agentId}</span>
-            </header>
-            <Markdown content={m.content} className="markdown-content seat-card-body" />
-          </article>
-        ))}
-      </div>
-    </section>
-  );
-}
-
 export function Session({ session, live, onNavigate, onCancel, onAnswer, onDecide }: SessionProps) {
   const view = useMemo<SessionView | null>(
     () => live ?? (session.engine ? viewFromStored(session.engine) : null),
     [live, session.engine],
   );
-  const [answer, setAnswer] = useState("");
   const [showExport, setShowExport] = useState(false);
+  // Derived from the run itself, so the analysis panel has something to show
+  // whether or not the review pass ran.
+  // The analysis is of a finished debate, so it is computed once the record
+  // exists and not before. Keyed on the parts it reads rather than on the whole
+  // view: during a run the view changes with every streamed token, and
+  // re-counting every word of the transcript on each one was pure waste. After
+  // the record no more tokens arrive, so these only move on the review's own
+  // events.
+  const record = view?.record ?? null;
+  const rounds = view?.rounds;
+  const board = view?.board ?? null;
+  const convergences = view?.convergences;
+  const liveCost = view?.cost ?? null;
+  const seats = session.engine?.seats;
+  const metrics = useMemo(
+    () =>
+      record
+        ? sessionMetrics({
+            names: Object.fromEntries((seats ?? []).map((seat) => [seat.id, seat.name])),
+            rounds: (rounds ?? []).map((round) => ({
+              kind: round.kind,
+              entries: round.entries.map((turn) => ({
+                seat: turn.seatId,
+                name: turn.name,
+                model: turn.model,
+                content: turn.text,
+                structured: turn.structured,
+                tool_uses: turn.toolUses,
+                usage: turn.usage ?? {
+                  input: 0,
+                  output: 0,
+                  reasoning: 0,
+                  cached_input: 0,
+                  cache_write: 0,
+                },
+              })),
+            })),
+            board,
+            convergences: convergences ?? [],
+            record,
+            cost: liveCost,
+          })
+        : null,
+    [record, rounds, board, convergences, liveCost, seats],
+  );
+  // Whether peer scores are coming, came, or were never going to. The estimate
+  // says if the review was part of the run; `done` says if it has finished.
+  const reviewStatus: ReviewStatus =
+    view?.estimate?.review === false ? "off" : view?.done ? "done" : "pending";
   const running = Boolean(live && !live.done);
   const status = running
     ? "running"
@@ -717,9 +578,39 @@ export function Session({ session, live, onNavigate, onCancel, onAnswer, onDecid
               {view.phase ? `${view.phase} in progress` : "Convening the council"}
             </p>
           )}
-          {view?.rounds.map((round) => (
-            <RoundSection key={round.key} round={round} />
-          ))}
+          {view?.record?.how_it_went?.trim() && (
+            <section className="record-block">
+              <SectionRule label="How the debate went" />
+              <Markdown
+                content={view.record.how_it_went}
+                className="markdown-content record-answer"
+              />
+            </section>
+          )}
+          {view && metrics && (
+            <ReviewPanel
+              peerEval={view.peerEval}
+              argGraph={view.argGraph}
+              metrics={metrics}
+              status={reviewStatus}
+            />
+          )}
+          {view && view.rounds.length > 0 && (
+            <button
+              type="button"
+              className="transcript-link"
+              onClick={() => onNavigate("transcript", session.id)}
+            >
+              <span className="transcript-link-label">
+                {running ? "Follow the debate as it happens" : "Read the full transcript"}
+              </span>
+              <span className="transcript-link-meta">
+                {view.rounds.length} rounds, {view.rounds.reduce((n, r) => n + r.entries.length, 0)}{" "}
+                turns
+              </span>
+              <span aria-hidden="true">&rarr;</span>
+            </button>
+          )}
           {moderatorNotes.length > 0 && (
             <section className="session-panel">
               <SectionRule label="Moderator" />
@@ -770,81 +661,7 @@ export function Session({ session, live, onNavigate, onCancel, onAnswer, onDecid
         />
       </ChamberSurface>
 
-      <ChamberSurface
-        open={Boolean(view?.pendingQuestion)}
-        onClose={() => undefined}
-        ariaLabel="The moderator has a question"
-        kicker="Moderator"
-        dismissOnEscape={false}
-        dismissOnScrim={false}
-      >
-        <div className="p-6 space-y-4">
-          <p className="text-gray-100">{view?.pendingQuestion?.question}</p>
-          <textarea
-            value={answer}
-            onChange={(e) => setAnswer(e.target.value)}
-            rows={3}
-            className="elegant-input w-full"
-            placeholder="Your answer"
-          />
-          <div className="flex justify-end gap-2">
-            <button
-              type="button"
-              className="session-control-button"
-              disabled={!answer.trim()}
-              onClick={() => {
-                const q = view?.pendingQuestion;
-                if (!q) return;
-                void onAnswer(session.id, q.id, answer.trim());
-                setAnswer("");
-              }}
-            >
-              Answer
-            </button>
-          </div>
-        </div>
-      </ChamberSurface>
-
-      <ChamberSurface
-        open={Boolean(view?.pendingApproval) && !view?.pendingQuestion}
-        onClose={() => undefined}
-        ariaLabel="A seat wants to run a tool"
-        kicker="Tool approval"
-        dismissOnEscape={false}
-        dismissOnScrim={false}
-      >
-        <div className="p-6 space-y-4">
-          <p className="text-gray-100">
-            <strong>{view?.pendingApproval?.seatId}</strong> wants to run{" "}
-            <code>{view?.pendingApproval?.call.name}</code>
-          </p>
-          <pre className="tool-chip-output">
-            {JSON.stringify(view?.pendingApproval?.call.arguments ?? {}, null, 2)}
-          </pre>
-          <div className="flex justify-end gap-2">
-            <button
-              type="button"
-              className="button-ghost"
-              onClick={() => {
-                const a = view?.pendingApproval;
-                if (a) void onDecide(session.id, a.id, false);
-              }}
-            >
-              Deny
-            </button>
-            <button
-              type="button"
-              className="session-control-button"
-              onClick={() => {
-                const a = view?.pendingApproval;
-                if (a) void onDecide(session.id, a.id, true);
-              }}
-            >
-              Allow
-            </button>
-          </div>
-        </div>
-      </ChamberSurface>
+      <RunPrompts sessionId={session.id} view={view} onAnswer={onAnswer} onDecide={onDecide} />
     </div>
   );
 }

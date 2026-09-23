@@ -32,6 +32,12 @@ pub struct DecisionRecord {
     pub open_questions: Vec<String>,
     pub next_actions: Vec<String>,
     pub what_changed: String,
+    /// How the debate actually went, in prose: who pushed on whom, where it
+    /// stuck, what settled it. `what_changed` is the before-and-after in two
+    /// sentences; this is the account of the argument that produced it.
+    /// Empty on a session written by an engine that predates the review pass.
+    #[serde(default)]
+    pub how_it_went: String,
     /// Seat id → vote (an option, or endorse / dissent).
     pub votes: BTreeMap<String, String>,
     pub cost: Option<CostSnapshot>,
@@ -106,6 +112,11 @@ pub fn to_markdown(
     }
     section(&mut out, "Open questions", &record.open_questions);
     section(&mut out, "Next actions", &record.next_actions);
+    if !record.how_it_went.trim().is_empty() {
+        out.push_str("\n## How the debate went\n\n");
+        out.push_str(record.how_it_went.trim());
+        out.push('\n');
+    }
     if !record.what_changed.trim().is_empty() {
         out.push_str("\n## What changed\n\n");
         out.push_str(record.what_changed.trim());
@@ -188,6 +199,7 @@ mod tests {
             open_questions: vec![],
             next_actions: vec!["do it".into()],
             what_changed: "a moved".into(),
+            how_it_went: "b pushed on a, a gave ground on cost.".into(),
             votes,
             cost: None,
         };
@@ -216,6 +228,7 @@ mod tests {
             open_questions: vec![],
             next_actions: vec![],
             what_changed: String::new(),
+            how_it_went: String::new(),
             votes: BTreeMap::new(),
             cost: None,
         };

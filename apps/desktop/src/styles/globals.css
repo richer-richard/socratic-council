@@ -3641,6 +3641,16 @@ textarea.workstation-input {
     background 0.2s ease;
 }
 
+/* The placeholder is a single line, always. It used to be long enough to wrap
+   at this width, and because the auto-resize sizes the box to scrollHeight the
+   whole composer grew to two rows before a character was typed. Clipping beats
+   reflowing the control: keep hints in .workstation-input-help below. */
+textarea.workstation-input::placeholder {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .workstation-input-help {
   font-family: var(--font-mono);
   margin-top: -0.2rem;
@@ -3933,6 +3943,55 @@ textarea.workstation-input {
 }
 
 /* Flat agent list (redesigned right sidebar) */
+/* The moderator and utility chairs, above the seats and separated by a rule so
+   the rack reads as "two chairs, then the council" rather than a ten-row list.
+   Each row is a button into Settings > Council, which is where they live. */
+.workstation-chair-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  padding: 0.35rem 0 0.5rem;
+  border-bottom: 1px solid var(--line-soft);
+}
+.workstation-chair-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.6rem;
+  width: 100%;
+  padding: 0.4rem 0.6rem;
+  border-radius: 0;
+  text-align: left;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease;
+}
+.workstation-chair-row:hover {
+  background: rgba(245, 197, 66, 0.08);
+}
+.workstation-chair-row:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(245, 197, 66, 0.35);
+}
+.workstation-chair-label {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  font-weight: 500;
+  color: var(--ink-500);
+}
+.workstation-chair-model {
+  font-family: var(--font-mono);
+  font-size: 0.55rem;
+  color: var(--ink-500);
+  opacity: 0.65;
+  white-space: nowrap;
+}
+.workstation-chair-row:hover .workstation-chair-label,
+.workstation-chair-row:hover .workstation-chair-model {
+  color: #f5c542;
+  opacity: 1;
+}
+
 .workstation-agent-list {
   display: flex;
   flex-direction: column;
@@ -5276,4 +5335,450 @@ textarea.workstation-input {
 .seat-card-body p + p,
 .record-answer p + p {
   margin-top: 0.7rem;
+}
+
+/* =========================================================================== */
+/* SESSION SUMMARY: THE ANALYSIS PANEL                                         */
+/* =========================================================================== */
+
+/* One panel, four views. The glyph row is the labelling, so the panel body
+   keeps the full width for content instead of spending it on four headings. */
+.review-panel {
+  /* margin-block only: the column centres its children with margin-inline,
+     and the shorthand was zeroing that out and pinning the panel left. */
+  margin-block-start: 1.6rem;
+  border-top: 1px solid var(--line-soft);
+  padding-top: 0.9rem;
+}
+
+/* Prose is measured, data is not. The column caps its children at 88ch so
+   paragraphs stay readable, which leaves a table or a graph sitting narrow in
+   a wide column with dead space beside it. These two take the whole width. */
+.session-main > .review-panel,
+.session-main > .transcript-link {
+  max-width: none;
+}
+
+.review-switch {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin-bottom: 1rem;
+}
+
+.review-switch-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.1rem;
+  height: 2.1rem;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 0;
+  color: rgba(232, 232, 239, 0.45);
+  background: rgba(15, 23, 42, 0.55);
+  transition:
+    color 0.16s ease,
+    border-color 0.16s ease,
+    background 0.16s ease;
+}
+.review-switch-button:hover {
+  color: rgba(232, 232, 239, 0.9);
+  border-color: rgba(255, 255, 255, 0.18);
+}
+.review-switch-button.is-active {
+  color: #f5c542;
+  border-color: rgba(245, 197, 66, 0.55);
+  background: rgba(245, 197, 66, 0.08);
+}
+.review-switch-button:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(245, 197, 66, 0.35);
+}
+
+.review-switch-label {
+  margin-left: 0.5rem;
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  color: rgba(232, 232, 239, 0.55);
+}
+
+.review-panel-stage {
+  /* No min-height: the vote view is a third the height of the matrix, and
+     reserving the taller one's space left a band of nothing under the short
+     views. The panel shrinks to what it holds. */
+  min-height: 0;
+}
+.review-panel-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+}
+
+.review-note {
+  font-size: 0.75rem;
+  line-height: 1.55;
+  color: rgba(232, 232, 239, 0.45);
+  max-width: 62ch;
+}
+
+/* --- The score matrix ------------------------------------------------------ */
+
+.review-grid-wrap {
+  overflow-x: auto;
+}
+.review-grid {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+}
+.review-caption {
+  caption-side: top;
+  text-align: left;
+  padding-bottom: 0.7rem;
+  font-family: var(--font-sans);
+  font-size: 0.75rem;
+  line-height: 1.55;
+  color: rgba(232, 232, 239, 0.45);
+  max-width: 68ch;
+}
+.review-grid th {
+  font-weight: 500;
+  color: rgba(232, 232, 239, 0.5);
+  text-align: right;
+  padding: 0 0.5rem 0.5rem;
+  white-space: nowrap;
+}
+.review-grid td {
+  text-align: right;
+  padding: 0.5rem 0.55rem;
+  /* A hairline in the page background, so the cells read as a grid of tiles
+     rather than one block of colour. */
+  border: 1px solid rgba(11, 15, 22, 0.9);
+  font-variant-numeric: tabular-nums;
+}
+.review-grid-seat {
+  text-align: left !important;
+  padding-right: 1.1rem !important;
+  max-width: 22ch;
+}
+.review-rank {
+  display: inline-block;
+  min-width: 1.4em;
+  color: rgba(245, 197, 66, 0.75);
+}
+.review-seat-name {
+  color: rgba(232, 232, 239, 0.85);
+}
+.review-seat-note {
+  display: block;
+  padding-top: 0.15rem;
+  font-family: var(--font-sans);
+  font-size: 0.68rem;
+  font-weight: 400;
+  line-height: 1.4;
+  color: rgba(232, 232, 239, 0.36);
+  white-space: normal;
+}
+
+/* --- The vote ------------------------------------------------------------- */
+
+.vote-bar {
+  display: flex;
+  height: 0.7rem;
+  width: 100%;
+  gap: 2px;
+}
+.vote-bar-seg {
+  display: block;
+  height: 100%;
+}
+.vote-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem 1.6rem;
+}
+.vote-legend li {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  font-size: 0.74rem;
+}
+.vote-legend-count {
+  font-family: var(--font-mono);
+  color: #f5c542;
+}
+.vote-legend-vote {
+  color: rgba(232, 232, 239, 0.85);
+}
+.vote-legend-seats {
+  color: rgba(232, 232, 239, 0.4);
+}
+
+.converge-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--line-soft);
+}
+.converge-row {
+  display: grid;
+  /* The track takes the free column. It used to be a fixed 6rem, which left a
+     96px bar sitting in a 1250px row with nothing beside it. */
+  grid-template-columns: 5.5rem minmax(0, 1fr) 6rem 14rem 7rem;
+  align-items: center;
+  gap: 0.9rem;
+  font-size: 0.72rem;
+}
+.converge-round {
+  font-family: var(--font-mono);
+  color: rgba(232, 232, 239, 0.6);
+}
+.converge-track {
+  display: block;
+  height: 0.35rem;
+  background: rgba(255, 255, 255, 0.06);
+}
+.converge-fill {
+  display: block;
+  height: 100%;
+  background: rgba(245, 197, 66, 0.55);
+}
+.converge-open,
+.converge-moved {
+  color: rgba(232, 232, 239, 0.42);
+}
+.converge-verdict {
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  text-align: right;
+  color: rgba(245, 197, 66, 0.6);
+}
+
+/* --- The graphs ----------------------------------------------------------- */
+
+.graph-stage {
+  display: flex;
+  justify-content: center;
+  padding: 0.4rem 0;
+}
+.graph-stage.is-scroll {
+  /* Centred when the map fits, scrolled from the left when it does not. */
+  justify-content: safe center;
+  overflow-x: auto;
+  padding-bottom: 0.8rem;
+}
+.critique-svg {
+  width: 100%;
+  max-width: 32rem;
+  height: auto;
+}
+.graph-label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  fill: rgba(232, 232, 239, 0.88);
+}
+.graph-sublabel {
+  font-family: var(--font-mono);
+  font-size: 8.5px;
+  fill: rgba(232, 232, 239, 0.45);
+}
+.critique-node,
+.arg-node {
+  cursor: pointer;
+}
+.critique-node:focus-visible rect,
+.arg-node:focus-visible rect {
+  outline: 2px solid rgba(245, 197, 66, 0.6);
+}
+
+.graph-key {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem 1.1rem;
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  color: rgba(232, 232, 239, 0.45);
+}
+.graph-key-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.graph-key-swatch {
+  width: 0.65rem;
+  height: 0.65rem;
+}
+.graph-key-note {
+  color: rgba(232, 232, 239, 0.3);
+}
+
+.critique-quotes {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  padding-top: 0.7rem;
+  border-top: 1px solid var(--line-soft);
+}
+.critique-quotes li {
+  display: grid;
+  grid-template-columns: 9rem minmax(0, 1fr);
+  gap: 0.9rem;
+  align-items: baseline;
+}
+.critique-from {
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+}
+.critique-text {
+  font-size: 0.78rem;
+  line-height: 1.55;
+  color: rgba(232, 232, 239, 0.7);
+}
+
+.arg-detail {
+  padding-top: 0.7rem;
+  border-top: 1px solid var(--line-soft);
+}
+.arg-detail-kind {
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  color: rgba(245, 197, 66, 0.75);
+}
+.arg-detail-text {
+  padding-top: 0.3rem;
+  font-size: 0.85rem;
+  line-height: 1.6;
+  color: rgba(232, 232, 239, 0.85);
+  max-width: 70ch;
+}
+
+/* --- The way through to the transcript ------------------------------------ */
+
+.transcript-link {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: 0.9rem;
+  width: 100%;
+  margin-top: 1.6rem;
+  padding: 0.9rem 1rem;
+  border: 1px solid var(--line-soft);
+  border-radius: 0;
+  text-align: left;
+  color: rgba(232, 232, 239, 0.7);
+  background: rgba(15, 23, 42, 0.45);
+  transition:
+    border-color 0.16s ease,
+    color 0.16s ease,
+    background 0.16s ease;
+}
+.transcript-link:hover {
+  border-color: rgba(245, 197, 66, 0.45);
+  color: #f5c542;
+  background: rgba(245, 197, 66, 0.06);
+}
+.transcript-link:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(245, 197, 66, 0.35);
+}
+.transcript-link-label {
+  font-size: 0.85rem;
+}
+.transcript-link-meta {
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  color: rgba(232, 232, 239, 0.38);
+}
+
+@media (max-width: 900px) {
+  .converge-row {
+    grid-template-columns: 4.5rem minmax(0, 1fr);
+    row-gap: 0.2rem;
+  }
+  .converge-verdict {
+    text-align: left;
+  }
+  .critique-quotes li {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0.2rem;
+  }
+}
+
+/* The one control in settings that destroys data. It is marked as such rather
+   than styled like the rest, because the rest are all reversible. */
+.settings-card.is-danger {
+  border-color: rgba(248, 113, 113, 0.28);
+}
+.button-danger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.55rem 0.95rem;
+  border: 1px solid rgba(248, 113, 113, 0.45);
+  border-radius: 0;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: #fca5a5;
+  background: rgba(248, 113, 113, 0.08);
+  transition:
+    background 0.16s ease,
+    color 0.16s ease,
+    border-color 0.16s ease;
+}
+.button-danger:hover:not(:disabled) {
+  color: #0b0f16;
+  background: #f87171;
+  border-color: #f87171;
+}
+.button-danger:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.button-danger:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(248, 113, 113, 0.3);
+}
+
+/* The transcript's rail: where you are in a long run, and the way to jump. */
+.round-index {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+.round-index-round {
+  display: block;
+  padding: 0.7rem 0.8rem;
+  border-left: 2px solid transparent;
+  color: rgba(232, 232, 239, 0.7);
+  transition:
+    border-color 0.16s ease,
+    background 0.16s ease;
+}
+.round-index-round:hover {
+  border-left-color: rgba(245, 197, 66, 0.6);
+  background: rgba(245, 197, 66, 0.05);
+}
+.round-index-label {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.06em;
+  color: rgba(232, 232, 239, 0.88);
+}
+.round-index-count {
+  display: block;
+  padding-top: 0.1rem;
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  color: rgba(245, 197, 66, 0.55);
+}
+.round-index-seats {
+  display: block;
+  padding-top: 0.25rem;
+  font-size: 0.7rem;
+  line-height: 1.45;
+  color: rgba(232, 232, 239, 0.34);
 }

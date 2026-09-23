@@ -84,7 +84,18 @@ fn answer_for(body: &Value) -> (String, Option<Value>) {
         "BOARD" => json!({"settled":["it runs"],"disagreements":[],"evidence":[{"claim":"notes.txt says checked","source":"read_file","by":"a"}],"open_questions":["is it fast"],"positions":{"a":"yes","b":"yes"}}).to_string(),
         "CONVERGENCE" => json!({"moved":[],"open_disagreements":0,"recommend":"close","why":"nothing moved"}).to_string(),
         "REVISION" => json!({"position":format!("{model} still says yes"),"changed":"nothing","final_confidence":0.8,"vote":"endorse"}).to_string(),
-        "RECORD" => json!({"answer":"The fake council is effective.","confidence":0.8,"options_considered":[],"dissent":[],"assumptions":["the fake is honest"],"evidence":[{"claim":"notes.txt says checked","source":"read_file"}],"open_questions":["is it fast"],"next_actions":["ship it"],"what_changed":"Nothing moved; the tool check confirmed the claim."}).to_string(),
+        "RECORD" => json!({"answer":"The fake council is effective.","confidence":0.8,"options_considered":[],"dissent":[],"assumptions":["the fake is honest"],"evidence":[{"claim":"notes.txt says checked","source":"read_file"}],"open_questions":["is it fast"],"next_actions":["ship it"],"what_changed":"Nothing moved; the tool check confirmed the claim.","how_it_went":"a opened on cost and read notes.txt before asserting. b agreed early, so the round turned on evidence rather than disagreement."}).to_string(),
+        // The evaluator is asked about everyone; parse drops the self-review,
+        // so one canned reply serves every seat.
+        "REVIEW" => json!({"evaluations":[
+            {"seat":"a","scores":{"rigor":70,"evidence":60,"novelty":50,"civility":90,"on_topic":80},"overall":68,"stance":"agree","critique":"Checked the file before claiming. Thin on alternatives."},
+            {"seat":"b","scores":{"rigor":50,"evidence":40,"novelty":30,"civility":85,"on_topic":75},"overall":46,"stance":"mixed","critique":"Asserted without sourcing. Never engaged the cost lens."}
+        ]}).to_string(),
+        "MAP" => json!({"fragments":[
+            {"kind":"claim","text":"The fake council is effective","by":"a"},
+            {"kind":"evidence","text":"notes.txt says checked","by":"a","target":"The fake council is effective","relation":"supports","rationale":"a read the file"},
+            {"kind":"rebuttal","text":"Being fake limits what it proves","by":"b","target":"The fake council is effective","relation":"rebuts","rationale":"b doubts the setup"}
+        ]}).to_string(),
         other => format!("{{\"unexpected\":\"{other}\"}}"),
     };
     (text, None)
@@ -252,13 +263,30 @@ async fn whole_protocol_runs_with_a_tool_call_and_writes_a_v2_session() {
             "Positions",
             "Cross-examination 1",
             "Revision",
-            "Record"
+            "Record",
+            "Review"
         ]
     );
     assert!(events
         .iter()
         .any(|e| matches!(e, DebateEvent::Plan { plan, .. } if plan.principals() == ["a", "b"])));
-    assert!(events.iter().any(|e| matches!(e, DebateEvent::Estimate { estimate } if estimate.calls == 1 + 2 + (2 + 2) + 2 + 1)));
+
+    // The record goes out before the review starts, and the review's results
+    // after it: a review can take minutes, and the record must not wait on it.
+    let at = |pred: &dyn Fn(&DebateEvent) -> bool| events.iter().position(pred);
+    let record_at = at(&|e| matches!(e, DebateEvent::Record { .. })).expect("a record");
+    let review_at = at(&|e| matches!(e, DebateEvent::Phase { name } if name == "Review"))
+        .expect("a review phase");
+    let scores_at = at(&|e| matches!(e, DebateEvent::PeerEvalReady { .. })).expect("peer scores");
+    assert!(
+        record_at < review_at,
+        "record at {record_at}, review at {review_at}"
+    );
+    assert!(review_at < scores_at);
+    assert!(events
+        .iter()
+        .any(|e| matches!(e, DebateEvent::Estimate { estimate } if estimate.review)));
+    assert!(events.iter().any(|e| matches!(e, DebateEvent::Estimate { estimate } if estimate.calls == 1 + 2 + (2 + 2) + 2 + 1 + 2 + 3)));
     let positions = events
         .iter()
         .filter(|e| {
@@ -299,7 +327,7 @@ async fn whole_protocol_runs_with_a_tool_call_and_writes_a_v2_session() {
     let record = events
         .iter()
         .find_map(|e| match e {
-            DebateEvent::Record { record } => Some(record.clone()),
+            DebateEvent::Record { record } => Some(record.as_ref().clone()),
             _ => None,
         })
         .expect("a record");
@@ -352,6 +380,40 @@ async fn whole_protocol_runs_with_a_tool_call_and_writes_a_v2_session() {
         3,
         "positions, one cross round, revision"
     );
+    // The review pass landed in the document, and the matrix means what it says:
+    // two seats, each graded once by the other, nobody grading themselves.
+    assert!(!doc["record"]["how_it_went"]
+        .as_str()
+        .unwrap_or("")
+        .is_empty());
+    let peer = &doc["peerEval"];
+    assert_eq!(peer["seats"], json!(["a", "b"]));
+    assert_eq!(peer["critiques"].as_array().unwrap().len(), 2);
+    assert!(peer["failed"].as_array().unwrap().is_empty());
+    assert!(peer["critiques"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|c| c["evaluator"] != c["target"]));
+    assert_eq!(peer["per_seat"]["a"]["reviews_received"], 1);
+    assert_eq!(
+        peer["per_seat"]["a"]["rank"], 1,
+        "a outscored b, so a ranks first"
+    );
+    assert_eq!(peer["per_seat"]["b"]["rank"], 2);
+    assert_eq!(peer["per_seat"]["a"]["average"]["civility"], 90);
+
+    // The map was extracted once per round and merged: the same three points
+    // repeated across three rounds collapse to three nodes and two edges.
+    let graph = &doc["argGraph"];
+    assert_eq!(graph["nodes"].as_array().unwrap().len(), 3);
+    assert_eq!(graph["edges"].as_array().unwrap().len(), 2);
+    assert!(graph["edges"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|e| e["relation"] == "rebuts"));
+
     let stored = SessionStore::at(sessions, [7u8; 32], StoreLocation::CliOwn)
         .load("sc-test-1")
         .expect("the session was saved");
@@ -414,7 +476,7 @@ async fn a_budget_stop_after_the_plan_still_writes_a_record() {
     let record = events
         .iter()
         .find_map(|e| match e {
-            DebateEvent::Record { record } => Some(record.clone()),
+            DebateEvent::Record { record } => Some(record.as_ref().clone()),
             _ => None,
         })
         .expect("a record");

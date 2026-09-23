@@ -117,6 +117,10 @@ pub struct ProtocolPolicy {
     pub tiers: RoundTiers,
     /// Seats streaming at once inside a round.
     pub concurrency: usize,
+    /// Run the review pass after the record: peer evaluation and the argument
+    /// map. Off means the session still finishes and the summary still renders
+    /// from the metrics the protocol produces anyway.
+    pub review: bool,
 }
 
 impl Default for ProtocolPolicy {
@@ -127,6 +131,7 @@ impl Default for ProtocolPolicy {
             interactive: true,
             tiers: RoundTiers::default(),
             concurrency: 4,
+            review: true,
         }
     }
 }

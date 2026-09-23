@@ -17,6 +17,8 @@ describe("recordToMarkdown", () => {
       open_questions: [],
       next_actions: ["Revisit in Q2"],
       what_changed: "Grace moved from strong yes to conditional yes.",
+      how_it_went:
+        "George opened on cost and Grace pushed back on the timeline. The room turned once Cathy sourced the launch figures.",
       votes: { george: "No", grace: "Yes" },
       cost: {
         rows: [],

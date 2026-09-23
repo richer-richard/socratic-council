@@ -8,6 +8,7 @@ import { Home } from "./pages/Home";
 import { ProjectDetail } from "./pages/ProjectDetail";
 import { Session } from "./pages/Session";
 import { Settings } from "./pages/Settings";
+import { Transcript } from "./pages/Transcript";
 import { loadSessionAttachmentDocuments, type ComposerAttachment } from "./services/attachments";
 import {
   DEFAULT_LAUNCH,
@@ -32,15 +33,21 @@ import { initSessionBlobStore, registerSessionBlobHooks } from "./services/sessi
 import {
   archiveDiscussionSession,
   createDiscussionSession,
+  deleteAllDiscussionSessions,
   deleteDiscussionSessionWithAttachments,
   listSessionSummaries,
   loadDiscussionSession,
   restoreDiscussionSession,
   stabilizeStoredSessions,
   touchDiscussionSession,
+  type BulkDeleteResult,
   type DiscussionSession,
 } from "./services/sessions";
-import { importEngineSession, importSharedSessions } from "./services/sessionSync";
+import {
+  deleteSharedSession,
+  importEngineSession,
+  importSharedSessions,
+} from "./services/sessionSync";
 import { describeSaveFailure } from "./services/storageErrors";
 import {
   getDecryptFailureCount,
@@ -53,6 +60,7 @@ import {
   cancelEngineRun,
   decideEngineTool,
   forgetEngineRun,
+  liveRunIds,
   startEngineRun,
   useEngineRun,
 } from "./session/useEngineRuns";
@@ -69,7 +77,7 @@ function readProxyPassword(): string | undefined {
   }
 }
 
-export type Page = "home" | "settings" | "chat" | "project";
+export type Page = "home" | "settings" | "chat" | "transcript" | "project";
 
 export interface AppState {
   currentPage: Page;
@@ -315,7 +323,10 @@ export default function App() {
 
   const navigate = useCallback(
     (page: Page, sessionId?: string) => {
-      if (page === "chat") {
+      // Both session surfaces need the session loaded, so they take the same
+      // path: the transcript is a second view of the same thing, not a
+      // separate destination that could be reached without one.
+      if (page === "chat" || page === "transcript") {
         const targetSessionId = sessionId ?? state.currentSessionId;
         if (!targetSessionId) return;
 
@@ -326,7 +337,7 @@ export default function App() {
         setActiveSession(nextSession);
         refreshAll();
         setState((prev) => ({
-          currentPage: "chat",
+          currentPage: page,
           currentSessionId: nextSession.id,
           currentProjectId: nextSession.projectId ?? prev.currentProjectId,
         }));
@@ -403,13 +414,44 @@ export default function App() {
 
         return {
           ...current,
-          currentPage: current.currentPage === "chat" ? "home" : current.currentPage,
+          // The transcript points at the same session, so it has to fall back
+          // too, or deleting the session leaves an empty page behind.
+          currentPage:
+            current.currentPage === "chat" || current.currentPage === "transcript"
+              ? "home"
+              : current.currentPage,
           currentSessionId: null,
         };
       });
     },
     [refreshAll],
   );
+
+  // Every stored session except the ones still running. A live run would be
+  // written straight back when the engine finishes, so it is kept and named in
+  // the report instead of being deleted and quietly resurrected.
+  const handleDeleteAllSessions = useCallback(async (): Promise<BulkDeleteResult> => {
+    const live = new Set(liveRunIds());
+    const result = await deleteAllDiscussionSessions({
+      skip: live,
+      deleteShared: deleteSharedSession,
+    });
+    refreshAll();
+    setActiveSession((current) => (current && !live.has(current.id) ? null : current));
+    setState((current) =>
+      current.currentSessionId && !live.has(current.currentSessionId)
+        ? {
+            ...current,
+            currentPage:
+              current.currentPage === "chat" || current.currentPage === "transcript"
+                ? "home"
+                : current.currentPage,
+            currentSessionId: null,
+          }
+        : current,
+    );
+    return result;
+  }, [refreshAll]);
 
   const handleArchiveSession = useCallback(
     (sessionId: string) => {
@@ -616,6 +658,7 @@ export default function App() {
             onArchiveSession={handleArchiveSession}
             onCreateSession={handleCreateSession}
             onDeleteSession={handleDeleteSession}
+            onDeleteAllSessions={handleDeleteAllSessions}
             onOpenSession={handleOpenSession}
             onRestoreSession={handleRestoreSession}
             onCreateProject={handleCreateProject}
@@ -634,6 +677,19 @@ export default function App() {
           <ErrorBoundary label="session">
             <Session
               key={activeSession.id}
+              session={activeSession}
+              live={liveView}
+              onNavigate={navigate}
+              onCancel={(id) => void cancelEngineRun(id)}
+              onAnswer={answerEngineQuestion}
+              onDecide={decideEngineTool}
+            />
+          </ErrorBoundary>
+        )}
+        {state.currentPage === "transcript" && activeSession && (
+          <ErrorBoundary label="transcript">
+            <Transcript
+              key={`${activeSession.id}-transcript`}
               session={activeSession}
               live={liveView}
               onNavigate={navigate}

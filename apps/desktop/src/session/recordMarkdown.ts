@@ -34,6 +34,8 @@ export function recordToMarkdown(record: EngineDecisionRecord): string {
   );
   out += section("Open questions", record.open_questions.map(bullet));
   out += section("Next actions", record.next_actions.map(bullet));
+  if (record.how_it_went?.trim())
+    out += `## How the debate went\n\n${record.how_it_went.trim()}\n\n`;
   if (record.what_changed.trim()) out += `## What changed\n\n${record.what_changed.trim()}\n\n`;
   const votes = Object.entries(record.votes);
   out += section(

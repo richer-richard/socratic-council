@@ -563,6 +563,15 @@ function normalizeEngineData(record: Record<string, unknown>): EngineSessionData
     ) as unknown as EngineSessionData["convergences"],
     record: (isObject(source.record) ? source.record : null) as EngineSessionData["record"],
     document: str(source.document),
+    // The review pass. Absent when it was turned off, so `null` is a normal
+    // value here rather than a fault. Both are checked for the one container
+    // shape the surfaces index on, and otherwise passed through whole.
+    peerEval: (isObject(source.peerEval) && Array.isArray(source.peerEval.seats)
+      ? source.peerEval
+      : null) as EngineSessionData["peerEval"],
+    argGraph: (isObject(source.argGraph) && Array.isArray(source.argGraph.nodes)
+      ? source.argGraph
+      : null) as EngineSessionData["argGraph"],
     costs: (isObject(source.costs) ? source.costs : null) as EngineSessionData["costs"],
     stoppedEarly: str(source.stoppedEarly),
     seats,
@@ -2039,17 +2048,23 @@ export function loadDiscussionSession(id: string): DiscussionSession | null {
   }
 }
 
-export function deleteDiscussionSession(id: string): boolean {
+/**
+ * Delete one session locally. `notify: false` skips the onDeleted hook, for a
+ * caller that removes the shared-store copy itself and needs to await it.
+ */
+export function deleteDiscussionSession(id: string, options: { notify?: boolean } = {}): boolean {
   const blobs = getBlobStorage();
   if (!blobs) return false;
 
   try {
     blobs.removeItem(createSessionStorageKey(id));
     writeIndex(readIndex().filter((entry) => entry.id !== id));
-    try {
-      sessionHooks.onDeleted?.(id);
-    } catch (error) {
-      console.warn("[sessions] onDeleted hook failed", error);
+    if (options.notify !== false) {
+      try {
+        sessionHooks.onDeleted?.(id);
+      } catch (error) {
+        console.warn("[sessions] onDeleted hook failed", error);
+      }
     }
     return true;
   } catch (error) {
@@ -2058,8 +2073,11 @@ export function deleteDiscussionSession(id: string): boolean {
   }
 }
 
-export async function deleteDiscussionSessionWithAttachments(id: string): Promise<boolean> {
-  const deleted = deleteDiscussionSession(id);
+export async function deleteDiscussionSessionWithAttachments(
+  id: string,
+  options: { notify?: boolean } = {},
+): Promise<boolean> {
+  const deleted = deleteDiscussionSession(id, options);
   if (!deleted) return false;
 
   try {
@@ -2069,6 +2087,88 @@ export async function deleteDiscussionSessionWithAttachments(id: string): Promis
   }
 
   return true;
+}
+
+/** What a bulk delete did, so the report can say exactly that. */
+export interface BulkDeleteResult {
+  deleted: number;
+  /** Sessions whose local copy could not be removed. They are still listed. */
+  failed: string[];
+  /** Sessions left alone because their run is still in flight. */
+  skipped: string[];
+  /** Deleted here, but the copy in the shared store the CLI reads remains. */
+  sharedFailed: string[];
+}
+
+/** The bulk delete's result as one plain report, claiming nothing it did not do. */
+export function describeBulkDelete(result: BulkDeleteResult): string {
+  const plural = (n: number, one: string, many: string) => (n === 1 ? one : many);
+  const parts: string[] = [];
+  if (result.deleted === 0 && result.failed.length === 0 && result.skipped.length === 0) {
+    return "There was nothing to delete.";
+  }
+  parts.push(`Deleted ${result.deleted} ${plural(result.deleted, "session", "sessions")}.`);
+  if (result.skipped.length > 0) {
+    const n = result.skipped.length;
+    parts.push(`Kept ${n} still running, ${plural(n, "it is", "they are")} in the list.`);
+  }
+  if (result.failed.length > 0) {
+    const n = result.failed.length;
+    parts.push(`${n} could not be removed and ${plural(n, "is", "are")} still listed.`);
+  }
+  if (result.sharedFailed.length > 0) {
+    const n = result.sharedFailed.length;
+    parts.push(
+      `The command line still has ${n} of them, because ${plural(n, "its copy", "their copies")} could not be removed.`,
+    );
+  }
+  return parts.join(" ");
+}
+
+/**
+ * Delete every session: the blob, its index entry, its attachments and the
+ * file in the shared engine store the CLI reads.
+ *
+ * One session at a time through the same path as a single delete, rather than
+ * clearing the stores wholesale: slower, and the only version that cannot
+ * leave an orphan behind in whichever store the wipe missed.
+ *
+ * `skip` keeps sessions whose run is still in flight: deleting one would only
+ * see it re-imported when the engine finishes and writes it back. With
+ * `deleteShared` the shared-store copy is removed by the caller's function and
+ * awaited, instead of by the fire-and-forget hook, so a failure is counted
+ * rather than reported as a clean delete.
+ */
+export async function deleteAllDiscussionSessions(
+  options: {
+    skip?: ReadonlySet<string>;
+    deleteShared?: (id: string) => Promise<boolean>;
+  } = {},
+): Promise<BulkDeleteResult> {
+  const result: BulkDeleteResult = { deleted: 0, failed: [], skipped: [], sharedFailed: [] };
+  for (const { id } of readIndex()) {
+    if (options.skip?.has(id)) {
+      result.skipped.push(id);
+      continue;
+    }
+    try {
+      const deleted = await deleteDiscussionSessionWithAttachments(id, {
+        notify: !options.deleteShared,
+      });
+      if (!deleted) {
+        result.failed.push(id);
+        continue;
+      }
+      result.deleted += 1;
+      if (options.deleteShared && !(await options.deleteShared(id))) {
+        result.sharedFailed.push(id);
+      }
+    } catch (error) {
+      console.error("Failed to delete session during a bulk delete:", id, error);
+      result.failed.push(id);
+    }
+  }
+  return result;
 }
 
 function updateArchivedState(id: string, archivedAt: number | null): DiscussionSession | null {
