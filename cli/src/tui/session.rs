@@ -13,7 +13,10 @@
 //! there would be one more box around content that is already bounded.
 
 use super::analysis::{self, AnalysisView};
-use super::{theme, App, SeatCard, SessionPage, SessionScreen, SideTab};
+use super::{
+    find_drawn, footer_hits, push_hit, theme, App, Click, Hit, SeatCard, SessionPage,
+    SessionScreen, SideTab,
+};
 use crate::deliberation::{Board, Convergence, DecisionRecord, Plan, Recommend, SeatRole};
 use crate::store::StoredMessage;
 use crate::text::sanitize_terminal as clean;
@@ -24,6 +27,7 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
 use ratatui::Frame;
+use std::cell::RefCell;
 use std::collections::BTreeMap;
 use unicode_width::UnicodeWidthStr;
 
@@ -40,6 +44,9 @@ const MEASURE: usize = 100;
 
 pub fn render(f: &mut Frame, area: Rect, app: &mut App) {
     let frame = app.frame;
+    let cmdline = app.cmdline.clone();
+    let hits = &app.hits;
+    let regions = &app.regions;
     let Some(s) = app.session.as_mut() else {
         return;
     };
@@ -65,7 +72,7 @@ pub fn render(f: &mut Frame, area: Rect, app: &mut App) {
     .split(area);
 
     let page = s.page();
-    render_header(f, rows[0], s, page, frame);
+    render_header(f, rows[0], s, page, frame, hits);
 
     let wide = rows[1].width >= RAIL_AT;
     let body = if wide {
@@ -73,30 +80,78 @@ pub fn render(f: &mut Frame, area: Rect, app: &mut App) {
     } else {
         Layout::horizontal([Constraint::Percentage(100)]).split(rows[1])
     };
-    render_main(f, body[0], s, page, frame);
+    // The reading column and the rail are text a drag can select, each on
+    // its own and no wider than its text.
+    let text = render_main(f, body[0], s, page, frame, hits);
+    regions.borrow_mut().push(text);
     if wide {
-        render_side(f, body[1], s, frame);
+        let rail = render_side(f, body[1], s, frame, hits);
+        regions.borrow_mut().push(rail);
     }
-    render_footer(f, rows[2], s, page);
+    let asking = s.view.pending_question.is_some() || s.view.pending_approval.is_some();
+    match cmdline.as_deref().filter(|_| !asking) {
+        Some(typed) => render_cmdline(f, rows[2], typed, frame),
+        None => render_footer(f, rows[2], s, page, hits),
+    }
 
     if let Some(q) = s.view.pending_question.clone() {
-        render_question(f, area, &q.question, &s.answer, frame);
+        let rect = render_question(f, area, &q.question, &s.answer, frame);
+        push_hit(hits, rect, Click::Nothing);
     } else if let Some(a) = s.view.pending_approval.clone() {
         let who = s
             .seat(&a.seat_id)
             .map(|c| c.name.clone())
             .unwrap_or(a.seat_id.clone());
-        render_approval(f, area, &who, &a.call.name, &a.call.arguments.to_string());
-    } else if s.ui.help {
-        render_help(f, area);
+        let rect = render_approval(f, area, &who, &a.call.name, &a.call.arguments.to_string());
+        push_hit(hits, rect, Click::Nothing);
+        for (needle, key) in [("y allow", 'y'), ("n deny", 'n')] {
+            if let Some(at) = find_drawn(f.buffer_mut(), rect, needle) {
+                push_hit(
+                    hits,
+                    at,
+                    Click::Key(crossterm::event::KeyEvent::new(
+                        crossterm::event::KeyCode::Char(key),
+                        crossterm::event::KeyModifiers::NONE,
+                    )),
+                );
+            }
+        }
     }
+    if cmdline.is_some() && !asking {
+        // The list sits over the body, right above the command line.
+        super::render_slash_menu(f, app, rows[2], rows[1]);
+    }
+}
+
+/// The command line `/` opens, in place of the footer.
+fn render_cmdline(f: &mut Frame, area: Rect, typed: &str, frame: u64) {
+    let caret_on = frame % 16 < 8;
+    f.render_widget(
+        Paragraph::new(Line::from(vec![
+            Span::raw(" "),
+            Span::styled(clean(typed), Style::default().fg(theme::TEXT)),
+            Span::styled(
+                if caret_on { "▌" } else { " " },
+                Style::default().fg(theme::GOLD),
+            ),
+            Span::styled("   Esc closes", Style::default().fg(theme::DIM)),
+        ])),
+        area,
+    );
 }
 
 // ---------------------------------------------------------------------------
 // Header and footer
 // ---------------------------------------------------------------------------
 
-fn render_header(f: &mut Frame, area: Rect, s: &SessionScreen, page: SessionPage, frame: u64) {
+fn render_header(
+    f: &mut Frame,
+    area: Rect,
+    s: &SessionScreen,
+    page: SessionPage,
+    frame: u64,
+    hits: &RefCell<Vec<Hit>>,
+) {
     let live = s.is_live();
     let rows = Layout::vertical([
         Constraint::Length(1),
@@ -204,8 +259,21 @@ fn render_header(f: &mut Frame, area: Rect, s: &SessionScreen, page: SessionPage
 
     // Row two: which page, and where the run is.
     let mut tabs = vec![Span::raw(" ")];
+    let mut x = rows[1].x + 1;
     for p in [SessionPage::Summary, SessionPage::Transcript] {
         let on = p == page;
+        let w = p.label().width() as u16 + 2;
+        push_hit(
+            hits,
+            Rect {
+                x,
+                y: rows[1].y,
+                width: w,
+                height: 1,
+            },
+            Click::Page(p),
+        );
+        x += w + 1;
         tabs.push(Span::styled(
             format!(" {} ", p.label()),
             if on {
@@ -262,7 +330,13 @@ fn render_header(f: &mut Frame, area: Rect, s: &SessionScreen, page: SessionPage
     );
 }
 
-fn render_footer(f: &mut Frame, area: Rect, s: &SessionScreen, page: SessionPage) {
+fn render_footer(
+    f: &mut Frame,
+    area: Rect,
+    s: &SessionScreen,
+    page: SessionPage,
+    hits: &RefCell<Vec<Hit>>,
+) {
     // A handful of keys for the page you are on, cut to fit; `?` has the rest.
     let live = s.is_live();
     let mut hints: Vec<(&str, &str)> = Vec::new();
@@ -284,11 +358,13 @@ fn render_footer(f: &mut Frame, area: Rect, s: &SessionScreen, page: SessionPage
             hints.push(("g", "follow"));
         }
     }
+    hints.push(("/", "commands"));
     hints.push(("?", "keys"));
-    let mut line = theme::hint_bar(
+    let (mut line, spots) = theme::hint_bar_spots(
         &hints,
         area.width.saturating_sub(if live { 14 } else { 0 }) as usize,
     );
+    footer_hits(hits, area.x, area.y, &hints, &spots);
     if live {
         line.spans.push(Span::styled(
             "deliberating…",
@@ -302,7 +378,14 @@ fn render_footer(f: &mut Frame, area: Rect, s: &SessionScreen, page: SessionPage
 // Main column
 // ---------------------------------------------------------------------------
 
-fn render_main(f: &mut Frame, area: Rect, s: &mut SessionScreen, page: SessionPage, frame: u64) {
+fn render_main(
+    f: &mut Frame,
+    area: Rect,
+    s: &mut SessionScreen,
+    page: SessionPage,
+    frame: u64,
+    hits: &RefCell<Vec<Hit>>,
+) -> Rect {
     // Two columns of margin each side instead of a frame, and the reading
     // column centred in what is left once it reaches the measure.
     let room = area.width.saturating_sub(4);
@@ -332,6 +415,25 @@ fn render_main(f: &mut Frame, area: Rect, s: &mut SessionScreen, page: SessionPa
         s.scroll
     };
     f.render_widget(Paragraph::new(lines).scroll((scroll, 0)), inner);
+
+    // What the page drew that a click can act on, wherever the scroll put it.
+    if page == SessionPage::Summary {
+        for v in AnalysisView::ALL {
+            let tab = format!("{} {}", v.glyph(), v.label());
+            if let Some(at) = find_drawn(f.buffer_mut(), inner, &tab) {
+                push_hit(hits, at, Click::Analysis(v));
+            }
+        }
+        for link in [
+            "Read the full transcript",
+            "Follow the debate as it happens",
+        ] {
+            if let Some(at) = find_drawn(f.buffer_mut(), inner, link) {
+                push_hit(hits, at, Click::Page(SessionPage::Transcript));
+            }
+        }
+    }
+    inner
 }
 
 /// A section heading: the label in the accent, then a hairline to the edge.
@@ -966,7 +1068,13 @@ fn push_legacy(
 // Side column
 // ---------------------------------------------------------------------------
 
-fn render_side(f: &mut Frame, area: Rect, s: &SessionScreen, frame: u64) {
+fn render_side(
+    f: &mut Frame,
+    area: Rect,
+    s: &SessionScreen,
+    frame: u64,
+    hits: &RefCell<Vec<Hit>>,
+) -> Rect {
     // A single rule on its left is the only border: the tab strip names what
     // is showing, so a titled box around it would say the same thing twice.
     let block = Block::default()
@@ -981,8 +1089,21 @@ fn render_side(f: &mut Frame, area: Rect, s: &SessionScreen, frame: u64) {
     };
     let rows = Layout::vertical([Constraint::Length(2), Constraint::Min(0)]).split(inner);
     let mut spans = Vec::new();
+    let mut x = rows[0].x;
     for tab in SideTab::ALL {
         let on = tab == s.side;
+        let w = tab.label().width() as u16 + 2;
+        push_hit(
+            hits,
+            Rect {
+                x,
+                y: rows[0].y,
+                width: w,
+                height: 1,
+            },
+            Click::Side(tab),
+        );
+        x += w;
         spans.push(Span::styled(
             format!(" {} ", tab.label()),
             if on {
@@ -1007,6 +1128,7 @@ fn render_side(f: &mut Frame, area: Rect, s: &SessionScreen, frame: u64) {
         SideTab::Seats => seat_lines(&s.seats, &s.view, frame),
     };
     f.render_widget(Paragraph::new(theme::fit(lines, width)), rows[1]);
+    rows[1]
 }
 
 fn plan_lines(
@@ -1389,9 +1511,10 @@ fn overlay_rect(area: Rect, width: u16, height: u16) -> Rect {
     }
 }
 
-fn render_question(f: &mut Frame, area: Rect, question: &str, answer: &str, frame: u64) {
+/// The moderator's question box, returning where it was drawn.
+fn render_question(f: &mut Frame, area: Rect, question: &str, answer: &str, frame: u64) -> Rect {
     if area.width < 12 || area.height < 6 {
-        return;
+        return Rect::default();
     }
     let rect = overlay_rect(area, 72, 9);
     f.render_widget(Clear, rect);
@@ -1438,11 +1561,13 @@ fn render_question(f: &mut Frame, area: Rect, question: &str, answer: &str, fram
             )),
     );
     f.render_widget(para, rect);
+    rect
 }
 
-fn render_approval(f: &mut Frame, area: Rect, who: &str, tool: &str, args: &str) {
+/// The approval box, returning where it was drawn so its keys can be clicked.
+fn render_approval(f: &mut Frame, area: Rect, who: &str, tool: &str, args: &str) -> Rect {
     if area.width < 12 || area.height < 6 {
-        return;
+        return Rect::default();
     }
     let rect = overlay_rect(area, 72, 8);
     f.render_widget(Clear, rect);
@@ -1488,61 +1613,7 @@ fn render_approval(f: &mut Frame, area: Rect, who: &str, tool: &str, args: &str)
             )),
     );
     f.render_widget(para, rect);
-}
-
-/// Every key the Session screen takes, grouped. The footer shows the few that
-/// matter for the page you are on; this has the rest.
-fn render_help(f: &mut Frame, area: Rect) {
-    let rect = overlay_rect(area, 70, 24);
-    f.render_widget(Clear, rect);
-    let group = |title: &str| {
-        Line::from(Span::styled(
-            title.to_string(),
-            Style::default()
-                .fg(theme::GOLD)
-                .add_modifier(Modifier::BOLD),
-        ))
-    };
-    let row = |k: &str, what: &str| {
-        Line::from(vec![
-            Span::styled(format!("  {k:<16}"), Style::default().fg(theme::GOLD)),
-            Span::styled(what.to_string(), Style::default().fg(theme::TEXT)),
-        ])
-    };
-    let lines = vec![
-        group("Pages"),
-        row("t", "switch between summary and transcript"),
-        row("1 2 3 4", "scores, vote, critique graph, argument map"),
-        row("[ ]", "step through seats in the critique graph"),
-        Line::from(""),
-        group("Moving around"),
-        row("↑ ↓  PgUp PgDn", "scroll"),
-        row("Home  g", "top, or follow the newest turn"),
-        row("T", "show or hide each seat's thinking"),
-        Line::from(""),
-        group("Rail"),
-        row("p b v $ s", "plan, board, convergence, cost, seats"),
-        row("← →", "previous or next rail tab"),
-        Line::from(""),
-        group("Session"),
-        row("e", "export the record"),
-        row("r  Enter", "reconvene on this record (a new, paid run)"),
-        row("Tab", "sessions"),
-        row("Esc", "close this, stop a live run, or go home"),
-    ];
-    let para = Paragraph::new(lines).block(
-        Block::default()
-            .borders(Borders::ALL)
-            .border_style(Style::default().fg(theme::GOLD))
-            .padding(ratatui::widgets::Padding::new(2, 2, 1, 0))
-            .title(Span::styled(
-                " Keys ",
-                Style::default()
-                    .fg(theme::GOLD)
-                    .add_modifier(Modifier::BOLD),
-            )),
-    );
-    f.render_widget(para, rect);
+    rect
 }
 
 // ---------------------------------------------------------------------------

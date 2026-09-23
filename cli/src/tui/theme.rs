@@ -143,13 +143,24 @@ pub fn speaker_color(agent_id: &str) -> Color {
 /// `width` rather than running off the edge. A hint either shows whole or not
 /// at all, so a narrow terminal never shows a key without what it does.
 pub fn hint_bar(hints: &[(&str, &str)], width: usize) -> Line<'static> {
+    hint_bar_spots(hints, width).0
+}
+
+/// [`hint_bar`], with where each hint that made it in sits: its first
+/// column from the start of the line, its width, and its index in `hints`.
+pub fn hint_bar_spots(
+    hints: &[(&str, &str)],
+    width: usize,
+) -> (Line<'static>, Vec<(u16, u16, usize)>) {
     let mut spans = vec![Span::raw(" ")];
+    let mut spots = Vec::new();
     let mut used = 1;
-    for (key, what) in hints {
+    for (i, (key, what)) in hints.iter().enumerate() {
         let cost = key.chars().count() + what.chars().count() + 4;
         if used + cost > width {
             break;
         }
+        spots.push((used as u16, (cost - 3) as u16, i));
         used += cost;
         spans.push(Span::styled(
             key.to_string(),
@@ -160,7 +171,7 @@ pub fn hint_bar(hints: &[(&str, &str)], width: usize) -> Line<'static> {
             Style::default().fg(MUTED),
         ));
     }
-    Line::from(spans)
+    (Line::from(spans), spots)
 }
 
 /// `s` cut to `max` display columns, with an ellipsis when anything was cut.

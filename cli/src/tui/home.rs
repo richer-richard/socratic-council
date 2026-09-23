@@ -6,9 +6,10 @@
 //! and the mark shrinks first, since it is the one thing on the screen that
 //! carries no information you cannot get elsewhere.
 
-use super::{deliverable_label, theme, App, DELIVERABLE_CHOICES};
+use super::{deliverable_label, theme, App, Click, DELIVERABLE_CHOICES};
 use crate::config::Preset;
 use crate::types::{ModelChoice, ModelRef, Provider, ReasoningTier};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::layout::{Alignment, Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::symbols::Marker;
@@ -28,7 +29,7 @@ const RACK_W: u16 = 36;
 
 pub fn render(f: &mut Frame, area: Rect, app: &App) {
     let rows = Layout::vertical([Constraint::Min(0), Constraint::Length(1)]).split(area);
-    render_footer(f, rows[1]);
+    render_footer(f, rows[1], app);
 
     let wide = area.width >= RACK_AT;
     let cols = if wide {
@@ -62,14 +63,33 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
     if wide {
         render_rack(f, cols[1], app);
     } else {
+        // The folded rack is chairs and seats a row at a time; each row
+        // opens Settings, where they are changed.
+        let rows = center[4];
+        for y in rows.y..rows.y + rows.height {
+            app.hit(
+                Rect {
+                    y,
+                    height: 1,
+                    ..rows
+                },
+                settings_click(),
+            );
+        }
         f.render_widget(Paragraph::new(folded), center[4]);
     }
+    // The command list opens over the mark, right above the composer.
+    let room = Rect {
+        height: center[2].y.saturating_sub(center[0].y),
+        ..center[0]
+    };
+    super::render_slash_menu(f, app, center[2], room);
 }
 
-/// The council mark as the desktop draws its hero: seats on an inner ring as
-/// solid dots in their provider colour with a soft halo, spokes out to a
-/// faint outer ring of satellites, turning slowly clockwise. Drawn in braille
-/// dots, which are square, so the rings come out round at any terminal size.
+/// The council mark: the roster's seats on a slowly turning ring, joined by a
+/// faint web between every pair, keyed seats glowing with a slow pulse. The
+/// height spans the same units whatever the size, and the width follows the
+/// area's shape, so braille's square dots keep the ring round.
 fn render_mark(f: &mut Frame, area: Rect, app: &App) {
     // A mark squeezed into a few rows is a knot of overlapping dots. Below
     // this it is left out: the wordmark underneath carries the identity.
@@ -94,91 +114,68 @@ fn render_mark(f: &mut Frame, area: Rect, app: &App) {
             })
             .collect()
     };
-    // Keep the mark modest: it is a mark, not the page.
-    let rows = area.height.saturating_sub(1).min(26);
-    let cols = (rows as u32 * 4 / 2 * 12 / 10) as u16; // ring fits with a little air
-    let cols = cols.min(area.width);
-    let rect = Rect {
-        x: area.x + (area.width.saturating_sub(cols)) / 2,
-        y: area.y + (area.height.saturating_sub(rows)) / 2,
-        width: cols,
-        height: rows,
-    };
-    let (dw, dh) = (cols as f64 * 2.0, rows as f64 * 4.0);
-    let (cx, cy) = (dw / 2.0, dh / 2.0);
-    let outer = (dw.min(dh) / 2.0) - 3.0;
-    let inner = outer * 0.56;
+    const HALF_H: f64 = 1.1;
+    let half_w = HALF_H * (area.width as f64 * 2.0) / (area.height as f64 * 4.0);
+    // On an area taller than it is wide the ring shrinks to fit across.
+    let ring = 0.82 * (half_w / HALF_H).min(1.0);
     let turn = (app.frame % TURN_FRAMES) as f64 / TURN_FRAMES as f64 * std::f64::consts::TAU;
+    // Six slow breaths a turn, so a full turn lands exactly where it began.
+    let pulse = 1.0 + 0.22 * (turn * 6.0).sin();
 
     let canvas = Canvas::default()
         .marker(Marker::Braille)
-        .x_bounds([0.0, dw])
-        .y_bounds([0.0, dh])
+        .x_bounds([-half_w, half_w])
+        .y_bounds([-HALF_H, HALF_H])
         .paint(move |ctx| {
             let n = nodes.len().max(1);
-            let at = |r: f64, i: usize| {
-                let a = -std::f64::consts::FRAC_PI_2
-                    + (i as f64) * std::f64::consts::TAU / n as f64
-                    + turn;
-                (cx + r * a.cos(), cy - r * a.sin())
-            };
-            // The faint structure first: two rings and the spokes.
-            for r in [inner, outer] {
-                ctx.draw(&Circle {
-                    x: cx,
-                    y: cy,
-                    radius: r,
-                    color: theme::WEB,
-                });
-            }
-            for i in 0..n {
-                let (x1, y1) = at(inner, i);
-                let (x2, y2) = at(outer, i);
-                ctx.draw(&CanvasLine {
-                    x1,
-                    y1,
-                    x2,
-                    y2,
-                    color: theme::WEB,
-                });
+            // Seat one at the top, the rest clockwise, the ring turning
+            // clockwise with the clock.
+            let pts: Vec<(f64, f64)> = (0..n)
+                .map(|i| {
+                    let a = std::f64::consts::FRAC_PI_2
+                        - (i as f64) * std::f64::consts::TAU / n as f64
+                        - turn;
+                    (ring * a.cos(), ring * a.sin())
+                })
+                .collect();
+            for i in 0..pts.len() {
+                for j in (i + 1)..pts.len() {
+                    ctx.draw(&CanvasLine {
+                        x1: pts[i].0,
+                        y1: pts[i].1,
+                        x2: pts[j].0,
+                        y2: pts[j].1,
+                        color: theme::WEB,
+                    });
+                }
             }
             ctx.layer();
-            for (i, (color, keyed)) in nodes.iter().enumerate() {
-                let (x, y) = at(inner, i);
-                let (ox, oy) = at(outer, i);
-                let hue = if *keyed { *color } else { theme::DIM };
-                // A satellite: a small dim dot of the seat's colour.
-                ctx.draw(&Points {
-                    coords: &[
-                        (ox, oy),
-                        (ox + 1.0, oy),
-                        (ox, oy + 1.0),
-                        (ox + 1.0, oy + 1.0),
-                    ],
-                    color: theme::blend(theme::BG, hue, 0.55),
-                });
-                // The node: a solid disc, larger than a satellite. A seat with
-                // no key keeps its place on the ring but not its colour.
-                // Sized to the gap between neighbours on the ring, so a
-                // small mark gets small dots instead of overlapping ones.
-                let gap = std::f64::consts::TAU * inner / n as f64;
-                let full = (gap * 0.26).clamp(1.0, 4.0).round() as i32;
-                let r = if *keyed { full } else { (full - 1).max(1) };
-                let mut disc = Vec::new();
-                for dx in -r..=r {
-                    for dy in -r..=r {
-                        if dx * dx + dy * dy <= r * r + 1 {
-                            disc.push((x + dx as f64, y + dy as f64));
-                        }
-                    }
+            for (&(x, y), (color, keyed)) in pts.iter().zip(nodes.iter()) {
+                let color = if *keyed { *color } else { theme::DIM };
+                if *keyed {
+                    ctx.draw(&Circle {
+                        x,
+                        y,
+                        radius: 0.16 * pulse,
+                        color,
+                    });
+                }
+                // A node reads as filled from three rings and a centre dot.
+                for r in [0.02, 0.05, 0.08] {
+                    ctx.draw(&Circle {
+                        x,
+                        y,
+                        radius: r,
+                        color,
+                    });
                 }
                 ctx.draw(&Points {
-                    coords: &disc,
-                    color: hue,
+                    coords: &[(x, y)],
+                    color,
                 });
             }
         });
-    f.render_widget(canvas, rect);
+    f.render_widget(canvas, area);
 }
 
 fn render_wordmark(f: &mut Frame, area: Rect) {
@@ -202,14 +199,18 @@ fn render_wordmark(f: &mut Frame, area: Rect) {
 fn render_composer(f: &mut Frame, area: Rect, app: &App) {
     let caret_on = app.frame % 16 < 8;
     let body: Line = if app.composer.is_empty() {
-        let mut spans = vec![Span::styled(
-            "What should the council pressure-test next? ",
-            Style::default().fg(theme::DIM),
-        )];
-        if caret_on {
-            spans.push(Span::styled("▌", Style::default().fg(theme::GOLD)));
-        }
-        Line::from(spans)
+        // The caret sits where the first letter will go, at the start, and
+        // the placeholder keeps its place while it blinks.
+        Line::from(vec![
+            Span::styled(
+                if caret_on { "▌" } else { " " },
+                Style::default().fg(theme::GOLD),
+            ),
+            Span::styled(
+                "What should the council pressure-test next?",
+                Style::default().fg(theme::DIM),
+            ),
+        ])
     } else {
         let mut spans = vec![Span::styled(
             app.composer.clone(),
@@ -258,11 +259,25 @@ fn render_chips(f: &mut Frame, area: Rect, app: &App) {
         "COUNCIL      ",
         Style::default().fg(theme::DIM),
     )];
+    // Each chip is clickable where it is drawn: the label column, then the
+    // chips with a space after each.
+    let mut x = area.x + 13;
     for p in Preset::ALL {
         let label = match p.size() {
             Some(n) => format!("{} · {n}", p.label()),
             None => p.label().to_string(),
         };
+        let w = label.width() as u16 + 2;
+        app.hit(
+            Rect {
+                x,
+                y: area.y + 1,
+                width: w,
+                height: 1,
+            },
+            Click::Preset(p),
+        );
+        x += w + 1;
         council.push(chip(label, p == app.launch.preset));
         council.push(Span::styled(" ", Style::default()));
     }
@@ -277,7 +292,19 @@ fn render_chips(f: &mut Frame, area: Rect, app: &App) {
         "DELIVERABLE  ",
         Style::default().fg(theme::DIM),
     )];
+    let mut x = area.x + 13;
     for d in DELIVERABLE_CHOICES {
+        let w = deliverable_label(d).width() as u16 + 2;
+        app.hit(
+            Rect {
+                x,
+                y: area.y + 2,
+                width: w,
+                height: 1,
+            },
+            Click::Deliverable(d),
+        );
+        x += w + 1;
         deliverable.push(chip(
             deliverable_label(d).to_string(),
             d == app.launch.deliverable,
@@ -310,6 +337,11 @@ fn chairs(app: &App) -> [(&'static str, ModelRef); 2] {
         ("Moderator", app.ctx.config.moderator_ref()),
         ("Utility", app.ctx.config.utility_ref()),
     ]
+}
+
+/// A click on the rack opens Settings, where the chairs and seats change.
+fn settings_click() -> Click {
+    Click::Key(KeyEvent::new(KeyCode::Char('p'), KeyModifiers::CONTROL))
 }
 
 /// The Council Rack in its own column: the two chairs nobody sits in, a rule,
@@ -364,6 +396,27 @@ fn render_rack(f: &mut Frame, area: Rect, app: &App) {
 
     let roster = app.ctx.config.roster(&app.ctx.providers);
     let convened = app.convened_seats();
+    // The chairs sit on rows 2 and 3 and the seats from row 5: each row is
+    // clickable on its own, so the pointer lights up one at a time.
+    let row_hit = |i: usize| {
+        let y = inner.y + i as u16;
+        if y < inner.y + inner.height {
+            app.hit(
+                Rect {
+                    x: inner.x,
+                    y,
+                    width: inner.width,
+                    height: 1,
+                },
+                settings_click(),
+            );
+        }
+    };
+    row_hit(2);
+    row_hit(3);
+    for i in 0..roster.seats.len() {
+        row_hit(5 + i);
+    }
     for seat in &roster.seats {
         let keyed = app.ctx.config.is_configured(seat.provider);
         let sitting = convened.seats.iter().any(|s| s.id == seat.id);
@@ -525,17 +578,19 @@ fn folded_rack_lines(app: &App, width: usize) -> Vec<Line<'static>> {
     theme::fit(lines, width)
 }
 
-fn render_footer(f: &mut Frame, area: Rect) {
+fn render_footer(f: &mut Frame, area: Rect, app: &App) {
     let hints = [
         ("Enter", "convene"),
+        ("/", "commands"),
         ("^P", "settings"),
         ("Tab", "sessions"),
-        ("Esc", "quit"),
+        ("^C ^C", "quit"),
         ("←/→", "council"),
         ("^D", "deliverable"),
     ];
-    f.render_widget(
-        Paragraph::new(theme::hint_bar(&hints, area.width as usize)).alignment(Alignment::Center),
-        area,
-    );
+    let (line, spots) = theme::hint_bar_spots(&hints, area.width as usize);
+    // Centred the way the paragraph centres it.
+    let x = area.x + area.width.saturating_sub(line.width() as u16) / 2;
+    app.footer_hits(x, area.y, &hints, &spots);
+    f.render_widget(Paragraph::new(line).alignment(Alignment::Center), area);
 }
