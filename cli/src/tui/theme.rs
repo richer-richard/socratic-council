@@ -2,7 +2,8 @@
 //! named agents with their provider colors, and the council-mark geometry.
 
 use crate::types::Provider;
-use ratatui::style::Color;
+use ratatui::style::{Color, Modifier, Style};
+use ratatui::text::{Line, Span};
 
 /// Gold accent (`#F5C542`) — the app's signature.
 pub const GOLD: Color = Color::Rgb(0xF5, 0xC5, 0x42);
@@ -20,6 +21,40 @@ pub const EMERALD: Color = Color::Rgb(0x34, 0xD3, 0x99);
 pub const ROSE: Color = Color::Rgb(0xFB, 0x71, 0x85);
 /// Cyan for tool chips (`#22D3EE`).
 pub const CYAN: Color = Color::Rgb(0x22, 0xD3, 0xEE);
+/// The app's background (`#0B0F16`). The TUI leaves the terminal's own
+/// background alone; this is only the base that heat cells blend against, so
+/// a score reads as a weight of gold on the dark the desktop is drawn on.
+pub const BG: Color = Color::Rgb(0x0B, 0x0F, 0x16);
+/// Ink for text sitting on a strong gold fill, where TEXT would wash out.
+pub const INK_ON_GOLD: Color = Color::Rgb(0x0B, 0x0F, 0x16);
+/// Stance colours, as the desktop's critique graph draws them.
+pub const AGREE: Color = EMERALD;
+pub const DISAGREE: Color = Color::Rgb(0xF8, 0x71, 0x71);
+pub const MIXED: Color = MUTED;
+
+/// `base` moved `amount` (0..1) of the way toward `toward`. Both must be RGB;
+/// anything else returns `toward` unchanged, which is the safe reading on a
+/// terminal that only has named colours.
+pub fn blend(base: Color, toward: Color, amount: f32) -> Color {
+    match (base, toward) {
+        (Color::Rgb(r1, g1, b1), Color::Rgb(r2, g2, b2)) => {
+            let t = amount.clamp(0.0, 1.0);
+            let mix = |a: u8, b: u8| (a as f32 + (b as f32 - a as f32) * t).round() as u8;
+            Color::Rgb(mix(r1, r2), mix(g1, g2), mix(b1, b2))
+        }
+        _ => toward,
+    }
+}
+
+/// A heat cell for a 0..100 value: gold on the app's dark, squared so values
+/// bunched between 40 and 95 still read as different cells (the desktop's
+/// matrix uses the same ramp). Returns (background, foreground).
+pub fn heat(value: u8) -> (Color, Color) {
+    let w = (value.min(100) as f32) / 100.0;
+    let bg = blend(BG, GOLD, 0.04 + w * w * 0.74);
+    let fg = if w > 0.62 { INK_ON_GOLD } else { TEXT };
+    (bg, fg)
+}
 
 /// One inner-ring council agent, paired to a provider and its accent color.
 pub struct AgentInfo {
@@ -115,4 +150,28 @@ pub fn ring_positions(n: usize, r: f64, phase: f64) -> Vec<(f64, f64)> {
             (r * angle.cos(), r * angle.sin())
         })
         .collect()
+}
+
+/// A footer of `key what` hints, in priority order, cut from the end to fit
+/// `width` rather than running off the edge. A hint either shows whole or not
+/// at all, so a narrow terminal never shows a key without what it does.
+pub fn hint_bar(hints: &[(&str, &str)], width: usize) -> Line<'static> {
+    let mut spans = vec![Span::raw(" ")];
+    let mut used = 1;
+    for (key, what) in hints {
+        let cost = key.chars().count() + what.chars().count() + 4;
+        if used + cost > width {
+            break;
+        }
+        used += cost;
+        spans.push(Span::styled(
+            key.to_string(),
+            Style::default().fg(GOLD).add_modifier(Modifier::BOLD),
+        ));
+        spans.push(Span::styled(
+            format!(" {what}   "),
+            Style::default().fg(MUTED),
+        ));
+    }
+    Line::from(spans)
 }

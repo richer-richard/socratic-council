@@ -33,6 +33,7 @@ pub enum SettingsRow {
     ToolsApproval,
     Rounds,
     Interactive,
+    Review,
     BudgetSession,
     BudgetDay,
     BudgetAction,
@@ -80,6 +81,7 @@ pub fn settings_rows(config: &Config) -> Vec<SettingsRow> {
         SettingsRow::ToolsApproval,
         SettingsRow::Rounds,
         SettingsRow::Interactive,
+        SettingsRow::Review,
         SettingsRow::BudgetSession,
         SettingsRow::BudgetDay,
         SettingsRow::BudgetAction,
@@ -297,6 +299,15 @@ impl App {
                 };
                 self.persist_config(note);
             }
+            SettingsRow::Review => {
+                self.ctx.config.protocol.review = !config.protocol.review;
+                let note = if self.ctx.config.protocol.review {
+                    "Seats score each other and the argument gets mapped after the record."
+                } else {
+                    "No review: the summary shows counts from the run instead."
+                };
+                self.persist_config(note);
+            }
             SettingsRow::BudgetSession => {
                 self.settings_draft = Some(draft(
                     DraftKind::Text,
@@ -467,6 +478,12 @@ impl App {
             SettingsRow::Interactive => {
                 self.ctx.config.protocol.interactive = true;
                 self.persist_config("The moderator may ask one clarifying question.");
+            }
+            SettingsRow::Review => {
+                self.ctx.config.protocol.review = true;
+                self.persist_config(
+                    "Seats score each other and the argument gets mapped after the record.",
+                );
             }
             SettingsRow::BudgetSession => {
                 self.ctx.config.budget_per_session_usd = 0.0;
@@ -1045,6 +1062,16 @@ fn render_rows(f: &mut Frame, area: Rect, app: &App) {
         },
         "the moderator may ask you one question before planning",
     ));
+    entries.push(plain(
+        SettingsRow::Review,
+        "Review afterwards",
+        if config.protocol.review {
+            "on".into()
+        } else {
+            "off".into()
+        },
+        "peer scores and the argument map, on the utility model: one call per seat plus one per round",
+    ));
     entries.push(blank());
 
     entries.push(section("Budget & network"));
@@ -1192,7 +1219,8 @@ mod tests {
     fn settings_rows_cover_every_section() {
         let mut config = Config::default();
         let rows = settings_rows(&config);
-        assert_eq!(rows.len(), 8 + 8 + 1 + 10);
+        // keys, seats, add-seat, then the ten fixed rows plus review afterwards.
+        assert_eq!(rows.len(), 8 + 8 + 1 + 11);
         assert_eq!(rows[0], SettingsRow::Key(Provider::OpenAI));
         assert_eq!(rows[8], SettingsRow::Seat(0));
         assert_eq!(rows[16], SettingsRow::AddSeat);
@@ -1204,7 +1232,7 @@ mod tests {
             model: "auto".into(),
             reasoning: None,
         }];
-        assert_eq!(settings_rows(&config).len(), 8 + 1 + 1 + 10);
+        assert_eq!(settings_rows(&config).len(), 8 + 1 + 1 + 11);
     }
 
     #[test]

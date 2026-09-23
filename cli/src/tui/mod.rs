@@ -7,6 +7,7 @@
 //! decision record — and answers the moderator's question and tool approvals.
 //! A Settings screen edits keys, the roster and the policies.
 
+mod analysis;
 mod home;
 mod session;
 mod settings;
@@ -113,6 +114,37 @@ pub struct SeatCard {
     pub color: Color,
 }
 
+/// The two pages of a session, as on the desktop: the report, and every turn.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SessionPage {
+    Summary,
+    Transcript,
+}
+
+impl SessionPage {
+    pub fn label(self) -> &'static str {
+        match self {
+            SessionPage::Summary => "Summary",
+            SessionPage::Transcript => "Transcript",
+        }
+    }
+}
+
+/// View state for the Session screen that the engine never sees.
+#[derive(Debug, Clone, Default)]
+pub struct SessionUi {
+    /// The page picked with `t`. `None` until one is picked, and then the page
+    /// follows the run: the transcript while there is nothing to summarise,
+    /// the summary once the record exists.
+    pub page: Option<SessionPage>,
+    /// The page last drawn, so a change of page can reset the scroll.
+    pub drawn: Option<SessionPage>,
+    pub analysis: analysis::AnalysisView,
+    /// The seat the critique graph is focused on, stepped with `[` and `]`.
+    pub focus: Option<usize>,
+    pub help: bool,
+}
+
 /// The right-hand pane of the Session screen.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SideTab {
@@ -187,6 +219,7 @@ pub struct SessionScreen {
     pub answer: String,
     /// A stored session (no engine behind it).
     pub read_only: bool,
+    pub ui: SessionUi,
     engine: Option<EngineHandle>,
     /// Frame until which a second `Esc` stops a live council.
     confirm_stop_until: u64,
@@ -207,6 +240,22 @@ impl SessionScreen {
 
     pub fn seat(&self, id: &str) -> Option<&SeatCard> {
         self.seats.iter().find(|s| s.id == id)
+    }
+
+    /// The page to draw. When it changes, each page opens where it is read
+    /// from: the summary at the top, a live transcript at the newest turn.
+    pub fn page(&mut self) -> SessionPage {
+        let page = self.ui.page.unwrap_or(if self.view.record.is_some() {
+            SessionPage::Summary
+        } else {
+            SessionPage::Transcript
+        });
+        if self.ui.drawn != Some(page) {
+            self.ui.drawn = Some(page);
+            self.scroll = 0;
+            self.follow = page == SessionPage::Transcript && self.is_live();
+        }
+        page
     }
 
     /// `running` / `completed` / `stopped` / `cancelled` / `failed` / `starting`.
@@ -535,6 +584,7 @@ impl App {
             read_only: false,
             engine: Some(EngineHandle { rx, input, handle }),
             confirm_stop_until: 0,
+            ui: SessionUi::default(),
         });
         self.composer.clear();
         self.view = View::Session;
@@ -733,6 +783,7 @@ impl App {
             read_only: true,
             engine: None,
             confirm_stop_until: 0,
+            ui: SessionUi::default(),
         });
         self.view = View::Session;
         true
@@ -848,7 +899,14 @@ impl App {
             }
         }
 
+        // The help overlay closes on Esc or `?` and swallows nothing else.
+        if s.ui.help && matches!(key.code, KeyCode::Esc | KeyCode::Char('?')) {
+            s.ui.help = false;
+            return false;
+        }
+
         match key.code {
+            KeyCode::Char('?') => s.ui.help = true,
             KeyCode::Esc | KeyCode::Char('q') if !ctrl => {
                 if s.is_live() {
                     if frame < s.confirm_stop_until {
@@ -864,7 +922,39 @@ impl App {
                 }
             }
             KeyCode::Tab => self.toggle_sidebar(),
-            KeyCode::Char('t') if !ctrl => s.show_thinking = !s.show_thinking,
+            KeyCode::Char('t') if !ctrl => {
+                let now = s.page();
+                s.ui.page = Some(match now {
+                    SessionPage::Summary => SessionPage::Transcript,
+                    SessionPage::Transcript => SessionPage::Summary,
+                });
+            }
+            KeyCode::Char('T') if !ctrl => s.show_thinking = !s.show_thinking,
+            KeyCode::Char(c @ '1'..='4') if !ctrl => {
+                if let Some(v) = analysis::AnalysisView::from_digit(c) {
+                    s.ui.analysis = v;
+                    s.ui.page = Some(SessionPage::Summary);
+                }
+            }
+            KeyCode::Char(c @ ('[' | ']')) if !ctrl => {
+                // Step through the seats the critique graph draws, with "all
+                // of them" as the stop between the last seat and the first.
+                let n = s
+                    .view
+                    .peer_eval
+                    .as_ref()
+                    .map(|p| p.seats.len())
+                    .unwrap_or(0);
+                if n > 0 {
+                    s.ui.focus = match (s.ui.focus, c) {
+                        (None, ']') => Some(0),
+                        (None, _) => Some(n - 1),
+                        (Some(i), ']') if i + 1 < n => Some(i + 1),
+                        (Some(i), '[') if i > 0 => Some(i - 1),
+                        _ => None,
+                    };
+                }
+            }
             KeyCode::Char('p') if !ctrl => s.side = SideTab::Plan,
             KeyCode::Char('b') if !ctrl => s.side = SideTab::Board,
             KeyCode::Char('v') if !ctrl => s.side = SideTab::Convergence,
@@ -886,7 +976,12 @@ impl App {
                 s.follow = false;
                 s.scroll = 0;
             }
-            KeyCode::End | KeyCode::Char('g') => s.follow = true,
+            KeyCode::End | KeyCode::Char('g') => {
+                // The transcript follows the newest turn; the summary has no
+                // newest turn, so End there simply means the bottom.
+                s.follow = true;
+                s.scroll = u16::MAX;
+            }
             KeyCode::Char('r') if !ctrl => self.reconvene(),
             KeyCode::Char('e') if !ctrl => self.export(),
             KeyCode::Enter if s.read_only => self.reconvene(),
@@ -1095,6 +1190,10 @@ async fn run_loop(
                         app.handle_paste(text);
                         dirty = true;
                     }
+                    // A static screen (a saved session, Settings) only
+                    // redraws when something marks it dirty, so without this
+                    // a resize left the old layout clipped until a key press.
+                    Event::Resize(_, _) => dirty = true,
                     _ => {}
                 }
                 if quit {
@@ -1377,6 +1476,7 @@ mod tests {
             read_only: false,
             engine: None,
             confirm_stop_until: 0,
+            ui: SessionUi::default(),
         }
     }
 
@@ -1405,11 +1505,29 @@ mod tests {
         }
         app.view = View::Session;
         app.session = Some(sample_screen());
+        // A session with a record opens on the summary: the record, the
+        // errors and the analysis panel, but not the turns themselves.
         let text = render_at(&mut app, 140, 50);
-        assert!(text.contains("Decision record"));
+        assert!(text.contains("DECISION RECORD"), "{text}");
         assert!(text.contains("Later, after a cheaper launch cadence."));
-        assert!(text.contains("web_search"));
         assert!(text.contains("Kate came back empty."));
+        assert!(text.contains("ANALYSIS"));
+        assert!(
+            !text.contains("web_search"),
+            "tool calls live on the transcript"
+        );
+        app.session.as_mut().unwrap().ui.page = Some(SessionPage::Transcript);
+        let text = render_at(&mut app, 140, 50);
+        assert!(text.contains("web_search"));
+        // Every analysis view renders, at full width and cramped.
+        for view in analysis::AnalysisView::ALL {
+            let s = app.session.as_mut().unwrap();
+            s.ui.page = Some(SessionPage::Summary);
+            s.ui.analysis = view;
+            render_at(&mut app, 140, 50);
+            render_at(&mut app, 60, 20);
+        }
+        app.session.as_mut().unwrap().ui.page = Some(SessionPage::Transcript);
         for tab in SideTab::ALL {
             app.session.as_mut().unwrap().side = tab;
             let text = render_at(&mut app, 140, 50);
@@ -1530,8 +1648,29 @@ mod tests {
         assert!(!app.session.as_ref().unwrap().follow);
         press(&mut app, KeyCode::Char('g'));
         assert!(app.session.as_ref().unwrap().follow);
+        let page = |app: &mut App| app.session.as_mut().unwrap().page();
+        let before = page(&mut app);
         press(&mut app, KeyCode::Char('t'));
+        assert_ne!(
+            page(&mut app),
+            before,
+            "t switches between summary and transcript"
+        );
+        press(&mut app, KeyCode::Char('T'));
         assert!(!app.session.as_ref().unwrap().show_thinking);
+        // A digit picks an analysis view and lands on the summary to show it.
+        press(&mut app, KeyCode::Char('3'));
+        assert_eq!(
+            app.session.as_ref().unwrap().ui.analysis,
+            analysis::AnalysisView::Critique
+        );
+        assert_eq!(page(&mut app), SessionPage::Summary);
+        // `?` opens the key list and Esc closes it without leaving the session.
+        press(&mut app, KeyCode::Char('?'));
+        assert!(app.session.as_ref().unwrap().ui.help);
+        press(&mut app, KeyCode::Esc);
+        assert!(!app.session.as_ref().unwrap().ui.help);
+        assert_eq!(app.view, View::Session);
         // A finished session leaves on one Esc.
         press(&mut app, KeyCode::Esc);
         assert_eq!(app.view, View::Home);
@@ -1563,7 +1702,12 @@ mod tests {
         assert!(text.contains("Quick · 3"));
         assert!(text.contains("review"));
         assert!(text.contains("0 seats convene"));
-        assert!(text.contains("Roster · 0/8 keyed"));
+        assert!(text.contains("COUNCIL RACK"));
+        assert!(text.contains("Moderator") && text.contains("Utility"));
+        assert!(text.contains("0/8 keyed"));
+        // Folded under the options on a narrow terminal, chairs still first.
+        let narrow = render_at(&mut app, 80, 24);
+        assert!(narrow.contains("Moderator"));
     }
 
     #[test]
@@ -1639,11 +1783,18 @@ mod tests {
             read_only: true,
             engine: None,
             confirm_stop_until: 0,
+            ui: SessionUi::default(),
         });
         app.view = View::Session;
         let text = render_at(&mut app, 120, 40);
+        assert!(text.contains("completed"));
+        assert!(
+            text.contains("Esc home"),
+            "a stored session offers home, not stop"
+        );
+        press(&mut app, KeyCode::Char('t'));
+        let text = render_at(&mut app, 120, 40);
         assert!(text.contains("stored point"));
-        assert!(text.contains("saved"));
         let s = app.session.as_ref().unwrap();
         assert_eq!(s.status().0, "completed");
         let notes = s
