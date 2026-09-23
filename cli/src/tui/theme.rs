@@ -242,6 +242,36 @@ pub fn hanging(
 /// this only catches what a fixed-width part pushes over, such as a long name
 /// in a label column on a narrow terminal. The row count stays exact, which
 /// the scroll clamp relies on.
+/// `fit`, and where each marked input line ended up.
+///
+/// A click target may only sit on a line that stayed on one row: wrapping
+/// moves its columns, and the row under the pointer would no longer be the
+/// thing that was drawn there. A marked line that had to be split comes back
+/// `None` and gets no target.
+pub fn fit_marked(
+    lines: Vec<Line<'static>>,
+    width: usize,
+    marks: &[usize],
+) -> (Vec<Line<'static>>, Vec<Option<usize>>) {
+    if width == 0 {
+        return (lines, marks.iter().map(|i| Some(*i)).collect());
+    }
+    let mut placed: Vec<Option<usize>> = vec![None; marks.len()];
+    let mut out: Vec<Line<'static>> = Vec::with_capacity(lines.len());
+    for (i, line) in lines.into_iter().enumerate() {
+        let before = out.len();
+        out.extend(fit(vec![line], width));
+        if out.len() == before + 1 {
+            for (m, mark) in marks.iter().enumerate() {
+                if *mark == i {
+                    placed[m] = Some(before);
+                }
+            }
+        }
+    }
+    (out, placed)
+}
+
 pub fn fit(lines: Vec<Line<'static>>, width: usize) -> Vec<Line<'static>> {
     if width == 0 {
         return lines;

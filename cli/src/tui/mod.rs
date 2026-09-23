@@ -390,6 +390,8 @@ pub struct App {
     hover: Option<(u16, u16)>,
     /// Text being selected by a drag, or selected and copied.
     selection: Option<Selection>,
+    /// A finished selection waiting for the next draw to be read and copied.
+    copy_pending: Option<Selection>,
     /// Selected text waiting to go to the clipboard after this frame.
     clipboard_out: Option<String>,
 }
@@ -402,8 +404,6 @@ struct Selection {
     anchor: (u16, u16),
     head: (u16, u16),
     dragging: bool,
-    /// Copy what it covers once the next frame is drawn.
-    copy: bool,
 }
 
 impl Selection {
@@ -517,6 +517,7 @@ impl App {
             regions: RefCell::new(Vec::new()),
             hover: None,
             selection: None,
+            copy_pending: None,
             clipboard_out: None,
             ctx,
         }
@@ -580,7 +581,6 @@ impl App {
                         anchor: (x, y),
                         head: (x, y),
                         dragging: true,
-                        copy: false,
                     });
                 }
             }
@@ -600,7 +600,12 @@ impl App {
                         // A press and release in place selects nothing.
                         self.selection = None;
                     } else {
-                        sel.copy = true;
+                        // The text can only be read off the drawn buffer, so
+                        // the copy waits for the next frame. It waits on its
+                        // own, not on `selection`, because any key pressed in
+                        // the meantime clears the selection and would take the
+                        // copy with it, silently.
+                        self.copy_pending = Some(*sel);
                     }
                 }
             }
@@ -1180,7 +1185,9 @@ impl App {
         let Some((input, place)) = self.slash_input() else {
             return Vec::new();
         };
-        let titles: Vec<String> = self.sessions.iter().map(|r| r.title.clone()).collect();
+        // Borrowed, not cloned: this runs on every frame for as long as a
+        // command is being typed.
+        let titles: Vec<&str> = self.sessions.iter().map(|r| r.title.as_str()).collect();
         slash::suggest(input, place, &titles)
     }
 
@@ -1188,7 +1195,11 @@ impl App {
     fn slash_edited(&mut self) {
         self.slash_sel = 0;
         self.slash_hidden = false;
-        if self.composer.starts_with("/open") {
+        // A command that takes a session needs the list loaded to suggest from.
+        // Which input is being edited decides that, not the composer: the
+        // session command line goes through here too, and reading `composer`
+        // from there is the wrong field.
+        if slash::takes_a_session(self.slash_input()) {
             self.ensure_sessions();
         }
     }
@@ -1435,20 +1446,36 @@ impl App {
             }
             return false;
         }
-        // Then a tool approval.
+        // Then a tool approval. It owns the keyboard the way the question above
+        // does: the run is blocked on this answer, and a key that fell through
+        // to the screen keys put something over the box that is asking. `?`
+        // drew the key list on top, and the list only passes Esc, `?`, Enter
+        // and `q` back, so `y` and `n` stopped reaching the approval; `/`
+        // stashed a command line that stays invisible until the approval is
+        // answered and then springs up holding what was typed at it.
         if let Some(a) = s.view.pending_approval.clone() {
-            let decision = match key.code {
-                KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => Some(true),
-                KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => Some(false),
-                _ => None,
-            };
-            if let Some(allow) = decision {
-                if let Some(e) = &s.engine {
-                    let _ = e.input.send(EngineInput::ToolDecision { id: a.id, allow });
+            match key.code {
+                KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => {
+                    if let Some(e) = &s.engine {
+                        let _ = e.input.send(EngineInput::ToolDecision {
+                            id: a.id,
+                            allow: true,
+                        });
+                    }
+                    s.view.pending_approval = None;
                 }
-                s.view.pending_approval = None;
-                return false;
+                KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
+                    if let Some(e) = &s.engine {
+                        let _ = e.input.send(EngineInput::ToolDecision {
+                            id: a.id,
+                            allow: false,
+                        });
+                    }
+                    s.view.pending_approval = None;
+                }
+                _ => self.toast("Answer the tool request first: y allows it, n denies it."),
             }
+            return false;
         }
 
         match key.code {
@@ -1593,12 +1620,19 @@ impl App {
                 self.slash_edited();
             }
             View::Session => {
-                if let Some(s) = self
+                let asking = self
                     .session
-                    .as_mut()
-                    .filter(|s| s.view.pending_question.is_some())
-                {
-                    s.answer.push_str(&clean);
+                    .as_ref()
+                    .is_some_and(|s| s.view.pending_question.is_some());
+                if asking {
+                    if let Some(s) = self.session.as_mut() {
+                        s.answer.push_str(&clean);
+                    }
+                } else if let Some(cmd) = self.cmdline.as_mut() {
+                    // The command line takes a paste the way the composer does.
+                    // Without this it went nowhere at all.
+                    cmd.push_str(&clean);
+                    self.slash_edited();
                 }
             }
         }
@@ -1811,13 +1845,10 @@ fn render(f: &mut Frame, app: &mut App) {
     render_toast(f, area, app);
 
     // The selection and the hover go on last, over whatever was drawn.
-    if let Some(sel) = app.selection.as_mut() {
-        if sel.copy {
-            sel.copy = false;
-            let text = selected_text(f.buffer_mut(), sel);
-            if !text.is_empty() {
-                app.clipboard_out = Some(text);
-            }
+    if let Some(sel) = app.copy_pending.take() {
+        let text = selected_text(f.buffer_mut(), &sel);
+        if !text.is_empty() {
+            app.clipboard_out = Some(text);
         }
     }
     if let Some(sel) = app.selection {
@@ -2956,6 +2987,134 @@ mod tests {
         // Off anything clickable, nothing is lit.
         mouse(&mut app, MouseEventKind::Moved, 0, 0);
         assert_eq!(app.hover_target(), None);
+    }
+
+    /// A key pressed before the next frame must not take the copy with the
+    /// highlight: the text can only be read off the drawn buffer, so the copy
+    /// waits a frame, and `handle_key` clears the selection first thing.
+    #[test]
+    fn a_key_after_the_drag_clears_the_highlight_but_still_copies() {
+        let mut app = test_app();
+        app.view = View::Session;
+        app.session = Some(sample_screen());
+        draw(&mut app, 140, 50);
+        let main = app.regions.borrow()[0];
+        mouse(
+            &mut app,
+            MouseEventKind::Down(MouseButton::Left),
+            main.x + 2,
+            main.y + 2,
+        );
+        mouse(
+            &mut app,
+            MouseEventKind::Drag(MouseButton::Left),
+            main.x + 20,
+            main.y + 5,
+        );
+        mouse(
+            &mut app,
+            MouseEventKind::Up(MouseButton::Left),
+            main.x + 20,
+            main.y + 5,
+        );
+        // Anything at all, in the same tick, before a frame is drawn.
+        press(&mut app, KeyCode::Char('T'));
+        assert!(app.selection.is_none(), "the highlight goes, as it should");
+        draw(&mut app, 140, 50);
+        let copied = app.clipboard_out.clone().expect("the copy still happens");
+        assert!(!copied.trim().is_empty(), "{copied:?}");
+    }
+
+    /// The tool approval owns the keyboard: the run is blocked on it, and a
+    /// key that reached the screen keys put the key list or a command line
+    /// over the box that is asking.
+    #[test]
+    fn an_approval_keeps_the_keyboard_until_it_is_answered() {
+        let mut app = test_app();
+        app.view = View::Session;
+        let mut screen = sample_screen();
+        screen.view.pending_approval = Some(crate::tui::view::PendingApproval {
+            id: "a1".into(),
+            seat_id: "george".into(),
+            call: ToolCall {
+                id: "c1".into(),
+                name: "run_command".into(),
+                arguments: json!({ "command": "ls" }),
+                signature: None,
+            },
+        });
+        app.session = Some(screen);
+
+        press(&mut app, KeyCode::Char('?'));
+        assert!(!app.help, "the key list never covers the approval");
+        press(&mut app, KeyCode::Char('/'));
+        assert!(app.cmdline.is_none(), "no command line hides behind it");
+        assert!(
+            app.session
+                .as_ref()
+                .unwrap()
+                .view
+                .pending_approval
+                .is_some(),
+            "still waiting"
+        );
+        assert!(app.toast.as_deref().unwrap().contains("y allows it"));
+
+        press(&mut app, KeyCode::Char('n'));
+        assert!(app
+            .session
+            .as_ref()
+            .unwrap()
+            .view
+            .pending_approval
+            .is_none());
+    }
+
+    /// A record that happens to contain the words a control is labelled with
+    /// must not take its click. The hit goes where the line was drawn.
+    #[test]
+    fn model_text_never_steals_a_click_target() {
+        let mut app = test_app();
+        app.view = View::Session;
+        let mut screen = sample_screen();
+        if let Some(r) = screen.view.record.as_mut() {
+            r.answer = "Read the full transcript and ◈ Critique every claim in it.".into();
+        }
+        screen.ui.page = Some(SessionPage::Summary);
+        app.session = Some(screen);
+        draw(&mut app, 140, 60);
+
+        let hits: Vec<Hit> = app.hits.borrow().clone();
+        // Only what the reading column itself registered: the header's own
+        // page tabs live above it and are not what this is about.
+        let main = app.regions.borrow()[0];
+        let in_column = |r: Rect| r.y >= main.y && r.y < main.y + main.height;
+        let to_transcript: Vec<Rect> = hits
+            .iter()
+            .filter(|h| h.click == Click::Page(SessionPage::Transcript))
+            .map(|h| h.area)
+            .filter(|r| in_column(*r))
+            .collect();
+        assert_eq!(
+            to_transcript.len(),
+            1,
+            "one transcript link, not one per mention of its words"
+        );
+        let critique: Vec<Rect> = hits
+            .iter()
+            .filter(|h| h.click == Click::Analysis(analysis::AnalysisView::Critique))
+            .map(|h| h.area)
+            .filter(|r| in_column(*r))
+            .collect();
+        assert_eq!(critique.len(), 1, "one critique tab");
+        // The link sits below the analysis tabs, where both are drawn, not up
+        // in the record where the same words also appear.
+        assert!(
+            to_transcript[0].y > critique[0].y,
+            "transcript link at {:?}, critique tab at {:?}",
+            to_transcript[0],
+            critique[0]
+        );
     }
 
     #[test]

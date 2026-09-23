@@ -106,17 +106,56 @@ describe("resolveSlash", () => {
 });
 
 describe("parity with the terminal", () => {
-  it("has the terminal's commands, less /sessions", () => {
+  it("has the terminal's commands, less /sessions, with the same arguments and screens", () => {
     const url = new URL("../../../../cli/src/tui/slash.rs", import.meta.url);
-    const src = readFileSync(url, "utf8");
-    const rust = [...src.matchAll(/name: "([a-z]+)",\s*aliases: &\[([^\]]*)\]/g)].map((m) => ({
+    const whole = readFileSync(url, "utf8");
+    // Just the registry, so nothing else in the file that happens to have a
+    // `name:` field is counted as a command.
+    const from = whole.indexOf("pub const COMMANDS: &[Command] = &[");
+    expect(from).toBeGreaterThan(-1);
+    const src = whole.slice(from, whole.indexOf("\n];", from));
+    // Names and aliases alone let the parts people actually hit drift: the
+    // argument a command takes, the words it accepts, and which screen it is
+    // on. Flip any of those on one side and only the other client's users
+    // find out.
+    const entries = [
+      ...src.matchAll(
+        /name: "([a-z]+)",\s*aliases: &\[([^\]]*)\],\s*arg: ([^,]+(?:\([^)]*\))?),\s*about: "[^"]*",\s*home: (true|false),\s*session: (true|false),/g,
+      ),
+    ];
+    const rust = entries.map((m) => ({
       name: m[1],
       aliases: [...m[2].matchAll(/"([a-z]+)"/g)].map((a) => a[1]),
+      arg: rustArg(m[3]),
+      home: m[4] === "true",
+      session: m[5] === "true",
     }));
     expect(rust.length).toBeGreaterThan(10);
+    // Every command in the file was matched, so nothing slipped past the regex.
+    expect(rust.length).toBe([...src.matchAll(/^ {4}Command \{$/gm)].length);
+
     const expected = rust.filter((c) => c.name !== "sessions");
-    expect(SLASH_COMMANDS.map((c) => ({ name: c.name, aliases: [...c.aliases] }))).toEqual(
-      expected,
-    );
+    const ours = SLASH_COMMANDS.map((c) => ({
+      name: c.name,
+      aliases: [...c.aliases],
+      arg: c.arg.kind === "choice" ? { kind: "choice", words: [...c.arg.words] } : c.arg,
+      home: c.home,
+      session: c.session,
+    }));
+    expect(ours).toEqual(expected);
   });
 });
+
+/** The Rust `Arg` variant as this file's `SlashArg`. */
+function rustArg(raw: string): { kind: string; words?: string[] } {
+  const text = raw.trim();
+  if (text.startsWith("Arg::Choice")) {
+    return {
+      kind: "choice",
+      words: [...text.matchAll(/"([a-z]+)"/g)].map((m) => m[1]),
+    };
+  }
+  if (text === "Arg::Session") return { kind: "session" };
+  if (text === "Arg::None") return { kind: "none" };
+  throw new Error(`unrecognised Arg in slash.rs: ${text}`);
+}

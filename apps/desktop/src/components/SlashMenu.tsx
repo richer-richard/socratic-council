@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState, type KeyboardEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 
 import {
   SLASH_COMMANDS,
@@ -81,9 +81,24 @@ export function useSlash({
         setValue("");
         setSelected(0);
         setNotice(null);
-        void Promise.resolve(run(resolved.name, resolved.arg)).then((said) => {
-          if (said) setNotice(said);
-        });
+        // The input is already cleared, so a command that fails has to say so
+        // here or it fails silently. A synchronous throw escapes the keydown
+        // handler entirely, hence the try as well as the catch.
+        const failed = (error: unknown) => {
+          console.error("[slash] /" + resolved.name + " failed:", error);
+          setNotice(
+            error instanceof Error && error.message
+              ? `/${resolved.name} could not run: ${error.message}`
+              : `/${resolved.name} could not run.`,
+          );
+        };
+        try {
+          void Promise.resolve(run(resolved.name, resolved.arg)).then((said) => {
+            if (said) setNotice(said);
+          }, failed);
+        } catch (error) {
+          failed(error);
+        }
         return;
       }
       if (resolved.kind === "needs-arg") {
@@ -161,6 +176,14 @@ export function useSlash({
  * what Enter runs; the pointer highlights the row under it.
  */
 export function SlashMenu({ ctl, typed }: { ctl: SlashController; typed: string }) {
+  // The list is capped at min(22rem, 50vh) and scrolls, so on a short window
+  // or a long `/open` list the arrows would move the highlight past the
+  // bottom edge with nothing to see and Enter running an invisible row.
+  // Above the early return: the hooks run on every render either way.
+  const selectedRow = useRef<HTMLButtonElement | null>(null);
+  useEffect(() => {
+    selectedRow.current?.scrollIntoView({ block: "nearest" });
+  }, [ctl.selected, ctl.open, ctl.suggestions.length]);
   if (!ctl.open && !ctl.notice) return null;
   const firstClose = ctl.suggestions.findIndex((s) => s.close);
   return (
@@ -179,13 +202,18 @@ export function SlashMenu({ ctl, typed }: { ctl: SlashController; typed: string 
             </div>
           )}
           {ctl.suggestions.map((s, i) => (
-            <div key={s.fill + s.label}>
+            // The index, not the text: two saved sessions can share a title
+            // (reconvening keeps the topic), and `/open <title>` then gives two
+            // rows the same fill and label. The list is rebuilt whole on every
+            // keystroke and the rows hold no state of their own.
+            <div key={`${i}-${s.fill}`}>
               {i === firstClose && (
                 <div className="slash-menu-label">{i === 0 ? "Close matches" : "Close"}</div>
               )}
               <button
                 type="button"
                 role="option"
+                ref={i === ctl.selected ? selectedRow : undefined}
                 aria-selected={i === ctl.selected}
                 className={`slash-menu-row ${i === ctl.selected ? "is-selected" : ""} ${
                   s.close ? "is-close" : ""
