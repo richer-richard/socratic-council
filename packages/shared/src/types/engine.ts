@@ -90,6 +90,11 @@ export interface EngineEstimate {
   usd_low: number;
   usd_high: number;
   unpriced_seats: string[];
+  /**
+   * Whether the review pass is part of the run. Absent on sessions written
+   * before it existed, which is not the same as switched off.
+   */
+  review?: boolean;
 }
 
 export interface EngineEvidence {
@@ -262,6 +267,8 @@ export interface EngineArgEdge {
 export interface EngineArgGraph {
   nodes: EngineArgNode[];
   edges: EngineArgEdge[];
+  /** Rounds the extractor returned nothing usable for, by label. */
+  missing?: string[];
 }
 
 export type EngineRoundKind = "prep" | "positions" | { cross: number } | "revision" | "critique";

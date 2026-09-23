@@ -16,7 +16,7 @@ import {
 } from "../services/attachments";
 import { DEFAULT_LAUNCH, type SessionLaunchOptions } from "../services/engine";
 import type { ProjectSummary } from "../services/projects";
-import type { SessionSummary, SessionStatus } from "../services/sessions";
+import type { BulkDeleteResult, SessionSummary, SessionStatus } from "../services/sessions";
 import { useConfig, getShuffledTopics, LOCKED_MODELS, type Provider } from "../stores/config";
 
 interface HomeProps {
@@ -31,6 +31,8 @@ interface HomeProps {
     launch?: SessionLaunchOptions,
   ) => void | Promise<void>;
   onDeleteSession: (sessionId: string) => void | Promise<void>;
+  /** Delete every stored session except runs in flight, and say what happened. */
+  onDeleteAllSessions: () => Promise<BulkDeleteResult>;
   onOpenSession: (sessionId: string) => void;
   onRestoreSession: (sessionId: string) => void;
   onCreateProject: (name: string, description?: string) => void;
@@ -745,6 +747,7 @@ export function Home({
   onArchiveSession,
   onCreateSession,
   onDeleteSession,
+  onDeleteAllSessions,
   onOpenSession,
   onRestoreSession,
   onCreateProject,
@@ -1920,6 +1923,8 @@ export function Home({
       <ConfigModal
         isOpen={showSettings}
         initialTab={settingsTab}
+        sessionCount={sessions.length}
+        onDeleteAllSessions={onDeleteAllSessions}
         onClose={() => setShowSettings(false)}
         config={config}
         proxy={getProxy()}

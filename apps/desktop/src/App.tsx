@@ -33,15 +33,21 @@ import { initSessionBlobStore, registerSessionBlobHooks } from "./services/sessi
 import {
   archiveDiscussionSession,
   createDiscussionSession,
+  deleteAllDiscussionSessions,
   deleteDiscussionSessionWithAttachments,
   listSessionSummaries,
   loadDiscussionSession,
   restoreDiscussionSession,
   stabilizeStoredSessions,
   touchDiscussionSession,
+  type BulkDeleteResult,
   type DiscussionSession,
 } from "./services/sessions";
-import { importEngineSession, importSharedSessions } from "./services/sessionSync";
+import {
+  deleteSharedSession,
+  importEngineSession,
+  importSharedSessions,
+} from "./services/sessionSync";
 import { describeSaveFailure } from "./services/storageErrors";
 import {
   getDecryptFailureCount,
@@ -54,6 +60,7 @@ import {
   cancelEngineRun,
   decideEngineTool,
   forgetEngineRun,
+  liveRunIds,
   startEngineRun,
   useEngineRun,
 } from "./session/useEngineRuns";
@@ -420,6 +427,32 @@ export default function App() {
     [refreshAll],
   );
 
+  // Every stored session except the ones still running. A live run would be
+  // written straight back when the engine finishes, so it is kept and named in
+  // the report instead of being deleted and quietly resurrected.
+  const handleDeleteAllSessions = useCallback(async (): Promise<BulkDeleteResult> => {
+    const live = new Set(liveRunIds());
+    const result = await deleteAllDiscussionSessions({
+      skip: live,
+      deleteShared: deleteSharedSession,
+    });
+    refreshAll();
+    setActiveSession((current) => (current && !live.has(current.id) ? null : current));
+    setState((current) =>
+      current.currentSessionId && !live.has(current.currentSessionId)
+        ? {
+            ...current,
+            currentPage:
+              current.currentPage === "chat" || current.currentPage === "transcript"
+                ? "home"
+                : current.currentPage,
+            currentSessionId: null,
+          }
+        : current,
+    );
+    return result;
+  }, [refreshAll]);
+
   const handleArchiveSession = useCallback(
     (sessionId: string) => {
       const archived = archiveDiscussionSession(sessionId);
@@ -625,6 +658,7 @@ export default function App() {
             onArchiveSession={handleArchiveSession}
             onCreateSession={handleCreateSession}
             onDeleteSession={handleDeleteSession}
+            onDeleteAllSessions={handleDeleteAllSessions}
             onOpenSession={handleOpenSession}
             onRestoreSession={handleRestoreSession}
             onCreateProject={handleCreateProject}
@@ -659,6 +693,9 @@ export default function App() {
               session={activeSession}
               live={liveView}
               onNavigate={navigate}
+              onCancel={(id) => void cancelEngineRun(id)}
+              onAnswer={answerEngineQuestion}
+              onDecide={decideEngineTool}
             />
           </ErrorBoundary>
         )}

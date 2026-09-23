@@ -19,6 +19,13 @@ import { ScoreMatrix, VoteChart } from "./ReviewMatrices";
 
 type ViewKey = "matrix" | "vote" | "critique" | "argument";
 
+/**
+ * Where the review stands, so a view with no peer data can say why: it was
+ * switched off for this run, it has not finished yet, or it finished and
+ * produced nothing usable. Saying "off" for all three was wrong twice over.
+ */
+export type ReviewStatus = "off" | "pending" | "done";
+
 const VIEWS: {
   key: ViewKey;
   label: string;
@@ -35,10 +42,12 @@ export function ReviewPanel({
   peerEval,
   argGraph,
   metrics,
+  status,
 }: {
   peerEval: EnginePeerEval | null;
   argGraph: EngineArgGraph | null;
   metrics: SessionMetrics;
+  status: ReviewStatus;
 }) {
   const [view, setView] = useState<ViewKey>("matrix");
   const active = VIEWS.find((v) => v.key === view) ?? VIEWS[0]!;
@@ -65,10 +74,12 @@ export function ReviewPanel({
       </div>
 
       <div className="review-panel-stage" role="tabpanel" aria-label={active.label}>
-        {view === "matrix" && <ScoreMatrix peerEval={peerEval} metrics={metrics} />}
+        {view === "matrix" && <ScoreMatrix peerEval={peerEval} metrics={metrics} status={status} />}
         {view === "vote" && <VoteChart metrics={metrics} />}
-        {view === "critique" && <CritiqueGraph peerEval={peerEval} metrics={metrics} />}
-        {view === "argument" && <ArgumentMap graph={argGraph} metrics={metrics} />}
+        {view === "critique" && (
+          <CritiqueGraph peerEval={peerEval} metrics={metrics} status={status} />
+        )}
+        {view === "argument" && <ArgumentMap graph={argGraph} metrics={metrics} status={status} />}
       </div>
     </section>
   );

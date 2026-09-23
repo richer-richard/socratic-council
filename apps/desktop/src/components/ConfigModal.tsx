@@ -13,7 +13,7 @@ import { useEffect, useMemo, useState } from "react";
 import desktopPkg from "../../package.json";
 import { clearAllAttachmentBlobs } from "../services/attachments";
 import { scanProviderModels, getCachedScan, type ScanResult } from "../services/modelScan";
-import { deleteAllDiscussionSessions, listSessionSummaries } from "../services/sessions";
+import { describeBulkDelete, type BulkDeleteResult } from "../services/sessions";
 import {
   type Provider,
   type ProxyType,
@@ -233,6 +233,10 @@ interface ConfigModalProps {
   vaultReady: boolean;
   /** Tab to open on. Lets a caller deep-link, e.g. the rack's chair rows. */
   initialTab?: TabType;
+  /** How many sessions are stored, from the caller's list: no index read here. */
+  sessionCount: number;
+  /** Delete every stored session except runs in flight. */
+  onDeleteAllSessions: () => Promise<BulkDeleteResult>;
 }
 
 const PROVIDERS = Object.keys(PROVIDER_INFO) as Provider[];
@@ -326,6 +330,8 @@ export function ConfigModal({
   proxy,
   vaultReady,
   initialTab,
+  sessionCount,
+  onDeleteAllSessions,
 }: ConfigModalProps) {
   const [activeTab, setActiveTab] = useState<TabType>(initialTab ?? "api-keys");
   // The bulk delete is two-step on purpose: arm it, then type the word. It is
@@ -368,16 +374,19 @@ export function ConfigModal({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [modelsVersion, isOpen]);
 
-  // The modal stays mounted while closed, so seeding activeTab from the prop
-  // at useState time only works once. Re-seed on each open instead, or the
-  // second deep-link from the rack would land on whatever tab was last used.
+  // The modal stays mounted while closed, so state seeded at useState time
+  // would outlive every open after the first. Each open starts over: the tab
+  // the caller asked for (API Keys when it asked for none), and a delete
+  // control that is disarmed with no report from an earlier run left on it.
   useEffect(() => {
-    if (isOpen && initialTab) setActiveTab(initialTab);
+    if (!isOpen) return;
+    setActiveTab(initialTab ?? "api-keys");
+    setWipeArmed(false);
+    setWipeConfirm("");
+    setWipeResult(null);
   }, [isOpen, initialTab]);
 
   if (!isOpen) return null;
-
-  const sessionCount = listSessionSummaries().length;
 
   const configuredCount = PROVIDERS.filter((p) => config.credentials[p]?.apiKey).length;
 
@@ -1160,14 +1169,8 @@ export function ConfigModal({
                       disabled={wipeConfirm.trim().toLowerCase() !== "delete" || wiping}
                       onClick={() => {
                         setWiping(true);
-                        void deleteAllDiscussionSessions()
-                          .then(({ deleted, failed }) => {
-                            setWipeResult(
-                              failed.length === 0
-                                ? `Deleted ${deleted} sessions.`
-                                : `Deleted ${deleted} sessions. ${failed.length} could not be removed and are still listed.`,
-                            );
-                          })
+                        void onDeleteAllSessions()
+                          .then((result) => setWipeResult(describeBulkDelete(result)))
                           .catch(() => setWipeResult("Nothing was deleted: the store errored."))
                           .finally(() => {
                             setWiping(false);

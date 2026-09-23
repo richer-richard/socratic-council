@@ -17,6 +17,8 @@ import { useState } from "react";
 
 import type { SessionMetrics } from "../../session/metrics";
 
+import type { ReviewStatus } from "./ReviewPanel";
+
 const STANCE_COLOR: Record<EnginePeerStance, string> = {
   agree: "#34d399",
   disagree: "#f87171",
@@ -29,22 +31,35 @@ const AGAINST: ReadonlySet<EngineArgRelation> = new Set<EngineArgRelation>([
   "contradicts",
 ]);
 
+/** Why the graph has nothing to draw. */
+function noCritiques(status: ReviewStatus, peerEval: EnginePeerEval | null): string {
+  if (status === "off") {
+    return "Peer scoring was off for this session, so no seat rated another. Switch it on under Settings, Preferences to get this graph on the next run.";
+  }
+  if (status === "pending") {
+    return "Each seat rates the others once the record is written. The graph fills in when that finishes.";
+  }
+  if (peerEval) {
+    return "The review ran but no evaluator returned a usable score, so there is nothing to draw.";
+  }
+  return "No seat rated another in this session.";
+}
+
 export function CritiqueGraph({
   peerEval,
   metrics,
+  status,
 }: {
   peerEval: EnginePeerEval | null;
   metrics: SessionMetrics;
+  status: ReviewStatus;
 }) {
   const [focus, setFocus] = useState<string | null>(null);
 
   if (!peerEval || peerEval.critiques.length === 0) {
     return (
       <div className="review-panel-body">
-        <p className="review-note">
-          Peer scoring is off for this session, so no seat rated another. Turn it on under Settings,
-          Council to get this graph on the next run.
-        </p>
+        <p className="review-note">{noCritiques(status, peerEval)}</p>
       </div>
     );
   }
@@ -94,6 +109,10 @@ export function CritiqueGraph({
             const p = at(i);
             const summary = peerEval.per_seat[id];
             const on = !focus || focus === id;
+            // A seat nobody managed to rate is drawn hollow and labelled as
+            // such. Drawn as 0 it read as the council's harshest verdict.
+            const rated = (summary?.reviews_received ?? 0) > 0;
+            const score = Math.round(summary?.overall_average ?? 0);
             return (
               <g
                 key={id}
@@ -104,7 +123,7 @@ export function CritiqueGraph({
                 onBlur={() => setFocus(null)}
                 tabIndex={0}
                 role="button"
-                aria-label={`${name(id)}, rated ${Math.round(summary?.overall_average ?? 0)} of 100`}
+                aria-label={rated ? `${name(id)}, rated ${score} of 100` : `${name(id)}, not rated`}
               >
                 <rect
                   x={p.x - 7}
@@ -112,9 +131,10 @@ export function CritiqueGraph({
                   width="14"
                   height="14"
                   fill="#f5c542"
-                  fillOpacity={on ? 0.2 + ((summary?.overall_average ?? 0) / 100) * 0.8 : 0.15}
+                  fillOpacity={rated ? (on ? 0.2 + (score / 100) * 0.8 : 0.15) : 0}
                   stroke="#f5c542"
                   strokeOpacity={on ? 0.9 : 0.25}
+                  strokeDasharray={rated ? undefined : "2 2"}
                 />
                 {/* Above the ring the score goes on top of the name, below it
                     underneath. Reading order stays name-then-score either way,
@@ -135,7 +155,7 @@ export function CritiqueGraph({
                   className="graph-sublabel"
                   opacity={on ? 1 : 0.3}
                 >
-                  {Math.round(summary?.overall_average ?? 0)}
+                  {rated ? score : "not rated"}
                 </text>
               </g>
             );
@@ -178,22 +198,35 @@ const NODE_GAP = 14;
 /** Characters of a claim that fit on one line at NODE_WIDTH. */
 const NODE_CHARS = 40;
 
+/** Why there is no map to draw. */
+function noMap(status: ReviewStatus, graph: EngineArgGraph | null): string {
+  if (graph) {
+    return "The argument map could not be built: the extractor returned nothing usable for any round.";
+  }
+  if (status === "off") {
+    return "No argument map: the review that builds it was off for this session. It is under Settings, Preferences.";
+  }
+  if (status === "pending") {
+    return "The argument map is built after the record, once the peer scores are in.";
+  }
+  return "No argument map for this session.";
+}
+
 export function ArgumentMap({
   graph,
   metrics,
+  status,
 }: {
   graph: EngineArgGraph | null;
   metrics: SessionMetrics;
+  status: ReviewStatus;
 }) {
   const [selected, setSelected] = useState<EngineArgNode | null>(null);
 
   if (!graph || graph.nodes.length === 0) {
     return (
       <div className="review-panel-body">
-        <p className="review-note">
-          No argument map for this session. It is built during the review pass, which is off under
-          Settings, Council.
-        </p>
+        <p className="review-note">{noMap(status, graph)}</p>
       </div>
     );
   }
@@ -296,6 +329,9 @@ export function ArgumentMap({
         <p className="review-note">
           {graph.nodes.length} points, {graph.edges.length} links. Green answers, red pushes back.
           Pick a point to read it in full.
+          {graph.missing && graph.missing.length > 0
+            ? ` Not mapped, because the extractor returned nothing usable: ${graph.missing.join(", ")}.`
+            : ""}
         </p>
       )}
     </div>

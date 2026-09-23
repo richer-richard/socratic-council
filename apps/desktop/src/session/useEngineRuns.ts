@@ -139,6 +139,17 @@ export function useEngineRun(sessionId: string | null): SessionView | null {
   return sessionId ? (runs.get(sessionId) ?? null) : null;
 }
 
+/**
+ * Ids of runs still in flight, read at the moment of the call. For handlers:
+ * a hook's value captured in a callback can be a render behind, and the bulk
+ * delete must not miss a run that started since.
+ */
+export function liveRunIds(): string[] {
+  return Array.from(views.entries())
+    .filter(([, view]) => !view.done)
+    .map(([id]) => id);
+}
+
 /** Ids of runs still in flight (for the sidebar's live markers). */
 export function useLiveRunIds(): string[] {
   const runs = useSyncExternalStore(subscribeStore, getSnapshot, getSnapshot);

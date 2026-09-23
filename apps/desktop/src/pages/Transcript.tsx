@@ -12,6 +12,7 @@ import { useMemo } from "react";
 
 import type { Page } from "../App";
 import { CouncilMark } from "../components/CouncilMark";
+import { RunPrompts } from "../components/session/RunPrompts";
 import { LegacyTranscript, RoundSection, usd } from "../components/session/Transcript";
 import type { DiscussionSession } from "../services/sessions";
 import { viewFromStored, type SessionView } from "../session/reducer";
@@ -21,9 +22,24 @@ interface TranscriptProps {
   /** The live view while the engine runs; null for a stored session. */
   live: SessionView | null;
   onNavigate: (page: Page, sessionId?: string) => void;
+  onCancel: (sessionId: string) => void;
+  onAnswer: (sessionId: string, questionId: string, text: string) => Promise<void> | void;
+  onDecide: (sessionId: string, approvalId: string, allow: boolean) => Promise<void> | void;
 }
 
-export function Transcript({ session, live, onNavigate }: TranscriptProps) {
+/**
+ * This is where a live run gets watched, since the summary only fills in once
+ * the record exists. So it carries the same controls the summary does: Stop,
+ * and the moderator's question and tool approvals the engine waits on.
+ */
+export function Transcript({
+  session,
+  live,
+  onNavigate,
+  onCancel,
+  onAnswer,
+  onDecide,
+}: TranscriptProps) {
   const view = useMemo<SessionView | null>(
     () => live ?? (session.engine ? viewFromStored(session.engine) : null),
     [live, session.engine],
@@ -66,6 +82,17 @@ export function Transcript({ session, live, onNavigate }: TranscriptProps) {
           </span>
           {cost != null && <span className="session-bar-spend-note">{usd(cost)}</span>}
         </div>
+        {running && (
+          <div className="session-bar-actions">
+            <button
+              type="button"
+              className="session-bar-button is-stop"
+              onClick={() => onCancel(session.id)}
+            >
+              Stop
+            </button>
+          </div>
+        )}
       </div>
 
       <div className="session-layout">
@@ -111,6 +138,8 @@ export function Transcript({ session, live, onNavigate }: TranscriptProps) {
           </aside>
         )}
       </div>
+
+      <RunPrompts sessionId={session.id} view={view} onAnswer={onAnswer} onDecide={onDecide} />
     </div>
   );
 }

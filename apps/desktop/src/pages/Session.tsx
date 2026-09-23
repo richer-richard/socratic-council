@@ -25,7 +25,8 @@ import { ChamberSurface } from "../components/ChamberSurface";
 import { ConversationExport } from "../components/ConversationExport";
 import { CouncilMark } from "../components/CouncilMark";
 import { Markdown } from "../components/Markdown";
-import { ReviewPanel } from "../components/session/ReviewPanel";
+import { ReviewPanel, type ReviewStatus } from "../components/session/ReviewPanel";
+import { RunPrompts } from "../components/session/RunPrompts";
 import { CopyButton, LegacyTranscript, SectionRule, usd } from "../components/session/Transcript";
 import type { ConversationExportMessage } from "../services/conversationExport";
 import type { DiscussionSession } from "../services/sessions";
@@ -423,43 +424,56 @@ export function Session({ session, live, onNavigate, onCancel, onAnswer, onDecid
     () => live ?? (session.engine ? viewFromStored(session.engine) : null),
     [live, session.engine],
   );
-  const [answer, setAnswer] = useState("");
   const [showExport, setShowExport] = useState(false);
   // Derived from the run itself, so the analysis panel has something to show
   // whether or not the review pass ran.
+  // The analysis is of a finished debate, so it is computed once the record
+  // exists and not before. Keyed on the parts it reads rather than on the whole
+  // view: during a run the view changes with every streamed token, and
+  // re-counting every word of the transcript on each one was pure waste. After
+  // the record no more tokens arrive, so these only move on the review's own
+  // events.
+  const record = view?.record ?? null;
+  const rounds = view?.rounds;
+  const board = view?.board ?? null;
+  const convergences = view?.convergences;
+  const liveCost = view?.cost ?? null;
+  const seats = session.engine?.seats;
   const metrics = useMemo(
     () =>
-      sessionMetrics({
-        names: Object.fromEntries(
-          (session.engine?.seats ?? []).map((seat) => [seat.id, seat.name]),
-        ),
-        // From the view rather than the stored file, so a run still in flight
-        // counts the turns it has already produced.
-        rounds: (view?.rounds ?? []).map((round) => ({
-          kind: round.kind,
-          entries: round.entries.map((turn) => ({
-            seat: turn.seatId,
-            name: turn.name,
-            model: turn.model,
-            content: turn.text,
-            structured: turn.structured,
-            tool_uses: turn.toolUses,
-            usage: turn.usage ?? {
-              input: 0,
-              output: 0,
-              reasoning: 0,
-              cached_input: 0,
-              cache_write: 0,
-            },
-          })),
-        })),
-        board: view?.board ?? null,
-        convergences: view?.convergences ?? [],
-        record: view?.record ?? null,
-        cost: view?.cost ?? null,
-      }),
-    [session.engine, view],
+      record
+        ? sessionMetrics({
+            names: Object.fromEntries((seats ?? []).map((seat) => [seat.id, seat.name])),
+            rounds: (rounds ?? []).map((round) => ({
+              kind: round.kind,
+              entries: round.entries.map((turn) => ({
+                seat: turn.seatId,
+                name: turn.name,
+                model: turn.model,
+                content: turn.text,
+                structured: turn.structured,
+                tool_uses: turn.toolUses,
+                usage: turn.usage ?? {
+                  input: 0,
+                  output: 0,
+                  reasoning: 0,
+                  cached_input: 0,
+                  cache_write: 0,
+                },
+              })),
+            })),
+            board,
+            convergences: convergences ?? [],
+            record,
+            cost: liveCost,
+          })
+        : null,
+    [record, rounds, board, convergences, liveCost, seats],
   );
+  // Whether peer scores are coming, came, or were never going to. The estimate
+  // says if the review was part of the run; `done` says if it has finished.
+  const reviewStatus: ReviewStatus =
+    view?.estimate?.review === false ? "off" : view?.done ? "done" : "pending";
   const running = Boolean(live && !live.done);
   const status = running
     ? "running"
@@ -573,8 +587,13 @@ export function Session({ session, live, onNavigate, onCancel, onAnswer, onDecid
               />
             </section>
           )}
-          {view && (view.record || view.rounds.length > 0) && (
-            <ReviewPanel peerEval={view.peerEval} argGraph={view.argGraph} metrics={metrics} />
+          {view && metrics && (
+            <ReviewPanel
+              peerEval={view.peerEval}
+              argGraph={view.argGraph}
+              metrics={metrics}
+              status={reviewStatus}
+            />
           )}
           {view && view.rounds.length > 0 && (
             <button
@@ -582,7 +601,9 @@ export function Session({ session, live, onNavigate, onCancel, onAnswer, onDecid
               className="transcript-link"
               onClick={() => onNavigate("transcript", session.id)}
             >
-              <span className="transcript-link-label">Read the full transcript</span>
+              <span className="transcript-link-label">
+                {running ? "Follow the debate as it happens" : "Read the full transcript"}
+              </span>
               <span className="transcript-link-meta">
                 {view.rounds.length} rounds, {view.rounds.reduce((n, r) => n + r.entries.length, 0)}{" "}
                 turns
@@ -640,81 +661,7 @@ export function Session({ session, live, onNavigate, onCancel, onAnswer, onDecid
         />
       </ChamberSurface>
 
-      <ChamberSurface
-        open={Boolean(view?.pendingQuestion)}
-        onClose={() => undefined}
-        ariaLabel="The moderator has a question"
-        kicker="Moderator"
-        dismissOnEscape={false}
-        dismissOnScrim={false}
-      >
-        <div className="p-6 space-y-4">
-          <p className="text-gray-100">{view?.pendingQuestion?.question}</p>
-          <textarea
-            value={answer}
-            onChange={(e) => setAnswer(e.target.value)}
-            rows={3}
-            className="elegant-input w-full"
-            placeholder="Your answer"
-          />
-          <div className="flex justify-end gap-2">
-            <button
-              type="button"
-              className="session-control-button"
-              disabled={!answer.trim()}
-              onClick={() => {
-                const q = view?.pendingQuestion;
-                if (!q) return;
-                void onAnswer(session.id, q.id, answer.trim());
-                setAnswer("");
-              }}
-            >
-              Answer
-            </button>
-          </div>
-        </div>
-      </ChamberSurface>
-
-      <ChamberSurface
-        open={Boolean(view?.pendingApproval) && !view?.pendingQuestion}
-        onClose={() => undefined}
-        ariaLabel="A seat wants to run a tool"
-        kicker="Tool approval"
-        dismissOnEscape={false}
-        dismissOnScrim={false}
-      >
-        <div className="p-6 space-y-4">
-          <p className="text-gray-100">
-            <strong>{view?.pendingApproval?.seatId}</strong> wants to run{" "}
-            <code>{view?.pendingApproval?.call.name}</code>
-          </p>
-          <pre className="tool-chip-output">
-            {JSON.stringify(view?.pendingApproval?.call.arguments ?? {}, null, 2)}
-          </pre>
-          <div className="flex justify-end gap-2">
-            <button
-              type="button"
-              className="button-ghost"
-              onClick={() => {
-                const a = view?.pendingApproval;
-                if (a) void onDecide(session.id, a.id, false);
-              }}
-            >
-              Deny
-            </button>
-            <button
-              type="button"
-              className="session-control-button"
-              onClick={() => {
-                const a = view?.pendingApproval;
-                if (a) void onDecide(session.id, a.id, true);
-              }}
-            >
-              Allow
-            </button>
-          </div>
-        </div>
-      </ChamberSurface>
+      <RunPrompts sessionId={session.id} view={view} onAnswer={onAnswer} onDecide={onDecide} />
     </div>
   );
 }

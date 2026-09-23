@@ -141,12 +141,19 @@ export async function importEngineSession(id: string): Promise<DiscussionSession
   return importDiscussionSession(mergeSharedIntoLocal(shared, local)) ?? local;
 }
 
-export async function deleteSharedSession(id: string): Promise<void> {
-  if (!isTauri()) return;
+/**
+ * Remove a session's file from the shared store the CLI reads. Resolves to
+ * whether the store no longer holds it (true outside Tauri, where there is no
+ * store), so a caller that counts deletions can count this one honestly.
+ */
+export async function deleteSharedSession(id: string): Promise<boolean> {
+  if (!isTauri()) return true;
   try {
     await invoke("session_sync_delete", { id });
+    return true;
   } catch (error) {
     console.warn("[sessionSync] delete failed:", id, error);
+    return false;
   }
 }
 

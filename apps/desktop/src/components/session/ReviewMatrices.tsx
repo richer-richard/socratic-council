@@ -10,6 +10,8 @@ import type { EnginePeerEval } from "@socratic-council/shared";
 import type { SessionMetrics } from "../../session/metrics";
 import { normalize } from "../../session/metrics";
 
+import type { ReviewStatus } from "./ReviewPanel";
+
 /**
  * A cell's ink: one hue, weight carrying the value, so a row reads as a shape.
  * The ramp is squared because peer scores bunch between 40 and 95 and a linear
@@ -86,12 +88,29 @@ function Grid({
   );
 }
 
+/** Why the matrix is showing counts instead of peer scores. */
+function countsCaption(status: ReviewStatus, peerEval: EnginePeerEval | null): string {
+  const counts = "these are counts from the run itself, shaded against the busiest seat.";
+  if (status === "off") {
+    return `Peer scoring was off for this session, so ${counts} It is under Settings, Preferences.`;
+  }
+  if (status === "pending") {
+    return `Peer scores replace this once the review finishes. Until then ${counts}`;
+  }
+  if (peerEval) {
+    return `The review ran but no evaluator returned a usable score, so ${counts}`;
+  }
+  return `No peer scores came back for this session, so ${counts}`;
+}
+
 export function ScoreMatrix({
   peerEval,
   metrics,
+  status,
 }: {
   peerEval: EnginePeerEval | null;
   metrics: SessionMetrics;
+  status: ReviewStatus;
 }) {
   if (peerEval && peerEval.critiques.length > 0) {
     // Ranked, so the matrix opens on the seat that carried the session.
@@ -141,7 +160,7 @@ export function ScoreMatrix({
   return (
     <div className="review-panel-body">
       <Grid
-        caption="What each seat did. Peer scoring is off for this session, so these are counts from the run itself, shaded against the busiest seat."
+        caption={`What each seat did. ${countsCaption(status, peerEval)}`}
         rows={seats.map((s) => ({
           id: s.seatId,
           name: s.name,
@@ -164,6 +183,15 @@ export function ScoreMatrix({
           { key: "tools", label: "Tools", value: (i) => seats[i]!.tools, weight: (i) => tools[i]! },
         ]}
       />
+      {peerEval && peerEval.failed.length > 0 && (
+        <p className="review-note">
+          No usable review came back from{" "}
+          {peerEval.failed
+            .map((id) => metrics.seats.find((s) => s.seatId === id)?.name ?? id)
+            .join(", ")}
+          .
+        </p>
+      )}
     </div>
   );
 }
