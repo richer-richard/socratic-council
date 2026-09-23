@@ -8,11 +8,12 @@ import {
   type EngineSlot,
   type EngineToolPolicy,
 } from "@socratic-council/shared";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import desktopPkg from "../../package.json";
 import { clearAllAttachmentBlobs } from "../services/attachments";
 import { scanProviderModels, getCachedScan, type ScanResult } from "../services/modelScan";
+import { deleteAllDiscussionSessions, listSessionSummaries } from "../services/sessions";
 import {
   type Provider,
   type ProxyType,
@@ -200,6 +201,8 @@ function IconCouncil() {
   );
 }
 
+type TabType = "api-keys" | "council" | "models" | "proxy" | "preferences" | "about";
+
 interface ConfigModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -228,9 +231,9 @@ interface ConfigModalProps {
   /** Resolved proxy (for routing scan requests). */
   proxy?: ProxyConfig;
   vaultReady: boolean;
+  /** Tab to open on. Lets a caller deep-link, e.g. the rack's chair rows. */
+  initialTab?: TabType;
 }
-
-type TabType = "api-keys" | "council" | "models" | "proxy" | "preferences" | "about";
 
 const PROVIDERS = Object.keys(PROVIDER_INFO) as Provider[];
 
@@ -322,8 +325,15 @@ export function ConfigModal({
   onModelsScanned,
   proxy,
   vaultReady,
+  initialTab,
 }: ConfigModalProps) {
-  const [activeTab, setActiveTab] = useState<TabType>("api-keys");
+  const [activeTab, setActiveTab] = useState<TabType>(initialTab ?? "api-keys");
+  // The bulk delete is two-step on purpose: arm it, then type the word. It is
+  // the only control in here that destroys data with no way back.
+  const [wipeArmed, setWipeArmed] = useState(false);
+  const [wipeConfirm, setWipeConfirm] = useState("");
+  const [wiping, setWiping] = useState(false);
+  const [wipeResult, setWipeResult] = useState<string | null>(null);
   // Scan status per provider + a counter bumped after each scan so the
   // available-model lists (read from localStorage) recompute.
   const [scanStatus, setScanStatus] = useState<
@@ -358,7 +368,16 @@ export function ConfigModal({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [modelsVersion, isOpen]);
 
+  // The modal stays mounted while closed, so seeding activeTab from the prop
+  // at useState time only works once. Re-seed on each open instead, or the
+  // second deep-link from the rack would land on whatever tab was last used.
+  useEffect(() => {
+    if (isOpen && initialTab) setActiveTab(initialTab);
+  }, [isOpen, initialTab]);
+
   if (!isOpen) return null;
+
+  const sessionCount = listSessionSummaries().length;
 
   const configuredCount = PROVIDERS.filter((p) => config.credentials[p]?.apiKey).length;
 
@@ -1111,6 +1130,75 @@ export function ConfigModal({
                     </a>
                   </div>
                 </div>
+              </div>
+
+              <div className="settings-card is-danger">
+                <h3 className="font-medium text-white mb-1">Delete every session</h3>
+                <p className="text-xs text-gray-400 mb-3 max-w-2xl">
+                  Removes all {sessionCount} stored sessions: the transcripts, their attachments and
+                  the copies the command line reads. Projects and settings stay. This cannot be
+                  undone and there is no export step, so take a bundle first if you want one.
+                </p>
+                {wipeResult ? (
+                  <p className="text-sm text-gray-200">{wipeResult}</p>
+                ) : wipeArmed ? (
+                  <div className="flex flex-wrap items-center gap-3">
+                    <label className="text-xs text-gray-400" htmlFor="wipe-confirm">
+                      Type <strong className="text-white">delete</strong> to confirm
+                    </label>
+                    <input
+                      id="wipe-confirm"
+                      value={wipeConfirm}
+                      onChange={(event) => setWipeConfirm(event.target.value)}
+                      className="elegant-input"
+                      style={{ width: "10rem", padding: "0.45rem 0.7rem", fontSize: "0.85rem" }}
+                      autoComplete="off"
+                    />
+                    <button
+                      type="button"
+                      className="button-danger"
+                      disabled={wipeConfirm.trim().toLowerCase() !== "delete" || wiping}
+                      onClick={() => {
+                        setWiping(true);
+                        void deleteAllDiscussionSessions()
+                          .then(({ deleted, failed }) => {
+                            setWipeResult(
+                              failed.length === 0
+                                ? `Deleted ${deleted} sessions.`
+                                : `Deleted ${deleted} sessions. ${failed.length} could not be removed and are still listed.`,
+                            );
+                          })
+                          .catch(() => setWipeResult("Nothing was deleted: the store errored."))
+                          .finally(() => {
+                            setWiping(false);
+                            setWipeArmed(false);
+                            setWipeConfirm("");
+                          });
+                      }}
+                    >
+                      {wiping ? "Deleting…" : "Delete them"}
+                    </button>
+                    <button
+                      type="button"
+                      className="button-ghost text-xs"
+                      onClick={() => {
+                        setWipeArmed(false);
+                        setWipeConfirm("");
+                      }}
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    className="button-danger"
+                    disabled={sessionCount === 0}
+                    onClick={() => setWipeArmed(true)}
+                  >
+                    {sessionCount === 0 ? "No sessions stored" : "Delete every session"}
+                  </button>
+                )}
               </div>
 
               <div className="settings-card">
