@@ -13,8 +13,9 @@ import { useMemo } from "react";
 import type { Page } from "../App";
 import { CouncilMark } from "../components/CouncilMark";
 import { RunPrompts } from "../components/session/RunPrompts";
-import { LegacyTranscript, RoundSection, usd } from "../components/session/Transcript";
+import { LegacyTranscript, RoundSection } from "../components/session/Transcript";
 import type { DiscussionSession } from "../services/sessions";
+import { usd } from "../session/format";
 import { viewFromStored, type SessionView } from "../session/reducer";
 
 interface TranscriptProps {
@@ -98,6 +99,16 @@ export function Transcript({
       <div className="session-layout">
         <main className="session-main">
           {!view && <LegacyTranscript session={session} />}
+          {/* A live run is watched here, so a seat that came back empty or a
+              provider that refused has to show here too, not only on the
+              summary. */}
+          {view?.errors.length ? (
+            <div className="session-errors">
+              {view.errors.map((e, i) => (
+                <div key={i}>{e}</div>
+              ))}
+            </div>
+          ) : null}
           {view && view.rounds.length === 0 && (
             <p className="session-waiting">
               {running ? "The council has not spoken yet" : "This session recorded no turns."}

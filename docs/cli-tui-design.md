@@ -89,8 +89,20 @@ A bridge failure is swallowed — the CLI still works from env / its own store.
 - **Provider colors:** openai `#60A5FA`, anthropic `#FBBF24`, google `#34D399`,
   deepseek `#F87171`, kimi `#2DD4BF`, qwen `#22D3EE`, minimax `#F472B6`,
   zhipu `#A78BFA`. A seat takes its provider's color.
-- **Council mark:** the configured roster's seats on a slowly rotating ring,
-  joined by a faint complete graph; keyed seats glow, unkeyed seats dim.
+- **Council mark:** the desktop hero, in braille: the roster's seats as solid
+  discs in their provider colour on an inner ring, spokes out to a faint outer
+  ring of dim satellites. Braille dots are square, so the bounds are set in
+  dots and the rings stay round at any size. Node size follows the gap
+  between neighbours, and below ten rows the mark is left out.
+- **Semantic tokens** (`theme.rs`): `BG` is only a base for blending, the TUI
+  never paints the terminal's own background; `heat(value)` is the score
+  matrix's gold-on-dark tile, on the same squared ramp as the desktop's;
+  `AGREE` / `DISAGREE` / `MIXED` are the critique graph's stance colours;
+  `hint_bar` is every footer, dropping the lowest-priority hints to fit the
+  width instead of running off the edge.
+- **Borders:** at most one between the terminal edge and any content. The
+  Session main column has none (the terminal frames it), the rail and the
+  Home rack have a single left rule, and only overlays are boxed.
 - Every string that came from a model or the network passes
   `sanitize_terminal` before it enters a ratatui buffer (tokens and thinking
   as they stream, stored content on load, structured fields at render), so no
@@ -104,14 +116,19 @@ enum View { Home, Session, Settings }
 
 ### Home
 
-The council mark, the wordmark, a topic composer, two chip rows and the
-roster strip.
+Laid out like the desktop workstation: the council mark, the wordmark, the
+composer and the launch options in the middle, and the **Council Rack** on the
+right with the two chairs (moderator and utility, provider and model) above a
+rule, then one line per seat. Under 110 columns the rack folds under the
+options as a grid, chairs first, then the keyed count and, with no key yet,
+how to add one. A roster too long for the grid ends with a row that says how
+many seats it left out.
 
 - **Council preset** (`←`/`→`): Quick · 3, Standard · 4, Full. The preset
   takes keyed seats of the allowed providers in roster order and cuts the list
   (`config::select_roster`); an explicit `--seats` roster is only key-gated.
-  The strip shows how many seats convene (`◆`), which seats are keyed (`●`)
-  and which are not (`○`).
+  The rack marks the seats that sit with this preset (`●`), keyed seats
+  that do not (`○`) and seats without a key (`·`).
 - **Deliverable** (`^D`): auto (the moderator decides), decision, analysis,
   document, review.
 - `Enter` convenes; `Tab` opens the sessions sidebar; `^P` opens Settings;
@@ -123,44 +140,75 @@ without leaving the terminal — the desktop app is never required.
 ### Session
 
 The engine's event stream, folded by `tui::view::SessionView` (the terminal
-twin of the desktop's `session/reducer.ts`).
+twin of the desktop's `session/reducer.ts`). Like the desktop, a session has
+two pages, switched with `t`:
 
-- **Header:** the topic; a status pill (running / completed / stopped /
-  cancelled / failed); the deliverable; the phase trail
-  (`Framing ▸ Prep ▸ Positions ▸ Cross-examination 1 ▸ …`); the estimate; the
-  running cost (bold gold when a budget note fired).
-- **Main column** (scrollable, follows the newest row until you scroll up):
-  errors; the **decision record** first when the run reached one (answer,
-  confidence bar, votes, what changed, dissent, options considered,
-  assumptions, evidence, open questions, next actions); the **document** for
-  document deliverables; then every **round** with a card per seat — a live
-  seat pulses and shows a caret, a finished seat shows its usage; a
-  collapsible reasoning trace (`t`); `⚙` tool chips with the call's
-  arguments and the result or error — and the moderator's notes. A session
-  written before v3 renders its flat transcript instead.
-- **Side column** (`p` `b` `v` `$` `s`, or `←`/`→`): **Plan** (deliverable,
-  rounds, question, what it settles, options, participants with roles,
-  lenses, prep subtasks, corrections); **Board** (settled points,
-  disagreements, evidence, open questions, positions); **Converge** (each
-  judgement: close / another round / revise, open disagreements, who moved,
-  why); **Cost** (the estimate, per-seat rows, lanes, total, tokens, caps,
-  the budget note); **Seats** (the convened seats with their resolved model
-  and plan role; the active ones pulse). The column collapses under 90 cells.
-- **Overlays:** when the moderator asks its clarifying question, a prompt
-  takes the keyboard (`Enter` answers, `Esc` plans without an answer, `^U`
-  clears, paste works); when a seat asks to run a tool under an ask-first
-  policy, an approval prompt shows the seat, the tool and its arguments
-  (`y` allow, `n` deny). A question outranks an approval.
-- **Hand-off:** once the engine writes the hand-off folder (the brief with
-  the next steps as a checklist, the record, the document, the board and
-  the session file), a section under the record names the folder and its
-  files.
-- **Keys:** `Esc` stops a live council (twice, to avoid a stray keypress
-  ending a paid run) or returns Home; `r` reconvenes a finished session — its
-  record (or the transcript tail) becomes the planner's notes and a new
-  session is written; `e` exports the record and the document (or the
-  transcript) as Markdown to the Downloads folder; `↑`/`↓`, `PgUp`/`PgDn`,
-  `Home`/`End` scroll; `g` follows.
+- **Summary** is the report. The **decision record** leads: the question, the
+  answer, a confidence bar, one vote per row in the seat's colour, dissent,
+  then what changed, options, assumptions, evidence, open questions and next
+  actions in a label column with hanging values. Then **How the debate went**
+  (the moderator's account of the argument), the **document** for document
+  deliverables, and the **analysis** panel, then the hand-off folder. Errors
+  from the run lead both pages. Without a record the summary says why (still
+  running, failed, cancelled, stopped, or from before v3), and a document
+  draft shows as soon as it arrives rather than waiting for the record.
+- **Transcript** is every round: a rule per round with its seat count, each
+  turn under its seat's colour bar and name with the model and token count,
+  tool chips with arguments and result, the reasoning trace folded behind
+  `T`, then the moderator's notes. A session written before v3 renders its
+  flat transcript here.
+
+A live run opens on the transcript, since there is nothing to summarise yet,
+and turns to the summary once the record lands, unless a page was picked with
+`t`. Each page opens where it is read from: the summary at the top, a live
+transcript following the newest turn. The reading column is at most 100
+columns wide and centred in the space it has. Every row is fitted to that
+width, so a label column that runs long on a narrow terminal carries on to the
+next row rather than being clipped, and a lead too wide to leave room beside
+it puts its text underneath.
+
+**Analysis** (`tui/analysis.rs`, the four desktop views, `1` to `4`):
+
+- **Scores:** peer evaluation as a heat grid, ranked, one tile per rubric
+  column, the harshest line each seat received listed under it. Columns widen
+  to fill the width and drop from the right when it is narrow, Overall always
+  kept. Without peer scores the same grid shows turns, words, evidence and
+  tools, and says why: review off, still running, or ran with no usable reply.
+- **Vote:** the final vote as a bar (winning bloc in gold, every bloc at
+  least one visible cell, a blank vote not counted), the blocs listed
+  with their seats, then one row per convergence judgement with a track for
+  the open disagreements, who moved and the verdict.
+- **Critique:** who rated whom, drawn on a braille canvas into an off-screen
+  buffer and read back as styled lines, so it scrolls with the page. Edges
+  take the stance colour; `[` and `]` focus a seat, dim everyone else's edges
+  and list the critiques it received. A seat nobody rated is drawn hollow and
+  labelled "not rated", never as 0.
+- **Map:** the argument map as a tree: each opening point, and under it with
+  `├─ └─` connectors whatever answered it, the relation coloured (answers in
+  emerald, pushback in rose, dependencies in cyan). Cycles terminate, a point
+  reached twice is marked "(above)", and rounds the extractor could not map
+  are named.
+
+- **Header:** the topic, then the status, the deliverable, the spend and the
+  call count on the right; the page tabs and, while live, the last few phases;
+  a rule, gold while the council sits.
+- **Rail** (`p` `b` `v` `$` `s`, or `←`/`→`), from 118 columns: **Plan**,
+  **Board**, **Converge**, **Cost**, **Seats**, every value hanging in its own
+  column.
+- **Overlays:** the moderator's question (`Enter` answers, `Esc` plans without
+  an answer, `^U` clears, paste works) and a tool approval (`y` allow, `n`
+  deny), a question outranking an approval; `?` lists every key.
+- **Keys:** `t` page; `1`–`4` analysis view; `[` `]` critique focus; `T`
+  thinking; `↑`/`↓`, `PgUp`/`PgDn`, `Home`/`End` scroll; `g` follows; `Esc`
+  stops a live council (twice, to avoid a stray keypress ending a paid run) or
+  returns Home; `r` reconvenes a finished session (its record becomes the
+  planner's notes and a new, paid session is written); `e` exports the record
+  and the document as Markdown to Downloads. The footer shows the keys for the
+  page you are on, cut to the width.
+- **Too small:** under 40×14 the screen says so and names the size it needs.
+  That fits an 80-column terminal with the sessions sidebar open.
+- **Resize:** a resize marks the frame dirty, so a static screen (a saved
+  session, Settings) re-lays out at once instead of on the next key.
 
 The engine is the only writer of session files; the TUI never persists a
 session itself. When the engine task ends without a `done` event the screen
@@ -172,13 +220,13 @@ One scrolling screen; the cursor row stays in view. Every change validates,
 applies to the in-memory config and saves at once (`config.toml`; keys to
 `keys.enc`, 0600).
 
-| Section             | Rows                                                                                                               | Keys                                                                                                                    |
-| ------------------- | ------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------- |
-| Keys                | one per provider: key source (local / env / shared / —) and the seats it serves                                    | `Enter` paste a key (masked bullets, never plaintext), `d` remove a local key                                           |
-| Council             | one per seat: `provider:model`, the resolved model with its class and prices, a reasoning override; `+ add a seat` | `Enter` edit `provider:model`, `n` rename, `r` cycle reasoning, `a` add, `d` remove, `R` reset to the eight named seats |
-| Moderator & utility | the slot's `provider:model`, resolved model, class, prices                                                         | `Enter` edit, `d` back to the default                                                                                   |
-| Tools & protocol    | tool level (none / safe / all), approval (auto / ask), cross-examination cap (1–6), clarifying question (on / off) | `Enter` cycle or edit, `d` reset                                                                                        |
-| Budget & network    | session cap, daily cap, cap action (warn / stop), proxy (masked while typed, userinfo redacted on screen)          | `Enter` edit or toggle, `d` reset                                                                                       |
+| Section             | Rows                                                                                                                                             | Keys                                                                                                                    |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------- |
+| Keys                | one per provider: key source (local / env / shared / —) and the seats it serves                                                                  | `Enter` paste a key (masked bullets, never plaintext), `d` remove a local key                                           |
+| Council             | one per seat: `provider:model`, the resolved model with its class and prices, a reasoning override; `+ add a seat`                               | `Enter` edit `provider:model`, `n` rename, `r` cycle reasoning, `a` add, `d` remove, `R` reset to the eight named seats |
+| Moderator & utility | the slot's `provider:model`, resolved model, class, prices                                                                                       | `Enter` edit, `d` back to the default                                                                                   |
+| Tools & protocol    | tool level (none / safe / all), approval (auto / ask), cross-examination cap (1–6), clarifying question (on / off), review afterwards (on / off) | `Enter` cycle or edit, `d` reset                                                                                        |
+| Budget & network    | session cap, daily cap, cap action (warn / stop), proxy (masked while typed, userinfo redacted on screen)                                        | `Enter` edit or toggle, `d` reset                                                                                       |
 
 A seat's or slot's model is `auto`, `auto-balanced`, `auto-fast` or an id; an
 id must exist in the provider's catalog or its last live scan, otherwise the
@@ -221,11 +269,12 @@ cli/src/config.rs        config.toml, keys.enc, the roster, presets, select_rost
 cli/src/engine/mod.rs    text helpers: sanitize_terminal, strip_directives (pre-v3 transcripts)
 cli/src/tui/mod.rs       App, AppContext, the event loop, view routing, launch / reconvene / export
 cli/src/tui/view.rs      SessionView: the pure reducer over DebateEvent; from_stored for session files
-cli/src/tui/session.rs   the Session screen: header, main column, side tabs, overlays
-cli/src/tui/home.rs      Home: council mark, composer, preset and deliverable chips, roster strip
+cli/src/tui/session.rs   the Session screen: header, summary and transcript pages, rail, overlays, help
+cli/src/tui/analysis.rs  the four analysis views, the derived seat metrics, the review status
+cli/src/tui/home.rs      Home: council mark, composer, preset and deliverable chips, Council Rack
 cli/src/tui/settings.rs  Settings rows, editing and validation, rendering
 cli/src/tui/sidebar.rs   the sessions sidebar
-cli/src/tui/theme.rs     colors, the eight named agents, ring geometry
+cli/src/tui/theme.rs     colours and semantic tokens, heat, blend, the hint bar, the eight named agents
 ```
 
 ## 6. Testing
@@ -241,5 +290,15 @@ cli/src/tui/theme.rs     colors, the eight named agents, ring geometry
   removes and resets without touching the disk (persistence is off in tests);
   the key and proxy buffers render masked; an engine disconnect marks the
   session failed.
+- `analysis.rs`: the metrics count turns, words and evidence and credit a
+  mover named by display name; the vote split orders its blocs; the review
+  status tells off, pending and done apart; the matrix ranks, names failed
+  evaluators, drops columns when narrow and says why when there are no peer
+  scores; the critique graph labels an unrated seat; the map hangs answers
+  under what they answer and terminates on a cycle; every view survives 20
+  columns.
 - A headless drive: run the binary inside `tmux`, send keys with
-  `tmux send-keys`, read the screen with `tmux capture-pane -p`.
+  `tmux send-keys`, and read the screen with `tmux capture-pane -e -p`. The
+  `-e` keeps the colours; rendered to HTML with every non-ASCII glyph boxed to
+  one cell and screenshotted, it is how the layout is checked by eye at
+  160×48, 80×24 and 60 columns.

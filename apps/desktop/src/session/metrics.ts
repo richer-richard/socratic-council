@@ -83,7 +83,8 @@ export function sessionMetrics(input: {
     return {
       seatId,
       name,
-      vote: record?.votes?.[seatId] ?? null,
+      // A blank vote is no vote, as the terminal counts it.
+      vote: record?.votes?.[seatId]?.trim() || null,
       // The moderator names movers by seat id in some rounds and by display
       // name in others, so both spellings count as the same seat.
       moved: moved.has(seatId) || moved.has(name),

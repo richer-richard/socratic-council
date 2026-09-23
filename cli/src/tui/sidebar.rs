@@ -99,7 +99,10 @@ fn session_item(s: &SessionRow, selected: bool, width: usize) -> ListItem<'stati
     let marker = if selected { "▸ " } else { "  " };
     let title_line = Line::from(vec![
         Span::styled(marker, Style::default().fg(theme::GOLD)),
-        Span::styled(truncate(&s.title, width.saturating_sub(2)), title_style),
+        Span::styled(
+            theme::truncate(&s.title, width.saturating_sub(2)),
+            title_style,
+        ),
     ]);
 
     let mut meta = vec![
@@ -138,7 +141,7 @@ fn session_item(s: &SessionRow, selected: bool, width: usize) -> ListItem<'stati
     let detail_line = Line::from(vec![
         Span::styled("  ", Style::default()),
         Span::styled(
-            truncate(&detail, width.saturating_sub(2)),
+            theme::truncate(&detail, width.saturating_sub(2)),
             Style::default()
                 .fg(theme::DIM)
                 .add_modifier(Modifier::ITALIC),
@@ -157,15 +160,5 @@ fn status_of(s: &SessionRow) -> (&'static str, Color) {
         (_, "running") | (_, "active") => ("Running", theme::GOLD),
         (_, "paused") => ("Paused", theme::MUTED),
         _ => ("Draft", theme::DIM),
-    }
-}
-
-fn truncate(s: &str, max: usize) -> String {
-    if s.chars().count() <= max {
-        s.to_string()
-    } else {
-        let mut out: String = s.chars().take(max.saturating_sub(1)).collect();
-        out.push('…');
-        out
     }
 }
