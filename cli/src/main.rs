@@ -792,7 +792,10 @@ async fn run_plain(
                     );
                 }
                 if !peer_eval.failed.is_empty() {
-                    println!("Did not return a usable review: {}", peer_eval.failed.join(", "));
+                    println!(
+                        "Did not return a usable review: {}",
+                        peer_eval.failed.join(", ")
+                    );
                 }
             }
             DebateEvent::ArgMap { graph } => {

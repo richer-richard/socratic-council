@@ -103,9 +103,8 @@ pub fn summarize(seats: &[String], critiques: &[PeerCritique]) -> BTreeMap<Strin
             continue;
         }
         let n = received.len() as f32;
-        let sum = |f: fn(&PeerCritique) -> u8| {
-            received.iter().map(|c| f(c) as f32).sum::<f32>() / n
-        };
+        let sum =
+            |f: fn(&PeerCritique) -> u8| received.iter().map(|c| f(c) as f32).sum::<f32>() / n;
         let average = PeerScores {
             rigor: sum(|c| c.scores.rigor).round() as u8,
             evidence: sum(|c| c.scores.evidence).round() as u8,

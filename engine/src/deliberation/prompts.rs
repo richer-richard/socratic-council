@@ -357,7 +357,12 @@ Answer with the JSON object requested and nothing else: no preamble, no code fen
 /// One round's fragments. `known` lists claims already in the graph so the
 /// extractor can point a rebuttal at an earlier round's claim by quoting it;
 /// it never invents ids, because the merge assigns those.
-pub fn argmap_user(question: &str, round_label: &str, round_text: &str, known: &[String]) -> String {
+pub fn argmap_user(
+    question: &str,
+    round_label: &str,
+    round_text: &str,
+    known: &[String],
+) -> String {
     let existing = if known.is_empty() {
         "Nothing has been mapped yet.".to_string()
     } else {

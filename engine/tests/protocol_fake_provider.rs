@@ -380,7 +380,10 @@ async fn whole_protocol_runs_with_a_tool_call_and_writes_a_v2_session() {
         .iter()
         .all(|c| c["evaluator"] != c["target"]));
     assert_eq!(peer["per_seat"]["a"]["reviews_received"], 1);
-    assert_eq!(peer["per_seat"]["a"]["rank"], 1, "a outscored b, so a ranks first");
+    assert_eq!(
+        peer["per_seat"]["a"]["rank"], 1,
+        "a outscored b, so a ranks first"
+    );
     assert_eq!(peer["per_seat"]["b"]["rank"], 2);
     assert_eq!(peer["per_seat"]["a"]["average"]["civility"], 90);
 

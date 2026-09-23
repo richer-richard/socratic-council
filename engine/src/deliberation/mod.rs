@@ -2056,7 +2056,10 @@ impl Deliberation {
         for log in &state.rounds {
             out.push_str(&format!("\n## {}\n\n", log.kind.label()));
             for e in &log.entries {
-                let name = names.get(&e.seat).cloned().unwrap_or_else(|| e.seat.clone());
+                let name = names
+                    .get(&e.seat)
+                    .cloned()
+                    .unwrap_or_else(|| e.seat.clone());
                 out.push_str(&format!(
                     "[{} | {}]\n{}\n\n",
                     e.seat,

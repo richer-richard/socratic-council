@@ -155,7 +155,13 @@ pub fn estimate(
             add(utility, &s.id, transcript, 800.0, tiers.utility);
         }
         for _ in 0..(plan.rounds.max(1) as u32 + 2) {
-            add(utility, "utility", base_input + 1600.0 * n, 700.0, tiers.utility);
+            add(
+                utility,
+                "utility",
+                base_input + 1600.0 * n,
+                700.0,
+                tiers.utility,
+            );
         }
     }
     Estimate {
