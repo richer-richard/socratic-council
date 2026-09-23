@@ -16,8 +16,6 @@ import { roundLayout } from "../../session/roundLayout";
 import { PROVIDER_INFO, isProvider } from "../../stores/config";
 import { Markdown } from "../Markdown";
 
-export const usd = (n: number) => `$${n.toFixed(n >= 10 ? 1 : 2)}`;
-
 export function seatColor(provider: string | null): string {
   return provider && isProvider(provider) ? PROVIDER_INFO[provider].color : "text-gray-200";
 }

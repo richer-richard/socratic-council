@@ -96,6 +96,30 @@ describe("sessionMetrics", () => {
     expect(m.seats.find((s) => s.seatId === "c")!.dissented).toBe(true);
   });
 
+  it("leaves a blank vote out of the split, as the terminal does", () => {
+    const m = sessionMetrics({
+      ...base,
+      record: {
+        deliverable: "decision",
+        question: "q",
+        answer: "a",
+        confidence: 0.5,
+        options_considered: [],
+        dissent: [],
+        assumptions: [],
+        evidence: [],
+        open_questions: [],
+        next_actions: [],
+        what_changed: "",
+        how_it_went: "",
+        votes: { a: "yes ", b: "  ", c: "" },
+        cost: null,
+      },
+    });
+    expect(m.voteSplit).toEqual([{ vote: "yes", seats: ["a"] }]);
+    expect(m.seats.find((s) => s.seatId === "b")!.vote).toBeNull();
+  });
+
   it("reports one row per convergence judgement", () => {
     const m = sessionMetrics(base);
     expect(m.rounds).toHaveLength(2);

@@ -27,9 +27,10 @@ import { CouncilMark } from "../components/CouncilMark";
 import { Markdown } from "../components/Markdown";
 import { ReviewPanel, type ReviewStatus } from "../components/session/ReviewPanel";
 import { RunPrompts } from "../components/session/RunPrompts";
-import { CopyButton, LegacyTranscript, SectionRule, usd } from "../components/session/Transcript";
+import { CopyButton, LegacyTranscript, SectionRule } from "../components/session/Transcript";
 import type { ConversationExportMessage } from "../services/conversationExport";
 import type { DiscussionSession } from "../services/sessions";
+import { usd } from "../session/format";
 import { sessionMetrics } from "../session/metrics";
 import { recordToMarkdown } from "../session/recordMarkdown";
 import { viewFromStored, type SessionView } from "../session/reducer";
@@ -419,6 +420,23 @@ export function exportMessagesFor(
   return out;
 }
 
+/** Why a finished session has no record, in the terminal's words. */
+function noRecord(view: SessionView): string {
+  const read = view.rounds.some((r) => r.entries.length > 0)
+    ? " The transcript has what was said."
+    : "";
+  switch (view.stoppedEarly) {
+    case "failed":
+      return `The run failed before the council wrote a record.${read}`;
+    case "cancelled":
+      return `The run was cancelled before the council wrote a record.${read}`;
+    case null:
+      return `The run finished without a decision record.${read}`;
+    default:
+      return `The run stopped before the council wrote a record.${read}`;
+  }
+}
+
 export function Session({ session, live, onNavigate, onCancel, onAnswer, onDecide }: SessionProps) {
   const view = useMemo<SessionView | null>(
     () => live ?? (session.engine ? viewFromStored(session.engine) : null),
@@ -578,6 +596,7 @@ export function Session({ session, live, onNavigate, onCancel, onAnswer, onDecid
               {view.phase ? `${view.phase} in progress` : "Convening the council"}
             </p>
           )}
+          {view && view.done && !view.record && <p className="session-waiting">{noRecord(view)}</p>}
           {view?.record?.how_it_went?.trim() && (
             <section className="record-block">
               <SectionRule label="How the debate went" />

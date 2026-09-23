@@ -213,8 +213,11 @@ export function VoteChart({ metrics }: { metrics: SessionMetrics }) {
                   width: `${(bloc.seats.length / total) * 100}%`,
                   // The winning bloc is gold; the rest step down in weight so
                   // the bar reads as one decision rather than a stack of peers.
+                  // Floored, so a sixth bloc is still a visible segment.
                   background:
-                    i === 0 ? "rgba(245, 197, 66, 0.78)" : `rgba(148, 163, 184, ${0.4 - i * 0.08})`,
+                    i === 0
+                      ? "rgba(245, 197, 66, 0.78)"
+                      : `rgba(148, 163, 184, ${Math.max(0.14, 0.4 - i * 0.08)})`,
                 }}
               />
             ))}
