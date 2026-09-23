@@ -18,6 +18,10 @@ use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 use ratatui::Frame;
 use unicode_width::UnicodeWidthStr;
 
+/// Frames for one full turn of the council mark: about 36 seconds at the
+/// 70 ms frame, the same pace as the desktop's hero.
+pub(super) const TURN_FRAMES: u64 = 512;
+
 /// Wide enough for the rack to take its own column.
 const RACK_AT: u16 = 110;
 const RACK_W: u16 = 36;
@@ -64,8 +68,8 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
 
 /// The council mark as the desktop draws its hero: seats on an inner ring as
 /// solid dots in their provider colour with a soft halo, spokes out to a
-/// faint outer ring of satellites. Drawn in braille dots, which are square,
-/// so the rings come out round at any terminal size.
+/// faint outer ring of satellites, turning slowly clockwise. Drawn in braille
+/// dots, which are square, so the rings come out round at any terminal size.
 fn render_mark(f: &mut Frame, area: Rect, app: &App) {
     // A mark squeezed into a few rows is a knot of overlapping dots. Below
     // this it is left out: the wordmark underneath carries the identity.
@@ -104,6 +108,7 @@ fn render_mark(f: &mut Frame, area: Rect, app: &App) {
     let (cx, cy) = (dw / 2.0, dh / 2.0);
     let outer = (dw.min(dh) / 2.0) - 3.0;
     let inner = outer * 0.56;
+    let turn = (app.frame % TURN_FRAMES) as f64 / TURN_FRAMES as f64 * std::f64::consts::TAU;
 
     let canvas = Canvas::default()
         .marker(Marker::Braille)
@@ -112,8 +117,9 @@ fn render_mark(f: &mut Frame, area: Rect, app: &App) {
         .paint(move |ctx| {
             let n = nodes.len().max(1);
             let at = |r: f64, i: usize| {
-                let a =
-                    -std::f64::consts::FRAC_PI_2 + (i as f64) * std::f64::consts::TAU / n as f64;
+                let a = -std::f64::consts::FRAC_PI_2
+                    + (i as f64) * std::f64::consts::TAU / n as f64
+                    + turn;
                 (cx + r * a.cos(), cy - r * a.sin())
             };
             // The faint structure first: two rings and the spokes.

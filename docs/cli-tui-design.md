@@ -93,7 +93,9 @@ A bridge failure is swallowed — the CLI still works from env / its own store.
   discs in their provider colour on an inner ring, spokes out to a faint outer
   ring of dim satellites. Braille dots are square, so the bounds are set in
   dots and the rings stay round at any size. Node size follows the gap
-  between neighbours, and below ten rows the mark is left out.
+  between neighbours, and below ten rows the mark is left out. The mark turns
+  clockwise, one full turn in 512 frames (about 36 seconds), the same pace as
+  the desktop hero.
 - **Semantic tokens** (`theme.rs`): `BG` is only a base for blending, the TUI
   never paints the terminal's own background; `heat(value)` is the score
   matrix's gold-on-dark tile, on the same squared ramp as the desktop's;

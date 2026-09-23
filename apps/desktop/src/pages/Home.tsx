@@ -129,7 +129,7 @@ function CouncilCircleViz({
 
   return (
     <div className="council-circle-viz" style={{ position: "relative" }}>
-      <svg viewBox="0 0 200 200" width="420" height="420">
+      <svg viewBox="0 0 200 200" width="420" height="420" className="council-circle-orbit">
         <defs>
           <radialGradient id="cc-glow" cx="50%" cy="50%" r="50%">
             <stop offset="0%" stopColor="rgba(148, 163, 184, 0.06)" />
