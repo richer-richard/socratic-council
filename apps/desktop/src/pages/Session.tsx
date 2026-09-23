@@ -28,12 +28,14 @@ import { Markdown } from "../components/Markdown";
 import { ReviewPanel, type ReviewStatus } from "../components/session/ReviewPanel";
 import { RunPrompts } from "../components/session/RunPrompts";
 import { CopyButton, LegacyTranscript, SectionRule } from "../components/session/Transcript";
+import { SessionCommandBar } from "../components/SessionCommandBar";
 import type { ConversationExportMessage } from "../services/conversationExport";
 import type { DiscussionSession } from "../services/sessions";
 import { usd } from "../session/format";
 import { sessionMetrics } from "../session/metrics";
 import { recordToMarkdown } from "../session/recordMarkdown";
 import { viewFromStored, type SessionView } from "../session/reducer";
+import { requestSettings } from "../utils/slash";
 
 interface SessionProps {
   session: DiscussionSession;
@@ -43,6 +45,7 @@ interface SessionProps {
   onCancel: (sessionId: string) => void;
   onAnswer: (sessionId: string, questionId: string, text: string) => Promise<void> | void;
   onDecide: (sessionId: string, approvalId: string, allow: boolean) => Promise<void> | void;
+  onReconvene: (session: DiscussionSession, view: SessionView | null) => void;
 }
 
 function PlanPanel({ plan, corrections }: { plan: EnginePlan; corrections: string[] }) {
@@ -437,7 +440,15 @@ function noRecord(view: SessionView): string {
   }
 }
 
-export function Session({ session, live, onNavigate, onCancel, onAnswer, onDecide }: SessionProps) {
+export function Session({
+  session,
+  live,
+  onNavigate,
+  onCancel,
+  onAnswer,
+  onDecide,
+  onReconvene,
+}: SessionProps) {
   const view = useMemo<SessionView | null>(
     () => live ?? (session.engine ? viewFromStored(session.engine) : null),
     [live, session.engine],
@@ -681,6 +692,19 @@ export function Session({ session, live, onNavigate, onCancel, onAnswer, onDecid
       </ChamberSurface>
 
       <RunPrompts sessionId={session.id} view={view} onAnswer={onAnswer} onDecide={onDecide} />
+      <SessionCommandBar
+        running={Boolean(live && !live.done)}
+        onSummary={() => undefined}
+        onTranscript={() => onNavigate("transcript", session.id)}
+        onExport={() => setShowExport(true)}
+        onStop={() => onCancel(session.id)}
+        onReconvene={() => onReconvene(session, view)}
+        onHome={() => onNavigate("home")}
+        onSettings={() => {
+          requestSettings();
+          onNavigate("home");
+        }}
+      />
     </div>
   );
 }

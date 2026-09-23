@@ -5794,3 +5794,235 @@ textarea.workstation-input::placeholder {
   line-height: 1.45;
   color: rgba(232, 232, 239, 0.34);
 }
+
+/* =========================================================================== */
+/* SELECTION                                                                   */
+/* =========================================================================== */
+
+/* The selection is painted behind the selected text only (see
+   utils/selectionHighlight.ts): WebKit's own highlight also fills the gaps
+   between lines and blocks out to the card's edge. Inputs keep their own. */
+.sc-text-selection ::selection {
+  background-color: transparent;
+}
+
+.sc-text-selection :is(input, textarea)::selection {
+  background-color: rgba(96, 165, 250, 0.38);
+}
+
+::highlight(sc-selection) {
+  background-color: rgba(96, 165, 250, 0.38);
+}
+
+/* =========================================================================== */
+/* SLASH COMMANDS                                                              */
+/* =========================================================================== */
+
+.slash-anchor {
+  position: relative;
+}
+
+/* The list opens right above the input it belongs to, as wide as it. */
+.slash-menu {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(100% + 0.5rem);
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  max-height: min(22rem, 50vh);
+  overflow-y: auto;
+  padding: 0.35rem 0;
+  background: rgba(11, 15, 22, 0.97);
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  box-shadow: 0 18px 40px -18px rgba(0, 0, 0, 0.8);
+  font-family: var(--font-mono);
+}
+
+.slash-menu-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.3rem 0.9rem 0.45rem;
+  font-size: 0.68rem;
+  color: var(--ink-500);
+}
+
+.slash-menu-keys {
+  color: rgba(148, 163, 184, 0.7);
+}
+
+.slash-menu-keys kbd {
+  font-family: var(--font-mono);
+  color: #f5c542;
+  margin-left: 0.6rem;
+}
+
+.slash-menu-label {
+  padding: 0.45rem 0.9rem 0.2rem;
+  font-size: 0.66rem;
+  color: rgba(148, 163, 184, 0.7);
+}
+
+.slash-menu-row {
+  display: grid;
+  grid-template-columns: minmax(0, max-content) minmax(0, 1fr);
+  gap: 1.4rem;
+  width: 100%;
+  padding: 0.38rem 0.9rem;
+  text-align: left;
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  color: #e8e8ef;
+  background: transparent;
+  border: 0;
+  border-left: 2px solid transparent;
+  cursor: pointer;
+}
+
+.slash-menu-row.is-close {
+  color: var(--ink-500);
+}
+
+.slash-menu-row.is-selected {
+  color: #f5c542;
+  background: rgba(245, 197, 66, 0.08);
+  border-left-color: #f5c542;
+}
+
+.slash-menu-command {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.slash-menu-about {
+  color: rgba(148, 163, 184, 0.8);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.slash-menu-empty,
+.slash-notice {
+  padding: 0.45rem 0.9rem;
+  font-size: 0.74rem;
+  color: var(--ink-500);
+}
+
+.slash-notice {
+  color: #e8e8ef;
+}
+
+.slash-menu-head + .slash-notice,
+.slash-menu-row + .slash-notice {
+  border-top: 1px solid rgba(148, 163, 184, 0.16);
+}
+
+/* The command bar a session page opens with `/`. */
+.session-command-bar {
+  position: fixed;
+  left: 50%;
+  bottom: 1.25rem;
+  transform: translateX(-50%);
+  width: min(46rem, calc(100vw - 2.5rem));
+  z-index: 60;
+}
+
+.session-command-bar.is-message {
+  background: rgba(11, 15, 22, 0.97);
+  border: 1px solid rgba(148, 163, 184, 0.28);
+}
+
+.session-command-anchor {
+  position: relative;
+}
+
+.session-command-input {
+  width: 100%;
+  padding: 0.75rem 1rem;
+  font-family: var(--font-mono);
+  font-size: 0.9rem;
+  color: #e8e8ef;
+  background: rgba(11, 15, 22, 0.97);
+  border: 1px solid #f5c542;
+  outline: none;
+  caret-color: #f5c542;
+}
+
+.slash-help-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+  background: rgba(3, 6, 10, 0.62);
+}
+
+.slash-help {
+  width: min(40rem, 100%);
+  max-height: 100%;
+  overflow-y: auto;
+  padding: 1.4rem 1.6rem 1.6rem;
+  background: rgba(11, 15, 22, 0.98);
+  border: 1px solid rgba(245, 197, 66, 0.5);
+  outline: none;
+}
+
+.slash-help-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 1rem;
+}
+
+.slash-help-head h2 {
+  font-family: var(--font-body);
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: #f5c542;
+}
+
+.slash-help-close {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--ink-500);
+  background: transparent;
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  padding: 0.25rem 0.6rem;
+  cursor: pointer;
+}
+
+.slash-help-close:hover {
+  color: #e8e8ef;
+  border-color: rgba(148, 163, 184, 0.55);
+}
+
+.slash-help-group {
+  margin: 1.2rem 0 0.5rem;
+  font-family: var(--font-body);
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: #f5c542;
+}
+
+.slash-help-list > div {
+  display: grid;
+  grid-template-columns: 9rem minmax(0, 1fr);
+  gap: 1rem;
+  padding: 0.28rem 0;
+}
+
+.slash-help-list dt {
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  color: #f5c542;
+}
+
+.slash-help-list dd {
+  font-size: 0.84rem;
+  color: #e8e8ef;
+}

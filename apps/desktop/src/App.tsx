@@ -55,6 +55,8 @@ import {
   getVaultStatus,
   initVault,
 } from "./services/vault";
+import { reconveneNotes } from "./session/reconvene";
+import type { SessionView } from "./session/reducer";
 import {
   answerEngineQuestion,
   cancelEngineRun,
@@ -310,6 +312,7 @@ export default function App() {
             keys,
             attachments,
             forced: launch.deliverable === "auto" ? undefined : launch.deliverable,
+            priorNotes: launch.priorNotes,
             sessionId: session.id,
           },
           { onFinished: (id) => void finishRun(id) },
@@ -382,6 +385,21 @@ export default function App() {
       }
     },
     [refreshAll, launchEngine],
+  );
+
+  /**
+   * Run a session's topic again as a new session, with its record (or its
+   * last turns) as the planner's notes. The same as the terminal's reconvene.
+   */
+  const handleReconvene = useCallback(
+    (session: DiscussionSession, view: SessionView | null) => {
+      const priorNotes = reconveneNotes(view) ?? undefined;
+      void handleCreateSession(session.topic, [], session.projectId ?? null, {
+        ...DEFAULT_LAUNCH,
+        priorNotes,
+      });
+    },
+    [handleCreateSession],
   );
 
   const handleOpenSession = useCallback(
@@ -683,6 +701,7 @@ export default function App() {
               onCancel={(id) => void cancelEngineRun(id)}
               onAnswer={answerEngineQuestion}
               onDecide={decideEngineTool}
+              onReconvene={handleReconvene}
             />
           </ErrorBoundary>
         )}
@@ -696,6 +715,7 @@ export default function App() {
               onCancel={(id) => void cancelEngineRun(id)}
               onAnswer={answerEngineQuestion}
               onDecide={decideEngineTool}
+              onReconvene={handleReconvene}
             />
           </ErrorBoundary>
         )}

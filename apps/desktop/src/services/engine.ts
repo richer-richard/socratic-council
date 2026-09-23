@@ -243,6 +243,8 @@ export type SessionPreset = "quick" | "standard" | "full";
 export interface SessionLaunchOptions {
   preset: SessionPreset;
   deliverable: EngineDeliverable | "auto";
+  /** A reconvened session's record (or last turns), for the planner. */
+  priorNotes?: string;
 }
 
 export const DEFAULT_LAUNCH: SessionLaunchOptions = { preset: "standard", deliverable: "auto" };

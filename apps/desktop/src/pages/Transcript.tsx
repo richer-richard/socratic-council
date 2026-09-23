@@ -8,15 +8,21 @@
  * which of the two you were reading.
  */
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 
 import type { Page } from "../App";
+import { ChamberSurface } from "../components/ChamberSurface";
+import { ConversationExport } from "../components/ConversationExport";
 import { CouncilMark } from "../components/CouncilMark";
 import { RunPrompts } from "../components/session/RunPrompts";
 import { LegacyTranscript, RoundSection } from "../components/session/Transcript";
+import { SessionCommandBar } from "../components/SessionCommandBar";
 import type { DiscussionSession } from "../services/sessions";
 import { usd } from "../session/format";
 import { viewFromStored, type SessionView } from "../session/reducer";
+import { requestSettings } from "../utils/slash";
+
+import { exportMessagesFor } from "./Session";
 
 interface TranscriptProps {
   session: DiscussionSession;
@@ -26,6 +32,7 @@ interface TranscriptProps {
   onCancel: (sessionId: string) => void;
   onAnswer: (sessionId: string, questionId: string, text: string) => Promise<void> | void;
   onDecide: (sessionId: string, approvalId: string, allow: boolean) => Promise<void> | void;
+  onReconvene: (session: DiscussionSession, view: SessionView | null) => void;
 }
 
 /**
@@ -40,12 +47,14 @@ export function Transcript({
   onCancel,
   onAnswer,
   onDecide,
+  onReconvene,
 }: TranscriptProps) {
   const view = useMemo<SessionView | null>(
     () => live ?? (session.engine ? viewFromStored(session.engine) : null),
     [live, session.engine],
   );
   const running = Boolean(live && !live.done);
+  const [showExport, setShowExport] = useState(false);
   const turns = (view?.rounds ?? []).reduce((n, r) => n + r.entries.length, 0);
   const cost = view?.cost?.total_usd ?? session.engine?.costs?.total_usd ?? null;
 
@@ -151,6 +160,32 @@ export function Transcript({
       </div>
 
       <RunPrompts sessionId={session.id} view={view} onAnswer={onAnswer} onDecide={onDecide} />
+      <ChamberSurface
+        open={showExport}
+        onClose={() => setShowExport(false)}
+        ariaLabel="Export this session"
+        kicker="Export"
+        maxWidth={560}
+      >
+        <ConversationExport
+          topic={session.topic}
+          messages={exportMessagesFor(session, view)}
+          onClose={() => setShowExport(false)}
+        />
+      </ChamberSurface>
+      <SessionCommandBar
+        running={running}
+        onSummary={() => onNavigate("chat", session.id)}
+        onTranscript={() => undefined}
+        onExport={() => setShowExport(true)}
+        onStop={() => onCancel(session.id)}
+        onReconvene={() => onReconvene(session, view)}
+        onHome={() => onNavigate("home")}
+        onSettings={() => {
+          requestSettings();
+          onNavigate("home");
+        }}
+      />
     </div>
   );
 }
