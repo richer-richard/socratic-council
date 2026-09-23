@@ -534,6 +534,7 @@ mod tests {
                 usd_low: 0.1,
                 usd_high: 0.3,
                 unpriced_seats: vec![],
+                review: true,
             },
         });
         v.apply(started("a", RoundKind::Positions));

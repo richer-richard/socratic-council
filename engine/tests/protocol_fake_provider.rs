@@ -270,6 +270,22 @@ async fn whole_protocol_runs_with_a_tool_call_and_writes_a_v2_session() {
     assert!(events
         .iter()
         .any(|e| matches!(e, DebateEvent::Plan { plan, .. } if plan.principals() == ["a", "b"])));
+
+    // The record goes out before the review starts, and the review's results
+    // after it: a review can take minutes, and the record must not wait on it.
+    let at = |pred: &dyn Fn(&DebateEvent) -> bool| events.iter().position(pred);
+    let record_at = at(&|e| matches!(e, DebateEvent::Record { .. })).expect("a record");
+    let review_at = at(&|e| matches!(e, DebateEvent::Phase { name } if name == "Review"))
+        .expect("a review phase");
+    let scores_at = at(&|e| matches!(e, DebateEvent::PeerEvalReady { .. })).expect("peer scores");
+    assert!(
+        record_at < review_at,
+        "record at {record_at}, review at {review_at}"
+    );
+    assert!(review_at < scores_at);
+    assert!(events
+        .iter()
+        .any(|e| matches!(e, DebateEvent::Estimate { estimate } if estimate.review)));
     assert!(events.iter().any(|e| matches!(e, DebateEvent::Estimate { estimate } if estimate.calls == 1 + 2 + (2 + 2) + 2 + 1 + 2 + 3)));
     let positions = events
         .iter()

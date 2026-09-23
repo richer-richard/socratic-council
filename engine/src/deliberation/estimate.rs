@@ -12,6 +12,12 @@ pub struct Estimate {
     pub usd_high: f64,
     /// Seats whose model has no published price (the estimate is a floor).
     pub unpriced_seats: Vec<String>,
+    /// Whether the review pass is part of this run. Carried here because the
+    /// estimate is the one early event every surface already keeps, and it
+    /// lets a summary say "peer review was off" rather than guess why scores
+    /// are missing.
+    #[serde(default)]
+    pub review: bool,
 }
 
 /// One priced participant as the estimator sees it.
@@ -151,8 +157,11 @@ pub fn estimate(
     // transcript, which is what makes their input large and their output small.
     if review && principals.len() > 1 {
         let transcript = base_input + 1400.0 * n * (plan.rounds.max(1) as f64 + 2.0);
-        for s in &principals {
-            add(utility, &s.id, transcript, 800.0, tiers.utility);
+        // Billed to "utility", not to the seat being impersonated: the call
+        // runs on the utility model, so an unpriced utility is what makes the
+        // estimate a floor, and naming the seats would point at the wrong models.
+        for _ in &principals {
+            add(utility, "utility", transcript, 800.0, tiers.utility);
         }
         for _ in 0..(plan.rounds.max(1) as u32 + 2) {
             add(
@@ -169,6 +178,7 @@ pub fn estimate(
         usd_low: usd,
         usd_high: usd * 1.6,
         unpriced_seats: unpriced,
+        review,
     }
 }
 
@@ -219,6 +229,20 @@ mod tests {
         // fraction of the bill rather than a second debate's worth.
         assert!(reviewed.usd_low > e.usd_low);
         assert!(reviewed.usd_low < e.usd_low * 1.5);
+        assert!(reviewed.review);
+        assert!(!e.review);
+
+        // An unpriced utility makes the review the unpriced part, and it is the
+        // utility that gets named, not every seat whose voice it grades in.
+        let unpriced_utility = estimate(
+            &plan,
+            &seats,
+            &Pricing::usd(1.0, 0.1, 5.0),
+            &Pricing::default(),
+            &RoundTiers::default(),
+            true,
+        );
+        assert_eq!(unpriced_utility.unpriced_seats, vec!["utility"]);
     }
 
     #[test]

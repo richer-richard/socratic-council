@@ -1237,6 +1237,7 @@ mod tests {
                 usd_low: 0.2,
                 usd_high: 0.6,
                 unpriced_seats: vec!["mary".into()],
+                review: true,
             },
         });
         for (id, name) in [("george", "George"), ("cathy", "Cathy")] {

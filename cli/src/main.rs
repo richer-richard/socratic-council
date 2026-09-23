@@ -804,6 +804,12 @@ async fn run_plain(
                     graph.nodes.len(),
                     graph.edges.len()
                 );
+                if !graph.missing.is_empty() {
+                    println!(
+                        "Not mapped, the extractor returned nothing usable: {}",
+                        clean(&graph.missing.join(", "))
+                    );
+                }
             }
             DebateEvent::Cost { snapshot } => {
                 if let Some(note) = &snapshot.note {

@@ -215,6 +215,10 @@ pub struct ArgEdge {
 pub struct ArgGraph {
     pub nodes: Vec<ArgNode>,
     pub edges: Vec<ArgEdge>,
+    /// Rounds the extractor returned nothing usable for, by label. A map with a
+    /// round quietly missing reads as a round where nobody argued anything.
+    #[serde(default)]
+    pub missing: Vec<String>,
 }
 
 /// A fragment as the extractor returns it, before it is placed in the graph.
@@ -261,17 +265,52 @@ fn similarity(a: &str, b: &str) -> f32 {
     }
 }
 
-/// Two claims this close in wording are treated as the same claim.
-const MERGE_THRESHOLD: f32 = 0.72;
+/// Two points this close in wording, of the same kind and the same polarity,
+/// are treated as the same point. Bag-of-words cosine cannot see "not", so the
+/// threshold alone would fold "X is the safest" and "X is not the safest" into
+/// one node (they score 0.93): the kind and polarity checks are what keep a
+/// rebuttal from being merged into the claim it rebuts.
+const MERGE_THRESHOLD: f32 = 0.85;
 
-/// Find the node a piece of text refers to, by closest wording above the
-/// threshold. `None` when nothing is close enough, which keeps an unrelated
-/// fragment from being welded onto the nearest node.
-fn match_node(graph: &ArgGraph, text: &str) -> Option<usize> {
+/// A quoted target only has to be recognisable, since the extractor copies it
+/// from text it can see. Polarity still has to agree.
+const TARGET_THRESHOLD: f32 = 0.72;
+
+/// Whether a sentence is negated. Crude on purpose: it only has to tell a
+/// claim from its denial when the rest of the words are the same.
+fn negated(text: &str) -> bool {
+    text.to_lowercase()
+        .split(|c: char| !(c.is_alphanumeric() || c == '\''))
+        .any(|w| {
+            matches!(
+                w,
+                "not" | "no" | "never" | "cannot" | "without" | "neither" | "nor"
+            ) || w.ends_with("n't")
+        })
+}
+
+/// Find the node a piece of text refers to, by closest wording above
+/// `threshold`, with the same polarity, and of `kind` when one is given.
+/// `None` when nothing qualifies, which keeps an unrelated fragment from being
+/// welded onto the nearest node.
+fn match_node(
+    graph: &ArgGraph,
+    text: &str,
+    kind: Option<ArgNodeKind>,
+    exclude: Option<&str>,
+    threshold: f32,
+) -> Option<usize> {
+    let polarity = negated(text);
     let mut best: Option<(usize, f32)> = None;
     for (i, node) in graph.nodes.iter().enumerate() {
+        if kind.is_some_and(|k| node.kind != k) || exclude == Some(node.id.as_str()) {
+            continue;
+        }
+        if negated(&node.text) != polarity {
+            continue;
+        }
         let score = similarity(&node.text, text);
-        if score >= MERGE_THRESHOLD && best.map(|(_, b)| score > b).unwrap_or(true) {
+        if score >= threshold && best.map(|(_, b)| score > b).unwrap_or(true) {
             best = Some((i, score));
         }
     }
@@ -284,7 +323,7 @@ pub fn merge_fragments(graph: &mut ArgGraph, fragments: &[ArgFragment], round: u
         if frag.text.trim().is_empty() {
             continue;
         }
-        let from = match match_node(graph, &frag.text) {
+        let from = match match_node(graph, &frag.text, Some(frag.kind), None, MERGE_THRESHOLD) {
             Some(i) => {
                 // Same claim from a second seat: record the speaker, keep the
                 // first wording so edges pointing at it stay meaningful.
@@ -309,7 +348,10 @@ pub fn merge_fragments(graph: &mut ArgGraph, fragments: &[ArgFragment], round: u
         let (Some(target), Some(relation)) = (frag.target.as_ref(), frag.relation) else {
             continue;
         };
-        let Some(to_index) = match_node(graph, target) else {
+        // The node just placed is never its own target: a rebuttal worded
+        // close to the claim it answers would otherwise point at itself.
+        let Some(to_index) = match_node(graph, target, None, Some(from.as_str()), TARGET_THRESHOLD)
+        else {
             continue;
         };
         let to = graph.nodes[to_index].id.clone();
@@ -337,21 +379,42 @@ pub fn merge_fragments(graph: &mut ArgGraph, fragments: &[ArgFragment], round: u
 // Parsing
 // ---------------------------------------------------------------------------
 
-fn score(v: &Value, key: &str) -> u8 {
-    let n = match &v[key] {
-        Value::Number(n) => n.as_f64().unwrap_or(0.0),
-        Value::String(s) => s.trim().trim_end_matches('%').parse::<f64>().unwrap_or(0.0),
-        _ => 0.0,
-    };
-    // A model that answers 0..10 or 0..1 instead of 0..100 is rescaled rather
-    // than clamped to nothing, because clamping would read as a real zero.
-    let n = if n > 0.0 && n <= 1.0 {
-        n * 100.0
-    } else if n > 1.0 && n <= 10.0 {
-        n * 10.0
+fn raw_number(v: &Value, key: &str) -> Option<f64> {
+    match &v[key] {
+        Value::Number(n) => n.as_f64(),
+        Value::String(s) => s.trim().trim_end_matches('%').parse::<f64>().ok(),
+        _ => None,
+    }
+}
+
+/// The factor that puts one evaluator's reply on 0..100. Decided once for the
+/// whole reply, from its largest number: judged value by value, a strict 1 out
+/// of 100 looked like a 1 out of 10 and came out as 100, turning the worst
+/// score in the matrix into the best. Only a reply whose every number fits a
+/// smaller scale is read on that scale.
+fn scale_of(items: &[Value]) -> f64 {
+    let top = items
+        .iter()
+        .flat_map(|item| {
+            SCORE_KEYS
+                .iter()
+                .filter_map(|k| raw_number(&item["scores"], k))
+                .chain(raw_number(item, "overall"))
+        })
+        .fold(0.0f64, f64::max);
+    if top <= 1.0 {
+        100.0
+    } else if top <= 10.0 {
+        10.0
     } else {
-        n
-    };
+        1.0
+    }
+}
+
+const SCORE_KEYS: [&str; 5] = ["rigor", "evidence", "novelty", "civility", "on_topic"];
+
+fn score(v: &Value, key: &str, scale: f64) -> u8 {
+    let n = raw_number(v, key).unwrap_or(0.0) * scale;
     n.clamp(0.0, 100.0).round() as u8
 }
 
@@ -371,9 +434,28 @@ fn stance_of(raw: &str) -> PeerStance {
     }
 }
 
+/// The seat id a reply names, matched on id or display name in any case. The
+/// prompt lists seats as `george (George)`, and a model that answers with the
+/// name, or copies the whole label, still meant that seat.
+fn resolve_seat(raw: &str, known: &[(String, String)]) -> Option<String> {
+    let key = raw.split(" (").next().unwrap_or(raw).trim().to_lowercase();
+    if key.is_empty() {
+        return None;
+    }
+    known
+        .iter()
+        .find(|(id, name)| id.to_lowercase() == key || name.to_lowercase() == key)
+        .map(|(id, _)| id.clone())
+}
+
 /// One evaluator's reply: a list of verdicts, one per seat they were asked
-/// about. Unknown targets are dropped rather than invented into the matrix.
-pub fn parse_peer_eval(raw: &str, evaluator: &str, known: &[String]) -> Vec<PeerCritique> {
+/// about. `known` is (id, display name) for every seat that may be scored.
+/// Unknown targets are dropped rather than invented into the matrix.
+pub fn parse_peer_eval(
+    raw: &str,
+    evaluator: &str,
+    known: &[(String, String)],
+) -> Vec<PeerCritique> {
     let Some(json) = super::parse::extract_json(raw) else {
         return Vec::new();
     };
@@ -383,25 +465,28 @@ pub fn parse_peer_eval(raw: &str, evaluator: &str, known: &[String]) -> Vec<Peer
     let Some(items) = v["evaluations"].as_array() else {
         return Vec::new();
     };
+    let scale = scale_of(items);
     let mut out = Vec::new();
     for item in items {
-        let target = text_of(item, "seat");
-        if target.is_empty() || target == evaluator || !known.contains(&target) {
+        let Some(target) = resolve_seat(&text_of(item, "seat"), known) else {
+            continue;
+        };
+        if target == evaluator {
             continue;
         }
         if out.iter().any(|c: &PeerCritique| c.target == target) {
             continue;
         }
         let scores = PeerScores {
-            rigor: score(&item["scores"], "rigor"),
-            evidence: score(&item["scores"], "evidence"),
-            novelty: score(&item["scores"], "novelty"),
-            civility: score(&item["scores"], "civility"),
-            on_topic: score(&item["scores"], "on_topic"),
+            rigor: score(&item["scores"], "rigor", scale),
+            evidence: score(&item["scores"], "evidence", scale),
+            novelty: score(&item["scores"], "novelty", scale),
+            civility: score(&item["scores"], "civility", scale),
+            on_topic: score(&item["scores"], "on_topic", scale),
         };
-        let overall = match &item["overall"] {
-            Value::Null => scores.mean().round() as u8,
-            _ => score(item, "overall"),
+        let overall = match raw_number(item, "overall") {
+            None => scores.mean().round() as u8,
+            Some(_) => score(item, "overall", scale),
         };
         out.push(PeerCritique {
             evaluator: evaluator.to_string(),
@@ -529,9 +614,15 @@ mod tests {
         );
     }
 
+    fn seats(ids: &[&str]) -> Vec<(String, String)> {
+        ids.iter()
+            .map(|id| (id.to_string(), id.to_uppercase()))
+            .collect()
+    }
+
     #[test]
     fn peer_eval_drops_self_reviews_unknown_seats_and_duplicates() {
-        let known = vec!["a".to_string(), "b".to_string()];
+        let known = seats(&["a", "b", "c"]);
         let raw = r#"{"evaluations":[
             {"seat":"a","scores":{"rigor":80,"evidence":70,"novelty":60,"civility":90,"on_topic":85},"overall":78,"stance":"agree","critique":"Solid."},
             {"seat":"a","scores":{"rigor":10,"evidence":10,"novelty":10,"civility":10,"on_topic":10},"overall":10,"stance":"disagree","critique":"Dup."},
@@ -546,17 +637,58 @@ mod tests {
     }
 
     #[test]
-    fn scores_on_a_ten_or_unit_scale_are_rescaled_not_flattened() {
-        let known = vec!["a".to_string()];
-        let raw = r#"{"evaluations":[{"seat":"a","scores":{"rigor":8,"evidence":0.9,"novelty":75,"civility":10,"on_topic":1},"stance":"mixed","critique":"x"}]}"#;
+    fn a_strict_low_score_on_the_hundred_scale_stays_low() {
+        // The prompt asks for 0 to 100 and for strictness. A 1 out of 100 must
+        // not be mistaken for a 1 out of 10 and come out as the top score.
+        let known = seats(&["a"]);
+        let raw = r#"{"evaluations":[{"seat":"a","scores":{"rigor":60,"evidence":10,"novelty":5,"civility":80,"on_topic":1},"overall":20,"stance":"disagree","critique":"x"}]}"#;
+        let out = parse_peer_eval(raw, "b", &known);
+        assert_eq!(out[0].scores.evidence, 10);
+        assert_eq!(out[0].scores.novelty, 5);
+        assert_eq!(out[0].scores.on_topic, 1);
+        assert_eq!(out[0].overall, 20);
+    }
+
+    #[test]
+    fn a_reply_entirely_on_a_ten_scale_is_read_on_that_scale() {
+        let known = seats(&["a", "c"]);
+        let raw = r#"{"evaluations":[
+            {"seat":"a","scores":{"rigor":8,"evidence":6,"novelty":7,"civility":9,"on_topic":10},"overall":8,"stance":"agree","critique":"x"},
+            {"seat":"c","scores":{"rigor":2,"evidence":1,"novelty":3,"civility":7,"on_topic":5},"stance":"mixed","critique":"y"}
+        ]}"#;
         let out = parse_peer_eval(raw, "b", &known);
         assert_eq!(out[0].scores.rigor, 80);
-        assert_eq!(out[0].scores.evidence, 90);
-        assert_eq!(out[0].scores.novelty, 75);
-        assert_eq!(out[0].scores.civility, 100);
         assert_eq!(out[0].scores.on_topic, 100);
+        assert_eq!(out[0].overall, 80);
+        assert_eq!(out[1].scores.evidence, 10);
         // No "overall" in the reply: it falls back to the rubric mean.
-        assert_eq!(out[0].overall, 89);
+        assert_eq!(out[1].overall, 36);
+    }
+
+    #[test]
+    fn a_reply_entirely_on_a_unit_scale_is_read_on_that_scale() {
+        let known = seats(&["a"]);
+        let raw = r#"{"evaluations":[{"seat":"a","scores":{"rigor":0.8,"evidence":0.9,"novelty":0.5,"civility":1,"on_topic":0.7},"overall":0.75,"stance":"agree","critique":"x"}]}"#;
+        let out = parse_peer_eval(raw, "b", &known);
+        assert_eq!(out[0].scores.evidence, 90);
+        assert_eq!(out[0].scores.civility, 100);
+        assert_eq!(out[0].overall, 75);
+    }
+
+    #[test]
+    fn a_seat_named_by_display_name_or_label_still_counts() {
+        let known = vec![
+            ("george".to_string(), "George".to_string()),
+            ("cathy".to_string(), "Cathy".to_string()),
+        ];
+        let raw = r#"{"evaluations":[
+            {"seat":"George","scores":{"rigor":70,"evidence":70,"novelty":70,"civility":70,"on_topic":70},"overall":70,"stance":"agree","critique":"x"},
+            {"seat":"cathy (Cathy)","scores":{"rigor":60,"evidence":60,"novelty":60,"civility":60,"on_topic":60},"overall":60,"stance":"mixed","critique":"y"}
+        ]}"#;
+        let out = parse_peer_eval(raw, "kate", &known);
+        assert_eq!(out.len(), 2);
+        assert_eq!(out[0].target, "george");
+        assert_eq!(out[1].target, "cathy");
     }
 
     #[test]
@@ -680,7 +812,108 @@ mod tests {
     #[test]
     fn junk_replies_yield_nothing_rather_than_panicking() {
         assert!(parse_fragments("I could not do that.").is_empty());
-        assert!(parse_peer_eval("no json here", "a", &["b".into()]).is_empty());
+        assert!(parse_peer_eval("no json here", "a", &seats(&["b"])).is_empty());
         assert!(parse_fragments("{\"fragments\": \"not an array\"}").is_empty());
+    }
+
+    fn frag(
+        kind: ArgNodeKind,
+        text: &str,
+        by: &str,
+        target: Option<&str>,
+        relation: Option<ArgRelation>,
+    ) -> ArgFragment {
+        ArgFragment {
+            kind,
+            text: text.into(),
+            by: by.into(),
+            target: target.map(Into::into),
+            relation,
+            rationale: String::new(),
+        }
+    }
+
+    #[test]
+    fn a_rebuttal_that_negates_a_claim_is_not_folded_into_it() {
+        // These two score 0.93 on bag-of-words cosine. Merged, the rebutting
+        // seat became a supporter and the rebuttal vanished from the map.
+        let mut g = ArgGraph::default();
+        merge_fragments(
+            &mut g,
+            &[
+                frag(
+                    ArgNodeKind::Claim,
+                    "Nuclear power is the safest energy source",
+                    "a",
+                    None,
+                    None,
+                ),
+                frag(
+                    ArgNodeKind::Rebuttal,
+                    "Nuclear power is not the safest energy source",
+                    "b",
+                    Some("Nuclear power is the safest energy source"),
+                    Some(ArgRelation::Rebuts),
+                ),
+            ],
+            0,
+        );
+        assert_eq!(g.nodes.len(), 2);
+        assert_eq!(g.nodes[0].by, vec!["a"]);
+        assert_eq!(g.edges.len(), 1);
+        assert_eq!(g.edges[0].from, "n2");
+        assert_eq!(g.edges[0].to, "n1");
+    }
+
+    #[test]
+    fn a_claim_and_its_denial_stay_apart_even_as_the_same_kind() {
+        let mut g = ArgGraph::default();
+        merge_fragments(
+            &mut g,
+            &[
+                frag(
+                    ArgNodeKind::Claim,
+                    "Ranked choice voting reduces wasted votes",
+                    "a",
+                    None,
+                    None,
+                ),
+                frag(
+                    ArgNodeKind::Claim,
+                    "Ranked choice voting doesn't reduce wasted votes",
+                    "b",
+                    None,
+                    None,
+                ),
+            ],
+            0,
+        );
+        assert_eq!(g.nodes.len(), 2);
+    }
+
+    #[test]
+    fn the_same_wording_as_a_different_kind_is_a_different_node() {
+        let mut g = ArgGraph::default();
+        merge_fragments(
+            &mut g,
+            &[
+                frag(
+                    ArgNodeKind::Claim,
+                    "Turnout rises under automatic registration",
+                    "a",
+                    None,
+                    None,
+                ),
+                frag(
+                    ArgNodeKind::Question,
+                    "Turnout rises under automatic registration",
+                    "b",
+                    None,
+                    None,
+                ),
+            ],
+            0,
+        );
+        assert_eq!(g.nodes.len(), 2);
     }
 }
