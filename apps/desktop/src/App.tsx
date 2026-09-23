@@ -249,6 +249,12 @@ export default function App() {
   const [activeSession, setActiveSession] = useState<DiscussionSession | null>(null);
   const [activeProject, setActiveProject] = useState<Project | null>(null);
   const [appError, setAppError] = useState<string | null>(null);
+  /**
+   * How the next council convenes. Home's chips and its `/council` and
+   * `/deliverable` commands set it, and `/reconvene` on a session reads it,
+   * so leaving Home no longer forgets what was chosen.
+   */
+  const [launch, setLaunch] = useState<SessionLaunchOptions>(DEFAULT_LAUNCH);
   const liveView = useEngineRun(state.currentSessionId);
 
   // A session blob reaches IndexedDB on a background queue, so a write that
@@ -418,12 +424,17 @@ export default function App() {
   const handleReconvene = useCallback(
     (session: DiscussionSession, view: SessionView | null) => {
       const priorNotes = reconveneNotes(view) ?? undefined;
+      // The council size and the deliverable that are set now, not the
+      // defaults. Reconvening is a paid run, and running eight seats on a
+      // standard deliverable when quick and document were chosen is not what
+      // the command asked for. The terminal's `reconvene` launches with its
+      // current options too.
       void handleCreateSession(session.topic, [], session.projectId ?? null, {
-        ...DEFAULT_LAUNCH,
+        ...launch,
         priorNotes,
       });
     },
-    [handleCreateSession],
+    [handleCreateSession, launch],
   );
 
   const handleOpenSession = useCallback(
@@ -710,6 +721,8 @@ export default function App() {
             onDeleteProject={handleDeleteProject}
             onArchiveProject={handleArchiveProject}
             onRestoreProject={handleRestoreProject}
+            launch={launch}
+            onLaunchChange={setLaunch}
             onBundleImported={(sessionId) => {
               refreshAll();
               handleOpenSession(sessionId);

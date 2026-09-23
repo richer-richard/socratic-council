@@ -1,5 +1,5 @@
 import { AUTO_MODEL, getModelInfo } from "@socratic-council/shared";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { BundleImportButton } from "../components/BundleActions";
 import { ConfigModal } from "../components/ConfigModal";
@@ -16,7 +16,7 @@ import {
   revokeComposerAttachmentPreview,
   type ComposerAttachment,
 } from "../services/attachments";
-import { DEFAULT_LAUNCH, type SessionLaunchOptions } from "../services/engine";
+import { type SessionLaunchOptions } from "../services/engine";
 import type { ProjectSummary } from "../services/projects";
 import type { BulkDeleteResult, SessionSummary, SessionStatus } from "../services/sessions";
 import { useConfig, getShuffledTopics, LOCKED_MODELS, type Provider } from "../stores/config";
@@ -45,6 +45,13 @@ interface HomeProps {
   onRestoreProject: (projectId: string) => void;
   /** Optional — fires after a .scbundle import so the app can refresh + navigate. */
   onBundleImported?: (sessionId: string) => void;
+  /**
+   * How the next council convenes. It lives in App so that leaving Home does
+   * not forget it and `/reconvene` on a session runs with what was chosen,
+   * which is what the terminal does.
+   */
+  launch: SessionLaunchOptions;
+  onLaunchChange: (next: SessionLaunchOptions) => void;
 }
 
 const INBOX_KEY = "__inbox__";
@@ -759,6 +766,8 @@ export function Home({
   onArchiveProject,
   onRestoreProject,
   onBundleImported,
+  launch,
+  onLaunchChange,
 }: HomeProps) {
   const [topic, setTopic] = useState("");
   const [showSettings, setShowSettings] = useState(false);
@@ -773,7 +782,13 @@ export function Home({
   const [expandedProjects, setExpandedProjects] = useState<Set<string>>(() => new Set([INBOX_KEY]));
   const [showArchived, setShowArchived] = useState(false);
   const [focusedProjectId, setFocusedProjectId] = useState<string | null>(null);
-  const [launch, setLaunch] = useState<SessionLaunchOptions>(DEFAULT_LAUNCH);
+  const setLaunch = useCallback(
+    (next: SessionLaunchOptions | ((prev: SessionLaunchOptions) => SessionLaunchOptions)) => {
+      onLaunchChange(typeof next === "function" ? next(launch) : next);
+    },
+    [launch, onLaunchChange],
+  );
+
   const [showNewProject, setShowNewProject] = useState(false);
   const [newProjectName, setNewProjectName] = useState("");
   const [newProjectDescription, setNewProjectDescription] = useState("");

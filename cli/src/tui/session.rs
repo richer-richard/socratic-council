@@ -397,14 +397,17 @@ fn render_main(
         height: area.height.saturating_sub(1),
     };
     let width = inner.width as usize;
-    let lines = match page {
+    let (lines, targets) = match page {
         SessionPage::Summary => summary_lines(s, width),
-        SessionPage::Transcript => transcript_lines(s, width, frame),
+        SessionPage::Transcript => (transcript_lines(s, width, frame), Vec::new()),
     };
 
     // Every line is wrapped to `width` here, so the row count is the line
-    // count and the scroll clamp reaches the last row exactly.
-    let lines = theme::fit(lines, width);
+    // count and the scroll clamp reaches the last row exactly. The clickable
+    // rows are tracked through the wrap: their text is no use as a landmark,
+    // since a record or a seat's turn can contain the very same words.
+    let marks: Vec<usize> = targets.iter().map(|(line, ..)| *line).collect();
+    let (lines, placed) = theme::fit_marked(lines, width, &marks);
     let total = u16::try_from(lines.len()).unwrap_or(u16::MAX);
     let max_off = total.saturating_sub(inner.height);
     let scroll = if s.follow && page == SessionPage::Transcript {
@@ -417,21 +420,24 @@ fn render_main(
     f.render_widget(Paragraph::new(lines).scroll((scroll, 0)), inner);
 
     // What the page drew that a click can act on, wherever the scroll put it.
-    if page == SessionPage::Summary {
-        for v in AnalysisView::ALL {
-            let tab = format!("{} {}", v.glyph(), v.label());
-            if let Some(at) = find_drawn(f.buffer_mut(), inner, &tab) {
-                push_hit(hits, at, Click::Analysis(v));
-            }
+    for ((_, dx, w, click), row) in targets.into_iter().zip(placed) {
+        let Some(row) = row.filter(|row| *row >= scroll as usize) else {
+            continue;
+        };
+        let y = inner.y + (row - scroll as usize) as u16;
+        if y >= inner.y + inner.height || dx >= inner.width {
+            continue;
         }
-        for link in [
-            "Read the full transcript",
-            "Follow the debate as it happens",
-        ] {
-            if let Some(at) = find_drawn(f.buffer_mut(), inner, link) {
-                push_hit(hits, at, Click::Page(SessionPage::Transcript));
-            }
-        }
+        push_hit(
+            hits,
+            Rect {
+                x: inner.x + dx,
+                y,
+                width: w.min(inner.width - dx),
+                height: 1,
+            },
+            click,
+        );
     }
     inner
 }
@@ -515,7 +521,12 @@ fn field_list(label: &str, items: &[String], width: usize) -> Vec<Line<'static>>
     out
 }
 
-fn summary_lines(s: &SessionScreen, width: usize) -> Vec<Line<'static>> {
+/// Where the summary put something a click can act on: the line it is on, the
+/// column it starts at, how wide it is, and what a click there does.
+type Target = (usize, u16, u16, Click);
+
+fn summary_lines(s: &SessionScreen, width: usize) -> (Vec<Line<'static>>, Vec<Target>) {
+    let mut targets: Vec<Target> = Vec::new();
     let names = s.names();
     let v = &s.view;
     let mut lines = error_lines(v, width);
@@ -555,13 +566,25 @@ fn summary_lines(s: &SessionScreen, width: usize) -> Vec<Line<'static>> {
         lines.push(Line::from(""));
     }
     if v.record.is_none() {
-        return lines;
+        // No analysis panel without a record, but the transcript link still
+        // goes on the end below.
+        let link_at = lines.len();
+        push_transcript_link(&mut lines, s);
+        if lines.len() > link_at {
+            let w = u16::try_from(lines[link_at].width()).unwrap_or(u16::MAX);
+            targets.push((link_at, 0, w, Click::Page(SessionPage::Transcript)));
+        }
+        return (lines, targets);
     }
 
     // The analysis panel: one view at a time, picked from a numbered row.
     lines.push(rule("Analysis", "", theme::GOLD, width));
     lines.push(Line::from(""));
-    lines.push(analysis::tab_row(s.ui.analysis));
+    let (tabs, spots) = analysis::tab_row(s.ui.analysis);
+    for (v, (dx, w)) in AnalysisView::ALL.into_iter().zip(spots) {
+        targets.push((lines.len(), dx, w, Click::Analysis(v)));
+    }
+    lines.push(tabs);
     lines.push(Line::from(""));
     let ctx = analysis::Ctx::new(v, &s.seats, s.ui.focus);
     lines.extend(analysis::lines(s.ui.analysis, &ctx, width));
@@ -589,8 +612,14 @@ fn summary_lines(s: &SessionScreen, width: usize) -> Vec<Line<'static>> {
         lines.push(Line::from(""));
     }
 
+    let link_at = lines.len();
     push_transcript_link(&mut lines, s);
-    lines
+    if lines.len() > link_at {
+        // The whole row, so the count beside the label is clickable too.
+        let w = u16::try_from(lines[link_at].width()).unwrap_or(u16::MAX);
+        targets.push((link_at, 0, w, Click::Page(SessionPage::Transcript)));
+    }
+    (lines, targets)
 }
 
 /// Why the summary has no record: still being written, or never will be.

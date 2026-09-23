@@ -319,16 +319,26 @@ fn buffer_lines(buf: &Buffer, left: usize) -> Vec<Line<'static>> {
 // The tab row
 // ---------------------------------------------------------------------------
 
-pub fn tab_row(current: AnalysisView) -> Line<'static> {
+/// The tab row, and where each tab sits on it: the column it starts at and
+/// how wide it is, so a click can be placed on the tab that was drawn rather
+/// than on whatever text happens to read the same.
+pub fn tab_row(current: AnalysisView) -> (Line<'static>, Vec<(u16, u16)>) {
     let mut spans = vec![pad(2)];
+    let mut at: Vec<(u16, u16)> = Vec::with_capacity(AnalysisView::ALL.len());
+    let mut x: u16 = 2;
     for (i, v) in AnalysisView::ALL.into_iter().enumerate() {
         let on = v == current;
+        let number = format!("{} ", i + 1);
+        let label = format!(" {} {} ", v.glyph(), v.label());
+        let width = u16::try_from(number.width() + label.width()).unwrap_or(u16::MAX);
+        at.push((x, width));
+        x = x.saturating_add(width).saturating_add(3);
         spans.push(Span::styled(
-            format!("{} ", i + 1),
+            number,
             style(if on { theme::GOLD } else { theme::DIM }),
         ));
         spans.push(Span::styled(
-            format!(" {} {} ", v.glyph(), v.label()),
+            label,
             if on {
                 Style::default()
                     .fg(theme::INK_ON_GOLD)
@@ -340,7 +350,7 @@ pub fn tab_row(current: AnalysisView) -> Line<'static> {
         ));
         spans.push(pad(3));
     }
-    Line::from(spans)
+    (Line::from(spans), at)
 }
 
 pub fn lines(view: AnalysisView, ctx: &Ctx, width: usize) -> Vec<Line<'static>> {

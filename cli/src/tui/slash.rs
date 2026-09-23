@@ -256,7 +256,19 @@ fn split(input: &str) -> Option<(String, Option<&str>)> {
 
 /// The list to show above the input for `input`. `titles` are the saved
 /// sessions, newest first, for `/open`.
-pub fn suggest(input: &str, place: Place, titles: &[String]) -> Vec<Suggestion> {
+/// Whether the command being typed takes a saved session, so the caller knows
+/// to have the sessions list loaded before the suggestions are asked for.
+pub fn takes_a_session(input: Option<(&str, Place)>) -> bool {
+    let Some((input, place)) = input else {
+        return false;
+    };
+    let Some((word, _)) = split(input) else {
+        return false;
+    };
+    named(&word).is_some_and(|c| c.available(place) && c.arg == Arg::Session)
+}
+
+pub fn suggest(input: &str, place: Place, titles: &[&str]) -> Vec<Suggestion> {
     let Some((word, rest)) = split(input) else {
         return Vec::new();
     };
@@ -298,7 +310,7 @@ pub fn suggest(input: &str, place: Place, titles: &[String]) -> Vec<Suggestion> 
 
 /// The choices for a command's argument, the ones starting with (or, for a
 /// title, containing) what was typed first, then the close ones.
-fn suggest_arg(cmd: &Command, typed: &str, titles: &[String]) -> Vec<Suggestion> {
+fn suggest_arg(cmd: &Command, typed: &str, titles: &[&str]) -> Vec<Suggestion> {
     const MAX_TITLES: usize = 8;
     let typed = typed.trim().to_lowercase();
     let row = |choice: &str, about: &str, close: bool| Suggestion {
@@ -508,10 +520,10 @@ mod tests {
 
     #[test]
     fn open_lists_saved_sessions_by_title() {
-        let titles = vec![
-            "Should we colonize Mars?".to_string(),
-            "Pricing for the Pro plan".to_string(),
-            "Mars base staffing".to_string(),
+        let titles = [
+            "Should we colonize Mars?",
+            "Pricing for the Pro plan",
+            "Mars base staffing",
         ];
         let s = suggest("/open mars", Place::Home, &titles);
         assert_eq!(
