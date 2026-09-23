@@ -8,7 +8,7 @@
 //! screen or a log. A seat's explicit model id must exist in the provider's
 //! catalog or live scan: the editor never lets a made-up id through.
 
-use super::{redact_proxy, theme, App, KeyDraft};
+use super::{redact_proxy, theme, App, Click, KeyDraft};
 use crate::catalog::{catalog_models, model_row, resolve_model, DiscoveredModel};
 use crate::config::{display_name_for, Config, KeySource, SeatConfig, SlotConfig};
 use crate::tools::{Approval, ToolPolicy};
@@ -189,8 +189,35 @@ impl App {
         rows[self.settings_sel.min(rows.len() - 1)]
     }
 
+    /// A click on a Settings row. A switch (tools, approval, the question,
+    /// review, the cap, add seat) flips at once, the way a toggle should. A
+    /// row that opens an editor is picked by the first click and opened by
+    /// a second. An edit in progress is dropped, as Esc would.
+    pub(super) fn click_settings_row(&mut self, pos: usize) {
+        self.key_draft = None;
+        self.settings_draft = None;
+        let rows = self.settings_rows();
+        let Some(&row) = rows.get(pos) else {
+            return;
+        };
+        let switch = matches!(
+            row,
+            SettingsRow::ToolsLevel
+                | SettingsRow::ToolsApproval
+                | SettingsRow::Interactive
+                | SettingsRow::Review
+                | SettingsRow::BudgetAction
+                | SettingsRow::AddSeat
+        );
+        let again = self.settings_sel == pos;
+        self.settings_sel = pos;
+        if switch || again {
+            self.begin_edit();
+        }
+    }
+
     /// Save the config (unless persistence is off) and toast `note`.
-    fn persist_config(&mut self, note: impl Into<String>) {
+    pub(super) fn persist_config(&mut self, note: impl Into<String>) {
         if !self.persist {
             self.toast(note);
             return;
@@ -1136,6 +1163,22 @@ fn render_rows(f: &mut Frame, area: Rect, app: &App) {
         // Show a header line above the row when scrolling down.
         sel_index.saturating_sub(inner_h.saturating_sub(2))
     };
+    // Each row on screen is clickable, by its place in the row order.
+    let order = app.settings_rows();
+    for (i, e) in entries.iter().enumerate().skip(offset).take(inner_h) {
+        let Some(row) = e.row else { continue };
+        if let Some(pos) = order.iter().position(|r| *r == row) {
+            app.hit(
+                Rect {
+                    x: area.x + 1,
+                    y: area.y + 1 + (i - offset) as u16,
+                    width: area.width.saturating_sub(2),
+                    height: 1,
+                },
+                Click::SettingsRow(pos),
+            );
+        }
+    }
     let lines: Vec<Line<'static>> = entries.into_iter().map(|e| e.line).collect();
     let block = Block::default()
         .borders(Borders::ALL)

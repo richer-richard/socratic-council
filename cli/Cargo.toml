@@ -45,6 +45,9 @@ anyhow = "1"
 directories = "5"
 unicode-width = "0.2"
 textwrap = "0.16"
+# Encodes a copied selection for the terminal clipboard (OSC 52). Already in
+# the tree through the engine.
+base64 = "0.22"
 
 # Desktop bridge (feature-gated): a bundled sqlite to read the app's WebView
 # localStorage. The only C dependency, and only when the bridge is enabled.

@@ -12,6 +12,7 @@ mod home;
 mod session;
 mod settings;
 mod sidebar;
+mod slash;
 pub mod theme;
 pub mod view;
 
@@ -22,8 +23,8 @@ use crate::deliberation::{DebateEvent, Deliberation, Deliverable, EngineInput};
 use crate::store::{self, SessionStore};
 use crate::types::{ModelChoice, Provider, Roster};
 use crossterm::event::{
-    self, DisableBracketedPaste, EnableBracketedPaste, Event, KeyCode, KeyEvent, KeyEventKind,
-    KeyModifiers,
+    self, DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
+    Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
 };
 use crossterm::execute;
 use crossterm::terminal::{
@@ -35,11 +36,13 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 use ratatui::{Frame, Terminal};
+use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
 use std::io;
 use std::time::Duration;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tokio::task::JoinHandle;
+use unicode_width::UnicodeWidthStr;
 use view::SessionView;
 
 /// Everything a run needs to be convened from the Home view.
@@ -142,7 +145,6 @@ pub struct SessionUi {
     pub analysis: analysis::AnalysisView,
     /// The seat the critique graph is focused on, stepped with `[` and `]`.
     pub focus: Option<usize>,
-    pub help: bool,
 }
 
 /// The right-hand pane of the Session screen.
@@ -367,6 +369,94 @@ pub struct App {
     /// The shared session store (the app's data dir when installed, else the
     /// CLI's own). `None` only when neither location is usable.
     store: Option<SessionStore>,
+    /// The command line `/` opens over a session. Home types commands into
+    /// the composer instead.
+    cmdline: Option<String>,
+    /// The highlighted row of the command list.
+    slash_sel: usize,
+    /// The command list was put away with Esc, until the input changes.
+    slash_hidden: bool,
+    /// The key list and commands, over whatever screen is open.
+    help: bool,
+    /// Frame until which a second Ctrl+C or Ctrl+Q quits.
+    quit_armed_until: u64,
+    /// Frame until which a second Esc clears the composer.
+    esc_armed_until: u64,
+    /// Where each clickable thing was drawn this frame, topmost last.
+    hits: RefCell<Vec<Hit>>,
+    /// Blocks of text a drag can select, drawn this frame.
+    regions: RefCell<Vec<Rect>>,
+    /// Where the pointer is, for the hover highlight.
+    hover: Option<(u16, u16)>,
+    /// Text being selected by a drag, or selected and copied.
+    selection: Option<Selection>,
+    /// Selected text waiting to go to the clipboard after this frame.
+    clipboard_out: Option<String>,
+}
+
+/// A drag selection. It stays inside the block it started in, the way a
+/// selection in a window stays inside its text box.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct Selection {
+    region: Rect,
+    anchor: (u16, u16),
+    head: (u16, u16),
+    dragging: bool,
+    /// Copy what it covers once the next frame is drawn.
+    copy: bool,
+}
+
+impl Selection {
+    /// The two ends in reading order.
+    fn ends(&self) -> ((u16, u16), (u16, u16)) {
+        let (a, b) = (self.anchor, self.head);
+        if (a.1, a.0) <= (b.1, b.0) {
+            (a, b)
+        } else {
+            (b, a)
+        }
+    }
+
+    /// The columns selected on row `y`, as a half-open range.
+    fn columns(&self, y: u16) -> Option<(u16, u16)> {
+        let ((sx, sy), (ex, ey)) = self.ends();
+        if y < sy || y > ey {
+            return None;
+        }
+        let left = if y == sy { sx } else { self.region.x };
+        let right = if y == ey {
+            ex + 1
+        } else {
+            self.region.x + self.region.width
+        };
+        (left < right).then_some((left, right))
+    }
+}
+
+/// What a click on something does.
+#[derive(Clone, Debug, PartialEq)]
+enum Click {
+    /// The same as pressing this key.
+    Key(KeyEvent),
+    Preset(Preset),
+    Deliverable(Option<Deliverable>),
+    /// A row of the sessions list.
+    Session(usize),
+    /// A row of the command list.
+    Suggestion(usize),
+    /// A row of Settings, by its place in `settings_rows`.
+    SettingsRow(usize),
+    Side(SideTab),
+    Analysis(analysis::AnalysisView),
+    Page(SessionPage),
+    /// Covers an overlay, so what is drawn under it cannot be clicked.
+    Nothing,
+}
+
+#[derive(Clone, Debug)]
+struct Hit {
+    area: Rect,
+    click: Click,
 }
 
 /// Rewrite a stored session the engine could not finish as stopped.
@@ -417,8 +507,166 @@ impl App {
             key_draft: None,
             settings_draft: None,
             persist: true,
+            cmdline: None,
+            slash_sel: 0,
+            slash_hidden: false,
+            help: false,
+            quit_armed_until: 0,
+            esc_armed_until: 0,
+            hits: RefCell::new(Vec::new()),
+            regions: RefCell::new(Vec::new()),
+            hover: None,
+            selection: None,
+            clipboard_out: None,
             ctx,
         }
+    }
+
+    /// Mark `area` as doing `click` when clicked. Later marks sit on top.
+    fn hit(&self, area: Rect, click: Click) {
+        push_hit(&self.hits, area, click);
+    }
+
+    /// Mark each footer hint whose key is a single key press as clickable.
+    /// `x` is where the hint line starts on screen.
+    fn footer_hits(&self, x: u16, y: u16, hints: &[(&str, &str)], spots: &[(u16, u16, usize)]) {
+        footer_hits(&self.hits, x, y, hints, spots);
+    }
+
+    /// The topmost clickable thing at a point.
+    fn hit_at(&self, x: u16, y: u16) -> Option<Hit> {
+        self.hits
+            .borrow()
+            .iter()
+            .rev()
+            .find(|h| contains(h.area, x, y))
+            .cloned()
+    }
+
+    /// What the pointer is over, for deciding whether a move needs a redraw.
+    fn hover_target(&self) -> Option<Rect> {
+        let (x, y) = self.hover?;
+        self.hit_at(x, y)
+            .filter(|h| h.click != Click::Nothing)
+            .map(|h| h.area)
+    }
+
+    /// A click, a drag, the wheel or a move. Returns `true` to quit.
+    fn handle_mouse(&mut self, m: MouseEvent) -> bool {
+        let (x, y) = (m.column, m.row);
+        self.hover = Some((x, y));
+        match m.kind {
+            MouseEventKind::Down(MouseButton::Left) => {
+                self.selection = None;
+                if self.help {
+                    self.help = false;
+                    return false;
+                }
+                if let Some(hit) = self.hit_at(x, y) {
+                    return self.click(hit.click);
+                }
+                // Not on anything clickable: a drag from here selects text,
+                // inside the block the press landed in.
+                let region = self
+                    .regions
+                    .borrow()
+                    .iter()
+                    .rev()
+                    .find(|r| contains(**r, x, y))
+                    .copied();
+                if let Some(region) = region {
+                    self.selection = Some(Selection {
+                        region,
+                        anchor: (x, y),
+                        head: (x, y),
+                        dragging: true,
+                        copy: false,
+                    });
+                }
+            }
+            MouseEventKind::Drag(MouseButton::Left) => {
+                if let Some(sel) = self.selection.as_mut().filter(|s| s.dragging) {
+                    let r = sel.region;
+                    sel.head = (
+                        x.clamp(r.x, r.x + r.width - 1),
+                        y.clamp(r.y, r.y + r.height - 1),
+                    );
+                }
+            }
+            MouseEventKind::Up(MouseButton::Left) => {
+                if let Some(sel) = self.selection.as_mut().filter(|s| s.dragging) {
+                    sel.dragging = false;
+                    if sel.anchor == sel.head {
+                        // A press and release in place selects nothing.
+                        self.selection = None;
+                    } else {
+                        sel.copy = true;
+                    }
+                }
+            }
+            MouseEventKind::ScrollUp | MouseEventKind::ScrollDown => {
+                // What was selected scrolls away, so the selection goes.
+                self.selection = None;
+                let code = if m.kind == MouseEventKind::ScrollUp {
+                    KeyCode::Up
+                } else {
+                    KeyCode::Down
+                };
+                // A notch moves a session's text three rows, and anything
+                // else (a list, Settings) one row.
+                let steps = if self.view == View::Session && self.cmdline.is_none() {
+                    3
+                } else {
+                    1
+                };
+                for _ in 0..steps {
+                    self.handle_key(KeyEvent::new(code, KeyModifiers::NONE));
+                }
+            }
+            _ => {}
+        }
+        false
+    }
+
+    /// Do what a click on something does. Returns `true` to quit.
+    fn click(&mut self, click: Click) -> bool {
+        let live = self.session.as_ref().is_some_and(|s| s.is_live());
+        match click {
+            Click::Key(key) => return self.handle_key(key),
+            Click::Preset(p) => self.launch.preset = p,
+            Click::Deliverable(d) => self.launch.deliverable = d,
+            Click::Session(i) => {
+                if live {
+                    self.toast("The council is still sitting. /stop it first.");
+                } else {
+                    self.sidebar_sel = i;
+                    self.open_selected_session();
+                }
+            }
+            Click::Suggestion(i) => {
+                self.slash_sel = i;
+                return self.slash_enter();
+            }
+            Click::SettingsRow(i) => self.click_settings_row(i),
+            Click::Side(tab) => {
+                if let Some(s) = self.session.as_mut() {
+                    s.side = tab;
+                }
+            }
+            Click::Analysis(v) => {
+                if let Some(s) = self.session.as_mut() {
+                    s.ui.analysis = v;
+                    s.ui.page = Some(SessionPage::Summary);
+                }
+            }
+            Click::Page(p) => {
+                if let Some(s) = self.session.as_mut() {
+                    s.ui.page = Some(p);
+                }
+            }
+            Click::Nothing => {}
+        }
+        false
     }
 
     fn toast(&mut self, msg: impl Into<String>) {
@@ -791,9 +1039,37 @@ impl App {
 
     /// Returns `true` to quit the app.
     fn handle_key(&mut self, key: KeyEvent) -> bool {
-        // Global: Ctrl-C quits from anywhere.
-        if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
-            return true;
+        self.selection = None;
+        let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+        // Ctrl+C or Ctrl+Q twice quits from anywhere. One press only says so,
+        // so a stray one (a copy reflex on Windows) never ends a run.
+        if ctrl && matches!(key.code, KeyCode::Char('c') | KeyCode::Char('q')) {
+            if self.frame < self.quit_armed_until {
+                return true;
+            }
+            self.quit_armed_until = self.frame + 30;
+            let which = if key.code == KeyCode::Char('c') {
+                "Ctrl+C"
+            } else {
+                "Ctrl+Q"
+            };
+            let live = self.session.as_ref().is_some_and(|s| s.is_live());
+            self.toast(if live {
+                format!("Press {which} again to stop the council and quit.")
+            } else {
+                format!("Press {which} again to quit.")
+            });
+            return false;
+        }
+        // The key list sits over everything and closes on Esc, `?` or Enter.
+        if self.help {
+            if matches!(
+                key.code,
+                KeyCode::Esc | KeyCode::Char('?') | KeyCode::Enter | KeyCode::Char('q')
+            ) {
+                self.help = false;
+            }
+            return false;
         }
         // Ctrl-P toggles Settings from anywhere and returns to wherever you
         // were (a live Session included), not unconditionally Home.
@@ -815,8 +1091,21 @@ impl App {
 
     fn handle_home_key(&mut self, key: KeyEvent) -> bool {
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+        // A composer starting with `/` is a command, never a topic: Enter runs
+        // it, and the arrows and Tab work the list above it.
+        if self.composer.starts_with('/') {
+            let listing = !self.slash_hidden;
+            match key.code {
+                KeyCode::Enter => return self.slash_enter(),
+                KeyCode::Up | KeyCode::Down | KeyCode::Tab if listing => {
+                    self.slash_move(key.code);
+                    return false;
+                }
+                _ => {}
+            }
+        }
         match key.code {
-            KeyCode::Esc => return true,
+            KeyCode::Esc => self.home_escape(),
             KeyCode::Tab => self.toggle_sidebar(),
             KeyCode::Enter => {
                 // A non-empty composer convenes; otherwise open the
@@ -842,10 +1131,267 @@ impl App {
             }
             KeyCode::Backspace => {
                 self.composer.pop();
+                self.slash_edited();
             }
             // Only insert printable input — a Ctrl+<letter> chord must not
             // land its bare letter in the composer.
-            KeyCode::Char(c) if !ctrl => self.composer.push(c),
+            KeyCode::Char(c) if !ctrl => {
+                self.composer.push(c);
+                self.slash_edited();
+            }
+            _ => {}
+        }
+        false
+    }
+
+    /// Esc on Home: twice clears the composer. It never quits, since it is
+    /// the key people press to back out of what they typed.
+    fn home_escape(&mut self) {
+        if self.composer.is_empty() {
+            self.toast("Type /quit or press Ctrl+C twice to quit.");
+        } else if self.frame < self.esc_armed_until {
+            self.composer.clear();
+            self.esc_armed_until = 0;
+            self.slash_edited();
+        } else {
+            self.esc_armed_until = self.frame + 30;
+            self.slash_hidden = true;
+            self.toast("Press Esc again to clear.");
+        }
+    }
+
+    /// The command being typed and where, while a command line is open.
+    fn slash_input(&self) -> Option<(&str, slash::Place)> {
+        match self.view {
+            View::Home if self.composer.starts_with('/') => {
+                Some((self.composer.as_str(), slash::Place::Home))
+            }
+            View::Session => self.cmdline.as_deref().map(|c| (c, slash::Place::Session)),
+            _ => None,
+        }
+    }
+
+    /// The list above the command being typed, empty when there is none or
+    /// it was put away.
+    fn suggestions(&self) -> Vec<slash::Suggestion> {
+        if self.slash_hidden {
+            return Vec::new();
+        }
+        let Some((input, place)) = self.slash_input() else {
+            return Vec::new();
+        };
+        let titles: Vec<String> = self.sessions.iter().map(|r| r.title.clone()).collect();
+        slash::suggest(input, place, &titles)
+    }
+
+    /// The command text changed: the list comes back, from the top.
+    fn slash_edited(&mut self) {
+        self.slash_sel = 0;
+        self.slash_hidden = false;
+        if self.composer.starts_with("/open") {
+            self.ensure_sessions();
+        }
+    }
+
+    fn set_slash_input(&mut self, text: String) {
+        if self.view == View::Session {
+            self.cmdline = Some(text);
+        } else {
+            self.composer = text;
+        }
+        self.slash_edited();
+    }
+
+    /// Up and Down move through the list, Tab puts the highlighted row in.
+    fn slash_move(&mut self, code: KeyCode) {
+        let list = self.suggestions();
+        if list.is_empty() {
+            return;
+        }
+        let last = list.len() - 1;
+        match code {
+            KeyCode::Up => self.slash_sel = self.slash_sel.min(last).saturating_sub(1),
+            KeyCode::Down => self.slash_sel = (self.slash_sel + 1).min(last),
+            KeyCode::Tab => {
+                let fill = list[self.slash_sel.min(last)].fill.clone();
+                self.set_slash_input(fill);
+            }
+            _ => {}
+        }
+    }
+
+    /// Enter on a command line: the highlighted row when there is one (a
+    /// command still missing its argument fills in, to list its choices),
+    /// else whatever was typed.
+    fn slash_enter(&mut self) -> bool {
+        let list = self.suggestions();
+        if let Some(pick) = list.get(self.slash_sel.min(list.len().saturating_sub(1))) {
+            if !pick.runs {
+                let fill = pick.fill.clone();
+                self.set_slash_input(fill);
+                return false;
+            }
+            let fill = pick.fill.clone();
+            return self.run_slash(&fill);
+        }
+        let typed = self
+            .slash_input()
+            .map(|(t, _)| t.to_string())
+            .unwrap_or_default();
+        self.run_slash(&typed)
+    }
+
+    /// Run a command line. Returns `true` to quit. What was typed stays put
+    /// when the command cannot run, so it can be fixed instead of retyped.
+    fn run_slash(&mut self, input: &str) -> bool {
+        let place = if self.view == View::Session {
+            slash::Place::Session
+        } else {
+            slash::Place::Home
+        };
+        match slash::resolve(input, place) {
+            slash::Resolved::Run { name, arg } => {
+                if self.view == View::Session {
+                    self.cmdline = None;
+                } else {
+                    self.composer.clear();
+                }
+                self.slash_edited();
+                return self.run_command(name, &arg);
+            }
+            slash::Resolved::NeedsArg { name } => self.set_slash_input(format!("/{name} ")),
+            slash::Resolved::BadArg { name, arg } => self.toast(format!(
+                "/{name} takes no {arg:?}. Try {}.",
+                slash::usage(name)
+            )),
+            slash::Resolved::NotHere { name } => self.toast(match place {
+                slash::Place::Home => format!("/{name} works on an open session."),
+                slash::Place::Session => format!("/{name} works on Home."),
+            }),
+            slash::Resolved::Unknown { word, near } => self.toast(match near {
+                Some(n) => format!("There is no /{word}. Did you mean /{n}?"),
+                None => format!("There is no /{word}. Type / to see every command."),
+            }),
+        }
+        false
+    }
+
+    /// Do what a resolved command asks. Returns `true` to quit.
+    fn run_command(&mut self, name: &str, arg: &str) -> bool {
+        let live = self.session.as_ref().is_some_and(|s| s.is_live());
+        match name {
+            "council" => {
+                if let Some(p) = Preset::parse(arg) {
+                    self.launch.preset = p;
+                }
+            }
+            "deliverable" => {
+                self.launch.deliverable = match arg {
+                    "auto" => None,
+                    other => Deliverable::parse(other),
+                };
+            }
+            "review" => {
+                self.ctx.config.protocol.review = arg == "on";
+                self.persist_config(if arg == "on" {
+                    "Review on: seats score each other and the argument gets mapped."
+                } else {
+                    "Review off: the summary shows counts from the run instead."
+                });
+            }
+            "open" => self.open_titled(arg),
+            "sessions" => self.toggle_sidebar(),
+            "settings" => {
+                self.prev_view = self.view;
+                self.view = View::Settings;
+            }
+            "help" => self.help = true,
+            "quit" => return true,
+            "summary" | "transcript" => {
+                if let Some(s) = self.session.as_mut() {
+                    s.ui.page = Some(if name == "summary" {
+                        SessionPage::Summary
+                    } else {
+                        SessionPage::Transcript
+                    });
+                }
+            }
+            "export" => self.export(),
+            "stop" => {
+                if live {
+                    self.abort_engine();
+                    self.toast("Stopped. What was said so far is kept.");
+                } else {
+                    self.toast("The council is not sitting.");
+                }
+            }
+            "reconvene" => {
+                if live {
+                    self.toast("The council is still sitting. /stop it first.");
+                } else {
+                    self.reconvene();
+                }
+            }
+            "home" => {
+                if live {
+                    self.toast("The council is still sitting. /stop it first, or press Esc twice.");
+                } else {
+                    self.session = None;
+                    self.view = View::Home;
+                    self.refresh_sessions();
+                }
+            }
+            _ => {}
+        }
+        false
+    }
+
+    /// Open the saved session `/open` named: the exact title, else the
+    /// newest one whose title contains what was typed.
+    fn open_titled(&mut self, typed: &str) {
+        self.ensure_sessions();
+        let want = typed.trim().to_lowercase();
+        let pick = self
+            .sessions
+            .iter()
+            .position(|r| r.title.to_lowercase() == want)
+            .or_else(|| {
+                self.sessions
+                    .iter()
+                    .position(|r| r.title.to_lowercase().contains(&want))
+            });
+        match pick {
+            Some(i) => {
+                self.sidebar_sel = i;
+                self.open_selected_session();
+            }
+            None => self.toast(format!("No saved session is called {typed:?}.")),
+        }
+    }
+
+    /// Keys while the session's command line is open.
+    fn cmdline_key(&mut self, key: KeyEvent) -> bool {
+        let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+        match key.code {
+            KeyCode::Esc => self.cmdline = None,
+            KeyCode::Enter => return self.slash_enter(),
+            KeyCode::Up | KeyCode::Down | KeyCode::Tab => self.slash_move(key.code),
+            KeyCode::Backspace => {
+                if let Some(c) = self.cmdline.as_mut() {
+                    c.pop();
+                    // Deleting the slash closes the line, as it opened.
+                    if c.is_empty() {
+                        self.cmdline = None;
+                    }
+                }
+                self.slash_edited();
+            }
+            KeyCode::Char(ch) if !ctrl => {
+                if let Some(c) = self.cmdline.as_mut() {
+                    c.push(ch);
+                }
+                self.slash_edited();
+            }
             _ => {}
         }
         false
@@ -854,6 +1400,12 @@ impl App {
     fn handle_session_key(&mut self, key: KeyEvent) -> bool {
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
         let frame = self.frame;
+        let asking = self.session.as_ref().is_some_and(|s| {
+            s.view.pending_question.is_some() || s.view.pending_approval.is_some()
+        });
+        if self.cmdline.is_some() && !asking {
+            return self.cmdline_key(key);
+        }
         let Some(s) = self.session.as_mut() else {
             self.view = View::Home;
             return false;
@@ -899,14 +1451,12 @@ impl App {
             }
         }
 
-        // The help overlay closes on Esc or `?` and swallows nothing else.
-        if s.ui.help && matches!(key.code, KeyCode::Esc | KeyCode::Char('?')) {
-            s.ui.help = false;
-            return false;
-        }
-
         match key.code {
-            KeyCode::Char('?') => s.ui.help = true,
+            KeyCode::Char('?') => self.help = true,
+            KeyCode::Char('/') if !ctrl => {
+                self.cmdline = Some("/".into());
+                self.slash_edited();
+            }
             KeyCode::Esc | KeyCode::Char('q') if !ctrl => {
                 if s.is_live() {
                     if frame < s.confirm_stop_until {
@@ -1038,7 +1588,10 @@ impl App {
                     d.buffer.push_str(&clean);
                 }
             }
-            View::Home => self.composer.push_str(&clean),
+            View::Home => {
+                self.composer.push_str(&clean);
+                self.slash_edited();
+            }
             View::Session => {
                 if let Some(s) = self
                     .session
@@ -1108,6 +1661,7 @@ impl Drop for TerminalGuard {
         let _ = disable_raw_mode();
         let _ = execute!(
             io::stdout(),
+            DisableMouseCapture,
             DisableBracketedPaste,
             LeaveAlternateScreen,
             crossterm::cursor::Show
@@ -1124,8 +1678,15 @@ pub async fn run(ctx: AppContext, initial_topic: Option<String>) -> anyhow::Resu
     let _guard = TerminalGuard;
     let mut stdout = io::stdout();
     // Bracketed paste lets a pasted API key arrive as one `Event::Paste`
-    // instead of a burst of key events.
-    execute!(stdout, EnterAlternateScreen, EnableBracketedPaste)?;
+    // instead of a burst of key events. Mouse capture makes the chips, tabs
+    // and rows clickable; the terminal's own selection still works with its
+    // modifier held (Option in iTerm2, Fn in Terminal, Shift elsewhere).
+    execute!(
+        stdout,
+        EnterAlternateScreen,
+        EnableBracketedPaste,
+        EnableMouseCapture
+    )?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
@@ -1175,6 +1736,16 @@ async fn run_loop(
             terminal.draw(|f| render(f, app))?;
         }
         dirty = false;
+        if let Some(text) = app.clipboard_out.take() {
+            copy_to_clipboard(&text);
+            let lines = text.lines().count();
+            app.toast(if lines > 1 {
+                format!("Copied {lines} lines.")
+            } else {
+                "Copied.".to_string()
+            });
+            dirty = true;
+        }
 
         // Block up to one frame for animation cadence, then drain everything
         // queued this tick so a char-by-char paste still registers instantly.
@@ -1189,6 +1760,13 @@ async fn run_loop(
                     Event::Paste(text) => {
                         app.handle_paste(text);
                         dirty = true;
+                    }
+                    Event::Mouse(m) => {
+                        let before = app.hover_target();
+                        quit = app.handle_mouse(m);
+                        // A bare move only redraws when it lands on something
+                        // else to light up.
+                        dirty |= m.kind != MouseEventKind::Moved || app.hover_target() != before;
                     }
                     // A static screen (a saved session, Settings) only
                     // redraws when something marks it dirty, so without this
@@ -1209,6 +1787,8 @@ async fn run_loop(
 }
 
 fn render(f: &mut Frame, app: &mut App) {
+    app.hits.borrow_mut().clear();
+    app.regions.borrow_mut().clear();
     let area = f.area();
     let main_area = if app.sidebar_open && area.width >= 60 {
         let cols = Layout::horizontal([Constraint::Length(32), Constraint::Min(0)]).split(area);
@@ -1224,7 +1804,404 @@ fn render(f: &mut Frame, app: &mut App) {
         View::Settings => settings::render(f, main_area, app),
     }
 
+    if app.help {
+        let rect = render_help(f, area, app.view);
+        app.hit(rect, Click::Nothing);
+    }
     render_toast(f, area, app);
+
+    // The selection and the hover go on last, over whatever was drawn.
+    if let Some(sel) = app.selection.as_mut() {
+        if sel.copy {
+            sel.copy = false;
+            let text = selected_text(f.buffer_mut(), sel);
+            if !text.is_empty() {
+                app.clipboard_out = Some(text);
+            }
+        }
+    }
+    if let Some(sel) = app.selection {
+        paint_selection(f.buffer_mut(), &sel);
+    }
+    if !app.help {
+        if let Some(rect) = app.hover_target() {
+            paint_hover(f.buffer_mut(), rect);
+        }
+    }
+}
+
+fn contains(r: Rect, x: u16, y: u16) -> bool {
+    x >= r.x && x < r.x + r.width && y >= r.y && y < r.y + r.height
+}
+
+/// The background a hovered thing takes: half lit, the way a button in a
+/// window lights up under the pointer.
+const HOVER: Color = Color::Rgb(0x2A, 0x31, 0x3D);
+/// The background of selected text.
+const SELECTED: Color = Color::Rgb(0x24, 0x3B, 0x5E);
+
+fn paint_hover(buf: &mut ratatui::buffer::Buffer, rect: Rect) {
+    let rect = rect.intersection(buf.area);
+    for y in rect.y..rect.y + rect.height {
+        for x in rect.x..rect.x + rect.width {
+            let cell = &mut buf[(x, y)];
+            // Something already filled (a gold chip) lightens instead.
+            let bg = match cell.bg {
+                Color::Rgb(..) => theme::blend(cell.bg, theme::TEXT, 0.22),
+                _ => HOVER,
+            };
+            cell.set_bg(bg);
+        }
+    }
+}
+
+fn paint_selection(buf: &mut ratatui::buffer::Buffer, sel: &Selection) {
+    let r = sel.region.intersection(buf.area);
+    for y in r.y..r.y + r.height {
+        if let Some((left, right)) = sel.columns(y) {
+            for x in left.max(r.x)..right.min(r.x + r.width) {
+                buf[(x, y)].set_bg(SELECTED);
+            }
+        }
+    }
+}
+
+/// The text a selection covers, a line per row, without the padding a row
+/// carries past its last character.
+fn selected_text(buf: &ratatui::buffer::Buffer, sel: &Selection) -> String {
+    let r = sel.region.intersection(buf.area);
+    let mut rows = Vec::new();
+    for y in r.y..r.y + r.height {
+        let Some((left, right)) = sel.columns(y) else {
+            continue;
+        };
+        let mut row = String::new();
+        for x in left.max(r.x)..right.min(r.x + r.width) {
+            row.push_str(buf[(x, y)].symbol());
+        }
+        rows.push(row.trim_end().to_string());
+    }
+    while rows.last().is_some_and(|r| r.is_empty()) {
+        rows.pop();
+    }
+    rows.join("\n")
+}
+
+/// Put `text` on the clipboard: through the terminal (OSC 52, which works
+/// over SSH and in most terminals), and through `pbcopy` on a Mac, since
+/// Terminal.app ignores OSC 52.
+fn copy_to_clipboard(text: &str) {
+    use base64::Engine as _;
+    use std::io::Write as _;
+    let encoded = base64::engine::general_purpose::STANDARD.encode(text);
+    let mut out = io::stdout();
+    let _ = write!(out, "\x1b]52;c;{encoded}\x07");
+    let _ = out.flush();
+    #[cfg(target_os = "macos")]
+    {
+        if let Ok(mut child) = std::process::Command::new("pbcopy")
+            .stdin(std::process::Stdio::piped())
+            .spawn()
+        {
+            if let Some(stdin) = child.stdin.as_mut() {
+                let _ = stdin.write_all(text.as_bytes());
+            }
+            let _ = child.wait();
+        }
+    }
+}
+
+fn push_hit(hits: &RefCell<Vec<Hit>>, area: Rect, click: Click) {
+    if area.width > 0 && area.height > 0 {
+        hits.borrow_mut().push(Hit { area, click });
+    }
+}
+
+fn footer_hits(
+    hits: &RefCell<Vec<Hit>>,
+    x: u16,
+    y: u16,
+    hints: &[(&str, &str)],
+    spots: &[(u16, u16, usize)],
+) {
+    for &(start, width, i) in spots {
+        if let Some(key) = hint_key(hints[i].0) {
+            push_hit(
+                hits,
+                Rect {
+                    x: x + start,
+                    y,
+                    width,
+                    height: 1,
+                },
+                Click::Key(key),
+            );
+        }
+    }
+}
+
+/// The key press a footer hint names, when it names exactly one: `Enter`,
+/// `Tab`, `Esc`, `^P`, or a single character. A range (`1-4`), a pair (`[ ]`)
+/// or the quit chord is left unclickable.
+fn hint_key(label: &str) -> Option<KeyEvent> {
+    let plain = |code| Some(KeyEvent::new(code, KeyModifiers::NONE));
+    match label {
+        "Enter" => plain(KeyCode::Enter),
+        "Tab" => plain(KeyCode::Tab),
+        "Esc" => plain(KeyCode::Esc),
+        _ => {
+            let mut chars = label.chars();
+            match (chars.next(), chars.next(), chars.next()) {
+                (Some('^'), Some(c), None) if c.is_ascii_alphabetic() => Some(KeyEvent::new(
+                    KeyCode::Char(c.to_ascii_lowercase()),
+                    KeyModifiers::CONTROL,
+                )),
+                (Some(c), None, None) => plain(KeyCode::Char(c)),
+                _ => None,
+            }
+        }
+    }
+}
+
+/// Where `needle` was drawn inside `area`, for text a scrolled paragraph put
+/// on screen: the analysis tabs, the transcript link.
+fn find_drawn(buf: &ratatui::buffer::Buffer, area: Rect, needle: &str) -> Option<Rect> {
+    let width = needle.chars().count() as u16;
+    for y in area.y..area.y + area.height {
+        let mut row = String::new();
+        let mut starts = Vec::new();
+        for x in area.x..area.x + area.width {
+            starts.push((row.len(), x));
+            row.push_str(buf[(x, y)].symbol());
+        }
+        if let Some(at) = row.find(needle) {
+            let x = starts.iter().find(|(b, _)| *b == at).map(|(_, x)| *x)?;
+            return Some(Rect {
+                x,
+                y,
+                width,
+                height: 1,
+            });
+        }
+    }
+    None
+}
+
+/// The list of commands above an input: the ones starting with what was
+/// typed, then the close matches under a quiet label. The highlighted row
+/// is what Enter runs and Tab fills in. `anchor` is the input; the list sits
+/// right above it, inside `room`.
+fn render_slash_menu(f: &mut Frame, app: &App, anchor: Rect, room: Rect) {
+    let Some((typed, _)) = app.slash_input() else {
+        return;
+    };
+    if app.slash_hidden {
+        return;
+    }
+    let list = app.suggestions();
+    let sel = app.slash_sel.min(list.len().saturating_sub(1));
+    let width = anchor.width;
+    if width < 20 || room.height < 3 {
+        return;
+    }
+    let label_w = list
+        .iter()
+        .map(|s| s.label.width())
+        .max()
+        .unwrap_or(0)
+        .min(width as usize * 3 / 5);
+    // Rows as drawn, with the index of the suggestion each one runs.
+    let mut rows: Vec<(Line<'static>, Option<usize>)> = Vec::new();
+    if list.is_empty() {
+        rows.push((
+            Line::from(Span::styled(
+                format!(
+                    " No command starts with {}. Type / to see them all.",
+                    theme::truncate(typed, 24)
+                ),
+                Style::default().fg(theme::DIM),
+            )),
+            None,
+        ));
+    }
+    let mut labelled_close = false;
+    for (i, sug) in list.iter().enumerate() {
+        if sug.close && !labelled_close {
+            labelled_close = true;
+            rows.push((
+                Line::from(Span::styled(
+                    if i == 0 { " close matches" } else { " close" },
+                    Style::default().fg(theme::DIM),
+                )),
+                None,
+            ));
+        }
+        let on = i == sel;
+        let label_style = if on {
+            Style::default()
+                .fg(theme::GOLD)
+                .add_modifier(Modifier::BOLD)
+        } else if sug.close {
+            Style::default().fg(theme::MUTED)
+        } else {
+            Style::default().fg(theme::TEXT)
+        };
+        let label = theme::truncate(&sug.label, label_w);
+        let pad = label_w.saturating_sub(label.width());
+        let about_room = (width as usize).saturating_sub(label_w + 7);
+        rows.push((
+            Line::from(vec![
+                Span::styled(
+                    if on { " ▸ " } else { "   " },
+                    Style::default().fg(theme::GOLD),
+                ),
+                Span::styled(label, label_style),
+                Span::raw(" ".repeat(pad + 2)),
+                Span::styled(
+                    theme::truncate(&sug.about, about_room),
+                    Style::default().fg(theme::DIM),
+                ),
+            ]),
+            Some(i),
+        ));
+    }
+    // Keep the highlighted row in view when the room is short.
+    let fit = (room.height.saturating_sub(2) as usize).max(1);
+    let at = rows.iter().position(|(_, i)| *i == Some(sel)).unwrap_or(0);
+    let first = at.saturating_sub(fit.saturating_sub(1));
+    let shown: Vec<_> = rows.into_iter().skip(first).take(fit).collect();
+    let height = shown.len() as u16 + 2;
+    let rect = Rect {
+        x: anchor.x,
+        y: anchor.y.saturating_sub(height).max(room.y),
+        width,
+        height,
+    };
+    f.render_widget(Clear, rect);
+    push_hit(&app.hits, rect, Click::Nothing);
+    for (row, (_, i)) in shown.iter().enumerate() {
+        if let Some(i) = i {
+            push_hit(
+                &app.hits,
+                Rect {
+                    x: rect.x + 1,
+                    y: rect.y + 1 + row as u16,
+                    width: rect.width.saturating_sub(2),
+                    height: 1,
+                },
+                Click::Suggestion(*i),
+            );
+        }
+    }
+    let lines: Vec<Line> = shown.into_iter().map(|(l, _)| l).collect();
+    f.render_widget(
+        Paragraph::new(lines).block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(theme::DIM))
+                .title(Span::styled(
+                    " Commands  ↑↓ pick  Tab fill  Enter run ",
+                    Style::default().fg(theme::MUTED),
+                )),
+        ),
+        rect,
+    );
+}
+
+/// Every key and command for the screen that is open, over everything.
+/// Returns where it was drawn.
+fn render_help(f: &mut Frame, area: Rect, view: View) -> Rect {
+    let group = |title: &str| {
+        Line::from(Span::styled(
+            title.to_string(),
+            Style::default()
+                .fg(theme::GOLD)
+                .add_modifier(Modifier::BOLD),
+        ))
+    };
+    let row = |k: &str, what: &str| {
+        Line::from(vec![
+            Span::styled(format!("  {k:<16}"), Style::default().fg(theme::GOLD)),
+            Span::styled(what.to_string(), Style::default().fg(theme::TEXT)),
+        ])
+    };
+    let mut lines = Vec::new();
+    let place = match view {
+        View::Session => {
+            lines.extend([
+                group("Pages"),
+                row("t", "switch between summary and transcript"),
+                row("1 2 3 4", "scores, vote, critique graph, argument map"),
+                row("[ ]", "step through seats in the critique graph"),
+                Line::from(""),
+                group("Moving around"),
+                row("↑ ↓  PgUp PgDn", "scroll, or the mouse wheel"),
+                row("Home  g", "top, or follow the newest turn"),
+                row("T", "show or hide each seat's thinking"),
+                row("p b v $ s", "plan, board, convergence, cost, seats"),
+                row("← →", "previous or next rail tab"),
+                Line::from(""),
+                group("Session"),
+                row("e", "export the record"),
+                row("r  Enter", "reconvene on this record (a new, paid run)"),
+                row("Tab", "sessions"),
+                row("Esc", "stop a live run (twice), or go home"),
+            ]);
+            slash::Place::Session
+        }
+        _ => {
+            lines.extend([
+                group("Home"),
+                row("Enter", "convene the council on what you typed"),
+                row("← →", "council size"),
+                row("^D", "deliverable"),
+                row("Tab", "sessions, ↑ ↓ and Enter to open one"),
+                row("^P", "settings"),
+                row("Esc Esc", "clear what you typed"),
+            ]);
+            slash::Place::Home
+        }
+    };
+    lines.extend([
+        row("^C ^C  ^Q ^Q", "quit"),
+        row("click", "chips, tabs and rows work with the mouse"),
+        Line::from(""),
+        group("Commands, typed after /"),
+    ]);
+    for c in slash::COMMANDS {
+        let here = match place {
+            slash::Place::Home => c.home,
+            slash::Place::Session => c.session,
+        };
+        if here {
+            lines.push(row(&format!("/{}", c.name), c.about));
+        }
+    }
+    let height = (lines.len() as u16 + 3).min(area.height.saturating_sub(2));
+    let width = 86.min(area.width.saturating_sub(2));
+    let rect = Rect {
+        x: area.x + (area.width.saturating_sub(width)) / 2,
+        y: area.y + (area.height.saturating_sub(height)) / 2,
+        width,
+        height,
+    };
+    f.render_widget(Clear, rect);
+    f.render_widget(
+        Paragraph::new(lines).block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(theme::GOLD))
+                .padding(ratatui::widgets::Padding::new(2, 2, 1, 0))
+                .title(Span::styled(
+                    " Keys and commands  Esc closes ",
+                    Style::default()
+                        .fg(theme::GOLD)
+                        .add_modifier(Modifier::BOLD),
+                )),
+        ),
+        rect,
+    );
+    rect
 }
 
 fn render_toast(f: &mut Frame, area: Rect, app: &App) {
@@ -1713,9 +2690,9 @@ mod tests {
         assert_eq!(page(&mut app), SessionPage::Summary);
         // `?` opens the key list and Esc closes it without leaving the session.
         press(&mut app, KeyCode::Char('?'));
-        assert!(app.session.as_ref().unwrap().ui.help);
+        assert!(app.help);
         press(&mut app, KeyCode::Esc);
-        assert!(!app.session.as_ref().unwrap().ui.help);
+        assert!(!app.help);
         assert_eq!(app.view, View::Session);
         // A finished session leaves on one Esc.
         press(&mut app, KeyCode::Esc);
@@ -1748,6 +2725,342 @@ mod tests {
         assert_ne!(mark(&mut app), start, "the mark moves from frame to frame");
         app.frame = home::TURN_FRAMES;
         assert_eq!(mark(&mut app), start, "a full turn lands where it began");
+    }
+
+    fn typed(app: &mut App, text: &str) {
+        for c in text.chars() {
+            press(app, KeyCode::Char(c));
+        }
+    }
+
+    fn ctrl(app: &mut App, c: char) -> bool {
+        app.handle_key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::CONTROL))
+    }
+
+    /// Draw the screen, then click the first place `needle` was drawn.
+    fn click_on(app: &mut App, w: u16, h: u16, needle: &str) -> bool {
+        let mut terminal = Terminal::new(TestBackend::new(w, h)).unwrap();
+        terminal.draw(|f| render(f, app)).unwrap();
+        let at = find_drawn(terminal.backend().buffer(), Rect::new(0, 0, w, h), needle)
+            .unwrap_or_else(|| panic!("{needle:?} is not on screen"));
+        app.handle_mouse(MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: at.x,
+            row: at.y,
+            modifiers: KeyModifiers::NONE,
+        })
+    }
+
+    #[test]
+    fn a_slash_in_the_composer_runs_a_command_and_never_convenes() {
+        let mut app = test_app();
+        typed(&mut app, "/council full");
+        assert!(!app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)));
+        assert_eq!(app.launch.preset, Preset::Full);
+        assert!(app.composer.is_empty());
+        assert!(app.session.is_none(), "a command never convenes");
+
+        typed(&mut app, "/deliverable decision");
+        press(&mut app, KeyCode::Enter);
+        assert_eq!(app.launch.deliverable, Some(Deliverable::Decision));
+
+        typed(&mut app, "/review off");
+        press(&mut app, KeyCode::Enter);
+        assert!(!app.ctx.config.protocol.review);
+
+        // Nothing by that name: say so and keep what was typed.
+        typed(&mut app, "/zzzz");
+        press(&mut app, KeyCode::Enter);
+        assert!(app.toast.as_deref().unwrap().contains("There is no /zzzz"));
+        assert_eq!(app.composer, "/zzzz");
+        assert!(app.session.is_none());
+        app.composer.clear();
+
+        // A command missing its argument fills in and lists its choices.
+        typed(&mut app, "/cou");
+        press(&mut app, KeyCode::Tab);
+        assert_eq!(app.composer, "/council ");
+        let text = render_at(&mut app, 120, 40);
+        assert!(text.contains("/council quick"), "the choices are listed");
+        app.composer.clear();
+
+        // A typo lists its command as a close match, and Enter runs it.
+        typed(&mut app, "/setings");
+        let text = render_at(&mut app, 120, 40);
+        assert!(text.contains("close matches"));
+        assert!(text.contains("/settings"));
+        press(&mut app, KeyCode::Enter);
+        assert_eq!(app.view, View::Settings);
+        press(&mut app, KeyCode::Esc);
+        assert_eq!(app.view, View::Home);
+
+        typed(&mut app, "/quit");
+        assert!(app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)));
+    }
+
+    #[test]
+    fn quitting_takes_two_presses_and_esc_twice_clears() {
+        let mut app = test_app();
+        assert!(!ctrl(&mut app, 'c'), "one Ctrl+C only warns");
+        assert!(app.toast.as_deref().unwrap().contains("Ctrl+C again"));
+        assert!(ctrl(&mut app, 'c'));
+
+        let mut app = test_app();
+        assert!(!ctrl(&mut app, 'q'));
+        assert!(ctrl(&mut app, 'q'));
+
+        // A second press long after the first only warns again.
+        let mut app = test_app();
+        assert!(!ctrl(&mut app, 'c'));
+        app.frame = 100;
+        assert!(!ctrl(&mut app, 'c'));
+
+        // Esc never quits. On an empty composer it says how to.
+        let mut app = test_app();
+        press(&mut app, KeyCode::Esc);
+        assert!(app.toast.as_deref().unwrap().contains("/quit"));
+        typed(&mut app, "abc");
+        press(&mut app, KeyCode::Esc);
+        assert_eq!(app.composer, "abc", "one Esc keeps the text");
+        assert!(app.toast.as_deref().unwrap().contains("again"));
+        press(&mut app, KeyCode::Esc);
+        assert!(app.composer.is_empty(), "the second clears it");
+    }
+
+    #[test]
+    fn the_empty_composer_puts_its_caret_at_the_start() {
+        let mut app = test_app();
+        app.frame = 0;
+        let text = render_at(&mut app, 120, 40);
+        assert!(text.contains("▌What should the council pressure-test next?"));
+        typed(&mut app, "Mars");
+        let text = render_at(&mut app, 120, 40);
+        assert!(text.contains("Mars▌"));
+    }
+
+    #[test]
+    fn a_session_opens_a_command_line_on_slash() {
+        let mut app = test_app();
+        app.view = View::Session;
+        app.session = Some(sample_screen());
+        press(&mut app, KeyCode::Char('/'));
+        assert_eq!(app.cmdline.as_deref(), Some("/"));
+        let text = render_at(&mut app, 140, 50);
+        assert!(text.contains("/transcript"), "the list shows the commands");
+        typed(&mut app, "transcript");
+        press(&mut app, KeyCode::Enter);
+        assert!(app.cmdline.is_none());
+        assert_eq!(
+            app.session.as_ref().unwrap().ui.page,
+            Some(SessionPage::Transcript)
+        );
+        // Keys go to the line while it is open, and Esc closes only it.
+        press(&mut app, KeyCode::Char('/'));
+        typed(&mut app, "t");
+        assert_eq!(app.cmdline.as_deref(), Some("/t"));
+        press(&mut app, KeyCode::Esc);
+        assert!(app.cmdline.is_none());
+        assert_eq!(app.view, View::Session);
+        // A Home command says where it works.
+        press(&mut app, KeyCode::Char('/'));
+        typed(&mut app, "council full");
+        press(&mut app, KeyCode::Enter);
+        assert!(app.toast.as_deref().unwrap().contains("works on Home"));
+        // Deleting the slash closes the line.
+        app.cmdline = Some("/".into());
+        press(&mut app, KeyCode::Backspace);
+        assert!(app.cmdline.is_none());
+    }
+
+    #[test]
+    fn clicks_do_what_the_thing_under_them_does() {
+        let mut app = test_app();
+        click_on(&mut app, 120, 40, " Full ");
+        assert_eq!(app.launch.preset, Preset::Full);
+        click_on(&mut app, 120, 40, " document ");
+        assert_eq!(app.launch.deliverable, Some(Deliverable::Document));
+        // A footer hint is its key.
+        click_on(&mut app, 120, 40, "^P settings");
+        assert_eq!(app.view, View::Settings);
+        // A switch in Settings flips on one click.
+        let review = app.ctx.config.protocol.review;
+        click_on(&mut app, 120, 50, "Review");
+        assert_eq!(app.ctx.config.protocol.review, !review);
+        press(&mut app, KeyCode::Esc);
+
+        // A row of the command list runs it.
+        typed(&mut app, "/se");
+        click_on(&mut app, 120, 40, "/settings");
+        assert_eq!(app.view, View::Settings);
+        press(&mut app, KeyCode::Esc);
+
+        // The session's page tabs, rail tabs and analysis tabs.
+        app.view = View::Session;
+        app.session = Some(sample_screen());
+        click_on(&mut app, 140, 50, " Transcript ");
+        assert_eq!(
+            app.session.as_ref().unwrap().ui.page,
+            Some(SessionPage::Transcript)
+        );
+        click_on(&mut app, 140, 50, " Board ");
+        assert_eq!(app.session.as_ref().unwrap().side, SideTab::Board);
+        click_on(&mut app, 140, 50, " Summary ");
+        click_on(&mut app, 140, 50, "◈ Critique");
+        assert_eq!(
+            app.session.as_ref().unwrap().ui.analysis,
+            analysis::AnalysisView::Critique
+        );
+
+        // The wheel scrolls the page.
+        let before = app.session.as_ref().unwrap().scroll;
+        app.handle_mouse(MouseEvent {
+            kind: MouseEventKind::ScrollDown,
+            column: 10,
+            row: 10,
+            modifiers: KeyModifiers::NONE,
+        });
+        assert_eq!(app.session.as_ref().unwrap().scroll, before + 3);
+    }
+
+    fn mouse(app: &mut App, kind: MouseEventKind, x: u16, y: u16) {
+        app.handle_mouse(MouseEvent {
+            kind,
+            column: x,
+            row: y,
+            modifiers: KeyModifiers::NONE,
+        });
+    }
+
+    fn draw(app: &mut App, w: u16, h: u16) -> Terminal<TestBackend> {
+        let mut terminal = Terminal::new(TestBackend::new(w, h)).unwrap();
+        terminal.draw(|f| render(f, app)).unwrap();
+        terminal
+    }
+
+    #[test]
+    fn the_thing_under_the_pointer_lights_up() {
+        let mut app = test_app();
+        let terminal = draw(&mut app, 120, 40);
+        let at = find_drawn(
+            terminal.backend().buffer(),
+            Rect::new(0, 0, 120, 40),
+            " Full ",
+        )
+        .unwrap();
+        mouse(&mut app, MouseEventKind::Moved, at.x + 2, at.y);
+        assert_eq!(app.hover_target(), Some(at));
+        let terminal = draw(&mut app, 120, 40);
+        let buf = terminal.backend().buffer();
+        assert_eq!(buf[(at.x + 1, at.y)].bg, HOVER, "the chip is lit");
+        assert_ne!(buf[(at.x, at.y + 1)].bg, HOVER, "and nothing else");
+        // Off anything clickable, nothing is lit.
+        mouse(&mut app, MouseEventKind::Moved, 0, 0);
+        assert_eq!(app.hover_target(), None);
+    }
+
+    #[test]
+    fn a_drag_selects_inside_its_own_block_and_copies() {
+        let mut app = test_app();
+        app.view = View::Session;
+        app.session = Some(sample_screen());
+        let terminal = draw(&mut app, 140, 50);
+        let main = app.regions.borrow()[0];
+        let rail = app.regions.borrow()[1];
+        assert!(main.x + main.width <= rail.x, "two blocks side by side");
+        let _ = terminal;
+        // Drag from the reading column far into the rail: the selection
+        // stops at the column's edge.
+        mouse(
+            &mut app,
+            MouseEventKind::Down(MouseButton::Left),
+            main.x + 2,
+            main.y + 2,
+        );
+        mouse(
+            &mut app,
+            MouseEventKind::Drag(MouseButton::Left),
+            rail.x + 20,
+            main.y + 5,
+        );
+        let sel = app.selection.unwrap();
+        assert_eq!(sel.head.0, main.x + main.width - 1);
+        mouse(
+            &mut app,
+            MouseEventKind::Up(MouseButton::Left),
+            rail.x + 20,
+            main.y + 5,
+        );
+        let terminal = draw(&mut app, 140, 50);
+        let buf = terminal.backend().buffer();
+        assert_eq!(buf[(main.x + 3, main.y + 3)].bg, SELECTED);
+        assert_ne!(
+            buf[(rail.x + 3, main.y + 3)].bg,
+            SELECTED,
+            "the rail is untouched"
+        );
+        let copied = app.clipboard_out.clone().expect("the selection is copied");
+        assert!(copied.lines().count() >= 3, "{copied:?}");
+        // A key press drops the selection.
+        press(&mut app, KeyCode::Char('?'));
+        assert!(app.selection.is_none());
+        // A press and release in place selects nothing.
+        app.help = false;
+        mouse(
+            &mut app,
+            MouseEventKind::Down(MouseButton::Left),
+            main.x + 2,
+            main.y + 2,
+        );
+        mouse(
+            &mut app,
+            MouseEventKind::Up(MouseButton::Left),
+            main.x + 2,
+            main.y + 2,
+        );
+        assert!(app.selection.is_none());
+    }
+
+    #[test]
+    fn an_overlay_keeps_clicks_off_what_is_under_it() {
+        let mut app = test_app();
+        app.view = View::Session;
+        let mut screen = sample_screen();
+        screen.view.apply(DebateEvent::ToolApproval {
+            id: "a1".into(),
+            seat_id: "george".into(),
+            call: ToolCall {
+                id: "c2".into(),
+                name: "run_command".into(),
+                arguments: json!({"command": "ls"}),
+                signature: None,
+            },
+        });
+        app.session = Some(screen);
+        let terminal = draw(&mut app, 140, 50);
+        let buf = terminal.backend().buffer();
+        let full = Rect::new(0, 0, 140, 50);
+        let title = find_drawn(buf, full, "Tool approval").unwrap();
+        // Inside the box, but not on its keys: covered, so nothing under it
+        // answers the click.
+        assert_eq!(
+            app.hit_at(title.x, title.y + 2).map(|h| h.click),
+            Some(Click::Nothing)
+        );
+        // Its keys are clickable.
+        let allow = find_drawn(buf, full, "y allow").unwrap();
+        mouse(
+            &mut app,
+            MouseEventKind::Down(MouseButton::Left),
+            allow.x,
+            allow.y,
+        );
+        assert!(app
+            .session
+            .as_ref()
+            .unwrap()
+            .view
+            .pending_approval
+            .is_none());
     }
 
     #[test]

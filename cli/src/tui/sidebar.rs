@@ -3,7 +3,7 @@
 //! status, the deliverable and cost when the run reached a record, and the
 //! record's answer.
 
-use super::{theme, App, SessionRow};
+use super::{theme, App, Click, SessionRow};
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
@@ -81,6 +81,20 @@ fn render_list(f: &mut Frame, area: Rect, app: &App) {
         .take(visible)
         .map(|(i, s)| session_item(s, i == app.sidebar_sel, width))
         .collect();
+    // A click on an item opens it, as Enter does.
+    for k in 0..items.len() {
+        let y = area.y + 1 + (k * per_item) as u16;
+        let height = (per_item as u16).min((area.y + area.height).saturating_sub(y + 1));
+        app.hit(
+            Rect {
+                x: area.x + 1,
+                y,
+                width: area.width.saturating_sub(2),
+                height,
+            },
+            Click::Session(first + k),
+        );
+    }
     f.render_widget(List::new(items).block(block), area);
 }
 

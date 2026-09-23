@@ -136,7 +136,9 @@ Three surfaces mirror the desktop app:
   the **deliverable** (`^D`: auto, decision, analysis, document, review), and
   the **Council Rack**: the moderator and utility chairs, then every seat
   (`●` sits in this council, `○` keyed but not sitting, `·` no key). On a
-  narrow terminal the rack folds under the composer. `Enter` convenes.
+  narrow terminal the rack folds under the composer. `Enter` convenes, and
+  `Esc` twice clears what you typed. A composer starting with `/` is a
+  command instead of a topic (see [Commands](#commands)).
 - **Sessions sidebar** (`Tab`) — every stored session with its status,
   deliverable, cost and the record's answer; `↑`/`↓` select, `Enter` opens
   one read-only, `r` reconvenes it.
@@ -167,31 +169,63 @@ Cross-examination 1 ▸ …`). On a wide terminal a side column has **Plan**,
   must exist in the provider's catalog or last scan; the editor refuses a
   made-up one.
 
-| Key                    | Action                                                       |
-| ---------------------- | ------------------------------------------------------------ |
-| `Enter`                | convene (Home) / open a session (sidebar) / answer (overlay) |
-| `←`/`→`                | council preset (Home) / side tab (Session)                   |
-| `^D`                   | deliverable (Home)                                           |
-| `Tab`                  | toggle the sessions sidebar                                  |
-| `^P`                   | toggle Settings                                              |
-| `Esc`                  | stop a live council (press twice) / back / quit (Home)       |
-| `t`                    | switch between Summary and Transcript                        |
-| `T`                    | toggle reasoning traces                                      |
-| `1`–`4`                | analysis view: Scores / Vote / Critique / Map                |
-| `[` / `]`              | step the critique graph through the seats                    |
-| `?`                    | every key for the screen you are on                          |
-| `p` `b` `v` `$` `s`    | Plan / Board / Converge / Cost / Seats                       |
-| `y` / `n`              | allow / deny a tool call                                     |
-| `r`                    | reconvene a finished session                                 |
-| `e`                    | export the record and document as Markdown                   |
-| `↑`/`↓`, `PgUp`/`PgDn` | scroll                                                       |
-| `g`                    | follow the newest row                                        |
-| `^C`                   | quit from anywhere                                           |
+| Key                    | Action                                                         |
+| ---------------------- | -------------------------------------------------------------- |
+| `Enter`                | convene (Home) / open a session (sidebar) / answer (overlay)   |
+| `←`/`→`                | council preset (Home) / side tab (Session)                     |
+| `^D`                   | deliverable (Home)                                             |
+| `Tab`                  | toggle the sessions sidebar                                    |
+| `^P`                   | toggle Settings                                                |
+| `Esc`                  | stop a live council (press twice) / back / clear (Home, twice) |
+| `t`                    | switch between Summary and Transcript                          |
+| `T`                    | toggle reasoning traces                                        |
+| `1`–`4`                | analysis view: Scores / Vote / Critique / Map                  |
+| `[` / `]`              | step the critique graph through the seats                      |
+| `?`                    | every key for the screen you are on                            |
+| `p` `b` `v` `$` `s`    | Plan / Board / Converge / Cost / Seats                         |
+| `y` / `n`              | allow / deny a tool call                                       |
+| `r`                    | reconvene a finished session                                   |
+| `e`                    | export the record and document as Markdown                     |
+| `↑`/`↓`, `PgUp`/`PgDn` | scroll                                                         |
+| `g`                    | follow the newest row                                          |
+| `/`                    | commands: in the Home composer, or a command line on a session |
+| `^C` `^C` / `^Q` `^Q`  | quit from anywhere (one press only warns)                      |
 
 In **Settings**: `↑`/`↓` select · `Enter` edit or toggle · `d` remove a key or
 a seat, or reset a row · `a` add a seat · `n` rename a seat · `r` cycle a
 seat's reasoning · `R` reset the roster · `Esc` cancel / back. Keys go to
 `keys.enc` (`0600`); everything else to `config.toml`.
+
+#### Commands
+
+Type `/` in the Home composer, or press `/` on a session, and the commands
+for that screen are listed above the input. As you type, the ones starting
+with what you typed come first, then close matches, so `/setings` still finds
+`/settings`. `↑`/`↓` pick, `Tab` fills in, `Enter` runs, `Esc` closes. A
+command is never sent to the council as a topic.
+
+| Command                                                   | Where   | Does                                     |
+| --------------------------------------------------------- | ------- | ---------------------------------------- |
+| `/council quick\|standard\|full`                          | Home    | how many seats sit                       |
+| `/deliverable auto\|decision\|analysis\|document\|review` | Home    | what the council leaves you              |
+| `/review on\|off`                                         | Home    | peer review after the record             |
+| `/open <session title>`                                   | Home    | open a saved session                     |
+| `/sessions`                                               | Home    | show or hide the sessions list           |
+| `/summary`, `/transcript`                                 | Session | switch page                              |
+| `/export`                                                 | Session | the record and document as Markdown      |
+| `/stop`                                                   | Session | stop the council that is sitting         |
+| `/reconvene`                                              | Session | run the topic again on its record (paid) |
+| `/home`                                                   | Session | back to Home                             |
+| `/settings`, `/help`, `/quit` (`/exit`)                   | both    | Settings, every key and command, quit    |
+
+#### Mouse
+
+Chips, tabs, footer hints, sessions, Settings rows and the command list are
+clickable, and light up under the pointer. The wheel scrolls. A drag selects
+text inside the block it starts in (the reading column, or the rail) and
+copies it when you let go, through the terminal (OSC 52) and, on a Mac,
+`pbcopy`. The terminal's own selection still works with its modifier held
+(Option in iTerm2, Fn in Terminal, Shift in most others).
 
 ## The session
 

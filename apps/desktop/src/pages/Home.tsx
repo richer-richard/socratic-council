@@ -5,7 +5,9 @@ import { BundleImportButton } from "../components/BundleActions";
 import { ConfigModal } from "../components/ConfigModal";
 import { CouncilMark } from "../components/CouncilMark";
 import { ProviderIcon } from "../components/icons/ProviderIcons";
+import { SlashHelp, SlashMenu, useSlash } from "../components/SlashMenu";
 import { Starfield } from "../components/Starfield";
+import { quitApp } from "../services/appWindow";
 import {
   MAX_ATTACHMENT_BYTES,
   buildAttachmentListLabel,
@@ -18,6 +20,7 @@ import { DEFAULT_LAUNCH, type SessionLaunchOptions } from "../services/engine";
 import type { ProjectSummary } from "../services/projects";
 import type { BulkDeleteResult, SessionSummary, SessionStatus } from "../services/sessions";
 import { useConfig, getShuffledTopics, LOCKED_MODELS, type Provider } from "../stores/config";
+import { onSettingsRequest, takeSettingsRequest } from "../utils/slash";
 
 interface HomeProps {
   sessions: SessionSummary[];
@@ -810,6 +813,78 @@ export function Home({
 
   const configuredProviders = getConfiguredProviders();
   const sampleTopics = useMemo(() => getShuffledTopics(5), []);
+
+  // Saved sessions newest first, for /open.
+  const recentSessions = useMemo(
+    () => [...sessions].sort((a, b) => b.updatedAt - a.updatedAt),
+    [sessions],
+  );
+  const sessionTitles = useMemo(
+    () => recentSessions.map((s) => s.title || s.topic),
+    [recentSessions],
+  );
+  const [slashHelpOpen, setSlashHelpOpen] = useState(false);
+  const escArmedAt = useRef(0);
+
+  const runCommand = (name: string, arg: string): string | void | Promise<string | void> => {
+    switch (name) {
+      case "council":
+        setLaunch((prev) => ({ ...prev, preset: arg as SessionLaunchOptions["preset"] }));
+        return;
+      case "deliverable":
+        setLaunch((prev) => ({
+          ...prev,
+          deliverable: arg as SessionLaunchOptions["deliverable"],
+        }));
+        return;
+      case "review":
+        updateProtocol({ review: arg === "on" });
+        return arg === "on"
+          ? "Review on: seats score each other and the argument gets mapped."
+          : "Review off: the summary shows counts from the run instead.";
+      case "open": {
+        const want = arg.trim().toLowerCase();
+        const title = (s: SessionSummary) => (s.title || s.topic).toLowerCase();
+        const pick =
+          recentSessions.find((s) => title(s) === want) ??
+          recentSessions.find((s) => title(s).includes(want));
+        if (!pick) return `No saved session is called "${arg}".`;
+        onOpenSession(pick.id);
+        return;
+      }
+      case "settings":
+        setSettingsTab(undefined);
+        setShowSettings(true);
+        return;
+      case "help":
+        setSlashHelpOpen(true);
+        return;
+      case "quit":
+        return quitApp().then((closed) =>
+          closed ? undefined : "Quit works in the app, not in a browser tab.",
+        );
+    }
+  };
+
+  const slash = useSlash({
+    value: topic,
+    setValue: setTopic,
+    place: "home",
+    titles: sessionTitles,
+    run: runCommand,
+  });
+
+  // /settings typed on a session page lands here and opens the modal.
+  useEffect(() => {
+    const open = () => {
+      if (takeSettingsRequest()) {
+        setSettingsTab(undefined);
+        setShowSettings(true);
+      }
+    };
+    open();
+    return onSettingsRequest(open);
+  }, []);
   const isArchivedActionTarget = pendingSessionAction?.archivedAt != null;
 
   const treeData = useMemo(() => {
@@ -999,6 +1074,11 @@ export function Home({
 
   const handleStart = async () => {
     if (!topic.trim() || isOpeningSession) return;
+    // A slash is a command, never a topic to convene on.
+    if (topic.startsWith("/")) {
+      slash.submit();
+      return;
+    }
     // Fix 8.1: gate the no-keys warning on vaultReady. During the brief
     // pre-hydration window the credentials map is empty regardless of what
     // the user has actually configured, so without this gate the warning
@@ -1598,7 +1678,8 @@ export function Home({
             </div>
 
             <div className="workstation-composer-body">
-              <div className="workstation-input-shell">
+              <div className="workstation-input-shell slash-anchor">
+                <SlashMenu ctl={slash} typed={topic} />
                 <div ref={attachShellRef} className="workstation-attach-shell">
                   <button
                     type="button"
@@ -1654,8 +1735,28 @@ export function Home({
                   ref={topicTextareaRef}
                   rows={1}
                   value={topic}
-                  onChange={(event) => setTopic(event.target.value)}
+                  onChange={(event) => {
+                    setTopic(event.target.value);
+                    slash.edited();
+                  }}
                   onKeyDown={(event) => {
+                    // Esc twice clears what was typed. The first only says so,
+                    // and puts the command list away.
+                    if (event.key === "Escape" && topic) {
+                      event.preventDefault();
+                      const now = Date.now();
+                      if (now - escArmedAt.current < 1500) {
+                        escArmedAt.current = 0;
+                        setTopic("");
+                        slash.edited();
+                      } else {
+                        escArmedAt.current = now;
+                        slash.hide();
+                        slash.setNotice("Press Esc again to clear.");
+                      }
+                      return;
+                    }
+                    if (slash.onKeyDown(event)) return;
                     // Enter sends; Shift+Enter inserts a newline. Skip while an
                     // IME composition is active so CJK input doesn't fire send.
                     if (
@@ -1697,7 +1798,13 @@ export function Home({
                     />
                   ) : null}
                   <span>
-                    {!vaultReady ? "Loading…" : isOpeningSession ? "Opening…" : "Open Session"}
+                    {!vaultReady
+                      ? "Loading…"
+                      : isOpeningSession
+                        ? "Opening…"
+                        : topic.startsWith("/")
+                          ? "Run command"
+                          : "Open Session"}
                   </span>
                   <ArrowIcon size={18} />
                 </button>
@@ -2243,6 +2350,7 @@ export function Home({
       )}
 
       {councilHelpOpen && <CouncilHelpPopup onClose={() => setCouncilHelpOpen(false)} />}
+      {slashHelpOpen && <SlashHelp place="home" onClose={() => setSlashHelpOpen(false)} />}
       <CommandPalettePill />
     </div>
   );

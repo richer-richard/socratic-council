@@ -89,13 +89,17 @@ A bridge failure is swallowed — the CLI still works from env / its own store.
 - **Provider colors:** openai `#60A5FA`, anthropic `#FBBF24`, google `#34D399`,
   deepseek `#F87171`, kimi `#2DD4BF`, qwen `#22D3EE`, minimax `#F472B6`,
   zhipu `#A78BFA`. A seat takes its provider's color.
-- **Council mark:** the desktop hero, in braille: the roster's seats as solid
-  discs in their provider colour on an inner ring, spokes out to a faint outer
-  ring of dim satellites. Braille dots are square, so the bounds are set in
-  dots and the rings stay round at any size. Node size follows the gap
-  between neighbours, and below ten rows the mark is left out. The mark turns
-  clockwise, one full turn in 512 frames (about 36 seconds), the same pace as
-  the desktop hero.
+- **Council mark:** the roster's seats on a ring in braille, joined by a faint
+  web between every pair, each seat drawn as three rings and a centre dot in
+  its provider colour, with a pulsing halo when it has a key. The height
+  spans fixed units and the width follows the area's shape, so the ring stays
+  round at any size; below ten rows the mark is left out. It turns clockwise,
+  one full turn in 512 frames (about 36 seconds), the same pace as the desktop
+  hero, and breathes six times a turn.
+- **Hover and selection:** whatever can be clicked lights up half way under
+  the pointer (`HOVER`, a filled chip lightens instead). A drag selects text
+  inside the block it started in and in no other (`SELECTED`), and is copied
+  on release.
 - **Semantic tokens** (`theme.rs`): `BG` is only a base for blending, the TUI
   never paints the terminal's own background; `heat(value)` is the score
   matrix's gold-on-dark tile, on the same squared ramp as the desktop's;
@@ -134,7 +138,20 @@ many seats it left out.
 - **Deliverable** (`^D`): auto (the moderator decides), decision, analysis,
   document, review.
 - `Enter` convenes; `Tab` opens the sessions sidebar; `^P` opens Settings;
-  `Esc` quits.
+  `Esc` twice clears what was typed (the first press says so). `Esc` never
+  quits: `Ctrl+C` or `Ctrl+Q` pressed twice does, anywhere, or `/quit`.
+- The caret sits at the start of the empty composer, where the first letter
+  will go, with the placeholder after it.
+- A composer starting with `/` is a command, never a topic (`slash.rs`). The
+  list above it shows the commands starting with what was typed, then close
+  matches under their own label (a typo within an edit or two, or the letters
+  in order), so `/setings` finds `/settings`. `↑`/`↓` pick, `Tab` fills in,
+  `Enter` runs the highlighted row, and a command still missing its argument
+  (`/council`, `/deliverable`, `/review`, `/open`) fills in instead and lists
+  its choices; `/open` lists saved sessions by title. The same commands, less
+  `/sessions`, are in the desktop app (`utils/slash.ts`, parity-tested).
+- Clicks: the preset and deliverable chips, the footer hints (each is its
+  key), and the rack's rows (Settings).
 
 A zero-key first run lands on Home, adds a key in Settings and convenes
 without leaving the terminal — the desktop app is never required.
@@ -207,6 +224,15 @@ it puts its text underneath.
   planner's notes and a new, paid session is written); `e` exports the record
   and the document as Markdown to Downloads. The footer shows the keys for the
   page you are on, cut to the width.
+- **Commands:** `/` opens a command line in place of the footer, with the
+  same list above it: `/summary`, `/transcript`, `/export`, `/stop` (stops
+  a sitting council and stays on it), `/reconvene`, `/home`, `/settings`,
+  `/help`, `/quit`. `Esc` closes it, and so does deleting the slash.
+- **Mouse:** the page tabs, the rail tabs, the analysis tabs and the
+  transcript link are clickable where the scroll put them; the wheel scrolls
+  three rows; a tool approval's `y allow` and `n deny` are clickable, and an
+  overlay keeps clicks off what is under it. A drag selects in the reading
+  column or in the rail, never across both.
 - **Too small:** under 40×14 the screen says so and names the size it needs.
   That fits an 80-column terminal with the sessions sidebar open.
 - **Resize:** a resize marks the frame dirty, so a static screen (a saved
@@ -241,7 +267,13 @@ through.
 store (newest first) and, for sessions the desktop app never exported, from
 its localStorage index. Each row shows the title, the status, the deliverable
 and cost when the run reached a record, and the record's answer. `Enter`
-opens a session read-only; `r` reconvenes it.
+opens a session read-only, and so does a click on its row; `r` reconvenes it.
+
+### Settings clicks
+
+A click on a switch (tools, approval, the clarifying question, review, the
+cap action, add a seat) flips it at once. A row that opens an editor is
+picked by the first click and opened by a second.
 
 ## 4. Engine integration
 
@@ -275,6 +307,7 @@ cli/src/tui/session.rs   the Session screen: header, summary and transcript page
 cli/src/tui/analysis.rs  the four analysis views, the derived seat metrics, the review status
 cli/src/tui/home.rs      Home: council mark, composer, preset and deliverable chips, Council Rack
 cli/src/tui/settings.rs  Settings rows, editing and validation, rendering
+cli/src/tui/slash.rs     the slash commands: the list, prefix and close matching, resolving
 cli/src/tui/sidebar.rs   the sessions sidebar
 cli/src/tui/theme.rs     colours and semantic tokens, heat, blend, the hint bar, the eight named agents
 ```
@@ -288,7 +321,12 @@ cli/src/tui/theme.rs     colours and semantic tokens, heat, blend, the hint bar,
 - `mod.rs` and `settings.rs`: every view and side tab renders at several
   sizes (including 1×1) without panicking; the overlays take the keyboard and
   send the right `EngineInput`; `Esc` needs two presses while live; Home
-  cycles the preset and the deliverable; Settings edits, toggles, adds,
+  cycles the preset and the deliverable; a slash never convenes, runs its
+  command or says why not, and lists close matches; quitting takes two
+  presses and `Esc` twice clears; the mark moves and a full turn lands where
+  it began; clicks hit what is drawn under them, the hover lights only the
+  thing under the pointer, a drag stays in its block and is copied, and an
+  overlay covers what is under it; Settings edits, toggles, adds,
   removes and resets without touching the disk (persistence is off in tests);
   the key and proxy buffers render masked; an engine disconnect marks the
   session failed.
