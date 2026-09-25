@@ -2162,7 +2162,7 @@ dependencies = [
 
 [[package]]
 name = "socratic-council"
-version = "2.0.0"
+version = "2.0.1"
 dependencies = [
  "anyhow",
  "base64",
@@ -2183,7 +2183,7 @@ dependencies = [
 
 [[package]]
 name = "socratic-council-engine"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "base64",
  "chacha20poly1305",

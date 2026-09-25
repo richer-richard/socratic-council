@@ -1,6 +1,6 @@
 [package]
 name = "socratic-council"
-version = "2.0.0"
+version = "2.0.1"
 edition = "2021"
 rust-version = "1.88"
 description = "A terminal council of AI models that deliberates a question in structured rounds and leaves a decision record — any model per seat across eight providers, native tools, a cost ledger with caps, and a ratatui TUI."
@@ -32,7 +32,7 @@ default = ["desktop-bridge"]
 desktop-bridge = ["dep:rusqlite"]
 
 [dependencies]
-socratic-council-engine = { version = "0.1.0", path = "../engine" }
+socratic-council-engine = { version = "0.1.1", path = "../engine" }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "io-std", "io-util", "signal"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls", "socks"] }
 ratatui = "0.30"

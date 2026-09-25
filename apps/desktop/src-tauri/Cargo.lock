@@ -3902,7 +3902,7 @@ dependencies = [
 
 [[package]]
 name = "socratic-council-engine"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "base64 0.22.1",
  "chacha20poly1305",

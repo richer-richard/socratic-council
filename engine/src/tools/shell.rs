@@ -182,7 +182,7 @@ fn blocked_reason_for(macos: bool, app_sandboxed: bool) -> Option<&'static str> 
     (macos && app_sandboxed).then_some(APP_SANDBOX_MESSAGE)
 }
 
-const APP_SANDBOX_MESSAGE: &str = "Shell commands cannot run inside the installed desktop app. macOS will not start the command sandbox inside the app's own, and a plain shell there could reach the app's keys. Run a council with shell commands from the terminal client instead.";
+const APP_SANDBOX_MESSAGE: &str = "Shell commands cannot run in a build of the app that uses the macOS App Sandbox. macOS will not start the command sandbox inside it, and a plain shell there could reach the app's keys. Use a current build of the app or the terminal client.";
 
 /// What `run_command` can do in this process, for a host deciding what to
 /// offer.
@@ -364,7 +364,12 @@ pub async fn run_command(cmd: &str, policy: &ShellPolicy, workspace: &Path) -> T
             let _ = child.kill().await;
             None
         } else {
-            child.wait().await.ok()
+            let status = child.wait().await.ok();
+            // A job the command sent to the background with its output
+            // redirected away is still in its process group. Nothing it
+            // started outlives it, or a later call could race it.
+            kill_group(pid);
+            status
         };
         (out, err, status)
     };
@@ -710,6 +715,31 @@ mod tests {
             "a command wrote outside the workspace after a swap"
         );
         assert!(!swapped, "the workspace root became a symlink");
+    }
+
+    #[cfg(target_os = "macos")]
+    #[tokio::test]
+    async fn nothing_a_command_starts_outlives_it() {
+        let out = run_command("sleep 30 >/dev/null 2>&1 & echo $!", &policy(), &ws()).await;
+        let pid: u32 = out
+            .text
+            .lines()
+            .next()
+            .and_then(|l| l.trim().parse().ok())
+            .unwrap_or_else(|| panic!("no pid in {out:?}"));
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        let alive = std::process::Command::new("/bin/kill")
+            .args(["-0", &pid.to_string()])
+            .stderr(Stdio::null())
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false);
+        if alive {
+            let _ = std::process::Command::new("/bin/kill")
+                .args(["-9", &pid.to_string()])
+                .status();
+        }
+        assert!(!alive, "a background job outlived its command: {out:?}");
     }
 
     #[cfg(target_os = "macos")]

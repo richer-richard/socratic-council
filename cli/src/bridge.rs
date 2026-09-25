@@ -47,9 +47,16 @@ const SESSION_KEY_PREFIX: &str = "socratic-council-session:";
 #[cfg(feature = "desktop-bridge")]
 const ENC_PREFIX: &str = "ENC1:";
 /// Left in the app data dir by a build that copied its data out of the App
-/// Sandbox container (`apps/desktop/src-tauri/src/data_move.rs`, same name).
-#[cfg(feature = "desktop-bridge")]
-const MOVED_MARKER: &str = ".moved-out-of-app-sandbox";
+/// Sandbox container (`apps/desktop/src-tauri/src/data_move.rs`, same names):
+/// the first while the app has not yet confirmed that WebKit reads the copy,
+/// the second once it has. Either way the app lives outside the container.
+#[cfg(all(feature = "desktop-bridge", target_os = "macos"))]
+const MOVED_MARKERS: [&str; 2] = [".copied-out-of-app-sandbox", ".moved-out-of-app-sandbox"];
+
+#[cfg(all(feature = "desktop-bridge", target_os = "macos"))]
+fn moved_out(app_data_dir: &Path) -> bool {
+    MOVED_MARKERS.iter().any(|m| app_data_dir.join(m).exists())
+}
 
 /// A summary row from the desktop app's decrypted session index — the same
 /// sessions the app's history sidebar shows.
@@ -421,14 +428,14 @@ mod imp {
 
     /// The app data dirs for a home folder. Builds up to 3.0.0 ran in the App
     /// Sandbox and kept their data in the container; later builds copy it out
-    /// on their first launch and leave [`MOVED_MARKER`] behind. After that the
+    /// on their first launch and leave a marker behind ([`MOVED_MARKERS`]). After that the
     /// container's copy is stale, so it is not a candidate at all: falling
     /// back to it would read an old session store the app no longer writes.
     fn app_data_dirs_for(home: &Path, data_dir: &Path) -> Vec<PathBuf> {
         let plain = data_dir.join(APP_IDENTIFIER);
         let mut dirs = Vec::new();
         #[cfg(target_os = "macos")]
-        if !plain.join(MOVED_MARKER).exists() {
+        if !moved_out(&plain) {
             dirs.push(
                 home.join("Library/Containers")
                     .join(APP_IDENTIFIER)
@@ -448,7 +455,7 @@ mod imp {
         let mut roots: Vec<PathBuf> = Vec::new();
         #[cfg(target_os = "macos")]
         {
-            let moved = app_data_dirs.iter().any(|d| d.join(MOVED_MARKER).exists());
+            let moved = app_data_dirs.iter().any(|d| moved_out(d));
             if !moved {
                 roots.push(
                     home.join("Library/Containers")
@@ -766,8 +773,13 @@ mod imp {
             let roots = webkit_roots_for(&home, &dirs);
             assert!(roots[0].ends_with("Data/Library/WebKit"), "{roots:?}");
 
+            // Copied out, not yet confirmed: the app already lives outside.
+            std::fs::write(plain.join(MOVED_MARKERS[0]), "copied").unwrap();
+            assert_eq!(app_data_dirs_for(&home, &data), vec![plain.clone()]);
+            std::fs::remove_file(plain.join(MOVED_MARKERS[0])).unwrap();
+
             // Moved out: the stale container copy is no candidate at all.
-            std::fs::write(plain.join(MOVED_MARKER), "moved").unwrap();
+            std::fs::write(plain.join(MOVED_MARKERS[1]), "moved").unwrap();
             let dirs = app_data_dirs_for(&home, &data);
             assert_eq!(dirs, vec![plain.clone()]);
             let roots = webkit_roots_for(&home, &dirs);

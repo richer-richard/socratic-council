@@ -297,6 +297,19 @@ pub fn app_data_move_status() -> DataMoveStatusResponse {
     }
 }
 
+/// The front end reports, once per boot, whether it saw the app's own
+/// localStorage keys. After a copy that finishes the move, or leaves it
+/// marked as unread so the app keeps saying so. Returns `confirmed`,
+/// `unread`, or `not_needed`.
+#[tauri::command]
+pub fn app_data_move_confirm(found: bool) -> &'static str {
+    match crate::data_move::confirm_for_app(found) {
+        crate::data_move::Confirmation::Confirmed => "confirmed",
+        crate::data_move::Confirmation::Unread => "unread",
+        crate::data_move::Confirmation::NotNeeded => "not_needed",
+    }
+}
+
 /// Delete the DEK file — used if the user explicitly resets the vault.
 /// Any at-rest encrypted sessions become unrecoverable after this call.
 ///

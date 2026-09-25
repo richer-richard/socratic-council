@@ -1,3 +1,7 @@
+// First, before any module that may write to localStorage: it records what
+// the app had stored before this boot (services/dataMove.ts).
+import "./services/dataMove";
+
 import React from "react";
 import ReactDOM from "react-dom/client";
 

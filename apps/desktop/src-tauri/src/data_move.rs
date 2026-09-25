@@ -31,9 +31,14 @@ use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
 pub const APP_IDENTIFIER: &str = "com.socratic-council.desktop";
-/// Written into the app data folder once the move has finished. The terminal
-/// client's desktop bridge (`cli/src/bridge.rs`) looks for the same name.
+/// Written once the front end has read the moved storage: the move is done.
+/// The terminal client's desktop bridge (`cli/src/bridge.rs`) looks for the
+/// same name.
 pub const MOVED_MARKER: &str = ".moved-out-of-app-sandbox";
+/// Written when the copy is in place but the front end has not yet confirmed
+/// that WebKit reads it. The bridge treats it like [`MOVED_MARKER`]: the app
+/// lives here from now on either way.
+pub const COPIED_MARKER: &str = ".copied-out-of-app-sandbox";
 const VAULT_KEY: &str = "vault.key";
 
 /// Where the data was and where it goes, for one home folder.
@@ -54,7 +59,9 @@ impl Paths {
         Paths {
             container_support: container.join("Application Support").join(APP_IDENTIFIER),
             container_webkit: container.join("WebKit/WebsiteData"),
-            support: home.join("Library/Application Support").join(APP_IDENTIFIER),
+            support: home
+                .join("Library/Application Support")
+                .join(APP_IDENTIFIER),
             webkit: home
                 .join("Library/WebKit")
                 .join(APP_IDENTIFIER)
@@ -62,11 +69,48 @@ impl Paths {
         }
     }
 
-    /// The container holds a vault that has not been moved out yet.
+    /// The container holds a vault that has not been copied out yet.
     pub fn move_pending(&self) -> bool {
         self.container_support.join(VAULT_KEY).is_file()
             && !self.support.join(MOVED_MARKER).exists()
+            && !self.support.join(COPIED_MARKER).exists()
     }
+
+    /// The copy is in place, and the front end has not yet said whether WebKit
+    /// reads it.
+    pub fn awaiting_confirmation(&self) -> bool {
+        self.support.join(COPIED_MARKER).exists() && !self.support.join(MOVED_MARKER).exists()
+    }
+}
+
+/// What the front end's first look at the moved storage settled.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Confirmation {
+    /// Nothing was waiting: no copy, or it was confirmed before.
+    NotNeeded,
+    /// WebKit read the moved storage: the move is done.
+    Confirmed,
+    /// WebKit opened an empty store. The copy stays marked as unconfirmed so
+    /// the app keeps saying so, and the container still holds everything.
+    Unread,
+}
+
+/// Settle a copy: `found` says whether the front end saw the app's own
+/// localStorage keys after the copy.
+pub fn confirm(paths: &Paths, found: bool) -> Confirmation {
+    if !paths.awaiting_confirmation() {
+        return Confirmation::NotNeeded;
+    }
+    if !found {
+        return Confirmation::Unread;
+    }
+    let copied = paths.support.join(COPIED_MARKER);
+    let text = fs::read_to_string(&copied).unwrap_or_default();
+    if fs::write(paths.support.join(MOVED_MARKER), text).is_err() {
+        return Confirmation::Unread;
+    }
+    let _ = fs::remove_file(copied);
+    Confirmation::Confirmed
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -106,14 +150,17 @@ fn try_move(p: &Paths, stamp: &str) -> Result<(), String> {
     // vault key's folder last. Until it lands the app refuses to start a
     // fresh vault, so a stop between the two is retried on the next launch.
     if webkit_stage.exists() {
-        set_aside(&p.webkit, stamp).map_err(|e| format!("set aside the old WebKit storage: {e}"))?;
+        set_aside(&p.webkit, stamp)
+            .map_err(|e| format!("set aside the old WebKit storage: {e}"))?;
         fs::rename(&webkit_stage, &p.webkit)
             .map_err(|e| format!("put the WebKit storage in place: {e}"))?;
     }
     set_aside(&p.support, stamp).map_err(|e| format!("set aside the old app data: {e}"))?;
     fs::rename(&support_stage, &p.support)
         .map_err(|e| format!("put the app data in place: {e}"))?;
-    fs::write(p.support.join(MOVED_MARKER), marker_text(p, stamp))
+    // Copied, not yet moved: only the front end can tell whether WebKit reads
+    // the copy, and it says so through `confirm`.
+    fs::write(p.support.join(COPIED_MARKER), marker_text(p, stamp))
         .map_err(|e| format!("record the move: {e}"))?;
     Ok(())
 }
@@ -172,7 +219,8 @@ fn set_aside(path: &Path, stamp: &str) -> io::Result<()> {
 }
 
 /// Copy a directory tree. Symlinks are copied as links, never followed: a
-/// session workspace can hold one a seat made.
+/// session workspace can hold one a seat made. Each folder keeps its source
+/// permissions, so an owner-only folder stays owner-only.
 fn copy_tree(src: &Path, dst: &Path) -> io::Result<()> {
     fs::create_dir_all(dst)?;
     for entry in fs::read_dir(src)? {
@@ -187,7 +235,8 @@ fn copy_tree(src: &Path, dst: &Path) -> io::Result<()> {
             fs::copy(entry.path(), &to)?;
         }
     }
-    Ok(())
+    // After the contents, so a read-only source folder can still be filled.
+    fs::set_permissions(dst, fs::metadata(src)?.permissions())
 }
 
 #[cfg(unix)]
@@ -222,10 +271,10 @@ fn app_sandboxed() -> bool {
     std::env::var_os("APP_SANDBOX_CONTAINER_ID").is_some()
 }
 
-/// Only a release build moves data. A development build (`tauri dev`) is
-/// unsandboxed too, and running the move there would relocate the installed
-/// app's real data into the folders the development build already uses for
-/// its own throwaway data.
+/// Only a release build moves data. A development build (`tauri dev`) runs
+/// under its own identifier (`tauri.dev.conf.json`), so it has its own
+/// folders and never reads the installed app's, and it must not copy the
+/// installed app's container into them.
 fn should_move(macos: bool, release: bool, sandboxed: bool) -> bool {
     macos && release && !sandboxed
 }
@@ -263,7 +312,9 @@ pub fn at_startup() {
     };
     match &outcome {
         Outcome::Moved => eprintln!("[data] moved the app data out of the App Sandbox container"),
-        Outcome::Failed(e) => eprintln!("[data] could not move the app data out of the container: {e}"),
+        Outcome::Failed(e) => {
+            eprintln!("[data] could not move the app data out of the container: {e}")
+        }
         Outcome::NotNeeded => {}
     }
     let _ = OUTCOME.set(outcome);
@@ -277,17 +328,30 @@ pub fn vault_blocked() -> Option<String> {
     if !this_process_moves() {
         return None;
     }
-    let paths = Paths::for_home(&home()?);
-    paths.move_pending().then(|| match OUTCOME.get() {
-        Some(Outcome::Failed(e)) => format!("The app data could not be moved: {e}"),
-        _ => "The app data has not been moved out of the old app container yet.".to_string(),
+    vault_blocked_for(&Paths::for_home(&home()?), OUTCOME.get())
+}
+
+fn vault_blocked_for(paths: &Paths, outcome: Option<&Outcome>) -> Option<String> {
+    paths.move_pending().then(|| match outcome {
+        Some(Outcome::Failed(e)) => format!("Copying it failed: {e}."),
+        _ => "The copy has not run yet.".to_string(),
     })
+}
+
+/// The front end reports whether it saw the app's own localStorage keys
+/// after a copy. Only a release build moves data, so elsewhere nothing waits.
+pub fn confirm_for_app(found: bool) -> Confirmation {
+    match (this_process_moves(), home()) {
+        (true, Some(home)) => confirm(&Paths::for_home(&home), found),
+        _ => Confirmation::NotNeeded,
+    }
 }
 
 /// Where the move stands in this process.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Status {
-    /// `not_needed`, `moved`, `failed`, or `pending` (not tried yet).
+    /// `not_needed`, `moved`, `copied` (waiting for the front end to confirm
+    /// it reads the copy), `failed`, or `pending` (not tried yet).
     pub state: &'static str,
     pub reason: Option<String>,
     /// Where the data still is, while it has not been moved.
@@ -298,14 +362,20 @@ pub fn status() -> Status {
     let paths = home()
         .filter(|_| this_process_moves())
         .map(|h| Paths::for_home(&h));
-    let pending = paths.as_ref().map(Paths::move_pending).unwrap_or(false);
+    status_for(paths.as_ref(), OUTCOME.get())
+}
+
+fn status_for(paths: Option<&Paths>, outcome: Option<&Outcome>) -> Status {
+    let pending = paths.map(Paths::move_pending).unwrap_or(false);
+    let unconfirmed = paths.map(Paths::awaiting_confirmation).unwrap_or(false);
     let container = paths
-        .filter(|_| pending)
+        .filter(|_| pending || unconfirmed)
         .map(|p| p.container_support.display().to_string());
-    let (state, reason) = match OUTCOME.get() {
-        Some(Outcome::Moved) => ("moved", None),
+    let (state, reason) = match outcome {
         Some(Outcome::Failed(e)) if pending => ("failed", Some(e.clone())),
         _ if pending => ("pending", None),
+        _ if unconfirmed => ("copied", None),
+        Some(Outcome::Moved) => ("moved", None),
         _ => ("not_needed", None),
     };
     Status {
@@ -320,9 +390,11 @@ mod tests {
     use super::*;
 
     fn temp_home(tag: &str) -> PathBuf {
+        static NEXT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
         let dir = std::env::temp_dir().join(format!(
-            "sc-move-{tag}-{}-{}",
+            "sc-move-{tag}-{}-{}-{}",
             std::process::id(),
+            NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
@@ -362,26 +434,48 @@ mod tests {
 
         // The app data arrived, the vault byte for byte and owner-only.
         assert_eq!(fs::read(p.support.join(VAULT_KEY)).unwrap(), [7u8; 32]);
-        assert_eq!(fs::read_to_string(p.support.join("sessions/s1.json")).unwrap(), "ENC1:abc");
+        assert_eq!(
+            fs::read_to_string(p.support.join("sessions/s1.json")).unwrap(),
+            "ENC1:abc"
+        );
         assert!(p.support.join("workspaces/s1").is_dir());
         assert!(p.support.join("daily-spend.json").is_file());
         // WebKit's salt came with the folder it names.
-        assert_eq!(fs::read_to_string(p.webkit.join("Default/salt")).unwrap(), "CONTAINR");
         assert_eq!(
-            fs::read_to_string(p.webkit.join("Default/AhBp/AhBp/LocalStorage/localstorage.sqlite3"))
-                .unwrap(),
+            fs::read_to_string(p.webkit.join("Default/salt")).unwrap(),
+            "CONTAINR"
+        );
+        assert_eq!(
+            fs::read_to_string(
+                p.webkit
+                    .join("Default/AhBp/AhBp/LocalStorage/localstorage.sqlite3")
+            )
+            .unwrap(),
             "real"
         );
         assert!(!p.webkit.join("Default/rnNF").exists());
         // The dev data was set aside, not deleted, and the container kept its copy.
         let aside = sibling(&p.webkit, "before-move-100");
-        assert_eq!(fs::read_to_string(aside.join("Default/salt")).unwrap(), "DEVSALT!");
+        assert_eq!(
+            fs::read_to_string(aside.join("Default/salt")).unwrap(),
+            "DEVSALT!"
+        );
         assert!(p.container_support.join(VAULT_KEY).is_file());
         assert!(p.container_webkit.join("Default/salt").is_file());
-        // Recorded, so it never runs again, and no staging folder is left.
-        assert!(p.support.join(MOVED_MARKER).is_file());
+        // Recorded as copied, so it never copies again, and no staging folder
+        // is left. Only the front end's confirmation finishes the move.
+        assert!(p.support.join(COPIED_MARKER).is_file());
+        assert!(!p.support.join(MOVED_MARKER).exists());
         assert!(!p.move_pending());
+        assert!(p.awaiting_confirmation());
         assert_eq!(move_out(&p, "200"), Outcome::NotNeeded);
+        // An empty WebKit store keeps it unconfirmed, and it says so again.
+        assert_eq!(confirm(&p, false), Confirmation::Unread);
+        assert!(p.awaiting_confirmation());
+        assert_eq!(confirm(&p, true), Confirmation::Confirmed);
+        assert!(p.support.join(MOVED_MARKER).is_file());
+        assert!(!p.support.join(COPIED_MARKER).exists());
+        assert_eq!(confirm(&p, true), Confirmation::NotNeeded);
         assert!(!sibling(&p.support, "moving").exists());
         assert!(!sibling(&p.webkit, "moving").exists());
         #[cfg(unix)]
@@ -429,7 +523,10 @@ mod tests {
         fs::set_permissions(&unreadable, fs::Permissions::from_mode(0o000)).unwrap();
         let outcome = move_out(&p, "9");
         fs::set_permissions(&unreadable, fs::Permissions::from_mode(0o600)).unwrap();
-        assert!(matches!(outcome, Outcome::Failed(ref e) if e.contains("copy the app data")), "{outcome:?}");
+        assert!(
+            matches!(outcome, Outcome::Failed(ref e) if e.contains("copy the app data")),
+            "{outcome:?}"
+        );
         assert!(!p.support.exists(), "no half-moved app data");
         assert!(!p.webkit.exists(), "no WebKit storage without its vault");
         assert!(!sibling(&p.support, "moving").exists());
@@ -446,10 +543,14 @@ mod tests {
         fs::write(outside.join("private.txt"), "x").unwrap();
         let p = Paths::for_home(&home);
         plant_container(&p);
-        std::os::unix::fs::symlink(&outside, p.container_support.join("workspaces/s1/peek")).unwrap();
+        std::os::unix::fs::symlink(&outside, p.container_support.join("workspaces/s1/peek"))
+            .unwrap();
         assert_eq!(move_out(&p, "3"), Outcome::Moved);
         let link = p.support.join("workspaces/s1/peek");
-        assert!(fs::symlink_metadata(&link).unwrap().file_type().is_symlink());
+        assert!(fs::symlink_metadata(&link)
+            .unwrap()
+            .file_type()
+            .is_symlink());
         assert_eq!(fs::read_link(&link).unwrap(), outside);
         let _ = fs::remove_dir_all(&home);
         let _ = fs::remove_dir_all(&outside);
@@ -458,14 +559,31 @@ mod tests {
     #[test]
     fn only_a_release_build_outside_the_sandbox_moves_data() {
         assert!(should_move(true, true, false));
-        assert!(!should_move(true, false, false), "a development build must not move anything");
-        assert!(!should_move(true, true, true), "a sandboxed build still lives in its container");
+        assert!(
+            !should_move(true, false, false),
+            "a development build must not move anything"
+        );
+        assert!(
+            !should_move(true, true, true),
+            "a sandboxed build still lives in its container"
+        );
         assert!(!should_move(false, true, false));
     }
 
+    /// Removes a rehearsal's copy of real data even when an assertion fails.
+    struct Scratch(PathBuf);
+    impl Drop for Scratch {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
     /// Copies this machine's real container into a fake home and moves it.
-    /// Skipped when there is no container. Never touches the real folders.
+    /// Opt in (`cargo test -- --ignored`): it copies the real vault key and
+    /// encrypted secrets into the temp folder for the length of the test.
+    /// Never touches the real folders.
     #[test]
+    #[ignore = "reads this machine's real app data; run on purpose with --ignored"]
     fn rehearse_against_a_copy_of_the_real_container() {
         let Some(real_home) = std::env::var_os("HOME").map(PathBuf::from) else {
             return;
@@ -482,6 +600,7 @@ mod tests {
                 .unwrap()
                 .as_nanos()
         ));
+        let _scratch = Scratch(home.clone());
         let fake = Paths::for_home(&home);
         copy_tree(&real.container_support, &fake.container_support).unwrap();
         if real.container_webkit.is_dir() {
@@ -490,12 +609,91 @@ mod tests {
         let before = fs::read(real.container_support.join("vault.key")).unwrap();
         assert_eq!(move_out(&fake, "rehearse"), Outcome::Moved);
         assert_eq!(fs::read(fake.support.join("vault.key")).unwrap(), before);
-        assert_eq!(fs::read(real.container_support.join("vault.key")).unwrap(), before);
+        assert_eq!(
+            fs::read(real.container_support.join("vault.key")).unwrap(),
+            before
+        );
         let sessions = fs::read_dir(fake.support.join("sessions")).unwrap().count();
-        let original = fs::read_dir(real.container_support.join("sessions")).unwrap().count();
+        let original = fs::read_dir(real.container_support.join("sessions"))
+            .unwrap()
+            .count();
         assert_eq!(sessions, original);
-        assert!(fake.support.join(MOVED_MARKER).is_file());
+        assert!(fake.support.join(COPIED_MARKER).is_file());
         assert!(fake.webkit.join("Default/salt").is_file());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn owner_only_folders_stay_owner_only() {
+        use std::os::unix::fs::PermissionsExt;
+        let home = temp_home("perms");
+        let p = Paths::for_home(&home);
+        plant_container(&p);
+        let sessions = p.container_support.join("sessions");
+        fs::set_permissions(&sessions, fs::Permissions::from_mode(0o700)).unwrap();
+        assert_eq!(move_out(&p, "6"), Outcome::Moved);
+        let mode = fs::metadata(p.support.join("sessions"))
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(mode, 0o700);
+        let _ = fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn the_vault_stays_closed_only_until_the_copy_lands() {
+        let home = temp_home("blocked");
+        let p = Paths::for_home(&home);
+        assert_eq!(
+            vault_blocked_for(&p, None),
+            None,
+            "no container, nothing to wait for"
+        );
+        plant_container(&p);
+        assert_eq!(
+            vault_blocked_for(&p, None).as_deref(),
+            Some("The copy has not run yet.")
+        );
+        let failed = Outcome::Failed("disk full".into());
+        assert_eq!(
+            vault_blocked_for(&p, Some(&failed)).as_deref(),
+            Some("Copying it failed: disk full.")
+        );
+        assert_eq!(move_out(&p, "7"), Outcome::Moved);
+        assert_eq!(
+            vault_blocked_for(&p, Some(&Outcome::Moved)),
+            None,
+            "copied: the vault opens"
+        );
+        let _ = fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn status_names_each_stage_and_where_the_data_is() {
+        let home = temp_home("status");
+        let p = Paths::for_home(&home);
+        assert_eq!(status_for(None, None).state, "not_needed");
+        assert_eq!(status_for(Some(&p), None).state, "not_needed");
+        plant_container(&p);
+        let pending = status_for(Some(&p), None);
+        assert_eq!(pending.state, "pending");
+        assert_eq!(
+            pending.container.as_deref(),
+            Some(p.container_support.to_str().unwrap())
+        );
+        let failed = status_for(Some(&p), Some(&Outcome::Failed("no space".into())));
+        assert_eq!(
+            (failed.state, failed.reason.as_deref()),
+            ("failed", Some("no space"))
+        );
+        assert_eq!(move_out(&p, "8"), Outcome::Moved);
+        let copied = status_for(Some(&p), Some(&Outcome::Moved));
+        assert_eq!(copied.state, "copied");
+        assert!(copied.container.is_some());
+        assert_eq!(confirm(&p, true), Confirmation::Confirmed);
+        let moved = status_for(Some(&p), Some(&Outcome::Moved));
+        assert_eq!((moved.state, moved.container), ("moved", None));
         let _ = fs::remove_dir_all(&home);
     }
 
@@ -504,5 +702,20 @@ mod tests {
         let raw = include_str!("../tauri.conf.json");
         let conf: serde_json::Value = serde_json::from_str(raw).unwrap();
         assert_eq!(conf["identifier"], APP_IDENTIFIER);
+    }
+
+    /// `tauri:dev` merges this file, so a development build keeps its own
+    /// folders and never reads or writes the installed app's.
+    #[test]
+    fn a_development_build_has_its_own_identifier() {
+        let raw = include_str!("../tauri.dev.conf.json");
+        let dev: serde_json::Value = serde_json::from_str(raw).unwrap();
+        let id = dev["identifier"].as_str().unwrap();
+        assert_ne!(id, APP_IDENTIFIER);
+        assert!(id.starts_with(APP_IDENTIFIER));
+        let pkg: serde_json::Value =
+            serde_json::from_str(include_str!("../../package.json")).unwrap();
+        let script = pkg["scripts"]["tauri:dev"].as_str().unwrap();
+        assert!(script.contains("tauri.dev.conf.json"), "{script}");
     }
 }

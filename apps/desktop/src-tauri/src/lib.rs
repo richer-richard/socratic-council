@@ -65,6 +65,7 @@ pub fn run() {
             vault_file::vault_get_dek,
             vault_file::vault_reset,
             vault_file::app_data_move_status,
+            vault_file::app_data_move_confirm,
             session_sync::session_sync_list,
             session_sync::session_sync_read,
             session_sync::session_sync_write,
