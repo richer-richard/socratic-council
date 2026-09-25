@@ -1059,6 +1059,7 @@ async fn cmd_probe(
                 tier,
                 tools: specs.clone(),
                 cache_key: None,
+                effort: None,
             };
             let started = std::time::Instant::now();
             let mut on_chunk = |_c: &CompletionChunk| {};
@@ -1120,6 +1121,7 @@ async fn cmd_probe(
                     tier,
                     tools: specs,
                     cache_key: None,
+                    effort: None,
                 }
             };
             let mut on_chunk = |_c: &CompletionChunk| {};

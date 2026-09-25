@@ -283,6 +283,7 @@ mod tests {
                     provider: Provider::OpenAI,
                     model: ModelChoice::Auto(ReasoningTier::High),
                     reasoning: None,
+                    effort: None,
                 })
                 .collect(),
         }

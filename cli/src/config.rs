@@ -7,7 +7,7 @@ use crate::crypto;
 use crate::deliberation::{EngineConfig, ProtocolPolicy};
 use crate::error::{Error, Result};
 use crate::tools::ToolPolicy;
-use crate::types::{ModelChoice, ModelRef, Provider, ReasoningTier, Roster, Seat};
+use crate::types::{ExtraEffort, ModelChoice, ModelRef, Provider, ReasoningTier, Roster, Seat};
 use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -94,6 +94,10 @@ pub struct SeatConfig {
     pub model: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reasoning: Option<ReasoningTier>,
+    /// "xhigh" or "max" on top of `reasoning = "high"`, for a model that
+    /// takes it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effort: Option<ExtraEffort>,
 }
 
 impl SeatConfig {
@@ -104,6 +108,7 @@ impl SeatConfig {
             provider: seat.provider.slug().to_string(),
             model: seat.model.label(),
             reasoning: seat.reasoning,
+            effort: seat.effort,
         }
     }
 }
@@ -548,6 +553,7 @@ impl Config {
                             provider,
                             model: ModelChoice::parse(&s.model),
                             reasoning: s.reasoning,
+                            effort: s.effort,
                         })
                     })
                     .collect(),
@@ -749,6 +755,7 @@ pub fn parse_seats_flag(spec: &str) -> Result<Vec<Seat>> {
             provider,
             model: ModelChoice::parse(model.trim()),
             reasoning: None,
+            effort: None,
         });
     }
     if seats.is_empty() {
@@ -877,6 +884,7 @@ mod tests {
             provider: "openai".into(),
             model: "gpt-5.6-luna".into(),
             reasoning: Some(ReasoningTier::Low),
+            effort: None,
         });
         let text = toml::to_string_pretty(&config).unwrap();
         let back: Config = toml::from_str(&text).unwrap();

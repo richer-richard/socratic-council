@@ -55,7 +55,7 @@ function SlotCard({
 }) {
   const hasKey = keyed.has(slot.provider);
   return (
-    <div className="settings-card">
+    <div className="settings-card settings-card-controls">
       <h3 className="font-medium text-white mb-1">{title}</h3>
       <p className="text-xs text-gray-400 mb-3">{hint}</p>
       <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,2fr)] items-center">

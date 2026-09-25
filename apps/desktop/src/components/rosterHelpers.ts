@@ -4,7 +4,13 @@
  * result straight to the config store.
  */
 
-import { AUTO_MODEL, DEFAULT_ENGINE_SEATS, type EngineSeat } from "@socratic-council/shared";
+import {
+  AUTO_MODEL,
+  DEFAULT_ENGINE_SEATS,
+  type EngineExtraEffort,
+  type EngineReasoningTier,
+  type EngineSeat,
+} from "@socratic-council/shared";
 
 import { MAX_SEATS, seatIdFromName, uniqueSeatId, type Provider } from "../stores/config";
 
@@ -54,6 +60,7 @@ export function updateSeat(
     if (seat.id !== id) return seat;
     const next: EngineSeat = { ...seat, ...patch };
     if ("reasoning" in patch && patch.reasoning === undefined) delete next.reasoning;
+    if ("effort" in patch && patch.effort === undefined) delete next.effort;
     return next;
   });
 }
@@ -68,4 +75,44 @@ export function renameSeat(roster: readonly EngineSeat[], id: string, name: stri
 /** The default eight, one per provider, all on Auto. */
 export function defaultRoster(): EngineSeat[] {
   return DEFAULT_ENGINE_SEATS.map((seat) => ({ ...seat }));
+}
+
+/** A seat's reasoning override as one dropdown value. */
+export type ReasoningChoice = EngineReasoningTier | EngineExtraEffort | "default";
+
+const EXTRA_LABELS: Record<EngineExtraEffort, string> = { xhigh: "Extra high", max: "Max" };
+
+/**
+ * The reasoning options for a seat: the round's level, the three tiers, then
+ * each level above High the seat's model takes (from the engine catalog).
+ */
+export function reasoningOptions(
+  extras: readonly EngineExtraEffort[],
+): { value: ReasoningChoice; label: string }[] {
+  return [
+    { value: "default", label: "Per round (protocol)" },
+    { value: "low", label: "Low" },
+    { value: "medium", label: "Medium" },
+    { value: "high", label: "High" },
+    ...extras.map((e) => ({ value: e, label: EXTRA_LABELS[e] })),
+  ];
+}
+
+/**
+ * What the dropdown shows for a seat. A level above High the current model
+ * does not take reads as High, which is what the engine sends.
+ */
+export function reasoningValue(
+  seat: Pick<EngineSeat, "reasoning" | "effort">,
+  extras: readonly EngineExtraEffort[],
+): ReasoningChoice {
+  if (seat.reasoning === "high" && seat.effort && extras.includes(seat.effort)) return seat.effort;
+  return seat.reasoning ?? "default";
+}
+
+/** The seat fields a choice sets: a level above High pins the seat to High. */
+export function reasoningPatch(choice: ReasoningChoice): Pick<EngineSeat, "reasoning" | "effort"> {
+  if (choice === "default") return { reasoning: undefined, effort: undefined };
+  if (choice === "xhigh" || choice === "max") return { reasoning: "high", effort: choice };
+  return { reasoning: choice, effort: undefined };
 }

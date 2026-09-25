@@ -6,7 +6,7 @@
 //! guess. Ids unknown to the table inherit their family's contract by prefix
 //! (`family_contract`) and stay unpriced.
 
-use crate::types::Provider;
+use crate::types::{ExtraEffort, Provider};
 use serde::{Deserialize, Serialize};
 
 /// Exchange rate used for the Chinese providers' CNY list prices.
@@ -51,12 +51,17 @@ pub enum ThinkingKnob {
     /// No reasoning control; temperature is the only dial.
     Absent,
     /// `reasoning.effort`; `floor` is the lowest value the model accepts
-    /// ("low" for gpt-6-astra, "none" for gpt-5.x).
-    OpenAiEffort { floor: &'static str },
+    /// ("low" for gpt-6-astra, "none" for gpt-5.x); `top` the highest.
+    OpenAiEffort { floor: &'static str, top: Top },
     /// Claude 4.6+ / 5.x: `thinking.type: adaptive` (+ `display`), depth via
     /// `output_config.effort`. `default_on`: the model thinks unless told not
     /// to (5.x). `always_on`: `thinking.type: disabled` is rejected (Fable).
-    AnthropicAdaptive { default_on: bool, always_on: bool },
+    /// `top`: the highest effort documented for it.
+    AnthropicAdaptive {
+        default_on: bool,
+        always_on: bool,
+        top: Top,
+    },
     /// Claude ≤ 4.5: `thinking.type: enabled` + `budget_tokens`.
     AnthropicExtended,
     /// Gemini 3.x and 2.5 Pro: `thinkingConfig.thinkingLevel` low|medium|high.
@@ -83,6 +88,38 @@ pub enum ThinkingKnob {
     GlmEffort,
     /// GLM-4.5 .. 5.2: `thinking.type` enabled|disabled; `forced` for 4.7.
     GlmType { forced: bool },
+}
+
+/// The highest reasoning effort a model documents. `High` is every model's
+/// ceiling unless its docs name more (`docs/provider-contract-sheet.md`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Top {
+    High,
+    XHigh,
+    Max,
+}
+
+impl ThinkingKnob {
+    /// The levels above High this model takes, in order.
+    pub fn extra_efforts(self) -> &'static [ExtraEffort] {
+        let top = match self {
+            OpenAiEffort { top, .. } | AnthropicAdaptive { top, .. } => top,
+            _ => Top::High,
+        };
+        match top {
+            Top::High => &[],
+            Top::XHigh => &[ExtraEffort::XHigh],
+            Top::Max => &ExtraEffort::ALL,
+        }
+    }
+
+    /// The effort to send for a seat asking for `wanted`: the level itself
+    /// when the model takes it, else the highest extra it does, else none
+    /// (the request stays at High).
+    pub fn effort_for(self, wanted: Option<ExtraEffort>) -> Option<ExtraEffort> {
+        let wanted = wanted?;
+        self.extra_efforts().iter().copied().rfind(|e| *e <= wanted)
+    }
 }
 
 /// What a request for this model may carry.
@@ -212,13 +249,55 @@ use ApiFamily::*;
 use ModelClass::*;
 use ThinkingKnob::*;
 
-const OPENAI_6: Contract = c(Responses, OpenAiEffort { floor: "low" }, false, true, true);
-const OPENAI_5: Contract = c(Responses, OpenAiEffort { floor: "none" }, false, true, true);
+// Efforts per docs/provider-contract-sheet.md: gpt-6-astra and gpt-5.6 take
+// up to `max`, gpt-5.5 up to `xhigh`; older GPT-5 generations document High.
+const OPENAI_6: Contract = c(
+    Responses,
+    OpenAiEffort {
+        floor: "low",
+        top: Top::Max,
+    },
+    false,
+    true,
+    true,
+);
+const OPENAI_56: Contract = c(
+    Responses,
+    OpenAiEffort {
+        floor: "none",
+        top: Top::Max,
+    },
+    false,
+    true,
+    true,
+);
+const OPENAI_55: Contract = c(
+    Responses,
+    OpenAiEffort {
+        floor: "none",
+        top: Top::XHigh,
+    },
+    false,
+    true,
+    true,
+);
+const OPENAI_5: Contract = c(
+    Responses,
+    OpenAiEffort {
+        floor: "none",
+        top: Top::High,
+    },
+    false,
+    true,
+    true,
+);
+// The Fable family documents `xhigh` and `max`; the rest document High.
 const CLAUDE_ALWAYS: Contract = c(
     Messages,
     AnthropicAdaptive {
         default_on: true,
         always_on: true,
+        top: Top::Max,
     },
     false,
     true,
@@ -229,6 +308,7 @@ const CLAUDE_5: Contract = c(
     AnthropicAdaptive {
         default_on: true,
         always_on: false,
+        top: Top::High,
     },
     false,
     true,
@@ -239,6 +319,7 @@ const CLAUDE_47: Contract = c(
     AnthropicAdaptive {
         default_on: false,
         always_on: false,
+        top: Top::High,
     },
     false,
     true,
@@ -249,6 +330,7 @@ const CLAUDE_46: Contract = c(
     AnthropicAdaptive {
         default_on: false,
         always_on: false,
+        top: Top::High,
     },
     true,
     true,
@@ -303,7 +385,7 @@ pub fn catalog_rows(provider: Provider) -> Vec<ModelRow> {
                 1_050_000,
                 128_000,
                 Pricing::usd_with_write(4.0, 0.4, 5.0, 20.0),
-                OPENAI_5,
+                OPENAI_56,
             ),
             row(
                 "gpt-5.6-terra",
@@ -313,7 +395,7 @@ pub fn catalog_rows(provider: Provider) -> Vec<ModelRow> {
                 1_050_000,
                 128_000,
                 Pricing::usd_with_write(2.0, 0.2, 2.5, 12.0),
-                OPENAI_5,
+                OPENAI_56,
             ),
             row(
                 "gpt-5.6-luna",
@@ -323,7 +405,7 @@ pub fn catalog_rows(provider: Provider) -> Vec<ModelRow> {
                 1_050_000,
                 128_000,
                 Pricing::usd_with_write(0.2, 0.02, 0.25, 1.2),
-                OPENAI_5,
+                OPENAI_56,
             ),
             row(
                 "gpt-5.5",
@@ -333,7 +415,7 @@ pub fn catalog_rows(provider: Provider) -> Vec<ModelRow> {
                 1_050_000,
                 128_000,
                 Pricing::usd(5.0, 0.5, 30.0),
-                OPENAI_5,
+                OPENAI_55,
             ),
             row(
                 "gpt-5.5-pro",
@@ -938,6 +1020,10 @@ pub fn family_contract(provider: Provider, id: &str) -> Contract {
                 c(Responses, Absent, true, true, true)
             } else if starts("gpt-6") {
                 OPENAI_6
+            } else if starts("gpt-5.6") {
+                OPENAI_56
+            } else if m == "gpt-5.5" {
+                OPENAI_55
             } else if starts("gpt-")
                 || (m.len() > 1 && m.starts_with('o') && m.as_bytes()[1].is_ascii_digit())
             {

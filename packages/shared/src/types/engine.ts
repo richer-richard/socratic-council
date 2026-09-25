@@ -11,6 +11,9 @@ export type EngineProvider =
 
 export type EngineReasoningTier = "low" | "medium" | "high";
 
+/** A level above High some models document (engine `ExtraEffort`). */
+export type EngineExtraEffort = "xhigh" | "max";
+
 /** "auto" (flagship), "auto-balanced", "auto-fast", or a model id. */
 export type EngineModelChoice = string;
 
@@ -20,6 +23,8 @@ export interface EngineSeat {
   provider: EngineProvider;
   model: EngineModelChoice;
   reasoning?: EngineReasoningTier;
+  /** On top of `reasoning: "high"`, for a model that takes it. */
+  effort?: EngineExtraEffort;
 }
 
 export interface EngineSlot {
@@ -409,6 +414,8 @@ export interface EngineCatalogRow {
   vision: boolean;
   thinking: boolean;
   catalogued: boolean;
+  /** Reasoning levels above High the model takes. Absent outside the app. */
+  extraEfforts?: EngineExtraEffort[];
 }
 
 /** Round label for display. */

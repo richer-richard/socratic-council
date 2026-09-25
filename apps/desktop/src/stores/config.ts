@@ -361,7 +361,17 @@ function sanitizeSeat(raw: unknown, used: Set<string>): EngineSeat | null {
     r.reasoning === "low" || r.reasoning === "medium" || r.reasoning === "high"
       ? r.reasoning
       : undefined;
-  return { id, name, provider: r.provider, model, ...(reasoning ? { reasoning } : {}) };
+  // A level above High only means something on a seat pinned to High.
+  const effort =
+    reasoning === "high" && (r.effort === "xhigh" || r.effort === "max") ? r.effort : undefined;
+  return {
+    id,
+    name,
+    provider: r.provider,
+    model,
+    ...(reasoning ? { reasoning } : {}),
+    ...(effort ? { effort } : {}),
+  };
 }
 
 /** The default eight seats; v2 per-character tiers become reasoning overrides. */

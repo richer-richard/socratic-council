@@ -209,6 +209,7 @@ fn config(
                 provider: Provider::DeepSeek,
                 model: ModelChoice::Id(model_a.into()),
                 reasoning: None,
+                effort: None,
             },
             Seat {
                 id: "b".into(),
@@ -216,6 +217,7 @@ fn config(
                 provider: Provider::DeepSeek,
                 model: ModelChoice::Id(model_b.into()),
                 reasoning: Some(ReasoningTier::Low),
+                effort: None,
             },
         ],
     };

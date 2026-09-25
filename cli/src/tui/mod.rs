@@ -3661,6 +3661,7 @@ mod tests {
                 provider: "openai".into(),
                 model: "auto".into(),
                 reasoning: None,
+                effort: None,
             })
             .collect();
         let narrow = render_at(&mut app, 80, 30);

@@ -44,6 +44,8 @@ pub struct SeatSpec {
     pub model: String,
     pub base_url: String,
     pub api_key: String,
+    /// A level above High for this seat, on a model that takes it.
+    pub effort: Option<crate::types::ExtraEffort>,
 }
 
 impl std::fmt::Debug for SeatSpec {
@@ -55,6 +57,7 @@ impl std::fmt::Debug for SeatSpec {
             .field("model", &self.model)
             .field("base_url", &self.base_url)
             .field("api_key", &"<redacted>")
+            .field("effort", &self.effort)
             .finish()
     }
 }
@@ -127,6 +130,8 @@ pub async fn run_seat_turn(
             // results is rejected by the Messages API without them.
             tools: tools.clone(),
             cache_key: ctx.cache_key.clone(),
+            // Only on top of High: the empty-reply retry at Low drops it.
+            effort: seat.effort.filter(|_| tier == ReasoningTier::High),
         };
         let tx = ctx.tx.clone();
         let seat_id = seat.id.clone();

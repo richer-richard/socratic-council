@@ -4339,6 +4339,12 @@ textarea.workstation-input::placeholder {
     0 0 22px -4px rgba(245, 197, 66, 0.18);
 }
 
+/* A card whose last row is a control: more room below it, so an open
+   control's gold ring does not sit on the card's bottom edge. */
+.settings-card.settings-card-controls {
+  padding-bottom: 1.625rem;
+}
+
 .settings-card.settings-card-editing,
 .settings-card.settings-card-editing:hover {
   border-color: rgba(245, 197, 66, 0.55);
@@ -4448,6 +4454,18 @@ textarea.workstation-input::placeholder {
   max-height: 280px;
   overflow-y: auto;
   animation: app-dropdown-in 140ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+
+/* Opened near a container's right edge: hang from the trigger's right edge. */
+.app-dropdown-panel.is-align-end {
+  left: auto;
+  right: 0;
+}
+
+/* No room below inside the container: open above the trigger. */
+.app-dropdown-panel.is-open-up {
+  top: auto;
+  bottom: calc(100% + 6px);
 }
 
 @keyframes app-dropdown-in {

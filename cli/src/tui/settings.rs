@@ -12,7 +12,7 @@ use super::{redact_proxy, theme, App, Click, KeyDraft};
 use crate::catalog::{catalog_models, model_row, resolve_model, DiscoveredModel};
 use crate::config::{display_name_for, Config, KeySource, SeatConfig, SlotConfig};
 use crate::tools::{Approval, ToolPolicy};
-use crate::types::{ModelChoice, Provider, ReasoningTier};
+use crate::types::{ExtraEffort, ModelChoice, Provider, ReasoningTier};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
@@ -160,12 +160,39 @@ fn usd(v: f64) -> String {
     }
 }
 
-fn cycle_reasoning(current: Option<ReasoningTier>) -> Option<ReasoningTier> {
+/// The next reasoning override for a seat: per round, Low, Medium, High,
+/// then each level above High the seat's model takes (`extras`), then back.
+fn cycle_reasoning(
+    current: (Option<ReasoningTier>, Option<ExtraEffort>),
+    extras: &[ExtraEffort],
+) -> (Option<ReasoningTier>, Option<ExtraEffort>) {
+    let high = Some(ReasoningTier::High);
     match current {
-        None => Some(ReasoningTier::Low),
-        Some(ReasoningTier::Low) => Some(ReasoningTier::Medium),
-        Some(ReasoningTier::Medium) => Some(ReasoningTier::High),
-        Some(ReasoningTier::High) => None,
+        (None, _) => (Some(ReasoningTier::Low), None),
+        (Some(ReasoningTier::Low), _) => (Some(ReasoningTier::Medium), None),
+        (Some(ReasoningTier::Medium), _) => (high, None),
+        (Some(ReasoningTier::High), effort) => {
+            let next = match effort {
+                None => extras.first(),
+                Some(e) => extras.iter().find(|x| **x > e),
+            };
+            match next {
+                Some(e) => (high, Some(*e)),
+                None => (None, None),
+            }
+        }
+    }
+}
+
+/// How a seat's override reads: "High", or "Max" when a level above it is set.
+fn reasoning_label(
+    reasoning: Option<ReasoningTier>,
+    effort: Option<ExtraEffort>,
+) -> Option<&'static str> {
+    match (reasoning, effort) {
+        (Some(ReasoningTier::High), Some(e)) => Some(e.label()),
+        (Some(t), _) => Some(t.label()),
+        (None, _) => None,
     }
 }
 
@@ -245,10 +272,11 @@ impl App {
     }
 
     /// The resolved model for a choice, with its class and prices.
-    fn describe_choice(&self, provider: Provider, choice: &ModelChoice) -> String {
+    /// The model id a choice resolves to right now.
+    fn resolved_id(&self, provider: Provider, choice: &ModelChoice) -> String {
         let empty = Vec::new();
         let avail = self.ctx.available.get(&provider).unwrap_or(&empty);
-        let id = match choice {
+        match choice {
             ModelChoice::Id(id) => id.clone(),
             ModelChoice::Auto(tier) => resolve_model(
                 provider,
@@ -256,7 +284,11 @@ impl App {
                 avail,
                 self.ctx.config.selection(provider, *tier).as_deref(),
             ),
-        };
+        }
+    }
+
+    fn describe_choice(&self, provider: Provider, choice: &ModelChoice) -> String {
+        let id = self.resolved_id(provider, choice);
         let row = model_row(provider, &id);
         let price = match (row.pricing.input, row.pricing.output) {
             (Some(i), Some(o)) => format!(" · ${}/{} per 1M", usd(i), usd(o)),
@@ -587,6 +619,7 @@ impl App {
             provider: provider.slug().to_string(),
             model: "auto".into(),
             reasoning: None,
+            effort: None,
         });
         let index = seats.len() - 1;
         self.ctx.config.seats = seats;
@@ -607,9 +640,15 @@ impl App {
         let Some(seat) = seats.get_mut(i) else {
             return;
         };
-        seat.reasoning = cycle_reasoning(seat.reasoning);
-        let note = match seat.reasoning {
-            Some(t) => format!("{}: {} reasoning in every round.", seat.name, t.label()),
+        let extras = Provider::from_slug(&seat.provider)
+            .map(|p| {
+                let id = self.resolved_id(p, &ModelChoice::parse(&seat.model));
+                model_row(p, &id).contract.thinking.extra_efforts()
+            })
+            .unwrap_or(&[]);
+        (seat.reasoning, seat.effort) = cycle_reasoning((seat.reasoning, seat.effort), extras);
+        let note = match reasoning_label(seat.reasoning, seat.effort) {
+            Some(level) => format!("{}: {level} reasoning in every round.", seat.name),
             None => format!("{}: the round's reasoning tier.", seat.name),
         };
         self.ctx.config.seats = seats;
@@ -938,8 +977,8 @@ fn render_rows(f: &mut Frame, area: Rect, app: &App) {
         let detail = provider
             .map(|p| app.describe_choice(p, &choice))
             .unwrap_or_else(|| " · unknown provider".to_string());
-        let reasoning = match seat.reasoning {
-            Some(t) => format!(" · {} reasoning", t.label()),
+        let reasoning = match reasoning_label(seat.reasoning, seat.effort) {
+            Some(level) => format!(" · {level} reasoning"),
             None => String::new(),
         };
         entries.push(Entry {
@@ -1284,6 +1323,7 @@ mod tests {
             provider: "openai".into(),
             model: "auto".into(),
             reasoning: None,
+            effort: None,
         }];
         assert_eq!(settings_rows(&config).len(), 8 + 1 + 1 + 11);
     }
@@ -1331,7 +1371,24 @@ mod tests {
         assert_eq!(usd(2.8169014084507045), "2.82");
         assert_eq!(usd(10.0), "10");
         assert_eq!(usd(0.3), "0.30");
-        assert_eq!(cycle_reasoning(None), Some(ReasoningTier::Low));
-        assert_eq!(cycle_reasoning(Some(ReasoningTier::High)), None);
+        use ExtraEffort::{Max, XHigh};
+        let high = Some(ReasoningTier::High);
+        assert_eq!(
+            cycle_reasoning((None, None), &[]),
+            (Some(ReasoningTier::Low), None)
+        );
+        assert_eq!(cycle_reasoning((high, None), &[]), (None, None));
+        // A model with levels above High walks through them before wrapping.
+        let both = [XHigh, Max];
+        assert_eq!(cycle_reasoning((high, None), &both), (high, Some(XHigh)));
+        assert_eq!(
+            cycle_reasoning((high, Some(XHigh)), &both),
+            (high, Some(Max))
+        );
+        assert_eq!(cycle_reasoning((high, Some(Max)), &both), (None, None));
+        assert_eq!(cycle_reasoning((high, None), &[XHigh]), (high, Some(XHigh)));
+        assert_eq!(cycle_reasoning((high, Some(XHigh)), &[XHigh]), (None, None));
+        assert_eq!(reasoning_label(high, Some(Max)), Some("Max"));
+        assert_eq!(reasoning_label(high, None), Some("High"));
     }
 }

@@ -19,7 +19,9 @@ use socratic_council_engine::providers::scan::scan_models;
 use socratic_council_engine::store::{new_session_id, SessionStore, StoreLocation};
 use socratic_council_engine::tools::shell::{self, SandboxKind, Support};
 use socratic_council_engine::tools::ToolPolicy;
-use socratic_council_engine::types::{ModelChoice, ModelRef, Provider, ReasoningTier, Roster, Seat};
+use socratic_council_engine::types::{
+    ExtraEffort, ModelChoice, ModelRef, Provider, ReasoningTier, Roster, Seat,
+};
 use socratic_council_engine::{catalog, http_client};
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -41,6 +43,9 @@ pub struct SeatJson {
     pub model: String,
     #[serde(default)]
     pub reasoning: Option<ReasoningTier>,
+    /// "xhigh" or "max" on top of a High override, for a model that takes it.
+    #[serde(default)]
+    pub effort: Option<ExtraEffort>,
 }
 
 fn auto() -> String {
@@ -184,6 +189,8 @@ pub struct CatalogRowJson {
     pub vision: bool,
     pub thinking: bool,
     pub catalogued: bool,
+    /// Reasoning levels above High the model takes ("xhigh", "max").
+    pub extra_efforts: Vec<&'static str>,
 }
 
 impl From<ModelRow> for CatalogRowJson {
@@ -202,6 +209,7 @@ impl From<ModelRow> for CatalogRowJson {
             vision: r.contract.vision,
             thinking: r.contract.thinking != catalog::ThinkingKnob::Absent,
             catalogued: r.catalogued,
+            extra_efforts: r.contract.thinking.extra_efforts().iter().map(|e| e.as_str()).collect(),
         }
     }
 }
@@ -233,6 +241,8 @@ fn roster_from(seats: &[SeatJson]) -> Roster {
                 provider: s.provider,
                 model: ModelChoice::parse(&s.model),
                 reasoning: s.reasoning,
+                // A level above High only means something on a seat pinned to High.
+                effort: s.effort.filter(|_| s.reasoning == Some(ReasoningTier::High)),
             })
             .collect(),
     }
@@ -534,6 +544,25 @@ mod tests {
         assert_eq!(fable.class, "flagship");
         assert_eq!(fable.output_cost_per_1m, Some(50.0));
         assert!(fable.tools && fable.thinking && fable.catalogued);
+    }
+
+    #[test]
+    fn a_level_above_high_stays_only_on_a_seat_pinned_to_high() {
+        let seats: Vec<SeatJson> = serde_json::from_str(
+            r#"[{"id":"a","provider":"openai","reasoning":"high","effort":"max"},
+                {"id":"b","provider":"openai","reasoning":"low","effort":"max"},
+                {"id":"c","provider":"openai","effort":"xhigh"}]"#,
+        )
+        .unwrap();
+        let roster = roster_from(&seats);
+        assert_eq!(roster.seats[0].effort, Some(ExtraEffort::Max));
+        assert_eq!(roster.seats[1].effort, None);
+        assert_eq!(roster.seats[2].effort, None);
+        let astra = engine_catalog(Provider::OpenAI)
+            .into_iter()
+            .find(|r| r.id == "gpt-6-astra")
+            .unwrap();
+        assert_eq!(astra.extra_efforts, ["xhigh", "max"]);
     }
 
     #[test]

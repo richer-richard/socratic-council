@@ -632,6 +632,7 @@ impl Deliberation {
             model: self.resolve_model(seat.provider, &seat.model),
             base_url: self.config.base_url(seat.provider),
             api_key,
+            effort: seat.effort,
         })
     }
 
@@ -2006,6 +2007,7 @@ impl Deliberation {
                 tier,
                 tools: Vec::new(),
                 cache_key: None,
+                effort: None,
             };
             let mut on_chunk = |c: &CompletionChunk| text.push_str(&c.content);
             let fut = stream_completion(

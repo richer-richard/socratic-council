@@ -124,6 +124,47 @@ impl ReasoningTier {
     }
 }
 
+/// A reasoning level above High that some models document: OpenAI's
+/// `xhigh` / `max` efforts and Anthropic's on the Fable family. It only
+/// refines a seat pinned to High, and a model that does not take it gets the
+/// highest level it does.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ExtraEffort {
+    XHigh,
+    Max,
+}
+
+impl ExtraEffort {
+    pub const ALL: [ExtraEffort; 2] = [ExtraEffort::XHigh, ExtraEffort::Max];
+
+    /// The value the provider APIs take.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ExtraEffort::XHigh => "xhigh",
+            ExtraEffort::Max => "max",
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            ExtraEffort::XHigh => "Extra high",
+            ExtraEffort::Max => "Max",
+        }
+    }
+}
+
+impl std::str::FromStr for ExtraEffort {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_ascii_lowercase().as_str() {
+            "xhigh" | "extra-high" | "extra high" => Ok(ExtraEffort::XHigh),
+            "max" => Ok(ExtraEffort::Max),
+            other => Err(format!("unknown extra effort: {other}")),
+        }
+    }
+}
+
 impl std::str::FromStr for ReasoningTier {
     type Err = String;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
@@ -320,6 +361,9 @@ pub struct CompletionRequest {
     /// A stable key for provider prompt caches: sets `prompt_cache_key` on
     /// the Responses API and turns on automatic caching on the Messages API.
     pub cache_key: Option<String>,
+    /// A level above High, sent only when `tier` is High and the model takes
+    /// it (clamped to the highest it does).
+    pub effort: Option<ExtraEffort>,
 }
 
 impl Default for CompletionRequest {
@@ -333,6 +377,7 @@ impl Default for CompletionRequest {
             tier: ReasoningTier::Medium,
             tools: Vec::new(),
             cache_key: None,
+            effort: None,
         }
     }
 }
@@ -449,6 +494,9 @@ pub struct Seat {
     /// Overrides the round's reasoning tier for this seat.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reasoning: Option<ReasoningTier>,
+    /// A level above High for a seat pinned to High, on a model that takes it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effort: Option<ExtraEffort>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -480,6 +528,7 @@ impl Roster {
                     provider: *provider,
                     model: ModelChoice::Auto(ReasoningTier::High),
                     reasoning: None,
+                    effort: None,
                 })
                 .collect(),
         }

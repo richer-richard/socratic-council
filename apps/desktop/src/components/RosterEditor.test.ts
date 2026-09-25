@@ -5,6 +5,9 @@ import {
   MAX_SEATS,
   addSeat,
   nextSeatId,
+  reasoningOptions,
+  reasoningPatch,
+  reasoningValue,
   removeSeat,
   renameSeat,
   updateSeat,
@@ -59,5 +62,38 @@ describe("roster helpers", () => {
   it("renameSeat keeps the id stable and trims the name", () => {
     const renamed = renameSeat(DEFAULT_ENGINE_SEATS, "zara", "  Zed  ");
     expect(renamed.find((s) => s.id === "zara")?.name).toBe("Zed");
+  });
+});
+
+describe("reasoning levels per seat", () => {
+  it("offers levels above High only for a model that takes them", () => {
+    const labels = (extras: ("xhigh" | "max")[]) => reasoningOptions(extras).map((o) => o.label);
+    expect(labels([])).toEqual(["Per round (protocol)", "Low", "Medium", "High"]);
+    expect(labels(["xhigh"])).toEqual([
+      "Per round (protocol)",
+      "Low",
+      "Medium",
+      "High",
+      "Extra high",
+    ]);
+    expect(labels(["xhigh", "max"]).slice(-2)).toEqual(["Extra high", "Max"]);
+  });
+
+  it("pins a seat to High underneath a level above it, and clears it again", () => {
+    expect(reasoningPatch("max")).toEqual({ reasoning: "high", effort: "max" });
+    expect(reasoningPatch("medium")).toEqual({ reasoning: "medium", effort: undefined });
+    const pinned = updateSeat(DEFAULT_ENGINE_SEATS, "george", reasoningPatch("xhigh"));
+    const george = pinned.find((s) => s.id === "george")!;
+    expect(george).toMatchObject({ reasoning: "high", effort: "xhigh" });
+    const cleared = updateSeat(pinned, "george", reasoningPatch("default"));
+    const back = cleared.find((s) => s.id === "george")!;
+    expect("reasoning" in back || "effort" in back).toBe(false);
+  });
+
+  it("reads a level the current model does not take as High", () => {
+    const seat = { reasoning: "high" as const, effort: "max" as const };
+    expect(reasoningValue(seat, ["xhigh", "max"])).toBe("max");
+    expect(reasoningValue(seat, ["xhigh"])).toBe("high");
+    expect(reasoningValue({}, [])).toBe("default");
   });
 });

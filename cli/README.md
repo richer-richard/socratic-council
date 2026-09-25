@@ -314,6 +314,8 @@ or an id), and `[[seats]]` in `config.toml` makes a roster permanent:
 id = "george"
 provider = "openai"
 model = "auto"
+reasoning = "high"
+effort = "max"      # xhigh | max, above High on models that document it
 [[seats]]
 id = "luna"
 provider = "openai"

@@ -8,8 +8,8 @@ pub mod sse;
 use crate::error::{Error, Result};
 use crate::types::ThinkingBlock;
 use crate::types::{
-    ChatMessage, CompletionChunk, CompletionOutcome, CompletionRequest, Provider, ReasoningTier,
-    Role, StopReason, ToolCall, Usage,
+    ChatMessage, CompletionChunk, CompletionOutcome, CompletionRequest, ExtraEffort, Provider,
+    ReasoningTier, Role, StopReason, ToolCall, Usage,
 };
 use futures_util::StreamExt;
 use serde_json::{json, Value};
@@ -38,6 +38,15 @@ use crate::catalog::{api_family, model_row, ApiFamily, ThinkingKnob};
 /// `reasoning.effort` for the Responses API: the three tiers map onto the
 /// documented low / medium / high; xhigh and max are never sent by default
 /// (they exist for long-horizon agent work, not a council turn).
+/// The level above High to send, when the request is at High, asks for one,
+/// and the model takes it (clamped to the highest it does).
+fn extra_effort(knob: ThinkingKnob, req: &CompletionRequest) -> Option<ExtraEffort> {
+    if req.tier != ReasoningTier::High {
+        return None;
+    }
+    knob.effort_for(req.effort)
+}
+
 fn openai_effort(tier: ReasoningTier) -> &'static str {
     match tier {
         ReasoningTier::Low => "low",
@@ -84,6 +93,7 @@ fn messages_thinking(
         ThinkingKnob::AnthropicAdaptive {
             default_on,
             always_on,
+            ..
         } => {
             if tier == ReasoningTier::Low {
                 if always_on {
@@ -352,8 +362,11 @@ fn prepare(
             }
             match contract.thinking {
                 ThinkingKnob::OpenAiEffort { .. } => {
-                    body["reasoning"] =
-                        json!({ "effort": openai_effort(req.tier), "summary": "auto" });
+                    let effort = match extra_effort(contract.thinking, req) {
+                        Some(extra) => extra.as_str(),
+                        None => openai_effort(req.tier),
+                    };
+                    body["reasoning"] = json!({ "effort": effort, "summary": "auto" });
                 }
                 _ => {
                     if contract.sampling {
@@ -404,10 +417,15 @@ fn prepare(
             // Effort (Claude 4.6+ / 5.x adaptive models): low/medium are explicit,
             // high is the API default.
             if let ThinkingKnob::AnthropicAdaptive { .. } = contract.thinking {
-                match req.tier {
-                    ReasoningTier::Low => body["output_config"] = json!({ "effort": "low" }),
-                    ReasoningTier::Medium => body["output_config"] = json!({ "effort": "medium" }),
-                    ReasoningTier::High => {}
+                match (req.tier, extra_effort(contract.thinking, req)) {
+                    (ReasoningTier::Low, _) => body["output_config"] = json!({ "effort": "low" }),
+                    (ReasoningTier::Medium, _) => {
+                        body["output_config"] = json!({ "effort": "medium" })
+                    }
+                    (ReasoningTier::High, Some(extra)) => {
+                        body["output_config"] = json!({ "effort": extra.as_str() })
+                    }
+                    (ReasoningTier::High, None) => {}
                 }
             }
             if !thinking_on && contract.sampling {
@@ -1151,6 +1169,7 @@ mod tests {
             tier: ReasoningTier::High,
             tools: Vec::new(),
             cache_key: None,
+            effort: None,
         }
     }
 
@@ -1517,6 +1536,82 @@ mod tests {
             assert!(p.body.get("temperature").is_none(), "{model}");
             assert!(p.body["instructions"].as_str().unwrap().contains("Douglas"));
         }
+    }
+
+    #[test]
+    fn extra_efforts_go_where_documented_and_clamp_elsewhere() {
+        use crate::types::ExtraEffort::{Max, XHigh};
+        for (model, wanted, sent) in [
+            ("gpt-6-astra", Max, "max"),
+            ("gpt-6-astra", XHigh, "xhigh"),
+            ("gpt-5.6-sol", Max, "max"),
+            ("gpt-5.5", Max, "xhigh"),
+            ("gpt-5.5", XHigh, "xhigh"),
+            ("gpt-5.4", Max, "high"),
+        ] {
+            let mut r = req(model);
+            r.effort = Some(wanted);
+            let p = prepare(Provider::OpenAI, "https://api.openai.com", "k", &r);
+            assert_eq!(p.body["reasoning"]["effort"], sent, "{model} {wanted:?}");
+        }
+        // Below High the extra level is never sent.
+        let mut r = req("gpt-6-astra");
+        r.effort = Some(Max);
+        r.tier = ReasoningTier::Medium;
+        let p = prepare(Provider::OpenAI, "https://api.openai.com", "k", &r);
+        assert_eq!(p.body["reasoning"]["effort"], "medium");
+        // Fable documents xhigh and max; Opus 5 documents High, so it stays default.
+        let mut r = req("claude-fable-5-1");
+        r.effort = Some(Max);
+        let p = prepare(Provider::Anthropic, "https://api.anthropic.com", "k", &r);
+        assert_eq!(p.body["output_config"]["effort"], "max");
+        let mut r = req("claude-opus-5");
+        r.effort = Some(Max);
+        let p = prepare(Provider::Anthropic, "https://api.anthropic.com", "k", &r);
+        assert!(p.body.get("output_config").is_none());
+        // The ladder providers already spend `max` on High: nothing extra to add.
+        let mut r = req("deepseek-v4-pro");
+        r.effort = Some(Max);
+        let plain = prepare(
+            Provider::DeepSeek,
+            "https://api.deepseek.com",
+            "k",
+            &req("deepseek-v4-pro"),
+        );
+        let with = prepare(Provider::DeepSeek, "https://api.deepseek.com", "k", &r);
+        assert_eq!(plain.body, with.body);
+    }
+
+    #[test]
+    fn the_catalog_lists_extra_levels_per_model() {
+        use crate::types::ExtraEffort::{Max, XHigh};
+        let knob = |p, m| model_row(p, m).contract.thinking;
+        assert_eq!(
+            knob(Provider::OpenAI, "gpt-6-astra").extra_efforts(),
+            &[XHigh, Max]
+        );
+        assert_eq!(
+            knob(Provider::OpenAI, "gpt-5.6-luna").extra_efforts(),
+            &[XHigh, Max]
+        );
+        assert_eq!(knob(Provider::OpenAI, "gpt-5.5").extra_efforts(), &[XHigh]);
+        assert!(knob(Provider::OpenAI, "gpt-5.4").extra_efforts().is_empty());
+        assert_eq!(
+            knob(Provider::Anthropic, "claude-fable-5-1").extra_efforts(),
+            &[XHigh, Max]
+        );
+        assert!(knob(Provider::Anthropic, "claude-opus-5")
+            .extra_efforts()
+            .is_empty());
+        assert!(knob(Provider::Google, "gemini-3.1-pro-preview")
+            .extra_efforts()
+            .is_empty());
+        assert!(knob(Provider::Kimi, "kimi-k3").extra_efforts().is_empty());
+        // A scanned id newer than the table inherits its family's levels.
+        assert_eq!(
+            knob(Provider::OpenAI, "gpt-5.6-hypothetical").extra_efforts(),
+            &[XHigh, Max]
+        );
     }
 
     #[test]

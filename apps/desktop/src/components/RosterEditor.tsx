@@ -8,28 +8,27 @@
 import type {
   DiscoveredModel,
   EngineCatalogRow,
-  EngineReasoningTier,
+  EngineExtraEffort,
   EngineSeat,
 } from "@socratic-council/shared";
 import { useState } from "react";
 
-import {
-  PROVIDER_INFO,
-  REASONING_TIER_OPTIONS,
-  type AppConfig,
-  type Provider,
-} from "../stores/config";
+import { PROVIDER_INFO, type AppConfig, type Provider } from "../stores/config";
 
 import { Dropdown } from "./Dropdown";
 import { ProviderIcon } from "./icons/ProviderIcons";
-import { ModelPicker } from "./ModelPicker";
+import { AUTO_CHOICES, ModelPicker, autoPreview } from "./ModelPicker";
 import {
   MAX_SEATS,
   addSeat,
   defaultRoster,
+  reasoningOptions,
+  reasoningPatch,
+  reasoningValue,
   removeSeat,
   renameSeat,
   updateSeat,
+  type ReasoningChoice,
 } from "./rosterHelpers";
 
 const PROVIDERS = Object.keys(PROVIDER_INFO) as Provider[];
@@ -39,12 +38,19 @@ const PROVIDER_OPTIONS = PROVIDERS.map((provider) => ({
   label: PROVIDER_INFO[provider].name,
 }));
 
-type ReasoningChoice = EngineReasoningTier | "default";
-
-const REASONING_OPTIONS: { value: ReasoningChoice; label: string }[] = [
-  { value: "default", label: "Per round (protocol)" },
-  ...REASONING_TIER_OPTIONS.map((tier) => ({ value: tier.value, label: tier.label })),
-];
+/** The levels above High the model a seat resolves to takes, per the catalog. */
+function seatExtras(
+  seat: EngineSeat,
+  available: DiscoveredModel[],
+  rows: EngineCatalogRow[] | undefined,
+  selection: AppConfig["modelSelection"][Provider] | undefined,
+): EngineExtraEffort[] {
+  const auto = AUTO_CHOICES.find((choice) => choice.value === seat.model);
+  const id = auto
+    ? autoPreview(seat.provider, auto.tier, available, selection?.[auto.tier], rows)
+    : seat.model;
+  return rows?.find((row) => row.id === id)?.extraEfforts ?? [];
+}
 
 export interface RosterEditorProps {
   roster: EngineSeat[];
@@ -88,6 +94,12 @@ export function RosterEditor({
         {roster.map((seat, index) => {
           const info = PROVIDER_INFO[seat.provider];
           const hasKey = keyed.has(seat.provider);
+          const extras = seatExtras(
+            seat,
+            availableByProvider[seat.provider],
+            engineRows[seat.provider],
+            modelSelection[seat.provider],
+          );
           return (
             // Earlier rows stack above later ones so an open model panel is not
             // painted over by the row beneath it. The row itself keeps full
@@ -130,15 +142,11 @@ export function RosterEditor({
                   ariaLabel={`Seat ${seat.name} model`}
                 />
                 <Dropdown<ReasoningChoice>
-                  value={seat.reasoning ?? "default"}
+                  value={reasoningValue(seat, extras)}
                   ariaLabel={`Seat ${seat.name} reasoning`}
-                  options={REASONING_OPTIONS}
+                  options={reasoningOptions(extras)}
                   onChange={(choice) =>
-                    onChange(
-                      updateSeat(roster, seat.id, {
-                        reasoning: choice === "default" ? undefined : choice,
-                      }),
-                    )
+                    onChange(updateSeat(roster, seat.id, reasoningPatch(choice)))
                   }
                 />
                 <div className="flex items-center gap-2 justify-end">

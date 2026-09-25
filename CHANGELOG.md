@@ -11,6 +11,10 @@ Three things ship from this repository: the desktop app, the terminal client
   returned.
 - The terminal client stops reading the desktop app's old App Sandbox
   container once the app has moved its data out.
+- A seat can reason above High where the model documents it: Extra high and
+  Max on GPT-6 Astra, GPT-5.6 and the Claude Fable family, Extra high on
+  GPT-5.5. Both clients offer the levels a seat's model takes, and a model
+  that tops out lower gets its highest.
 
 ## Desktop app 3.0.0 (unreleased) · CLI 2.0.0 · engine 0.1.0 (2026-09-25)
 
