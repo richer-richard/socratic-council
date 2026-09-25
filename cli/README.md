@@ -274,9 +274,13 @@ plus a stance heuristic, topped up from Wikipedia when evidence is thin),
 `search_attachments`, `read_attachment`, and `read_file` / `write_file`
 inside the session workspace. `--tools all` adds `run_command`: a shell
 command under the macOS sandbox (no network, no keychain or directory-service
-reads, writes only inside the workspace; `git` and `python3` work) or under
-bubblewrap on Linux, with a timeout and an output cap; elsewhere it refuses
-unless `[tools.shell] unsandboxed = true`, and then the record says so.
+reads, writes only inside the workspace and never to the workspace folder
+itself, signals only to its own processes; `git` and `python3` work) or under
+bubblewrap on Linux, with a timeout and an output cap. Where no sandbox exists
+the shell stays off, and the plan says why, unless `[tools.shell] unsandboxed
+= true`, and then the record says so. The installed desktop app cannot offer
+the shell at all (macOS will not start the command sandbox inside the app's
+own), so a council that needs it runs here.
 Results are capped, scrubbed of directives and fenced as untrusted data. At
 most two calls per turn and two tool rounds per turn; `--ask-tools` makes
 every call wait for your yes. `probe --tools` proves the tool-call round trip
@@ -287,7 +291,9 @@ default, `--handoff DIR` to choose — with `handoff.md` (the question, the
 answer, the next steps as a checklist, open questions, dissent, evidence, the
 workspace listing), `record.md`, `document.md` when there is one, `board.md`
 and `session.json`. `socratic-council handoff <session-id> [--to DIR]`
-rebuilds it for any stored session.
+rebuilds it for any stored session. The folder is never written through a
+symbolic link and the workspace listing never follows one; a workspace that
+was swapped for a link during the run gets no hand-off at all.
 
 **Cost.** Every call is metered with the provider's published prices,
 including prompt-cache hits and writes. Unpriced models count tokens and
