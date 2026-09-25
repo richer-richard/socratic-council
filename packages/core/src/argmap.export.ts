@@ -5,9 +5,8 @@
  *   - exportArgGraphToMermaid(graph) → `graph TD` Mermaid source
  *   - exportArgGraphToJSON(graph)    → deterministic JSON (stable key order)
  *
- * SVG and PNG come from the rendering side (the panel uses html-to-image
- * over the .react-flow__viewport DOM). Those are not pure functions of
- * the graph — they need the DOM — so they live in the desktop app.
+ * SVG and PNG are not produced here: they are not pure functions of the
+ * graph, they need a rendered DOM.
  */
 
 import type { ArgEdge, ArgEdgeRelation, ArgGraph, ArgNode, ArgNodeKind } from "./argmap.js";
