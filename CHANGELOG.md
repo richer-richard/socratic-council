@@ -4,6 +4,14 @@ Three things ship from this repository: the desktop app, the terminal client
 (`socratic-council` on crates.io) and the engine they share
 (`socratic-council-engine` on crates.io). Their versions move independently.
 
+## Unreleased: CLI 2.0.1 · engine 0.1.1
+
+- A shell command's background jobs end with it. Before, a job with its
+  output redirected away kept running and could act after the command
+  returned.
+- The terminal client stops reading the desktop app's old App Sandbox
+  container once the app has moved its data out.
+
 ## Desktop app 3.0.0 (unreleased) · CLI 2.0.0 · engine 0.1.0 (2026-09-25)
 
 Version 3 replaces the free-running chat of v2 with a structured deliberation
@@ -53,11 +61,17 @@ clients.
 - The file tools refuse a workspace that has become a link.
 - The hand-off folder is never written through a link, and its workspace
   listing never follows one.
-- The installed desktop app no longer offers the shell: macOS will not start
-  the command sandbox inside the app's own sandbox, and a bare shell there
-  could reach the network and the app's keys. The Tools card says so, and the
-  engine turns the shell off, with a note on the plan, wherever it cannot run
-  one.
+- The desktop app no longer uses the macOS App Sandbox, so shell commands run
+  in the app under the same command sandbox as the terminal. macOS will not
+  start that sandbox inside App Sandbox, and a bare shell there could reach
+  the network and the app's keys. The engine turns the shell off, with a note
+  on the plan, anywhere it cannot run one.
+- The first launch of the app copies the previous build's data out of its App
+  Sandbox container and leaves the original in place. The copy only counts as
+  done once the app has read it back. If it fails, the app stops rather than
+  open an empty vault, and if the copied settings do not show up, it says so.
+- Development builds (`tauri:dev`) use their own identifier and folders, so
+  they never read or write the installed app's data.
 - API keys held for a run are overwritten when it ends, and never printed.
 - The app's permissions are cut to the five commands the front end calls.
 - Ten unused front-end dependencies removed.

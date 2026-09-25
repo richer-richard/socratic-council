@@ -160,9 +160,13 @@ mod tests {
     use super::*;
 
     fn temp_dir() -> PathBuf {
+        // Tests run in parallel and the clock can hand two of them the same
+        // instant, so a counter keeps each folder its own.
+        static NEXT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
         let dir = std::env::temp_dir().join(format!(
-            "sc-sync-{}-{}",
+            "sc-sync-{}-{}-{}",
             std::process::id(),
+            NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .map(|d| d.as_nanos())

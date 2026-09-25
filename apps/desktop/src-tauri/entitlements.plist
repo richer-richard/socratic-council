@@ -2,26 +2,14 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-    <!-- App Sandbox: enabled for defense-in-depth so the app can only touch
-         resources it's been explicitly granted. -->
-    <key>com.apple.security.app-sandbox</key>
-    <true/>
-
-    <!-- Outbound network required for provider API calls and the vault's
-         proxy support. No inbound connections — the app doesn't run a server. -->
-    <key>com.apple.security.network.client</key>
-    <true/>
-    <key>com.apple.security.network.server</key>
-    <false/>
-
-    <!-- Read/write to files the user explicitly selects via the system file
-         dialog (attachment uploads, bundle import targets, custom export
-         destinations). Sandbox grants per-file access when the dialog is used. -->
-    <key>com.apple.security.files.user-selected.read-write</key>
-    <true/>
-
-    <!-- Scoped Downloads folder — where exports land by default. -->
-    <key>com.apple.security.files.downloads.read-write</key>
-    <true/>
+    <!-- No App Sandbox. Inside it macOS will not let the shell tool start
+         its own, much tighter sandbox (sandbox-exec: no network, writes only
+         in the session workspace), and a shell run bare under the app's
+         sandbox could reach the network and the app's keys. The app keeps
+         the hardened runtime (tauri.conf.json), the webview keeps its strict
+         CSP and no network of its own, and IPC is limited to the commands in
+         capabilities/default.json. Every build up to 3.0.0 was sandboxed:
+         src/data_move.rs copies that build's data out of its container on
+         the first launch. -->
 </dict>
 </plist>

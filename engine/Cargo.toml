@@ -1,6 +1,6 @@
 [package]
 name = "socratic-council-engine"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 rust-version = "1.82"
 description = "The Socratic Council deliberation engine: a council of AI models (any model per seat, eight providers) deliberates in structured rounds with native tool calling and leaves a decision record."

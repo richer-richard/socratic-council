@@ -6,6 +6,7 @@
 #![forbid(unsafe_code)]
 
 mod allowlist;
+mod data_move;
 mod engine_host;
 mod http;
 mod redact;
@@ -18,6 +19,11 @@ use tauri::Manager;
 /// Configure the Tauri application
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Before the builder exists, so no window (and no WebKit storage) is open
+    // yet: the first launch outside the App Sandbox copies the container's
+    // data to where an unsandboxed app reads it.
+    data_move::at_startup();
+
     #[allow(unused_mut)]
     let mut builder = tauri::Builder::default()
         .manage(http::RequestRegistry::default())
@@ -58,6 +64,8 @@ pub fn run() {
             http::http_cancel,
             vault_file::vault_get_dek,
             vault_file::vault_reset,
+            vault_file::app_data_move_status,
+            vault_file::app_data_move_confirm,
             session_sync::session_sync_list,
             session_sync::session_sync_read,
             session_sync::session_sync_write,

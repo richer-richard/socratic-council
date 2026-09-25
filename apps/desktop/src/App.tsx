@@ -9,7 +9,14 @@ import { ProjectDetail } from "./pages/ProjectDetail";
 import { Session } from "./pages/Session";
 import { Settings } from "./pages/Settings";
 import { Transcript } from "./pages/Transcript";
+import { quitApp } from "./services/appWindow";
 import { loadSessionAttachmentDocuments, type ComposerAttachment } from "./services/attachments";
+import {
+  blockedMessage,
+  confirmDataMove,
+  dataMoveStatus,
+  unreadMessage,
+} from "./services/dataMove";
 import {
   DEFAULT_LAUNCH,
   engineSettingsFromConfig,
@@ -123,6 +130,10 @@ export default function App() {
    * re-asks).
    */
   const [vaultInitFailed, setVaultInitFailed] = useState(false);
+  /** Set when the vault is closed because the container data has not moved. */
+  const [dataMoveNote, setDataMoveNote] = useState<string | null>(null);
+  /** Set when the copy landed but WebKit showed none of the app's storage. */
+  const [dataMoveUnread, setDataMoveUnread] = useState<string | null>(null);
   const [encryptionBypassAcked, setEncryptionBypassAcked] = useState<boolean>(() => {
     try {
       return sessionStorage.getItem("socratic-council-encryption-bypass-acked") === "1";
@@ -186,6 +197,9 @@ export default function App() {
       const failedDecrypts = getDecryptFailureCount();
       if (status === "init_failed") {
         setVaultInitFailed(true);
+        setDataMoveNote(blockedMessage(await dataMoveStatus()));
+      } else if ((await confirmDataMove()) === "unread") {
+        setDataMoveUnread(unreadMessage((await dataMoveStatus())?.container ?? null));
       }
       if (status === "quarantined" || failedDecrypts > 0) {
         setVaultRecoveryNotice({
@@ -620,45 +634,60 @@ export default function App() {
       <ErrorBoundary label="app">
         <div className="h-screen flex items-center justify-center bg-gray-900 text-gray-100 p-6">
           <div
-            className="max-w-lg w-full rounded-2xl border border-red-500/30 bg-red-500/5 p-6"
+            className="max-w-lg w-full border border-red-500/30 bg-red-500/5 p-6"
             style={{ display: "flex", flexDirection: "column", gap: "16px" }}
           >
-            <h2 className="text-lg font-semibold text-red-300">Encryption is unavailable</h2>
+            <h2 className="text-lg font-semibold text-red-300">
+              {dataMoveNote
+                ? "Your data is still in the old app folder"
+                : "Encryption is unavailable"}
+            </h2>
             <p className="text-sm text-gray-300 leading-relaxed">
-              The encryption key file couldn't be initialized on this machine. Sessions and API keys
-              can't be safely stored right now. This usually means filesystem permissions on{" "}
-              <code className="text-gray-200">
-                ~/Library/Application Support/com.socratic-council.desktop/
-              </code>{" "}
-              are blocking the app from writing the key file.
+              {dataMoveNote ??
+                "The encryption key file couldn't be initialized on this machine. Sessions and API keys can't be safely stored right now. This usually means filesystem permissions on ~/Library/Application Support/com.socratic-council.desktop/ are blocking the app from writing the key file."}
             </p>
             <div className="flex gap-3 pt-2">
-              <button
-                type="button"
-                onClick={() => window.location.reload()}
-                className="px-4 py-2 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 text-sm font-medium transition-colors"
-              >
-                Retry
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  try {
-                    sessionStorage.setItem("socratic-council-encryption-bypass-acked", "1");
-                  } catch {
-                    /* sessionStorage unavailable; bypass stays in-memory only */
-                  }
-                  setEncryptionBypassAcked(true);
-                }}
-                className="px-4 py-2 rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-300 text-sm font-medium transition-colors"
-              >
-                Continue without encryption
-              </button>
+              {dataMoveNote ? (
+                // The copy only runs as the app starts, so a reload cannot retry it.
+                <button
+                  type="button"
+                  onClick={() => void quitApp()}
+                  className="px-4 py-2 bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 text-sm font-medium transition-colors"
+                >
+                  Quit
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => window.location.reload()}
+                  className="px-4 py-2 bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 text-sm font-medium transition-colors"
+                >
+                  Retry
+                </button>
+              )}
+              {!dataMoveNote && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    try {
+                      sessionStorage.setItem("socratic-council-encryption-bypass-acked", "1");
+                    } catch {
+                      /* sessionStorage unavailable; bypass stays in-memory only */
+                    }
+                    setEncryptionBypassAcked(true);
+                  }}
+                  className="px-4 py-2 bg-gray-800 hover:bg-gray-700 text-gray-300 text-sm font-medium transition-colors"
+                >
+                  Continue without encryption
+                </button>
+              )}
             </div>
-            <p className="text-xs text-gray-500 leading-relaxed">
-              Continuing without encryption stores keys and sessions in plain text on disk for this
-              session only. The setting resets when you relaunch the app.
-            </p>
+            {!dataMoveNote && (
+              <p className="text-xs text-gray-500 leading-relaxed">
+                Continuing without encryption stores keys and sessions in plain text on disk for
+                this session only. The setting resets when you relaunch the app.
+              </p>
+            )}
           </div>
         </div>
       </ErrorBoundary>
@@ -679,6 +708,19 @@ export default function App() {
               type="button"
               onClick={() => setAppError(null)}
               className="text-red-200 hover:text-red-50"
+              style={{ background: "none", border: "none", cursor: "pointer" }}
+            >
+              Dismiss
+            </button>
+          </div>
+        ) : null}
+        {dataMoveUnread ? (
+          <div className="border-b border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-100 flex items-start gap-3">
+            <div style={{ flex: 1 }}>{dataMoveUnread}</div>
+            <button
+              type="button"
+              onClick={() => setDataMoveUnread(null)}
+              className="text-amber-200 hover:text-amber-50"
               style={{ background: "none", border: "none", cursor: "pointer" }}
             >
               Dismiss

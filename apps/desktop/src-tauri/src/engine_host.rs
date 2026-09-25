@@ -239,9 +239,9 @@ fn roster_from(seats: &[SeatJson]) -> Roster {
 }
 
 /// The desktop never runs a plain shell where a real sandbox exists, and
-/// drops the shell entirely in a process that cannot run it (the installed,
-/// App-Sandboxed app). The Tools card says so. The engine would turn it off
-/// anyway, with a note on every plan.
+/// drops the shell entirely in a process that cannot run it (a build signed
+/// into the App Sandbox, as every build up to 3.0.0 was). The Tools card
+/// says so. The engine would turn it off anyway, with a note on every plan.
 fn desktop_tools(mut tools: ToolPolicy, support: Support) -> ToolPolicy {
     match support {
         Support::Blocked(_) => tools.shell.enabled = false,
