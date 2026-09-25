@@ -169,6 +169,22 @@ fn cycle_reasoning(current: Option<ReasoningTier>) -> Option<ReasoningTier> {
     }
 }
 
+/// The Tools row's hint at `all`, honest about this machine: the engine
+/// turns the shell off at run start where it cannot run one.
+fn all_tools_hint(policy: &ToolPolicy) -> String {
+    match crate::tools::shell::support() {
+        crate::tools::shell::Support::Sandboxed(_) => "safe tools plus the sandboxed shell".into(),
+        crate::tools::shell::Support::UnsandboxedOnly if policy.shell.unsandboxed => {
+            "safe tools plus a shell with no sandbox".into()
+        }
+        crate::tools::shell::Support::UnsandboxedOnly => {
+            "no sandbox on this machine, so the shell stays off (tools.shell.unsandboxed opts in)"
+                .into()
+        }
+        crate::tools::shell::Support::Blocked(reason) => reason.into(),
+    }
+}
+
 fn tools_level(policy: &ToolPolicy) -> &'static str {
     if policy.shell.enabled {
         "all"
@@ -1050,6 +1066,7 @@ fn render_rows(f: &mut Frame, area: Rect, app: &App) {
         ]),
     };
     let level = tools_level(&config.tools);
+    let all_hint = all_tools_hint(&config.tools);
     entries.push(plain(
         SettingsRow::ToolsLevel,
         "Tools",
@@ -1057,7 +1074,7 @@ fn render_rows(f: &mut Frame, area: Rect, app: &App) {
         match level {
             "none" => "seats reason without tools",
             "safe" => "attachments, web search, claim checks, workspace files",
-            _ => "safe tools plus the sandboxed shell",
+            _ => &all_hint,
         },
     ));
     entries.push(plain(

@@ -67,6 +67,7 @@ pub fn run() {
             engine_host::engine_cancel,
             engine_host::engine_catalog,
             engine_host::engine_scan,
+            engine_host::engine_shell_support,
         ])
         .setup(|_app| {
             #[cfg(debug_assertions)]

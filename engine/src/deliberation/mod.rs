@@ -474,13 +474,31 @@ impl EngineConfig {
     }
 }
 
-/// A resolved moderator or utility slot.
-#[derive(Debug, Clone)]
+/// A resolved moderator or utility slot. The key is overwritten when the
+/// spec is dropped and never printed.
+#[derive(Clone)]
 struct ModeratorSpec {
     provider: Provider,
     model: String,
     base_url: String,
     api_key: String,
+}
+
+impl std::fmt::Debug for ModeratorSpec {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ModeratorSpec")
+            .field("provider", &self.provider)
+            .field("model", &self.model)
+            .field("base_url", &self.base_url)
+            .field("api_key", &"<redacted>")
+            .finish()
+    }
+}
+
+impl Drop for ModeratorSpec {
+    fn drop(&mut self) {
+        zeroize::Zeroize::zeroize(&mut self.api_key);
+    }
 }
 
 const MODERATOR_ORDER: [Provider; 8] = [
@@ -512,6 +530,17 @@ pub struct Deliberation {
     forced: Option<Deliverable>,
     store: Option<SessionStore>,
     prior_notes: Option<String>,
+}
+
+/// The run's own copies of the keys are overwritten when it ends. The
+/// per-request header values the HTTP client builds from them are not: they
+/// live only for the length of one request.
+impl Drop for Deliberation {
+    fn drop(&mut self) {
+        for key in self.keys.values_mut() {
+            zeroize::Zeroize::zeroize(key);
+        }
+    }
 }
 
 /// Everything a run accumulates.
@@ -627,10 +656,28 @@ impl Deliberation {
 
     /// Drive the whole protocol. Returns the session document (format v2).
     pub async fn run(
-        self,
+        mut self,
         tx: UnboundedSender<DebateEvent>,
         rx: UnboundedReceiver<EngineInput>,
     ) -> Value {
+        // A shell the policy enables but this process cannot run comes off
+        // before the planner sees the tool list, and the plan says why,
+        // instead of every call failing mid-debate.
+        let mut shell_note = None;
+        if self.config.tools.shell.enabled {
+            if let Some(why) = tools::shell::unavailable_for(&self.config.tools.shell) {
+                self.config.tools.shell.enabled = false;
+                shell_note = Some(why);
+            }
+        }
+        // The workspace is resolved once, now, before any tool can touch it,
+        // so a path the user gave through a symlink is followed while that
+        // is still their choice. From here on the tools refuse a root that
+        // has become a link.
+        let _ = std::fs::create_dir_all(&self.config.workspace);
+        if let Ok(real) = self.config.workspace.canonicalize() {
+            self.config.workspace = real;
+        }
         let this = &self;
         let hub = InputHub::spawn(rx);
         let session_id = this
@@ -647,6 +694,7 @@ impl Deliberation {
             .map(|d| DailyLedger::load(d));
         let mut last_session_usd = 0.0f64;
         let mut state = RunState::default();
+        state.corrections.extend(shell_note);
         let names: BTreeMap<String, String> = this
             .roster
             .seats
@@ -714,6 +762,11 @@ impl Deliberation {
                 std::fs::Permissions::from_mode(0o700),
             );
         }
+        // The workspace as it really is before any tool runs. The shell tool
+        // can delete this directory and put a symlink in its place; comparing
+        // this against the path at hand-off time catches that, so the hand-off
+        // never writes through a redirected workspace.
+        let workspace_canon = std::fs::canonicalize(&this.config.workspace).ok();
         let tiers = this.config.protocol.tiers;
 
         // A cost snapshot plus the budget check, after anything billable.
@@ -1797,12 +1850,24 @@ impl Deliberation {
             "completed"
         };
         let mut doc = this.session_json(&session_id, created_at, &state, &ledger, status);
+        let in_workspace = this.config.handoff_dir.is_none();
         let handoff_dir = this
             .config
             .handoff_dir
             .clone()
             .unwrap_or_else(|| this.config.workspace.join("handoff"));
-        match crate::handoff::write_handoff(&handoff_dir, &doc) {
+        // The default hand-off sits inside the workspace, which the seats'
+        // shell can swap for a symlink. If the workspace no longer resolves to
+        // where it started, writing into it would land outside, so skip it.
+        let workspace_swapped = in_workspace
+            && workspace_canon.is_some()
+            && std::fs::canonicalize(&this.config.workspace).ok() != workspace_canon;
+        let written = if workspace_swapped {
+            Err("the session workspace was replaced during the run".to_string())
+        } else {
+            crate::handoff::write_handoff(&handoff_dir, &doc)
+        };
+        match written {
             Ok(files) => {
                 let dir = handoff_dir.display().to_string();
                 doc["handoff"] = json!({ "dir": dir, "files": files });

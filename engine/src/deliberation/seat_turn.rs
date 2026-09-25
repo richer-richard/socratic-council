@@ -34,8 +34,9 @@ pub struct TurnOutcome {
     pub calls: u32,
 }
 
-/// A seat with its model resolved and its credentials in hand.
-#[derive(Debug, Clone)]
+/// A seat with its model resolved and its credentials in hand. The key is
+/// overwritten when the spec is dropped and never printed.
+#[derive(Clone)]
 pub struct SeatSpec {
     pub id: String,
     pub name: String,
@@ -43,6 +44,25 @@ pub struct SeatSpec {
     pub model: String,
     pub base_url: String,
     pub api_key: String,
+}
+
+impl std::fmt::Debug for SeatSpec {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SeatSpec")
+            .field("id", &self.id)
+            .field("name", &self.name)
+            .field("provider", &self.provider)
+            .field("model", &self.model)
+            .field("base_url", &self.base_url)
+            .field("api_key", &"<redacted>")
+            .finish()
+    }
+}
+
+impl Drop for SeatSpec {
+    fn drop(&mut self) {
+        zeroize::Zeroize::zeroize(&mut self.api_key);
+    }
 }
 
 pub struct TurnCtx<'a> {

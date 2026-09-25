@@ -18,7 +18,6 @@ export default defineConfig({
       output: {
         manualChunks: {
           react: ["react", "react-dom"],
-          virtuoso: ["react-virtuoso"],
           markdown: [
             "react-markdown",
             "remark-gfm",
