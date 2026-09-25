@@ -82,6 +82,30 @@ async function invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T
   return tauriInvoke<T>(cmd, args);
 }
 
+/** What the shell tool can do in this build (`engine_host.rs::ShellSupportJson`). */
+export interface ShellSupport {
+  /** Whether a council may use shell commands here at all. */
+  available: boolean;
+  /** The sandbox commands run under ("macos", "bubblewrap"), or none. */
+  sandbox: string | null;
+  /** Why the shell is unavailable, ready to show. */
+  reason: string | null;
+}
+
+/**
+ * Ask the backend whether this build can run shell commands. The installed
+ * app cannot (macOS will not nest the command sandbox inside the app's own).
+ * Outside Tauri there is nothing to ask, so the answer is null.
+ */
+export async function engineShellSupport(): Promise<ShellSupport | null> {
+  if (!isEngineAvailable()) return null;
+  try {
+    return await invoke<ShellSupport>("engine_shell_support");
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Build the request: only seats whose provider has a key are sent, and only
  * those providers' keys travel with the request.

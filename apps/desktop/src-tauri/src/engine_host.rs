@@ -1,8 +1,11 @@
 //! The deliberation engine, hosted in the Tauri backend. The webview starts a
 //! run with `engine_start`, receives every event on the `engine://event`
 //! channel, answers questions and tool approvals with `engine_input`, and
-//! stops a run with `engine_cancel`. API keys arrive with the request, live
-//! in this process only for the run, and are overwritten when it ends.
+//! stops a run with `engine_cancel`. API keys arrive with the request and
+//! live in this process only for the run: the request's keys move into the
+//! engine, which overwrites its copies when the run ends, and the copy kept
+//! for scrubbing error text is overwritten when the event stream closes. The
+//! HTTP client's per-request header values are not overwritten.
 
 use crate::redact::redact_with_secrets;
 use serde::{Deserialize, Serialize};
@@ -14,6 +17,7 @@ use socratic_council_engine::deliberation::{
 };
 use socratic_council_engine::providers::scan::scan_models;
 use socratic_council_engine::store::{new_session_id, SessionStore, StoreLocation};
+use socratic_council_engine::tools::shell::{self, SandboxKind, Support};
 use socratic_council_engine::tools::ToolPolicy;
 use socratic_council_engine::types::{ModelChoice, ModelRef, Provider, ReasoningTier, Roster, Seat};
 use socratic_council_engine::{catalog, http_client};
@@ -234,6 +238,62 @@ fn roster_from(seats: &[SeatJson]) -> Roster {
     }
 }
 
+/// The desktop never runs a plain shell where a real sandbox exists, and
+/// drops the shell entirely in a process that cannot run it (the installed,
+/// App-Sandboxed app). The Tools card says so. The engine would turn it off
+/// anyway, with a note on every plan.
+fn desktop_tools(mut tools: ToolPolicy, support: Support) -> ToolPolicy {
+    match support {
+        Support::Blocked(_) => tools.shell.enabled = false,
+        Support::Sandboxed(_) => tools.shell.unsandboxed = false,
+        Support::UnsandboxedOnly => {}
+    }
+    tools
+}
+
+/// What the shell tool can do in this process, for the Tools card.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ShellSupportJson {
+    /// Whether a council may use shell commands here at all.
+    pub available: bool,
+    /// The sandbox commands run under: "macos", "bubblewrap", or none.
+    pub sandbox: Option<&'static str>,
+    /// Why the shell is unavailable, in words for the settings card.
+    pub reason: Option<&'static str>,
+}
+
+impl From<Support> for ShellSupportJson {
+    fn from(s: Support) -> Self {
+        match s {
+            Support::Blocked(reason) => ShellSupportJson {
+                available: false,
+                sandbox: None,
+                reason: Some(reason),
+            },
+            Support::Sandboxed(kind) => ShellSupportJson {
+                available: true,
+                sandbox: Some(match kind {
+                    SandboxKind::MacOs => "macos",
+                    SandboxKind::Bubblewrap => "bubblewrap",
+                    SandboxKind::None => "none",
+                }),
+                reason: None,
+            },
+            Support::UnsandboxedOnly => ShellSupportJson {
+                available: true,
+                sandbox: None,
+                reason: None,
+            },
+        }
+    }
+}
+
+#[tauri::command]
+pub fn engine_shell_support() -> ShellSupportJson {
+    shell::support().into()
+}
+
 /// Overwrite key material before it is dropped.
 fn wipe(keys: &mut Vec<String>) {
     for k in keys.iter_mut() {
@@ -249,7 +309,7 @@ fn wipe(keys: &mut Vec<String>) {
 pub async fn engine_start(
     app: tauri::AppHandle,
     registry: tauri::State<'_, EngineRegistry>,
-    request: StartRequest,
+    mut request: StartRequest,
 ) -> Result<String, String> {
     let session_id = match request.session_id.as_deref().map(str::trim) {
         Some(id) if !id.is_empty() => id.to_string(),
@@ -288,7 +348,7 @@ pub async fn engine_start(
             provider: request.utility.provider,
             model: ModelChoice::parse(&request.utility.model),
         },
-        tools: request.tools.clone(),
+        tools: desktop_tools(request.tools.clone(), shell::support()),
         protocol: request.protocol.clone(),
         budget: budget_policy(&request.budget),
         workspace,
@@ -305,14 +365,11 @@ pub async fn engine_start(
         })
         .collect();
     let http = http_client(request.proxy.as_deref())?;
-    let engine = Deliberation::new(
-        http,
-        config,
-        request.topic.clone(),
-        roster,
-        request.keys.clone(),
-        HashMap::new(),
-    )
+    // One copy for scrubbing error text, overwritten when the stream closes;
+    // the request's own keys move into the engine rather than being cloned.
+    let mut secrets: Vec<String> = request.keys.values().cloned().collect();
+    let keys = std::mem::take(&mut request.keys);
+    let engine = Deliberation::new(http, config, request.topic.clone(), roster, keys, HashMap::new())
     .with_attachments(attachments)
     .with_forced_deliverable(request.forced)
     .with_store(Some(store))
@@ -320,7 +377,6 @@ pub async fn engine_start(
 
     let (tx, mut rx) = unbounded_channel::<DebateEvent>();
     let (input, input_rx) = unbounded_channel::<EngineInput>();
-    let mut secrets: Vec<String> = request.keys.values().cloned().collect();
     let forward_app = app.clone();
     let forward_id = session_id.clone();
     let forwarder = tauri::async_runtime::spawn(async move {
@@ -478,6 +534,29 @@ mod tests {
         assert_eq!(fable.class, "flagship");
         assert_eq!(fable.output_cost_per_1m, Some(50.0));
         assert!(fable.tools && fable.thinking && fable.catalogued);
+    }
+
+    #[test]
+    fn the_desktop_never_runs_a_plain_shell_where_a_sandbox_exists() {
+        let mut asked = ToolPolicy::all();
+        asked.shell.unsandboxed = true;
+        let sandboxed = desktop_tools(asked.clone(), Support::Sandboxed(SandboxKind::MacOs));
+        assert!(sandboxed.shell.enabled && !sandboxed.shell.unsandboxed);
+        let blocked = desktop_tools(asked.clone(), Support::Blocked("no"));
+        assert!(!blocked.shell.enabled, "the installed app drops the shell");
+        let bare = desktop_tools(asked, Support::UnsandboxedOnly);
+        assert!(bare.shell.enabled && bare.shell.unsandboxed, "the opt-in stands where no sandbox exists");
+    }
+
+    #[test]
+    fn shell_support_serialises_for_the_tools_card() {
+        let json = serde_json::to_value(ShellSupportJson::from(Support::Blocked("why"))).unwrap();
+        assert_eq!(json, serde_json::json!({"available": false, "sandbox": null, "reason": "why"}));
+        let json =
+            serde_json::to_value(ShellSupportJson::from(Support::Sandboxed(SandboxKind::MacOs))).unwrap();
+        assert_eq!(json, serde_json::json!({"available": true, "sandbox": "macos", "reason": null}));
+        // A test process is never App-Sandboxed.
+        assert!(engine_shell_support().available || cfg!(not(unix)));
     }
 
     #[test]

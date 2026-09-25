@@ -8,7 +8,9 @@ import type {
   EngineReasoningTier,
   EngineToolPolicy,
 } from "@socratic-council/shared";
+import { useEffect, useState } from "react";
 
+import { engineShellSupport, type ShellSupport } from "../../services/engine";
 import {
   POLICY_LIMITS,
   REASONING_TIER_OPTIONS,
@@ -16,6 +18,8 @@ import {
   type BudgetPolicy,
 } from "../../stores/config";
 import { Dropdown } from "../Dropdown";
+
+import { UNSANDBOXED_HINT, shellControls } from "./shellControls";
 
 function Toggle({
   label,
@@ -164,12 +168,22 @@ export function ToolsCard({
   tools: EngineToolPolicy;
   onChange: (patch: Partial<EngineToolPolicy>) => void;
 }) {
+  const [support, setSupport] = useState<ShellSupport | null>(null);
+  useEffect(() => {
+    let live = true;
+    void engineShellSupport().then((s) => {
+      if (live) setSupport(s);
+    });
+    return () => {
+      live = false;
+    };
+  }, []);
+  const shell = shellControls(support, tools.shell);
   return (
     <div className="settings-card">
       <h3 className="font-medium text-white mb-1">Tools</h3>
       <p className="text-xs text-gray-400 mb-4">
-        What a seat may do while it argues. Tool output is fenced as untrusted text; the shell runs
-        under the macOS sandbox inside the session workspace.
+        What a seat may do while it argues. Tool output is fenced as untrusted text.
       </p>
       <div className="space-y-4">
         <Toggle
@@ -198,11 +212,12 @@ export function ToolsCard({
         />
         <Toggle
           label="Shell commands"
-          hint="Run commands in the workspace (sandboxed, no network, timed out)"
-          checked={tools.shell.enabled}
+          hint={shell.hint}
+          checked={shell.checked}
+          disabled={shell.disabled}
           onChange={(enabled) => onChange({ shell: { ...tools.shell, enabled } })}
         />
-        {tools.shell.enabled && (
+        {shell.showOptions && (
           <div className="pl-4 border-l border-gray-700 space-y-4">
             <div className="grid sm:grid-cols-2 gap-4">
               <NumberField
@@ -222,12 +237,14 @@ export function ToolsCard({
                 }
               />
             </div>
-            <Toggle
-              label="Unsandboxed"
-              hint="Skip sandbox-exec. Only for a trusted topic on a machine you can afford to lose state on."
-              checked={tools.shell.unsandboxed}
-              onChange={(unsandboxed) => onChange({ shell: { ...tools.shell, unsandboxed } })}
-            />
+            {shell.showUnsandboxed && (
+              <Toggle
+                label="Unsandboxed"
+                hint={UNSANDBOXED_HINT}
+                checked={tools.shell.unsandboxed}
+                onChange={(unsandboxed) => onChange({ shell: { ...tools.shell, unsandboxed } })}
+              />
+            )}
           </div>
         )}
         <div className="grid sm:grid-cols-3 gap-4 pt-2">
