@@ -278,9 +278,9 @@ reads, writes only inside the workspace and never to the workspace folder
 itself, signals only to its own processes; `git` and `python3` work) or under
 bubblewrap on Linux, with a timeout and an output cap. Where no sandbox exists
 the shell stays off, and the plan says why, unless `[tools.shell] unsandboxed
-= true`, and then the record says so. The installed desktop app cannot offer
-the shell at all (macOS will not start the command sandbox inside the app's
-own), so a council that needs it runs here.
+= true`, and then the record says so. The desktop app runs the same sandboxed
+shell. It does not use the macOS App Sandbox, which would stop the command
+sandbox from starting.
 Results are capped, scrubbed of directives and fenced as untrusted data. At
 most two calls per turn and two tool rounds per turn; `--ask-tools` makes
 every call wait for your yes. `probe --tools` proves the tool-call round trip

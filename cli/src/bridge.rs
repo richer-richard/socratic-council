@@ -46,6 +46,10 @@ const SESSION_INDEX_KEY: &str = "socratic-council-session-index-v1";
 const SESSION_KEY_PREFIX: &str = "socratic-council-session:";
 #[cfg(feature = "desktop-bridge")]
 const ENC_PREFIX: &str = "ENC1:";
+/// Left in the app data dir by a build that copied its data out of the App
+/// Sandbox container (`apps/desktop/src-tauri/src/data_move.rs`, same name).
+#[cfg(feature = "desktop-bridge")]
+const MOVED_MARKER: &str = ".moved-out-of-app-sandbox";
 
 /// A summary row from the desktop app's decrypted session index — the same
 /// sessions the app's history sidebar shows.
@@ -236,10 +240,10 @@ mod imp {
 
             let mut bridge = Self::default();
 
-            // Candidate app-data dirs, most-specific first. On macOS the app is
-            // sandboxed, so its real data lives in the App Sandbox *container*
-            // (`~/Library/Containers/<id>/Data/...`) — search that before the
-            // plain (unsandboxed/dev) data dir.
+            // Candidate app-data dirs, most-specific first. Builds up to 3.0.0
+            // were sandboxed, so their data lives in the App Sandbox *container*
+            // (`~/Library/Containers/<id>/Data/...`), searched before the plain
+            // data dir until a later build has moved it out (the marker).
             let app_data_dirs = desktop_app_data_dirs();
             for dir in &app_data_dirs {
                 let dek_path = dir.join("vault.key");
@@ -409,19 +413,54 @@ mod imp {
     /// container (`~/Library/Containers/<id>/Data/...`); an unsandboxed/dev build
     /// uses the plain data dir. Linux/Windows use the platform data dir.
     fn desktop_app_data_dirs() -> Vec<PathBuf> {
+        match BaseDirs::new() {
+            Some(base) => app_data_dirs_for(base.home_dir(), base.data_dir()),
+            None => Vec::new(),
+        }
+    }
+
+    /// The app data dirs for a home folder. Builds up to 3.0.0 ran in the App
+    /// Sandbox and kept their data in the container; later builds copy it out
+    /// on their first launch and leave [`MOVED_MARKER`] behind. After that the
+    /// container's copy is stale, so it is not a candidate at all: falling
+    /// back to it would read an old session store the app no longer writes.
+    fn app_data_dirs_for(home: &Path, data_dir: &Path) -> Vec<PathBuf> {
+        let plain = data_dir.join(APP_IDENTIFIER);
         let mut dirs = Vec::new();
-        if let Some(base) = BaseDirs::new() {
-            #[cfg(target_os = "macos")]
+        #[cfg(target_os = "macos")]
+        if !plain.join(MOVED_MARKER).exists() {
             dirs.push(
-                base.home_dir()
-                    .join("Library/Containers")
+                home.join("Library/Containers")
                     .join(APP_IDENTIFIER)
                     .join("Data/Library/Application Support")
                     .join(APP_IDENTIFIER),
             );
-            dirs.push(base.data_dir().join(APP_IDENTIFIER));
         }
+        let _ = home;
+        dirs.push(plain);
         dirs
+    }
+
+    /// Roots that may hold the WebView's `localstorage.sqlite3`: the
+    /// container's WebKit storage while the app still lives there, then the
+    /// unsandboxed one, then the app data dirs (Linux).
+    fn webkit_roots_for(home: &Path, app_data_dirs: &[PathBuf]) -> Vec<PathBuf> {
+        let mut roots: Vec<PathBuf> = Vec::new();
+        #[cfg(target_os = "macos")]
+        {
+            let moved = app_data_dirs.iter().any(|d| d.join(MOVED_MARKER).exists());
+            if !moved {
+                roots.push(
+                    home.join("Library/Containers")
+                        .join(APP_IDENTIFIER)
+                        .join("Data/Library/WebKit"),
+                );
+            }
+            roots.push(home.join("Library/WebKit").join(APP_IDENTIFIER));
+        }
+        let _ = home;
+        roots.extend(app_data_dirs.iter().cloned());
+        roots
     }
 
     /// Locate the WebView's `localstorage.sqlite3`, picking the most-recently-
@@ -431,24 +470,10 @@ mod imp {
     /// data dir. **Windows (WebView2) uses LevelDB, not sqlite — unsupported**,
     /// so the bridge yields nothing and the CLI uses its own encrypted key store.
     fn find_localstorage(app_data_dirs: &[PathBuf]) -> Option<PathBuf> {
-        let mut roots: Vec<PathBuf> = Vec::new();
-        if let Some(base) = BaseDirs::new() {
-            let home = base.home_dir();
-            #[cfg(target_os = "macos")]
-            {
-                // Sandboxed WKWebView storage (the active store for a sandboxed app).
-                roots.push(
-                    home.join("Library/Containers")
-                        .join(APP_IDENTIFIER)
-                        .join("Data/Library/WebKit"),
-                );
-                // Unsandboxed WKWebView storage.
-                roots.push(home.join("Library/WebKit").join(APP_IDENTIFIER));
-            }
-            let _ = home;
-        }
-        // Linux (WebKitGTK) keeps it under the app data dir.
-        roots.extend(app_data_dirs.iter().cloned());
+        let roots = match BaseDirs::new() {
+            Some(base) => webkit_roots_for(base.home_dir(), app_data_dirs),
+            None => app_data_dirs.to_vec(),
+        };
 
         let mut best: Option<(PathBuf, SystemTime)> = None;
         for root in roots {
@@ -719,6 +744,41 @@ mod imp {
 
         fn enc1(dek: &[u8; 32], plaintext: &str) -> String {
             crypto::encrypt_str(dek, plaintext).unwrap()
+        }
+
+        #[cfg(target_os = "macos")]
+        #[test]
+        fn the_container_is_dropped_once_the_app_moved_its_data_out() {
+            let home = std::env::temp_dir().join(format!("sc-bridge-move-{}", std::process::id()));
+            let data = home.join("Library/Application Support");
+            let plain = data.join(APP_IDENTIFIER);
+            let container = home
+                .join("Library/Containers")
+                .join(APP_IDENTIFIER)
+                .join("Data/Library/Application Support")
+                .join(APP_IDENTIFIER);
+            let _ = std::fs::remove_dir_all(&home);
+            std::fs::create_dir_all(&plain).unwrap();
+
+            // A sandboxed build: the container first, where the live data is.
+            let dirs = app_data_dirs_for(&home, &data);
+            assert_eq!(dirs, vec![container.clone(), plain.clone()]);
+            let roots = webkit_roots_for(&home, &dirs);
+            assert!(roots[0].ends_with("Data/Library/WebKit"), "{roots:?}");
+
+            // Moved out: the stale container copy is no candidate at all.
+            std::fs::write(plain.join(MOVED_MARKER), "moved").unwrap();
+            let dirs = app_data_dirs_for(&home, &data);
+            assert_eq!(dirs, vec![plain.clone()]);
+            let roots = webkit_roots_for(&home, &dirs);
+            assert!(
+                !roots
+                    .iter()
+                    .any(|r| r.starts_with(home.join("Library/Containers"))),
+                "{roots:?}"
+            );
+            assert_eq!(roots[0], home.join("Library/WebKit").join(APP_IDENTIFIER));
+            let _ = std::fs::remove_dir_all(&home);
         }
 
         #[test]

@@ -232,6 +232,13 @@ fn create_new_dek(path: &Path) -> Result<Vec<u8>, String> {
 /// distinguish a typical boot from a corruption-recovery boot.
 #[tauri::command]
 pub fn vault_get_dek(app: tauri::AppHandle) -> Result<VaultDekResponse, String> {
+    // The real key is still in the old App Sandbox container because the move
+    // failed. Whatever sits here is not it (a development build's key at most),
+    // and a fresh key would open an empty vault that stops the move from ever
+    // being retried, so the front end is told to quit and reopen instead.
+    if let Some(reason) = crate::data_move::vault_blocked() {
+        return Err(reason);
+    }
     let path = resolve_dek_path(&app)?;
 
     if path.exists() {
@@ -266,6 +273,28 @@ pub fn vault_get_dek(app: tauri::AppHandle) -> Result<VaultDekResponse, String> 
         status: VaultDekStatus::FreshlyCreated,
         quarantine_path: None,
     })
+}
+
+/// Where moving the app data out of the App Sandbox container stands, so a
+/// boot that could not open the vault can say why and what to do.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DataMoveStatusResponse {
+    /// `not_needed`, `moved`, `failed`, or `pending`.
+    pub state: &'static str,
+    pub reason: Option<String>,
+    /// Where the data still is, while it has not been moved.
+    pub container: Option<String>,
+}
+
+#[tauri::command]
+pub fn app_data_move_status() -> DataMoveStatusResponse {
+    let s = crate::data_move::status();
+    DataMoveStatusResponse {
+        state: s.state,
+        reason: s.reason,
+        container: s.container,
+    }
 }
 
 /// Delete the DEK file — used if the user explicitly resets the vault.

@@ -52,14 +52,15 @@ fallback was removed in this pass). The bridge reads the DEK + decrypts every
 secret **eagerly at load** — the file DEK never prompts — so `has_key` is honest:
 it reports "configured" only for a key actually decrypted.
 
-**Sandboxing is the catch.** The app is sandboxed, so its data is redirected into
-the macOS **App Sandbox container**:
+**Where the app keeps its data.** Builds up to 3.0.0 ran in the macOS App
+Sandbox, so their data lives in
 `~/Library/Containers/com.socratic-council.desktop/Data/Library/{Application
-Support,WebKit}/…`. `desktop_app_data_dirs` + `find_localstorage` search the
-container **before** the plain `~/Library/{Application Support,WebKit}` paths (and
-pick the most-recently-modified `localstorage.sqlite3`). Missing this was the bug
-that made the CLI report "could not read key." Linux = WebKitGTK sqlite under the
-data dir; Windows = WebView2 LevelDB (unsupported → the CLI uses its own store).
+Support,WebKit}/…`. The bridge searches that container before the plain
+`~/Library/{Application Support,WebKit}` paths. A later build copies the data
+out on its first launch and leaves `.moved-out-of-app-sandbox` in the app data
+folder. Once that marker exists the container copy is stale and the bridge
+ignores it. Linux = WebKitGTK sqlite under the data dir. Windows = WebView2
+LevelDB (unsupported, so the CLI uses its own store).
 
 **Read-only & safe.** The bridge opens the sqlite read-only (WAL-aware, retry with
 `immutable=1`), never writes to the app's store, and **never logs secret values**.

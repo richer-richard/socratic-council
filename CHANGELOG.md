@@ -4,6 +4,14 @@ Three things ship from this repository: the desktop app, the terminal client
 (`socratic-council` on crates.io) and the engine they share
 (`socratic-council-engine` on crates.io). Their versions move independently.
 
+## Unreleased
+
+- The desktop app no longer uses the macOS App Sandbox, so shell commands run
+  in the app under the same command sandbox as the terminal. The first launch
+  copies the previous build's data out of the App Sandbox container and leaves
+  the original where it was. If that copy fails, the app stops rather than
+  open an empty vault.
+
 ## Desktop app 3.0.0 (unreleased) · CLI 2.0.0 · engine 0.1.0 (2026-09-25)
 
 Version 3 replaces the free-running chat of v2 with a structured deliberation
