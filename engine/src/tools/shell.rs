@@ -33,10 +33,15 @@ pub enum SandboxKind {
 
 /// The macOS sandbox profile (SBPL) for a workspace and its temp dir.
 ///
-/// `(deny default)` and then: exec, fork and signals; metadata everywhere
+/// `(deny default)` and then: exec and fork; signals only to processes in
+/// the same sandbox (the command's own tree, so a `kill -9 -1` ends the
+/// command and nothing else the user runs); metadata everywhere
 /// (paths must resolve); reads of the system trees, the workspace and its
 /// temp dir — but never the keychains, the local directory service or the
-/// privacy database; writes only inside the workspace, `/dev/null`, and the
+/// privacy database; writes only inside the workspace (never to the root's
+/// own entry: a command that could delete it and put a symlink there would
+/// have the next command's profile, built from the resolved path, open
+/// wherever the link points), `/dev/null`, and the
 /// Xcode command shims' cache file (`xcrun_db`, written next to the user's
 /// temp dir, without which `git` and `python3` refuse to start); reads of
 /// the active Xcode developer directory, where those shims load `libxcrun`
@@ -56,12 +61,14 @@ pub fn sandbox_profile(workspace: &Path, tmp: &Path) -> String {
     format!(
         r#"(version 1)
 (deny default)
-(allow process-exec process-fork signal sysctl-read)
+(allow process-exec process-fork sysctl-read)
+(allow signal (target same-sandbox))
 (allow file-read-metadata)
 (allow file-read* (literal "/") (subpath "/usr") (subpath "/bin") (subpath "/sbin") (subpath "/System") (subpath "/Library") (subpath "/private/etc") (subpath "/private/var/db") (subpath "/dev") (subpath "/opt/homebrew") (subpath "{ws}") (subpath "{tmp}"){dev})
 (deny file-read* (subpath "/Library/Keychains") (subpath "/private/var/db/dslocal") (subpath "/Library/Application Support/com.apple.TCC"))
 (deny file-read* file-write* (literal "/dev/tty"))
 (allow file-write* (subpath "{ws}") (subpath "{tmp}") (literal "/dev/null"))
+(deny file-write-unlink file-write-create (literal "{ws}"))
 (allow file-read* file-write* (regex #"^/private/tmp/xcrun_db(-[A-Za-z0-9]+)?$") (regex #"^/private/var/folders/[^/]+/[^/]+/T/xcrun_db(-[A-Za-z0-9]+)?$"))
 (allow mach-lookup (global-name "com.apple.system.opendirectoryd.libinfo") (global-name "com.apple.system.opendirectoryd.membership") (global-name "com.apple.system.logger") (global-name "com.apple.system.notification_center"))
 (deny network*)
@@ -156,8 +163,60 @@ pub fn available_sandbox() -> Option<SandboxKind> {
     }
 }
 
+/// Why no command can run in this process at all, or `None` when one can.
+///
+/// Inside the macOS App Sandbox (the installed desktop app) both modes are
+/// out: `sandbox-exec` cannot apply a second sandbox there ("Operation not
+/// permitted"), and a plain shell would inherit the app's own sandbox, which
+/// reaches the network and the app's data directory, `vault.key` included.
+/// The variable is set by the system for every sandboxed process; setting
+/// it by hand only turns the shell off.
+pub fn blocked_reason() -> Option<&'static str> {
+    blocked_reason_for(
+        cfg!(target_os = "macos"),
+        std::env::var_os("APP_SANDBOX_CONTAINER_ID").is_some(),
+    )
+}
+
+fn blocked_reason_for(macos: bool, app_sandboxed: bool) -> Option<&'static str> {
+    (macos && app_sandboxed).then_some(APP_SANDBOX_MESSAGE)
+}
+
+const APP_SANDBOX_MESSAGE: &str = "Shell commands cannot run inside the installed desktop app. macOS will not start the command sandbox inside the app's own, and a plain shell there could reach the app's keys. Run a council with shell commands from the terminal client instead.";
+
+/// What `run_command` can do in this process, for a host deciding what to
+/// offer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Support {
+    /// Commands run under this sandbox.
+    Sandboxed(SandboxKind),
+    /// No sandbox here: commands run only when the policy opts into
+    /// `unsandboxed`.
+    UnsandboxedOnly,
+    /// No command can run in this process, for the reason given.
+    Blocked(&'static str),
+}
+
+pub fn support() -> Support {
+    match (blocked_reason(), available_sandbox()) {
+        (Some(reason), _) => Support::Blocked(reason),
+        (None, Some(kind)) => Support::Sandboxed(kind),
+        (None, None) => Support::UnsandboxedOnly,
+    }
+}
+
+/// Why a policy that enables the shell cannot have it in this process, or
+/// `None` when it can: blocked outright, or no sandbox and no opt-in.
+pub fn unavailable_for(policy: &ShellPolicy) -> Option<String> {
+    match support() {
+        Support::Blocked(reason) => Some(reason.to_string()),
+        Support::UnsandboxedOnly if !policy.unsandboxed => Some(unsupported_message()),
+        _ => None,
+    }
+}
+
 fn unsupported_message() -> String {
-    "run_command has no sandbox on this host (macOS uses sandbox-exec; Linux needs bubblewrap at /usr/bin/bwrap); set tools.shell.unsandboxed = true to run without one".into()
+    "Shell commands have no sandbox on this machine. macOS uses sandbox-exec and Linux needs bubblewrap at /usr/bin/bwrap. Set tools.shell.unsandboxed = true to run them without one.".into()
 }
 
 /// Run `cmd` under the policy. The output is stdout followed by stderr,
@@ -167,6 +226,9 @@ pub async fn run_command(cmd: &str, policy: &ShellPolicy, workspace: &Path) -> T
     if !policy.enabled {
         return ToolOutput::error("run_command is disabled by the session policy");
     }
+    if let Some(reason) = blocked_reason() {
+        return ToolOutput::error(reason);
+    }
     if cmd.trim().is_empty() {
         return ToolOutput::error("command is empty");
     }
@@ -174,6 +236,11 @@ pub async fn run_command(cmd: &str, policy: &ShellPolicy, workspace: &Path) -> T
         return ToolOutput::error(format!(
             "command exceeds {MAX_COMMAND_CHARS} characters; write a script with write_file and run that"
         ));
+    }
+    // Resolving a root that has become a symlink would build the profile
+    // around wherever it points, so a root that is not a real folder is out.
+    if let Err(e) = super::workspace::real_root(workspace) {
+        return ToolOutput::error(e);
     }
     let workspace = match workspace.canonicalize() {
         Ok(p) => p,
@@ -394,6 +461,8 @@ mod tests {
         let p = sandbox_profile(Path::new("/tmp/ws"), Path::new("/tmp/ws/.tmp"));
         assert!(p.contains("(deny network*)"));
         assert!(p.contains("(allow file-write* (subpath \"/tmp/ws\")"));
+        // The root's own entry stays put: no delete, no symlink in its place.
+        assert!(p.contains("(deny file-write-unlink file-write-create (literal \"/tmp/ws\"))"));
         assert!(p.starts_with("(version 1)\n(deny default)"));
         assert!(p.contains("(deny file-read* (subpath \"/Library/Keychains\")"));
         // The controlling terminal is off limits: nothing a model runs can
@@ -405,6 +474,12 @@ mod tests {
             "(allow file-read* file-write* (regex #\"^/private/tmp/xcrun_db(-[A-Za-z0-9]+)?$\")"
         ));
         assert!(p.contains("opendirectoryd.libinfo"));
+        // Signals reach the command's own tree and nothing else.
+        assert!(p.contains("(allow signal (target same-sandbox))"));
+        assert!(p.contains("(allow process-exec process-fork sysctl-read)"));
+        assert!(!p
+            .lines()
+            .any(|l| l.contains(" signal") && !l.contains("target")));
         // The two allowances never widen to a whole temp dir.
         assert!(!p.contains("(subpath \"/private/tmp\")"));
         assert!(!p.contains("(subpath \"/private/var/folders\")"));
@@ -468,6 +543,33 @@ mod tests {
         assert!(joined.contains("--ro-bind /usr /usr"));
         assert!(!joined.contains("--bind /usr"));
         assert!(!joined.contains("--share-net"));
+    }
+
+    #[test]
+    fn the_app_sandbox_blocks_the_shell_on_macos_only() {
+        assert_eq!(blocked_reason_for(true, true), Some(APP_SANDBOX_MESSAGE));
+        assert_eq!(blocked_reason_for(true, false), None);
+        assert_eq!(blocked_reason_for(false, true), None);
+        // Both reach the plan as shown: no semicolons, no dashes standing in.
+        for text in [APP_SANDBOX_MESSAGE.to_string(), unsupported_message()] {
+            assert!(!text.contains(';') && !text.contains('—'), "{text}");
+        }
+    }
+
+    #[test]
+    fn a_policy_learns_why_the_shell_is_out() {
+        // This test process is never App-Sandboxed, so only the no-sandbox
+        // case can apply, and only where neither sandbox exists.
+        let mut p = policy();
+        match support() {
+            Support::Sandboxed(_) => assert_eq!(unavailable_for(&p), None),
+            Support::UnsandboxedOnly => {
+                assert!(unavailable_for(&p).is_some());
+                p.unsandboxed = true;
+                assert_eq!(unavailable_for(&p), None);
+            }
+            Support::Blocked(_) => unreachable!("tests do not run in the App Sandbox"),
+        }
     }
 
     #[test]
@@ -559,6 +661,55 @@ mod tests {
         assert!(!outside.exists());
         let inside = run_command("echo ok > inside.txt && cat inside.txt", &policy(), &root).await;
         assert!(inside.text.starts_with("ok"), "{inside:?}");
+    }
+
+    #[cfg(target_os = "macos")]
+    #[tokio::test]
+    async fn sandbox_signals_only_its_own_processes() {
+        let mut outside = std::process::Command::new("/bin/sleep")
+            .arg("30")
+            .spawn()
+            .unwrap();
+        let cmd = format!(
+            "kill -TERM {} 2>&1; echo \"outside rc=$?\"; sleep 30 & kill -TERM $! && echo own-ok",
+            outside.id()
+        );
+        let out = run_command(&cmd, &policy(), &ws()).await;
+        let still_running = outside.try_wait().unwrap().is_none();
+        let _ = outside.kill();
+        let _ = outside.wait();
+        assert!(
+            still_running,
+            "a sandboxed command killed an outside process: {out:?}"
+        );
+        assert!(out.text.contains("Operation not permitted"), "{out:?}");
+        assert!(!out.text.contains("outside rc=0"), "{out:?}");
+        assert!(out.text.contains("own-ok"), "{out:?}");
+    }
+
+    #[cfg(target_os = "macos")]
+    #[tokio::test]
+    async fn a_command_cannot_swap_the_workspace_root_for_a_symlink() {
+        let root = ws();
+        let outside = ws();
+        let swap = format!(
+            "cd /; rm -rf \"$HOME\"; ln -s {} \"$HOME\"; echo swap-rc=$?",
+            outside.display()
+        );
+        let _ = run_command(&swap, &policy(), &root).await;
+        let meta = std::fs::symlink_metadata(&root);
+        let swapped = meta.map(|m| m.file_type().is_symlink()).unwrap_or(false);
+        // Even if a swap slipped through, the next command must not land outside.
+        let _ = run_command("echo pwned > escaped.txt", &policy(), &root).await;
+        let escaped = outside.join("escaped.txt").exists();
+        let _ = std::fs::remove_file(&root);
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_dir_all(&outside);
+        assert!(
+            !escaped,
+            "a command wrote outside the workspace after a swap"
+        );
+        assert!(!swapped, "the workspace root became a symlink");
     }
 
     #[cfg(target_os = "macos")]

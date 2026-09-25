@@ -23,6 +23,15 @@ const MAX_LISTED_FILES: usize = 200;
 /// Write the hand-off folder for a v2 session document into `dir` (created
 /// if needed). Returns the file names written, brief first.
 pub fn write_handoff(dir: &Path, session: &Value) -> Result<Vec<String>, String> {
+    // A seat's shell can plant `handoff` as a symlink to a folder outside the
+    // workspace. Writing, or changing permissions, through it would overwrite
+    // files there, so a symlinked target is refused before anything happens.
+    if is_symlink(dir) {
+        return Err(format!(
+            "{} is a symbolic link, so the hand-off was not written there",
+            dir.display()
+        ));
+    }
     std::fs::create_dir_all(dir).map_err(|e| format!("create {}: {e}", dir.display()))?;
     owner_only_dir(dir);
     let names: BTreeMap<String, String> =
@@ -270,7 +279,16 @@ fn list_workspace(ws: &Path) -> Vec<String> {
             if name.starts_with('.') || name == "handoff" {
                 continue;
             }
-            if path.is_dir() {
+            // `file_type` on a directory entry does not follow symlinks, so a
+            // link a seat planted is neither listed nor walked into: it could
+            // point outside the workspace, or back at a parent and loop.
+            let Ok(kind) = e.file_type() else {
+                continue;
+            };
+            if kind.is_symlink() {
+                continue;
+            }
+            if kind.is_dir() {
                 walk(root, &path, out);
             } else if let Ok(rel) = path.strip_prefix(root) {
                 // `/`-joined on every platform so the brief reads the same
@@ -310,13 +328,24 @@ fn write_owner_only(path: &Path, contents: &str) -> Result<(), String> {
     std::fs::write(path, contents).map_err(|e| format!("write {}: {e}", path.display()))
 }
 
+/// Whether `path` is itself a symlink (not following it).
+fn is_symlink(path: &Path) -> bool {
+    std::fs::symlink_metadata(path)
+        .map(|m| m.file_type().is_symlink())
+        .unwrap_or(false)
+}
+
 #[cfg(unix)]
 fn owner_only_dir(dir: &Path) {
     use std::os::unix::fs::PermissionsExt;
-    if let Ok(meta) = std::fs::metadata(dir) {
-        let mut perms = meta.permissions();
-        perms.set_mode(0o700);
-        let _ = std::fs::set_permissions(dir, perms);
+    // `symlink_metadata`, and only a real directory: a chmod through a
+    // symlink would change the permissions of whatever it points at.
+    if let Ok(meta) = std::fs::symlink_metadata(dir) {
+        if meta.file_type().is_dir() {
+            let mut perms = meta.permissions();
+            perms.set_mode(0o700);
+            let _ = std::fs::set_permissions(dir, perms);
+        }
     }
 }
 
@@ -433,5 +462,46 @@ mod tests {
         assert!(brief.contains("stopped early: cancelled"));
         assert!(brief.contains("ended before a record was written"));
         let _ = std::fs::remove_dir_all(&ws);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_planted_symlink_is_never_written_through_or_listed() {
+        use std::os::unix::fs::{symlink, PermissionsExt};
+        let ws = temp_dir("symlink");
+        let outside = temp_dir("outside");
+        std::fs::set_permissions(&outside, std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::fs::write(outside.join(RECORD_FILE), "the user's own file").unwrap();
+        std::fs::write(outside.join("private.txt"), "x").unwrap();
+
+        // `handoff` pointing outside: refused, nothing written, no chmod.
+        symlink(&outside, ws.join("handoff")).unwrap();
+        let err = write_handoff(&ws.join("handoff"), &session(&ws)).unwrap_err();
+        assert!(err.contains("symbolic link"), "{err}");
+        assert_eq!(
+            std::fs::read_to_string(outside.join(RECORD_FILE)).unwrap(),
+            "the user's own file"
+        );
+        let mode = std::fs::metadata(&outside).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o755, "the outside folder kept its permissions");
+
+        // A link to outside and a loop back to the root: listed nowhere,
+        // walked into never, so the brief stays inside and the walk ends.
+        std::fs::remove_file(ws.join("handoff")).unwrap();
+        symlink(&outside, ws.join("peek")).unwrap();
+        symlink(&ws, ws.join("loop")).unwrap();
+        std::fs::write(ws.join("real.txt"), "r").unwrap();
+        let dir = ws.join("handoff");
+        write_handoff(&dir, &session(&ws)).unwrap();
+        let brief = std::fs::read_to_string(dir.join(BRIEF_FILE)).unwrap();
+        assert!(brief.contains("- `real.txt`"), "{brief}");
+        assert!(!brief.contains("private.txt"), "{brief}");
+        assert!(
+            !brief.contains("peek") && !brief.contains("loop"),
+            "{brief}"
+        );
+
+        let _ = std::fs::remove_dir_all(&ws);
+        let _ = std::fs::remove_dir_all(&outside);
     }
 }

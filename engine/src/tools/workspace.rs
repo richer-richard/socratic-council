@@ -7,9 +7,24 @@ pub const READ_CHAR_CAP: usize = 12_000;
 /// Cap on a single written file.
 pub const WRITE_BYTE_CAP: usize = 256 * 1024;
 
+/// The workspace root must still be a real directory, not a symlink. A
+/// sandboxed command can write inside it, so it is the one party that could
+/// have replaced it, and every check below starts by resolving the root.
+pub fn real_root(root: &Path) -> Result<(), String> {
+    match std::fs::symlink_metadata(root) {
+        Ok(m) if m.file_type().is_symlink() => {
+            Err("the workspace was replaced by a link, so no tool may use it".into())
+        }
+        Ok(m) if m.is_dir() => Ok(()),
+        Ok(_) => Err("the workspace is not a folder".into()),
+        Err(e) => Err(format!("workspace unavailable: {e}")),
+    }
+}
+
 /// Resolve `rel` inside `root`, refusing absolute paths, parent segments and
 /// symlinks that escape the root.
 pub fn resolve_inside(root: &Path, rel: &str) -> Result<PathBuf, String> {
+    real_root(root)?;
     let rel_path = Path::new(rel.trim());
     if rel.trim().is_empty() {
         return Err("path is empty".into());
@@ -117,5 +132,21 @@ mod tests {
         std::fs::write(outside.join("secret.txt"), "s").unwrap();
         std::os::unix::fs::symlink(&outside, root.join("link")).unwrap();
         assert!(resolve_inside(&root, "link/secret.txt").is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_root_swapped_for_a_symlink_is_refused() {
+        let base = temp_root();
+        let outside = temp_root();
+        std::fs::write(outside.join("secret.txt"), "s").unwrap();
+        let root = base.join("ws");
+        std::os::unix::fs::symlink(&outside, &root).unwrap();
+        let err = read_file(&root, "secret.txt").unwrap_err();
+        assert!(err.contains("replaced by a link"), "{err}");
+        assert!(write_file(&root, "planted.txt", "x").is_err());
+        assert!(!outside.join("planted.txt").exists());
+        let _ = std::fs::remove_dir_all(&base);
+        let _ = std::fs::remove_dir_all(&outside);
     }
 }
