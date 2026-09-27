@@ -51,8 +51,8 @@
     "eslint-plugin-jsx-a11y": "^6.10.0",
     "eslint-plugin-react": "^7.37.0",
     "eslint-plugin-react-hooks": "^5.1.0",
-    "prettier": "^3.9.6",
-    "typescript-eslint": "^8.69.0",
+    "prettier": "^3.9.9",
+    "typescript-eslint": "^8.70.1",
     "vitest": "^2.1.5"
   },
   "pnpm": {
