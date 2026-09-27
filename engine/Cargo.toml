@@ -26,9 +26,9 @@ thiserror = "2"
 
 # At-rest secret encryption (pure Rust): session files and the CLI's key
 # store are XChaCha20-Poly1305 `ENC1:` envelopes shared with the desktop app.
-chacha20poly1305 = "0.10"
-base64 = "0.22"
-getrandom = "0.2"
+chacha20poly1305 = "0.11"
+base64 = "0.23"
+getrandom = "0.4"
 # Overwrites API keys held for a run when it ends (already in the tree
 # through chacha20poly1305).
 zeroize = "1"
