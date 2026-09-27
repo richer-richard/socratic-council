@@ -40,18 +40,18 @@ crossterm = "0.29"
 clap = { version = "4", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-toml = "0.8"
+toml = "1.1"
 anyhow = "1"
-directories = "5"
+directories = "6"
 unicode-width = "0.2"
 textwrap = "0.16"
 # Encodes a copied selection for the terminal clipboard (OSC 52). Already in
 # the tree through the engine.
-base64 = "0.22"
+base64 = "0.23"
 
 # Desktop bridge (feature-gated): a bundled sqlite to read the app's WebView
 # localStorage. The only C dependency, and only when the bridge is enabled.
-rusqlite = { version = "0.32", features = ["bundled"], optional = true }
+rusqlite = { version = "0.40", features = ["bundled"], optional = true }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["rt", "macros"] }
